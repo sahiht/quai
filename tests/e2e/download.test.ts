@@ -33,8 +33,19 @@ function expectNoKeyInDir(dir: string, key: string): void {
   for (const f of listFiles(dir)) expectNoKey(readFileSync(join(dir, f), 'utf8'), key, f);
 }
 
+/**
+ * Les replis De Lijn et TEC visent de vrais serveurs, joignables sur les machines de GitHub mais pas ici :
+ * on les fait pointer vers le faux portail (réponse 404 immédiate) pour que le test ne dépende pas d'Internet.
+ */
+const offlineFallbacks = (base: string | undefined): Record<string, string> =>
+  base ? { QUAI_DELIJN_FALLBACK: `${base}/__repli/delijn.zip`, QUAI_TEC_FALLBACK: `${base}/__repli/tec.zip` } : {};
+
 const buildData = (out: string, env: Record<string, string>, extra: string[] = []) =>
-  run('npm', ['run', 'build-data', '--', '--out', out, '--site', `${out}-site`, ...extra], { cwd: PIPELINE, env: { QUAI_SOURCES: '', QUAI_DATE: '2026-11-10', ...env }, timeoutMs: 240_000 });
+  run('npm', ['run', 'build-data', '--', '--out', out, '--site', `${out}-site`, ...extra], {
+    cwd: PIPELINE,
+    env: { QUAI_SOURCES: '', QUAI_DATE: '2026-11-10', ...offlineFallbacks(env.BMC_BASE), ...env },
+    timeoutMs: 240_000,
+  });
 
 let bmc: Proc;
 let reference: string;

@@ -72,6 +72,21 @@ describe('configuration', () => {
     expect(tec[1]).toEqual({ url: 'https://opendata.tec-wl.be/Current%20GTFS/TEC-GTFS.zip', withKey: false, label: 'TEC, repli opendata.tec-wl.be' });
   });
 
+  it('replis remplaçables pour les tests (QUAI_DELIJN_FALLBACK, QUAI_TEC_FALLBACK), libellés inchangés', () => {
+    const saved = { d: process.env.QUAI_DELIJN_FALLBACK, t: process.env.QUAI_TEC_FALLBACK };
+    try {
+      process.env.QUAI_DELIJN_FALLBACK = 'http://localhost:1/__repli/delijn.zip';
+      process.env.QUAI_TEC_FALLBACK = ' http://localhost:1/__repli/tec.zip ';
+      expect(staticTargets('delijn', 'https://bmc.example')[1]).toEqual({ url: 'http://localhost:1/__repli/delijn.zip', withKey: true, label: 'De Lijn, repli BMC' });
+      expect(staticTargets('tec', 'https://bmc.example')[1]).toEqual({ url: 'http://localhost:1/__repli/tec.zip', withKey: false, label: 'TEC, repli opendata.tec-wl.be' });
+      process.env.QUAI_TEC_FALLBACK = '';
+      expect(staticTargets('tec', 'https://bmc.example')[1].url).toBe('https://opendata.tec-wl.be/Current%20GTFS/TEC-GTFS.zip');
+    } finally {
+      if (saved.d === undefined) delete process.env.QUAI_DELIJN_FALLBACK; else process.env.QUAI_DELIJN_FALLBACK = saved.d;
+      if (saved.t === undefined) delete process.env.QUAI_TEC_FALLBACK; else process.env.QUAI_TEC_FALLBACK = saved.t;
+    }
+  });
+
   it('QUAI_SOURCES : chemins relatifs au dossier d’appel, entrée invalide refusée', () => {
     expect(parseSourcesEnv('sncb=a.zip, stib=/x/b.zip', '/base')).toEqual({ sncb: '/base/a.zip', stib: '/x/b.zip' });
     expect(() => parseSourcesEnv('bus=a.zip', '/base')).toThrow(ConfigError);

@@ -12,6 +12,12 @@ export const DEFAULT_BMC_BASE = 'https://api-management-opendata-production.azur
 export const DELIJN_FALLBACK = 'https://opendata-discovery-gtfs-static.api.production.belgianmobility.io/api/gtfs/feed/delijn/static';
 export const TEC_FALLBACK = 'https://opendata.tec-wl.be/Current%20GTFS/TEC-GTFS.zip';
 
+/**
+ * Adresse de repli effective. QUAI_DELIJN_FALLBACK et QUAI_TEC_FALLBACK servent uniquement aux tests de bout en bout,
+ * qui ne doivent pas dépendre d'Internet (sur les machines de GitHub, les vrais replis sont joignables).
+ */
+const fallbackUrl = (envName: string, def: string) => (process.env[envName] ?? '').trim() || def;
+
 export class ConfigError extends Error {}
 
 export type Source =
@@ -23,8 +29,8 @@ export type Source =
 export function staticTargets(op: Op, base: string): Target[] {
   const b = base.replace(/\/+$/, '');
   const targets: Target[] = [{ url: `${b}/api/gtfs/feed/${SLUG[op]}/static`, withKey: true, label: `${OP_LABEL[op]}, portail BMC` }];
-  if (op === 'delijn') targets.push({ url: DELIJN_FALLBACK, withKey: true, label: 'De Lijn, repli BMC' });
-  if (op === 'tec') targets.push({ url: TEC_FALLBACK, withKey: false, label: 'TEC, repli opendata.tec-wl.be' });
+  if (op === 'delijn') targets.push({ url: fallbackUrl('QUAI_DELIJN_FALLBACK', DELIJN_FALLBACK), withKey: true, label: 'De Lijn, repli BMC' });
+  if (op === 'tec') targets.push({ url: fallbackUrl('QUAI_TEC_FALLBACK', TEC_FALLBACK), withKey: false, label: 'TEC, repli opendata.tec-wl.be' });
   return targets;
 }
 
