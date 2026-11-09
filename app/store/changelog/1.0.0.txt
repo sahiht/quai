@@ -1,0 +1,3 @@
+Première version : départs en temps réel SNCB, STIB, De Lijn et TEC, arrêts autour de moi et favoris.
+Trajets porte à porte vers tes lieux, avec les alertes de voie, de retard et de suppression.
+Recherche d’un trajet sur le téléphone, affichée dans les lunettes.

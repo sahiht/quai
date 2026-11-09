@@ -1,0 +1,35 @@
+{
+  "total_count": 6,
+  "results": [
+    {
+      "pointid": "6357",
+      "lineid": "3",
+      "passingtimes": "[{\"destination\":{\"fr\":\"CHURCHILL\",\"nl\":\"CHURCHILL\"},\"expectedArrivalTime\":\"2026-11-10T12:12:00+01:00\",\"lineId\":\"3\"},{\"destination\":{\"fr\":\"CHURCHILL\",\"nl\":\"CHURCHILL\"},\"expectedArrivalTime\":\"2026-11-10T12:20:00+01:00\",\"lineId\":\"3\"}]"
+    },
+    {
+      "pointid": "6357",
+      "lineid": "4",
+      "passingtimes": "[{\"destination\":{\"fr\":\"STALLE (P)\",\"nl\":\"STALLE (P)\"},\"expectedArrivalTime\":\"2026-11-10T12:15:00+01:00\",\"lineId\":\"4\"},{\"destination\":{\"fr\":\"STALLE (P)\",\"nl\":\"STALLE (P)\"},\"expectedArrivalTime\":\"2026-11-10T12:23:00+01:00\",\"lineId\":\"4\"}]"
+    },
+    {
+      "pointid": "6358",
+      "lineid": "3",
+      "passingtimes": "[{\"destination\":{\"fr\":\"ESPLANADE\",\"nl\":\"ESPLANADE\"},\"expectedArrivalTime\":\"2026-11-10T12:16:00+01:00\",\"lineId\":\"3\"},{\"destination\":{\"fr\":\"ESPLANADE\",\"nl\":\"ESPLANADE\"},\"expectedArrivalTime\":\"2026-11-10T12:24:00+01:00\",\"lineId\":\"3\"}]"
+    },
+    {
+      "pointid": "8041",
+      "lineid": "2",
+      "passingtimes": "[{\"destination\":{\"fr\":\"GARE DU MIDI\",\"nl\":\"ZUIDSTATION\"},\"expectedArrivalTime\":\"2026-11-10T12:14:00+01:00\",\"lineId\":\"2\",\"message\":{\"fr\":\"Travaux : arrêt Botanique non desservi\",\"nl\":\"Werken: halte Kruidtuin niet bediend\"}},{\"destination\":{\"fr\":\"GARE DU MIDI\",\"nl\":\"ZUIDSTATION\"},\"expectedArrivalTime\":\"2026-11-10T12:20:00+01:00\",\"lineId\":\"2\",\"message\":{\"fr\":\"Travaux : arrêt Botanique non desservi\",\"nl\":\"Werken: halte Kruidtuin niet bediend\"}}]"
+    },
+    {
+      "pointid": "8042",
+      "lineid": "2",
+      "passingtimes": "[{\"destination\":{\"fr\":\"SIMONIS (ELISABETH)\",\"nl\":\"SIMONIS (ELISABETH)\"},\"expectedArrivalTime\":\"2026-11-10T12:13:00+01:00\",\"lineId\":\"2\"},{\"destination\":{\"fr\":\"SIMONIS (ELISABETH)\",\"nl\":\"SIMONIS (ELISABETH)\"},\"expectedArrivalTime\":\"2026-11-10T12:19:00+01:00\",\"lineId\":\"2\"}]"
+    },
+    {
+      "pointid": "8042",
+      "lineid": "6",
+      "passingtimes": "[{\"destination\":{\"fr\":\"ROI BAUDOUIN\",\"nl\":\"KONING BOUDEWIJN\"},\"expectedArrivalTime\":\"2026-11-10T12:15:00+01:00\",\"lineId\":\"6\"},{\"destination\":{\"fr\":\"ROI BAUDOUIN\",\"nl\":\"KONING BOUDEWIJN\"},\"expectedArrivalTime\":\"2026-11-10T12:25:00+01:00\",\"lineId\":\"6\"}]"
+    }
+  ]
+}

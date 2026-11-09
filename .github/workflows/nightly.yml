@@ -1,0 +1,144 @@
+# Quai : préparation de nuit des données (GTFS officiels SNCB, STIB, De Lijn, TEC -> fichiers JSON)
+# et publication sur GitHub Pages. Voir pipeline/README.md.
+name: Données de nuit
+
+on:
+  schedule:
+    # 01:15 UTC = 02:15 à Bruxelles en hiver (03:15 en été)
+    - cron: '15 1 * * *'
+  workflow_dispatch:
+
+# Droits par défaut du flux. Chaque job déclare ses propres droits, qui remplacent ceux-ci,
+# limités à ce dont il a besoin (voir plus bas).
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Une seule publication à la fois ; une exécution en cours n'est jamais interrompue.
+concurrency:
+  group: pages-nightly
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Préparer les données
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - name: Vérifier le secret BMC_KEY
+        env:
+          BMC_KEY: ${{ secrets.BMC_KEY }}
+        run: |
+          if [ -z "$BMC_KEY" ]; then
+            echo "::error title=Secret BMC_KEY manquant::Le secret BMC_KEY n'est pas défini. Crée une clé gratuite sur https://api-management-opendata-production.developer.azure-api.net/ (abonnement au produit « Standard »), puis ajoute-la dans Settings > Secrets and variables > Actions > New repository secret, sous le nom BMC_KEY. Les données publiées la veille restent en ligne."
+            exit 1
+          fi
+          echo "Secret BMC_KEY présent."
+
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Installer Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: pipeline/package-lock.json
+
+      - name: Installer les dépendances du pipeline
+        working-directory: pipeline
+        run: npm ci
+
+      # Repli : les GTFS des nuits précédentes (au plus 7 jours) servent si le portail ne répond pas cette nuit.
+      - name: Reprendre les GTFS gardés des nuits précédentes
+        uses: actions/cache/restore@v6
+        with:
+          path: gtfs-cache
+          key: gtfs-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            gtfs-
+
+      - name: Préparer les données (site/data) et la page d'état (site/index.html)
+        id: data
+        working-directory: pipeline
+        env:
+          BMC_KEY: ${{ secrets.BMC_KEY }}
+        run: npm run build-data -- --out ../site/data --site ../site --cache-dir ../gtfs-cache
+
+      # Même si un réseau a échoué : on garde les GTFS de cette nuit et ceux qui ont servi de repli.
+      - name: Garder les GTFS pour les nuits suivantes
+        if: ${{ !cancelled() && steps.data.outcome != 'skipped' }}
+        uses: actions/cache/save@v6
+        with:
+          path: gtfs-cache
+          key: gtfs-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Configurer GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Envoyer le site
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    name: Publier sur GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publier
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+  # GitHub désactive sans prévenir les tâches planifiées d'un dépôt public après 60 jours sans activité.
+  # Si le dernier commit de la branche par défaut a plus de 30 jours, on committe un petit fichier daté.
+  # Ne fait jamais échouer le flux : en cas de problème, simple avertissement.
+  keepalive:
+    name: Garder la tâche planifiée active
+    needs: [build, deploy]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v7
+
+      - name: Commit de maintien si la branche par défaut est inactive depuis 30 jours
+        continue-on-error: true
+        run: |
+          warn() { echo "::warning title=Maintien de la tâche planifiée::$1"; exit 0; }
+          branch="$(git ls-remote --symref origin HEAD | awk '/^ref:/ { sub("refs/heads/", "", $2); print $2 }')"
+          [ -n "$branch" ] || warn "Branche par défaut introuvable, vérification ignorée."
+          git fetch --quiet --depth=1 origin "$branch" || warn "Impossible de lire la branche $branch."
+          last="$(git log -1 --format=%ct FETCH_HEAD)"
+          age=$(( ($(date +%s) - last) / 86400 ))
+          echo "Dernier commit sur $branch : il y a $age jour(s)."
+          if [ "$age" -lt 30 ]; then
+            echo "Dépôt actif, rien à faire."
+            exit 0
+          fi
+          git checkout --quiet -B "$branch" FETCH_HEAD
+          mkdir -p .github
+          date -u +%Y-%m-%d > .github/keepalive.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/keepalive.txt
+          if git diff --cached --quiet; then echo "Fichier de maintien déjà à jour, rien à committer."; exit 0; fi
+          git commit --quiet -m "Maintien de la tâche de nuit (dépôt inactif depuis $age jours)" || warn "Commit de maintien impossible."
+          git push --quiet origin "HEAD:$branch" || warn "Envoi de .github/keepalive.txt refusé (branche protégée ?). Sans commit d'ici 60 jours, GitHub désactivera la tâche de nuit : fais un commit à la main."
+          echo "Commit de maintien envoyé sur $branch."

@@ -1,0 +1,22 @@
+{
+  "package_id": "com.quai.transports",
+  "edition": "202601",
+  "name": "Quai",
+  "version": "1.0.0",
+  "min_sdk_version": "0.0.16",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Télécharge les horaires préparés chaque nuit (GitHub Pages, par zones d’environ 2 km) et le temps réel (retards, voies, suppressions) depuis ton relais personnel.",
+      "whitelist": []
+    },
+    {
+      "name": "location",
+      "desc": "Trouve les arrêts proches et propose le bon trajet. La position exacte reste sur le téléphone : l’appli ne télécharge que les horaires de ta zone (environ 2 km) et n’envoie jamais ta position au relais."
+    }
+  ],
+  "supported_languages": [
+    "fr"
+  ]
+}

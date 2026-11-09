@@ -1,0 +1,45 @@
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { defineConfig, type Plugin } from 'vite';
+
+const CORE_ENTRY = fileURLToPath(new URL('./src/core/index.ts', import.meta.url));
+
+/**
+ * Le cœur (app/src/core/index.ts) est écrit par une autre équipe. S'il manque, le build
+ * échoue avec un message clair, uniquement sur ce fichier. En développement (vite),
+ * l'appli reste utilisable avec ?fake=1.
+ */
+function coreGuard(): Plugin {
+  return {
+    name: 'quai-core-guard',
+    buildStart() {
+      if (!existsSync(CORE_ENTRY)) {
+        this.error(
+          'Fichier manquant : app/src/core/index.ts (équipe cœur). ' +
+            "L'appli attend les exports createCore(opts) et dataFreshness(meta, now). " +
+            'Le reste de l’interface est prêt ; en développement, utilisez ?fake=1.',
+        );
+      }
+    },
+  };
+}
+
+export default defineConfig(({ command }) => ({
+  // Chemins relatifs : le paquet .ehpk est servi depuis un dossier local de l'appli Even.
+  base: './',
+  plugins: command === 'build' ? [coreGuard()] : [],
+  server: {
+    host: true,
+    port: 5173,
+    strictPort: false,
+    fs: { allow: ['..'] },
+  },
+  preview: { host: true, port: 4173 },
+  build: {
+    target: 'es2022',
+    outDir: 'dist',
+    emptyOutDir: true,
+    sourcemap: false,
+    assetsInlineLimit: 0,
+  },
+}));

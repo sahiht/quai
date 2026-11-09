@@ -1,0 +1,57 @@
+{
+  "header": {
+    "gtfsRealtimeVersion": "2.0",
+    "incrementality": "FULL_DATASET",
+    "timestamp": 1794309000
+  },
+  "entity": [
+    {
+      "id": "1",
+      "tripUpdate": {
+        "trip": {
+          "tripId": "gt:tec:N5-0750",
+          "startTime": "07:50:00",
+          "startDate": "20261110",
+          "scheduleRelationship": "SCHEDULED",
+          "routeId": "gr:tec:N5"
+        },
+        "stopTimeUpdate": [
+          {
+            "stopSequence": 1,
+            "departure": {
+              "delay": 180,
+              "time": 1794293580
+            },
+            "stopId": "gs:tec:N509aaa",
+            "scheduleRelationship": "SCHEDULED"
+          }
+        ],
+        "timestamp": 1794309000
+      }
+    },
+    {
+      "id": "2",
+      "tripUpdate": {
+        "trip": {
+          "tripId": "gt:tec:N4-0745",
+          "startTime": "07:45:00",
+          "startDate": "20261110",
+          "scheduleRelationship": "SCHEDULED",
+          "routeId": "gr:tec:N4"
+        },
+        "stopTimeUpdate": [
+          {
+            "stopSequence": 1,
+            "departure": {
+              "delay": 0,
+              "time": 1794293100
+            },
+            "stopId": "gs:tec:N508aga",
+            "scheduleRelationship": "SCHEDULED"
+          }
+        ],
+        "timestamp": 1794309000
+      }
+    }
+  ]
+}

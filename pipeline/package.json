@@ -1,0 +1,29 @@
+{
+  "name": "quai-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Quai : préparation de nuit des données de transport (GTFS SNCB, STIB, De Lijn, TEC vers fichiers JSON statiques)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build-data": "node --experimental-strip-types src/cli.ts",
+    "serve-data": "node --experimental-strip-types src/serve.ts",
+    "make-fixtures": "node --experimental-strip-types ../fixtures/pipeline/make-gtfs.ts",
+    "load-test": "node --experimental-strip-types test/load/run-load.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "yauzl": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/yauzl": "^3.4.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0",
+    "yaml": "^2.9.1"
+  }
+}

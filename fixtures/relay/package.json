@@ -1,0 +1,6 @@
+{
+  "name": "quai-relay-fixtures",
+  "private": true,
+  "description": "Fixtures du relais (générateur et faux portail BMC). Scripts lancés depuis relay/ : npm run make-rt, npm run mock-bmc.",
+  "type": "module"
+}

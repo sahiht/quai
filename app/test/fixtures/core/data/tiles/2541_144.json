@@ -1,0 +1,1 @@
+{"v":1,"areas":[{"id":"sncb:8814001","op":"sncb","n":{"fr":"Bruxelles-Midi","nl":"Brussel-Zuid"},"lat":50.8357,"lon":4.3363,"modes":["train"],"lines":["IC","S1"]},{"id":"stib:6364","op":"stib","n":{"fr":"Gare du Midi","nl":"Zuidstation"},"lat":50.835675,"lon":4.33595,"modes":["metro","tram"],"lines":["2","3","4"]}]}

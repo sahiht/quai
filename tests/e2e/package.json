@@ -1,0 +1,26 @@
+{
+  "name": "quai-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Quai : tests de bout en bout (données, relais, cœur, simulateur)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "validate-data": "tsx validate-data.ts",
+    "test": "vitest run",
+    "test:data": "vitest run data download",
+    "test:core": "vitest run core robustness",
+    "sim": "tsx sim/run-sim.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/pngjs": "^6.0.5",
+    "pngjs": "^7.0.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

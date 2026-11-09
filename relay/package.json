@@ -1,0 +1,29 @@
+{
+  "name": "quai-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Quai : relais temps réel (Vercel) entre le portail Belgian Mobility Company et l'appli",
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "vercel-build": "tsc --noEmit -p tsconfig.deploy.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "dev": "tsx scripts/dev.ts",
+    "mock-bmc": "tsx ../fixtures/relay/mock-bmc.ts",
+    "make-rt": "tsx ../fixtures/relay/make-rt.ts",
+    "sync-shared": "tsx scripts/sync-shared.ts"
+  },
+  "dependencies": {
+    "gtfs-realtime-bindings": "2.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

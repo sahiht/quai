@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "time": "2026-11-10T11:10:00.000Z",
+  "data": {
+    "generatedAt": "2026-11-10T01:15:00.000Z",
+    "ok": true
+  },
+  "sources": {
+    "sncb": {
+      "ok": true,
+      "ms": 120
+    },
+    "stib": {
+      "ok": true,
+      "ms": 120
+    },
+    "delijn": {
+      "ok": true,
+      "ms": 120
+    },
+    "tec": {
+      "ok": true,
+      "ms": 120
+    }
+  }
+}

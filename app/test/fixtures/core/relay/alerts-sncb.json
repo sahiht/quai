@@ -1,0 +1,23 @@
+{
+  "op": "sncb",
+  "fetchedAt": "2026-11-10T11:10:00.000Z",
+  "alerts": [
+    {
+      "id": "sncb-works-ottignies",
+      "routes": [],
+      "stops": [
+        "8811601"
+      ],
+      "header": {
+        "fr": "Travaux à Ottignies : quelques minutes de retard possibles",
+        "nl": "Werken in Ottignies: enkele minuten vertraging mogelijk"
+      },
+      "active": [
+        [
+          1794178800,
+          1794783540
+        ]
+      ]
+    }
+  ]
+}

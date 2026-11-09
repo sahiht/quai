@@ -1,0 +1,225 @@
+{
+  "v": 1,
+  "about": "Mini-réseau de test commun à toutes les équipes. Cohérent avec les maquettes Visite1-3. Les générateurs (pipeline : GTFS ; relais : temps réel) partent de ce fichier. Voir fixtures/README.md.",
+  "timezone": "Europe/Brussels",
+  "serviceDates": ["2026-11-10", "2026-11-11"],
+  "calendars": {
+    "WEEK": { "days": "1111100", "start": "2026-11-01", "end": "2026-12-31", "remove": ["2026-11-11"] },
+    "DAILY": { "days": "1111111", "start": "2026-11-01", "end": "2026-12-31" },
+    "HOLI": { "days": "0000000", "start": "2026-11-01", "end": "2026-12-31", "add": ["2026-11-11"] }
+  },
+  "ops": {
+    "sncb": {
+      "agency": { "id": "NMBS/SNCB", "name": "NMBS/SNCB", "url": "https://www.belgiantrain.be", "lang": "fr" },
+      "notes": "stops.txt : une ligne parente 'S'+uic (location_type 1), une ligne gare uic (location_type 0, parent S+uic, sans quai) et une ligne par quai uic_N (location_type 0, parent S+uic, platform_code N). stop_name = nom local (bilingue avec '/' à Bruxelles). translations.txt au format récent avec field_value, pour stops.stop_name et trips.trip_headsign, langues fr, nl, de, en.",
+      "stations": [
+        { "uic": "8863008", "name": "Namur", "fr": "Namur", "nl": "Namen", "lat": 50.4685, "lon": 4.8625, "platforms": ["4", "5", "6"] },
+        { "uic": "8874005", "name": "Gembloux", "fr": "Gembloux", "nl": "Gembloers", "lat": 50.5707, "lon": 4.6913, "platforms": ["1", "2"] },
+        { "uic": "8811601", "name": "Ottignies", "fr": "Ottignies", "nl": "Ottignies", "lat": 50.6727, "lon": 4.5694, "platforms": ["2", "5"] },
+        { "uic": "8811304", "name": "Brussel-Luxemburg/Bruxelles-Luxembourg", "fr": "Bruxelles-Luxembourg", "nl": "Brussel-Luxemburg", "lat": 50.8388, "lon": 4.3732, "platforms": ["1"] },
+        { "uic": "8811916", "name": "Brussel-Schuman/Bruxelles-Schuman", "fr": "Bruxelles-Schuman", "nl": "Brussel-Schuman", "lat": 50.8433, "lon": 4.3804, "platforms": ["2"] },
+        { "uic": "8812005", "name": "Brussel-Noord/Bruxelles-Nord", "fr": "Bruxelles-Nord", "nl": "Brussel-Noord", "lat": 50.8605, "lon": 4.3612, "platforms": ["3", "9", "11", "12"] },
+        { "uic": "8813003", "name": "Brussel-Centraal/Bruxelles-Central", "fr": "Bruxelles-Central", "nl": "Brussel-Centraal", "lat": 50.8454, "lon": 4.3571, "platforms": ["1", "3", "4", "5", "6"] },
+        { "uic": "8814001", "name": "Brussel-Zuid/Bruxelles-Midi", "fr": "Bruxelles-Midi", "nl": "Brussel-Zuid", "lat": 50.8357, "lon": 4.3363, "platforms": ["6", "12", "15", "19"] },
+        { "uic": "8892007", "name": "Gent-Sint-Pieters", "fr": "Gand-Saint-Pierre", "nl": "Gent-Sint-Pieters", "lat": 51.0359, "lon": 3.7107, "platforms": ["8", "9"] },
+        { "uic": "8893120", "name": "Gent-Dampoort", "fr": "Gand-Dampoort", "nl": "Gent-Dampoort", "lat": 51.0563, "lon": 3.7406, "platforms": ["2"] },
+        { "uic": "8891009", "name": "Brugge", "fr": "Bruges", "nl": "Brugge", "lat": 51.1972, "lon": 3.2167, "platforms": ["5"] },
+        { "uic": "8822004", "name": "Mechelen", "fr": "Malines", "nl": "Mechelen", "lat": 51.0175, "lon": 4.4831, "platforms": ["7"] },
+        { "uic": "8821006", "name": "Antwerpen-Centraal", "fr": "Anvers-Central", "nl": "Antwerpen-Centraal", "lat": 51.2172, "lon": 4.4211, "platforms": ["22"] },
+        { "uic": "8883006", "name": "Nivelles", "fr": "Nivelles", "nl": "Nijvel", "lat": 50.5996, "lon": 4.3289, "platforms": ["2"] }
+      ],
+      "routes": [
+        { "id": "IC", "short": "IC", "long": "Intercity", "type": 2 },
+        { "id": "S1", "short": "S1", "long": "S1 Anvers - Nivelles", "type": 109 }
+      ],
+      "trips": [
+        { "id": "88____:007::8863008:8814001:10:852:20261231", "route": "IC", "service": "WEEK", "num": "2112", "head": "Brussel-Zuid/Bruxelles-Midi",
+          "st": [["8863008_4", "07:42"], ["8874005_1", "07:55"], ["8811601_2", "08:09"], ["8811304_1", "08:31"], ["8811916_2", "08:35"], ["8812005_11", "08:40", "08:41"], ["8813003_3", "08:46"], ["8814001_15", "08:52"]] },
+        { "id": "88____:007::8863008:8814001:10:952:20261231", "route": "IC", "service": "DAILY", "num": "2113", "head": "Brussel-Zuid/Bruxelles-Midi",
+          "st": [["8863008_5", "08:42"], ["8874005_1", "08:55"], ["8811601_2", "09:09"], ["8811304_1", "09:31"], ["8811916_2", "09:35"], ["8812005_11", "09:40", "09:41"], ["8813003_3", "09:46"], ["8814001_15", "09:52"]] },
+        { "id": "88____:007::8863008:8814001:10:1052:20261231", "route": "IC", "service": "HOLI", "num": "2192", "head": "Brussel-Zuid/Bruxelles-Midi",
+          "st": [["8863008_4", "09:42"], ["8874005_1", "09:55"], ["8811601_2", "10:09"], ["8811304_1", "10:31"], ["8811916_2", "10:35"], ["8812005_11", "10:40", "10:41"], ["8813003_3", "10:46"], ["8814001_15", "10:52"]] },
+        { "id": "88____:007::8812005:8891009:5:952:20261231", "route": "IC", "service": "WEEK", "num": "1508", "head": "Brugge",
+          "st": [["8812005_12", "08:56"], ["8813003_4", "09:00"], ["8814001_12", "09:04"], ["8892007_8", "09:29"], ["8891009_5", "09:52"]] },
+        { "id": "88____:007::8814001:8821006:5:1258:20261231", "route": "IC", "service": "DAILY", "num": "2412", "head": "Antwerpen-Centraal",
+          "st": [["8814001_19", "12:12"], ["8813003_5", "12:17"], ["8812005_9", "12:22"], ["8822004_7", "12:37"], ["8821006_22", "12:58"]] },
+        { "id": "88____:007::8814001:8821006:5:1306:20261231", "route": "IC", "service": "DAILY", "num": "2312", "head": "Antwerpen-Centraal",
+          "st": [["8814001_6", "12:20"], ["8813003_1", "12:25"], ["8812005_12", "12:30"], ["8822004_7", "12:45"], ["8821006_22", "13:06"]] },
+        { "id": "88____:046::8812005:8883006:4:1315:20261231", "route": "S1", "service": "WEEK", "num": "1987", "head": "Nivelles",
+          "st": [["8812005_3", "12:34"], ["8813003_1", "12:38"], ["8814001_6", "12:42"], ["8883006_2", "13:15"]] },
+        { "id": "88____:007::8812005:8891009:5:1502:20261231", "route": "IC", "service": "DAILY", "num": "1510", "head": "Brugge",
+          "st": [["8812005_11", "14:06"], ["8813003_4", "14:10"], ["8814001_12", "14:14"], ["8892007_8", "14:39"], ["8891009_5", "15:02"]] },
+        { "id": "88____:007::8812005:8821006:7:1552:20261231", "route": "IC", "service": "DAILY", "num": "1810", "head": "Antwerpen-Centraal",
+          "st": [["8812005_12", "14:18"], ["8813003_6", "14:22"], ["8814001_12", "14:26"], ["8892007_9", "14:53"], ["8893120_2", "15:01"], ["8821006_22", "15:52"]] },
+        { "id": "88____:007::8812005:8891009:5:1532:20261231", "route": "IC", "service": "DAILY", "num": "1511", "head": "Brugge",
+          "st": [["8812005_11", "14:36"], ["8813003_4", "14:40"], ["8814001_12", "14:44"], ["8892007_8", "15:09"], ["8891009_5", "15:32"]] },
+        { "id": "88____:007::8814001:8821006:5:2436:20261231", "route": "IC", "service": "DAILY", "num": "2199", "head": "Antwerpen-Centraal",
+          "st": [["8814001_19", "23:52"], ["8813003_5", "23:56"], ["8812005_9", "24:01"], ["8822004_7", "24:16"], ["8821006_22", "24:36"]] }
+      ]
+    },
+    "stib": {
+      "agency": { "id": "STIB", "name": "STIB-MIVB", "url": "https://www.stib-mivb.be", "lang": "fr" },
+      "notes": "Pas de parent_station : regroupement par nom à moins de 300 m. stop_name et trip_headsign EN MAJUSCULES (comme la STIB). translations.txt au format record_id (table_name stops, field_name stop_name, record_id = stop_id) pour les arrêts, et field_value pour trips.trip_headsign. Identifiant temps réel (pointid) = stop_id sans lettres finales (6357F -> 6357).",
+      "stops": [
+        { "id": "6357F", "name": "GARE DU NORD", "nl": "NOORDSTATION", "lat": 50.86000, "lon": 4.36014 },
+        { "id": "6358", "name": "GARE DU NORD", "nl": "NOORDSTATION", "lat": 50.86008, "lon": 4.36020 },
+        { "id": "6359", "name": "ROGIER", "nl": "ROGIER", "lat": 50.85695, "lon": 4.35895 },
+        { "id": "6360", "name": "ROGIER", "nl": "ROGIER", "lat": 50.85700, "lon": 4.35900 },
+        { "id": "8041", "name": "ROGIER", "nl": "ROGIER", "lat": 50.85685, "lon": 4.35880 },
+        { "id": "8042", "name": "ROGIER", "nl": "ROGIER", "lat": 50.85680, "lon": 4.35875 },
+        { "id": "6361", "name": "DE BROUCKERE", "nl": "DE BROUCKERE", "lat": 50.85100, "lon": 4.35240 },
+        { "id": "6362", "name": "BOURSE", "nl": "BEURS", "lat": 50.84830, "lon": 4.34970 },
+        { "id": "6364", "name": "GARE DU MIDI", "nl": "ZUIDSTATION", "lat": 50.83580, "lon": 4.33600 },
+        { "id": "6365", "name": "GARE DU MIDI", "nl": "ZUIDSTATION", "lat": 50.83585, "lon": 4.33610 },
+        { "id": "8402", "name": "GARE DU MIDI", "nl": "ZUIDSTATION", "lat": 50.83550, "lon": 4.33580 },
+        { "id": "8403", "name": "GARE DU MIDI", "nl": "ZUIDSTATION", "lat": 50.83555, "lon": 4.33590 },
+        { "id": "6366", "name": "CHURCHILL", "nl": "CHURCHILL", "lat": 50.80750, "lon": 4.36600 },
+        { "id": "6367", "name": "CHURCHILL", "nl": "CHURCHILL", "lat": 50.80755, "lon": 4.36610 },
+        { "id": "6370", "name": "STALLE", "nl": "STALLE", "lat": 50.79720, "lon": 4.31880 },
+        { "id": "6380", "name": "ESPLANADE", "nl": "ESPLANADE", "lat": 50.89900, "lon": 4.33900 },
+        { "id": "6381", "name": "ESPLANADE", "nl": "ESPLANADE", "lat": 50.89905, "lon": 4.33910 },
+        { "id": "8291", "name": "SIMONIS", "nl": "SIMONIS", "lat": 50.86330, "lon": 4.32900 },
+        { "id": "8292", "name": "SIMONIS", "nl": "SIMONIS", "lat": 50.86335, "lon": 4.32910 },
+        { "id": "8302", "name": "ROI BAUDOUIN", "nl": "KONING BOUDEWIJN", "lat": 50.89120, "lon": 4.33480 }
+      ],
+      "headsigns": { "CHURCHILL": "CHURCHILL", "STALLE (P)": "STALLE (P)", "ESPLANADE": "ESPLANADE", "SIMONIS (ELISABETH)": "SIMONIS (ELISABETH)", "GARE DU MIDI": "ZUIDSTATION", "ROI BAUDOUIN": "KONING BOUDEWIJN" },
+      "routes": [
+        { "id": "3", "short": "3", "long": "ESPLANADE - CHURCHILL", "type": 0 },
+        { "id": "4", "short": "4", "long": "GARE DU NORD - STALLE (P)", "type": 0 },
+        { "id": "2", "short": "2", "long": "SIMONIS - GARE DU MIDI", "type": 1 },
+        { "id": "6", "short": "6", "long": "ROI BAUDOUIN - SIMONIS", "type": 1 }
+      ],
+      "templates": [
+        { "idTpl": "1103{HHMM}", "route": "3", "service": "DAILY", "head": "CHURCHILL",
+          "stops": [["6381", 0], ["6357F", 12], ["6359", 14], ["6361", 16], ["6362", 17], ["6364", 22], ["6366", 37]], "from": "05:52", "to": "22:44", "every": 8 },
+        { "idTpl": "1104{HHMM}", "route": "4", "service": "DAILY", "head": "STALLE (P)",
+          "stops": [["6357F", 0], ["6359", 2], ["6361", 4], ["6362", 5], ["6364", 10], ["6370", 25]], "from": "06:07", "to": "22:55", "every": 8 },
+        { "idTpl": "1203{HHMM}", "route": "3", "service": "DAILY", "head": "ESPLANADE",
+          "stops": [["6367", 0], ["6365", 15], ["6360", 21], ["6358", 23], ["6380", 35]], "from": "05:45", "to": "22:37", "every": 8 },
+        { "idTpl": "1302{HHMM}", "route": "2", "service": "DAILY", "head": "SIMONIS (ELISABETH)",
+          "stops": [["8402", 0], ["8042", 14], ["8292", 20]], "from": "05:53", "to": "23:47", "every": 6 },
+        { "idTpl": "1402{HHMM}", "route": "2", "service": "DAILY", "head": "GARE DU MIDI",
+          "stops": [["8291", 0], ["8041", 6], ["8403", 20]], "from": "06:08", "to": "23:50", "every": 6 },
+        { "idTpl": "1306{HHMM}", "route": "6", "service": "DAILY", "head": "ROI BAUDOUIN",
+          "stops": [["8042", 0], ["8302", 14]], "from": "06:05", "to": "23:55", "every": 10 }
+      ]
+    },
+    "delijn": {
+      "agency": { "id": "DL", "name": "De Lijn", "url": "https://www.delijn.be", "lang": "nl" },
+      "notes": "Noms néerlandais, sans translations.txt, sans parent_station. Le suffixe ' perron N' du nom devient le quai N et ne fait pas partie du nom de zone. Noms français via frName() de shared/names.ts.",
+      "stops": [
+        { "id": "308611", "name": "Brussel Noordstation perron 4", "lat": 50.86180, "lon": 4.35900 },
+        { "id": "308613", "name": "Brussel Noordstation perron 6", "lat": 50.86186, "lon": 4.35912 },
+        { "id": "300120", "name": "Vilvoorde Station perron 2", "lat": 50.92620, "lon": 4.43000 },
+        { "id": "300450", "name": "Meise Centrum", "lat": 50.93900, "lon": 4.32700 },
+        { "id": "301870", "name": "Kortenberg Station", "lat": 50.88400, "lon": 4.53800 },
+        { "id": "200553", "name": "Gent Sint-Pietersstation perron 3", "lat": 51.03620, "lon": 3.71100 },
+        { "id": "200554", "name": "Gent Sint-Pietersstation perron 4", "lat": 51.03625, "lon": 3.71110 },
+        { "id": "200101", "name": "Gent Korenmarkt perron 1", "lat": 51.05470, "lon": 3.72140 },
+        { "id": "200102", "name": "Gent Korenmarkt perron 2", "lat": 51.05475, "lon": 3.72150 },
+        { "id": "200900", "name": "Gent Flanders Expo", "lat": 51.02400, "lon": 3.69500 }
+      ],
+      "routes": [
+        { "id": "232", "short": "232", "long": "Brussel - Vilvoorde", "type": 3 },
+        { "id": "460", "short": "460", "long": "Brussel - Meise", "type": 3 },
+        { "id": "270", "short": "270", "long": "Brussel - Kortenberg", "type": 700 },
+        { "id": "1", "short": "1", "long": "Flanders Expo - Korenmarkt", "type": 0 }
+      ],
+      "templates": [
+        { "idTpl": "70232{HHMM}", "route": "232", "service": "DAILY", "head": "Vilvoorde", "stops": [["308611", 0], ["300120", 25]], "from": "06:00", "to": "22:45", "every": 15 },
+        { "idTpl": "70460{HHMM}", "route": "460", "service": "DAILY", "head": "Meise", "stops": [["308613", 0], ["300450", 22]], "from": "06:18", "to": "22:48", "every": 30 },
+        { "idTpl": "70270{HHMM}", "route": "270", "service": "WEEK", "head": "Kortenberg", "stops": [["308611", 0], ["301870", 35]], "from": "06:22", "to": "22:52", "every": 30 },
+        { "idTpl": "70001{HHMM}", "route": "1", "service": "DAILY", "head": "Korenmarkt", "stops": [["200900", 0], ["200553", 6], ["200101", 16]], "from": "06:06", "to": "22:54", "every": 8 },
+        { "idTpl": "70002{HHMM}", "route": "1", "service": "DAILY", "head": "Flanders Expo", "stops": [["200102", 0], ["200554", 10], ["200900", 16]], "from": "06:00", "to": "22:48", "every": 8 }
+      ]
+    },
+    "tec": {
+      "agency": { "id": "TEC", "name": "TEC", "url": "https://www.letec.be", "lang": "fr" },
+      "notes": "Noms français, sans parent_station. Le suffixe ' quai X' du nom devient le quai X et ne fait pas partie du nom de zone. Un voyage de nuit dépasse 24:00.",
+      "stops": [
+        { "id": "N508aga", "name": "Namur Gare quai A", "lat": 50.46800, "lon": 4.86350 },
+        { "id": "N508agb", "name": "Namur Gare quai B", "lat": 50.46806, "lon": 4.86362 },
+        { "id": "N509aaa", "name": "Namur Place Léopold", "lat": 50.46600, "lon": 4.86100 },
+        { "id": "N520aaa", "name": "Jambes Place de la Wallonie", "lat": 50.45900, "lon": 4.87300 },
+        { "id": "N530aaa", "name": "Bouge Église", "lat": 50.47700, "lon": 4.88500 },
+        { "id": "N540aaa", "name": "Salzinnes Ronet", "lat": 50.45700, "lon": 4.84200 }
+      ],
+      "routes": [
+        { "id": "N4", "short": "4", "long": "Namur Gare - Jambes", "type": 3 },
+        { "id": "N5", "short": "5", "long": "Namur Place Léopold - Bouge", "type": 3 },
+        { "id": "N51", "short": "51", "long": "Namur Gare - Salzinnes", "type": 3 }
+      ],
+      "templates": [
+        { "idTpl": "N4-{HHMM}", "route": "N4", "service": "DAILY", "head": "Jambes", "stops": [["N508aga", 0], ["N520aaa", 9]], "from": "06:00", "to": "23:45", "every": 15 },
+        { "idTpl": "N5-{HHMM}", "route": "N5", "service": "DAILY", "head": "Bouge", "stops": [["N509aaa", 0], ["N508agb", 4], ["N530aaa", 15]], "from": "06:10", "to": "22:50", "every": 20 },
+        { "idTpl": "N51-{HHMM}", "route": "N51", "service": "WEEK", "head": "Salzinnes", "stops": [["N508aga", 0], ["N540aaa", 12]], "from": "06:05", "to": "21:35", "every": 30 }
+      ],
+      "trips": [
+        { "id": "N4-2410", "route": "N4", "service": "DAILY", "head": "Jambes", "st": [["N508aga", "24:10"], ["N520aaa", "24:19"]] }
+      ]
+    }
+  },
+  "realtime": {
+    "notes": "Identifiants du portail BMC préfixés : trip_id 'gt:<slug>:', stop_id 'gs:<slug>:', route_id 'gr:<slug>:' (slug nmbssncb, delijn, tec). Le flux SNCB direct optionnel (SNCB_RT_URL) n'a pas de préfixe. Retards en secondes. Horodatage du flux : 2026-11-10T12:10:00+01:00 (1794309000).",
+    "sncb": {
+      "tripUpdates": [
+        { "trip": "88____:007::8863008:8814001:10:852:20261231", "updates": [{ "seq": 1, "stop": "8863008_6", "depDelay": 120 }, { "seq": 7, "stop": "8813003_3", "arrDelay": 120, "depDelay": 120 }] },
+        { "trip": "88____:007::8814001:8821006:5:1258:20261231", "updates": [{ "seq": 3, "stop": "8812005_9", "arrDelay": 0, "depDelay": 0 }] },
+        { "trip": "88____:046::8812005:8883006:4:1315:20261231", "cancelled": true },
+        { "trip": "88____:007::8812005:8891009:5:1502:20261231", "updates": [{ "seq": 2, "stop": "8813003_4", "depDelay": 0 }] },
+        { "trip": "88____:007::8812005:8821006:7:1552:20261231", "updates": [{ "seq": 1, "stop": "8812005_12", "depDelay": 180 }] },
+        { "trip": "88____:007::8812005:8891009:5:1532:20261231", "updates": [{ "seq": 2, "stop": "8813003_4", "depDelay": 0 }] }
+      ],
+      "alerts": [
+        { "id": "sncb-works-ottignies", "stops": ["8811601"], "routes": [], "fr": "Travaux à Ottignies : quelques minutes de retard possibles", "nl": "Werken in Ottignies: enkele minuten vertraging mogelijk", "from": "2026-11-09T00:00:00+01:00", "to": "2026-11-15T23:59:00+01:00" }
+      ]
+    },
+    "delijn": {
+      "tripUpdates": [
+        { "trip": "702321230", "updates": [{ "seq": 1, "stop": "308611", "depDelay": 0 }] },
+        { "trip": "702321245", "updates": [{ "seq": 1, "stop": "308611", "depDelay": 60 }] },
+        { "trip": "704601218", "updates": [{ "seq": 1, "stop": "308613", "depDelay": 120 }] },
+        { "trip": "700011438", "updates": [{ "seq": 2, "stop": "200553", "arrDelay": 0, "depDelay": 0 }] },
+        { "trip": "700011446", "updates": [{ "seq": 2, "stop": "200553", "arrDelay": 60, "depDelay": 60 }] }
+      ],
+      "alerts": []
+    },
+    "tec": {
+      "tripUpdates": [
+        { "trip": "N5-0750", "updates": [{ "seq": 1, "stop": "N509aaa", "depDelay": 180 }] },
+        { "trip": "N4-0745", "updates": [{ "seq": 1, "stop": "N508aga", "depDelay": 0 }] }
+      ],
+      "alerts": [
+        { "id": "tec-51-deviation", "routes": ["N51"], "stops": [], "fr": "Ligne 51 déviée rue de Fer", "nl": "", "from": "2026-11-09T00:00:00+01:00", "to": "2026-11-20T23:59:00+01:00" }
+      ]
+    },
+    "stib": {
+      "notes": "Réponse WaitingTimes à 2026-11-10T12:10:00+01:00. Destinations en majuscules. passingtimes est une chaîne JSON dans la vraie réponse.",
+      "points": {
+        "6357": [
+          { "line": "3", "dest": { "fr": "CHURCHILL", "nl": "CHURCHILL" }, "times": ["12:12", "12:20"] },
+          { "line": "4", "dest": { "fr": "STALLE (P)", "nl": "STALLE (P)" }, "times": ["12:15", "12:23"] }
+        ],
+        "6358": [
+          { "line": "3", "dest": { "fr": "ESPLANADE", "nl": "ESPLANADE" }, "times": ["12:16", "12:24"] }
+        ],
+        "8042": [
+          { "line": "2", "dest": { "fr": "SIMONIS (ELISABETH)", "nl": "SIMONIS (ELISABETH)" }, "times": ["12:13", "12:19"] },
+          { "line": "6", "dest": { "fr": "ROI BAUDOUIN", "nl": "KONING BOUDEWIJN" }, "times": ["12:15", "12:25"] }
+        ],
+        "8041": [
+          { "line": "2", "dest": { "fr": "GARE DU MIDI", "nl": "ZUIDSTATION" }, "times": ["12:14", "12:20"], "message": { "fr": "Travaux : arrêt Botanique non desservi", "nl": "Werken: halte Kruidtuin niet bediend" } }
+        ]
+      }
+    }
+  },
+  "places": {
+    "maison": { "label": "Maison", "lat": 50.4655, "lon": 4.8590, "city": "Namur" },
+    "bureau": { "label": "Bureau", "lat": 50.8441, "lon": 4.3474, "city": "Bruxelles" }
+  },
+  "positions": {
+    "scenario1_home": { "lat": 50.4655, "lon": 4.8590, "now": "2026-11-10T07:31:00+01:00" },
+    "scenario2_gare_du_nord": { "lat": 50.8600, "lon": 4.3590, "now": "2026-11-10T12:10:00+01:00" },
+    "scenario3_central": { "lat": 50.8454, "lon": 4.3571, "now": "2026-11-10T13:55:00+01:00" }
+  }
+}

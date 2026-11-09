@@ -1,0 +1,182 @@
+{
+  "header": {
+    "gtfsRealtimeVersion": "2.0",
+    "incrementality": "FULL_DATASET",
+    "timestamp": 1794309000
+  },
+  "entity": [
+    {
+      "id": "1",
+      "tripUpdate": {
+        "trip": {
+          "tripId": "gt:delijn:702321230",
+          "startTime": "12:30:00",
+          "startDate": "20261110",
+          "scheduleRelationship": "SCHEDULED",
+          "routeId": "gr:delijn:232"
+        },
+        "stopTimeUpdate": [
+          {
+            "stopSequence": 1,
+            "departure": {
+              "delay": 0,
+              "time": 1794310200
+            },
+            "stopId": "gs:delijn:308611",
+            "scheduleRelationship": "SCHEDULED"
+          }
+        ],
+        "timestamp": 1794309000
+      }
+    },
+    {
+      "id": "2",
+      "tripUpdate": {
+        "trip": {
+          "tripId": "gt:delijn:702321245",
+          "startTime": "12:45:00",
+          "startDate": "20261110",
+          "scheduleRelationship": "SCHEDULED",
+          "routeId": "gr:delijn:232"
+        },
+        "stopTimeUpdate": [
+          {
+            "stopSequence": 1,
+            "departure": {
+              "delay": 60,
+              "time": 1794311160
+            },
+            "stopId": "gs:delijn:308611",
+            "scheduleRelationship": "SCHEDULED"
+          }
+        ],
+        "timestamp": 1794309000
+      }
+    },
+    {
+      "id": "3",
+      "tripUpdate": {
+        "trip": {
+          "tripId": "gt:delijn:704601218",
+          "startTime": "12:18:00",
+          "startDate": "20261110",
+          "scheduleRelationship": "SCHEDULED",
+          "routeId": "gr:delijn:460"
+        },
+        "stopTimeUpdate": [
+          {
+            "stopSequence": 1,
+            "departure": {
+              "delay": 120,
+              "time": 1794309600
+            },
+            "stopId": "gs:delijn:308613",
+            "scheduleRelationship": "SCHEDULED"
+          }
+        ],
+        "timestamp": 1794309000
+      }
+    },
+    {
+      "id": "4",
+      "tripUpdate": {
+        "trip": {
+          "tripId": "gt:delijn:700011438",
+          "startTime": "14:38:00",
+          "startDate": "20261110",
+          "scheduleRelationship": "SCHEDULED",
+          "routeId": "gr:delijn:1"
+        },
+        "stopTimeUpdate": [
+          {
+            "stopSequence": 2,
+            "arrival": {
+              "delay": 0,
+              "time": 1794318240
+            },
+            "departure": {
+              "delay": 0,
+              "time": 1794318240
+            },
+            "stopId": "gs:delijn:200553",
+            "scheduleRelationship": "SCHEDULED"
+          }
+        ],
+        "timestamp": 1794309000
+      }
+    },
+    {
+      "id": "5",
+      "tripUpdate": {
+        "trip": {
+          "tripId": "gt:delijn:700011446",
+          "startTime": "14:46:00",
+          "startDate": "20261110",
+          "scheduleRelationship": "SCHEDULED",
+          "routeId": "gr:delijn:1"
+        },
+        "stopTimeUpdate": [
+          {
+            "stopSequence": 2,
+            "arrival": {
+              "delay": 60,
+              "time": 1794318780
+            },
+            "departure": {
+              "delay": 60,
+              "time": 1794318780
+            },
+            "stopId": "gs:delijn:200553",
+            "scheduleRelationship": "SCHEDULED"
+          }
+        ],
+        "timestamp": 1794309000
+      }
+    },
+    {
+      "id": "6",
+      "tripUpdate": {
+        "trip": {
+          "startTime": "12:45:00",
+          "startDate": "20261110",
+          "routeId": "gr:delijn:232",
+          "directionId": 0
+        },
+        "stopTimeUpdate": [
+          {
+            "stopSequence": 1,
+            "departure": {
+              "delay": 600
+            },
+            "stopId": "gs:delijn:308611"
+          }
+        ],
+        "timestamp": 1794309000
+      }
+    },
+    {
+      "id": "7",
+      "tripUpdate": {
+        "trip": {
+          "tripId": "gt:delijn:702321245",
+          "startTime": "12:45:00",
+          "startDate": "20261110",
+          "scheduleRelationship": "SCHEDULED",
+          "routeId": "gr:delijn:232"
+        },
+        "stopTimeUpdate": [
+          {
+            "stopSequence": 1,
+            "departure": {
+              "delay": 60,
+              "time": 1794311160
+            },
+            "stopId": "gs:delijn:308611",
+            "scheduleRelationship": "SCHEDULED"
+          }
+        ],
+        "timestamp": 1794309000
+      }
+    }
+  ]
+}

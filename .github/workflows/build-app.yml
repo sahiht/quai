@@ -1,0 +1,131 @@
+# Quai : construit le paquet Even Hub (quai.ehpk) et le publie en asset de release (téléchargeable sur le téléphone).
+# Variables du dépôt (Settings > Secrets and variables > Actions > Variables) :
+#   QUAI_RELAY_BASE  obligatoire, ex. https://quai-relais.vercel.app (https, sans / final)
+#   QUAI_DATA_BASE   facultative, par défaut https://<compte>.github.io/<dépôt>/data
+# Tant que QUAI_RELAY_BASE manque, un push ne lance rien (job ignoré) ; un lancement manuel échoue avec un message clair.
+# Nouvelle version : ajouter d'abord app/store/changelog/<version>.txt (1 à 3 lignes, exigé par les tests),
+# puis changer "version" dans app/app.json : ce second commit lance le paquet et crée la release v<version>.
+name: Paquet de l'appli
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      # Les notes d'une future version s'ajoutent avant de changer la version : pas de paquet pour elles seules.
+      - '!app/store/changelog/**'
+      - 'shared/**'
+      - '.github/workflows/build-app.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-app-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Tests et paquet .ehpk
+    # Juste après le premier envoi du code, le relais n'existe pas encore : pas d'échec rouge pour un push.
+    if: ${{ vars.QUAI_RELAY_BASE != '' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Adresses des données et du relais
+        env:
+          VAR_DATA_BASE: ${{ vars.QUAI_DATA_BASE }}
+          VAR_RELAY_BASE: ${{ vars.QUAI_RELAY_BASE }}
+        run: |
+          if [ -z "$VAR_RELAY_BASE" ]; then
+            echo "::error title=Variable QUAI_RELAY_BASE manquante::Ajoute la variable de dépôt QUAI_RELAY_BASE (adresse https de ton relais Vercel, sans / final) dans Settings > Secrets and variables > Actions > Variables, puis relance ce workflow."
+            exit 1
+          fi
+          data="$VAR_DATA_BASE"
+          if [ -z "$data" ]; then
+            owner="${GITHUB_REPOSITORY%%/*}"
+            repo="${GITHUB_REPOSITORY#*/}"
+            owner="$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')"
+            if [ "$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')" = "$owner.github.io" ]; then
+              data="https://$owner.github.io/data"
+            else
+              data="https://$owner.github.io/$repo/data"
+            fi
+            echo "QUAI_DATA_BASE absente : adresse GitHub Pages par défaut $data"
+          fi
+          echo "QUAI_DATA_BASE=$data" >> "$GITHUB_ENV"
+          echo "QUAI_RELAY_BASE=$VAR_RELAY_BASE" >> "$GITHUB_ENV"
+
+      - run: npm ci
+
+      - name: Vérification des types
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Configuration (config.ts et liste blanche de app.json)
+        run: npm run configure
+
+      - name: Paquet
+        run: npm run pack
+
+      - name: Version
+        id: version
+        run: echo "version=$(node -p "require('./app.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: quai-ehpk
+          path: |
+            app/quai.ehpk
+            app/icon.png
+            app/store/changelog/
+          if-no-files-found: error
+
+  release:
+    name: Release v${{ needs.build.outputs.version }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: quai-ehpk
+          path: paquet
+
+      - name: Créer ou mettre à jour la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          TAG: v${{ needs.build.outputs.version }}
+        run: |
+          ls -lR paquet
+          notes="paquet/store/changelog/$VERSION.txt"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::warning title=Release $TAG déjà publiée::Ses fichiers sont remplacés par ce nouveau paquet. Even Hub refuse une version déjà déposée : pour une mise à jour, augmente d'abord \"version\" dans app/app.json."
+            gh release upload "$TAG" paquet/quai.ehpk paquet/icon.png --clobber
+          elif [ -f "$notes" ]; then
+            gh release create "$TAG" paquet/quai.ehpk paquet/icon.png --target "$GITHUB_SHA" --title "Quai $TAG" --notes-file "$notes"
+          else
+            gh release create "$TAG" paquet/quai.ehpk paquet/icon.png --target "$GITHUB_SHA" --title "Quai $TAG" --notes "Paquet Even Hub de Quai (quai.ehpk) et icône du portail."
+          fi

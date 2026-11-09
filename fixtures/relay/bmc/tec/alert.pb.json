@@ -1,0 +1,43 @@
+{
+  "header": {
+    "gtfsRealtimeVersion": "2.0",
+    "incrementality": "FULL_DATASET",
+    "timestamp": 1794309000
+  },
+  "entity": [
+    {
+      "id": "tec-51-deviation",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": 1794178800,
+            "end": 1795215540
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "gr:tec:N51"
+          }
+        ],
+        "cause": "CONSTRUCTION",
+        "effect": "DETOUR",
+        "headerText": {
+          "translation": [
+            {
+              "text": "Ligne 51 déviée rue de Fer",
+              "language": "fr"
+            }
+          ]
+        },
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ligne 51 déviée rue de Fer",
+              "language": "fr"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

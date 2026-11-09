@@ -1,0 +1,12 @@
+# Fins de ligne LF partout, même si le dépôt est cloné sous Windows : scripts sh lancés par Vercel,
+# workflows, fixtures comparées octet pour octet par les tests.
+* text=auto eol=lf
+
+# Binaires : ni conversion ni diff texte.
+*.png binary
+*.zip binary
+*.pb binary
+*.ehpk binary
+
+# Fichiers générés par npm : repliés dans les diffs sur GitHub.
+package-lock.json linguist-generated=true

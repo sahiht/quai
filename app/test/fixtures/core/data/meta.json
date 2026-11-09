@@ -1,0 +1,1 @@
+{"v":1,"generatedAt":"2026-11-10T01:15:00.000Z","timezone":"Europe/Brussels","serviceDates":["2026-11-10","2026-11-11"],"tile":{"lat":0.02,"lon":0.03},"feeds":{"sncb":{"ok":true,"areas":14,"trips":18},"stib":{"ok":true,"areas":10,"trips":1694},"delijn":{"ok":true,"areas":7,"trips":746},"tec":{"ok":true,"areas":5,"trips":280}}}

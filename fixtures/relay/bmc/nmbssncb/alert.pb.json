@@ -1,0 +1,51 @@
+{
+  "header": {
+    "gtfsRealtimeVersion": "2.0",
+    "incrementality": "FULL_DATASET",
+    "timestamp": 1794309000
+  },
+  "entity": [
+    {
+      "id": "sncb-works-ottignies",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": 1794178800,
+            "end": 1794783540
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "gs:nmbssncb:8811601"
+          }
+        ],
+        "cause": "MAINTENANCE",
+        "effect": "SIGNIFICANT_DELAYS",
+        "headerText": {
+          "translation": [
+            {
+              "text": "Travaux à Ottignies : quelques minutes de retard possibles",
+              "language": "fr"
+            },
+            {
+              "text": "Werken in Ottignies: enkele minuten vertraging mogelijk",
+              "language": "nl"
+            }
+          ]
+        },
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Travaux à Ottignies : quelques minutes de retard possibles",
+              "language": "fr"
+            },
+            {
+              "text": "Werken in Ottignies: enkele minuten vertraging mogelijk",
+              "language": "nl"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "v": 1,
+  "onboarded": true,
+  "lang": "fr",
+  "places": [
+    { "id": "maison", "label": "Maison", "lat": 50.4655, "lon": 4.8590, "address": "Namur" },
+    { "id": "bureau", "label": "Bureau", "lat": 50.8441, "lon": 4.3474, "address": "Bruxelles" }
+  ],
+  "maxWalkMin": 10,
+  "favorites": [
+    { "kind": "trip", "id": "fav-bureau", "from": { "type": "here" }, "to": { "type": "place", "placeId": "bureau" }, "label": "bureau", "propose": "morning" },
+    { "kind": "stop", "id": "fav-gdn", "areaId": "stib:6357F", "op": "stib", "name": { "fr": "Gare du Nord", "nl": "Noordstation" }, "lat": 50.86004, "lon": 4.36017,
+      "filter": [ { "line": "3", "head": "churchill" }, { "line": "3", "head": "esplanade" }, { "line": "4", "head": "stalle p" } ], "propose": "near" },
+    { "kind": "trip", "id": "fav-gand",
+      "from": { "type": "area", "areaId": "sncb:8813003", "op": "sncb", "name": { "fr": "Bruxelles-Central", "nl": "Brussel-Centraal" }, "lat": 50.8454, "lon": 4.3571 },
+      "to": { "type": "area", "areaId": "sncb:8892007", "op": "sncb", "name": { "fr": "Gand-Saint-Pierre", "nl": "Gent-Sint-Pieters", "l": "nl" }, "lat": 51.0359, "lon": 3.7107 },
+      "propose": "never" },
+    { "kind": "stop", "id": "fav-namur", "areaId": "sncb:8863008", "op": "sncb", "name": { "fr": "Namur", "nl": "Namen" }, "lat": 50.4685, "lon": 4.8625, "propose": "never" },
+    { "kind": "stop", "id": "fav-dl-nord", "areaId": "delijn:308611", "op": "delijn", "name": { "fr": "Bruxelles-Nord", "nl": "Brussel Noordstation", "l": "nl" }, "lat": 50.86183, "lon": 4.35906, "propose": "never" }
+  ],
+  "display": { "depsPerStop": 5, "radiusM": 500, "gestureHints": true, "markPlanned": true, "opening": "suggest" },
+  "alerts": { "platform": true, "delay": true, "delayMin": 5, "cancel": true, "leave": true, "leaveBeforeMin": 2, "works": false }
+}

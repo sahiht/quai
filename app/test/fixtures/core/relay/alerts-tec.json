@@ -1,0 +1,22 @@
+{
+  "op": "tec",
+  "fetchedAt": "2026-11-10T11:10:00.000Z",
+  "alerts": [
+    {
+      "id": "tec-51-deviation",
+      "routes": [
+        "N51"
+      ],
+      "stops": [],
+      "header": {
+        "fr": "Ligne 51 déviée rue de Fer"
+      },
+      "active": [
+        [
+          1794178800,
+          1795215540
+        ]
+      ]
+    }
+  ]
+}

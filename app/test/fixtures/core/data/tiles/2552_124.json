@@ -1,0 +1,1 @@
+{"v":1,"areas":[{"id":"sncb:8893120","op":"sncb","n":{"fr":"Gand-Dampoort","nl":"Gent-Dampoort","l":"nl"},"lat":51.0563,"lon":3.7406,"modes":["train"],"lines":["IC"]},{"id":"delijn:200101","op":"delijn","n":{"fr":"Korenmarkt, Gand","nl":"Gent Korenmarkt","l":"nl"},"lat":51.054725,"lon":3.72145,"modes":["tram"],"lines":["1"]}]}

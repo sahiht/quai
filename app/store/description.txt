@@ -1,0 +1,16 @@
+Quai affiche sur tes lunettes Even G2 les prochains départs des transports en commun belges, en temps réel : SNCB, STIB, De Lijn et TEC.
+
+Dans les lunettes :
+- Autour de moi : les arrêts proches, tous réseaux confondus, avec le prochain départ.
+- Les départs d’un arrêt : en minutes pour les bus, trams et métros, avec l’heure et la voie pour les trains.
+- Mes favoris : tes arrêts et trajets habituels, avec le prochain départ.
+- Aller à… : le trajet porte à porte vers tes lieux (Maison, Bureau…), heure de départ à pied comprise.
+- Le suivi du trajet : changement de voie, retard ou suppression s’affichent en tête de l’écran.
+
+Sur le téléphone, tu règles tes lieux, tes favoris, l’affichage et les alertes, et tu cherches un trajet à afficher dans les lunettes.
+
+Le signe ~ signale un horaire prévu, sans temps réel.
+
+Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company, licence CC BY 4.0. Les horaires sont préparés chaque nuit et le temps réel passe par ton relais personnel. Quai ne crée aucun compte et ne suit personne.
+
+Usage personnel et non commercial.
