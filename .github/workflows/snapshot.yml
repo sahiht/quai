@@ -1,0 +1,62 @@
+# Instantané des données réelles, pour les tests de l'équipe (déclenchement manuel uniquement).
+# Prépare les données comme la nuit, puis les publie dans la pré-version « data-snapshot » (fichier data-snapshot.tar.gz).
+# Données ouvertes (CC BY 4.0), déjà publiques sur GitHub Pages ; ne contient aucune clé.
+name: Instantané des données (tests)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: data-snapshot
+  cancel-in-progress: true
+
+jobs:
+  snapshot:
+    name: Préparer et publier l'instantané
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - name: Vérifier le secret BMC_KEY
+        env:
+          BMC_KEY: ${{ secrets.BMC_KEY }}
+        run: |
+          if [ -z "$BMC_KEY" ]; then
+            echo "::error::Le secret BMC_KEY manque (Settings, Secrets and variables, Actions)."
+            exit 1
+          fi
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Installer Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: pipeline/package-lock.json
+      - name: Installer les dépendances du pipeline
+        working-directory: pipeline
+        run: npm ci
+      - name: Préparer les données
+        working-directory: pipeline
+        env:
+          BMC_KEY: ${{ secrets.BMC_KEY }}
+        run: npm run build-data -- --out ../snapshot/data
+      - name: Publier l'instantané
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tar -czf data-snapshot.tar.gz -C snapshot data
+          ls -la data-snapshot.tar.gz
+          if gh release view data-snapshot >/dev/null 2>&1; then
+            gh release upload data-snapshot data-snapshot.tar.gz --clobber
+          else
+            gh release create data-snapshot data-snapshot.tar.gz --prerelease \
+              --title "Instantané des données (tests)" \
+              --notes "Données ouvertes SNCB, STIB, De Lijn, TEC via Belgian Mobility Company (CC BY 4.0), pour les tests. Peut être supprimé sans risque."
+          fi
