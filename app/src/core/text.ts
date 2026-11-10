@@ -69,7 +69,10 @@ export function forLabel(label: string): string {
   return `Pour le ${t}`;
 }
 
-/** « IC 07:42, voie 4 », « IC 07:42 +2, voie 6 », « IC 07:42 supprimé », « T3 12:14 », « IC demain 07:42, voie 4 ». */
+/** Marque du dernier passage annoncé d'une ligne (STIB « Dernier passage »). */
+export const LAST_MARK = ', dernier';
+
+/** « IC 07:42, voie 4 », « IC 07:42 +2, voie 6 », « IC 07:42 supprimé », « T3 12:14 », « T3 23:58, dernier », « IC demain 07:42, voie 4 ». */
 export function rideSummary(l: Leg, now?: number): string {
   const label = vehicleLabel(l);
   const time = atDay(l.schedDep, now);
@@ -79,10 +82,10 @@ export function rideSummary(l: Leg, now?: number): string {
     const p = l.newPlatform ?? l.platform;
     return `${label} ${time}${delay}${p ? `, voie ${p}` : ''}`;
   }
-  return `${label} ${atDay(l.dep, now)}`;
+  return `${label} ${atDay(l.dep, now)}${l.last ? LAST_MARK : ''}`;
 }
 
-/** Départ en une ligne : « T3 Churchill 2 min », « 232 Vilvorde ~5 min », « IC 12:22 +2, voie 9 ». */
+/** Départ en une ligne : « T3 Churchill 2 min », « 232 Vilvorde ~5 min », « T3 Churchill 4 min, dernier », « IC 12:22 +2, voie 9 ». */
 export function departureSummary(d: Departure, now: number, lang: NameLang, markPlanned: boolean): string {
   const label = lineLabel(d.mode, d.line);
   if (d.mode === 'train') {
@@ -93,7 +96,8 @@ export function departureSummary(d: Departure, now: number, lang: NameLang, mark
   const head = headName(d, lang);
   if (d.cancelled) return `${label} ${head} supprimé`;
   const tilde = !d.rt && markPlanned ? '~' : '';
+  const last = d.last ? LAST_MARK : '';
   const m = minutesUntil(d.est, now);
-  if (m >= 60 && dayWord(d.est, now)) return `${label} ${head} ${tilde}${atDay(d.est, now)}`;
-  return `${label} ${head} ${tilde}${m} min`;
+  if (m >= 60 && dayWord(d.est, now)) return `${label} ${head} ${tilde}${atDay(d.est, now)}${last}`;
+  return `${label} ${head} ${tilde}${m} min${last}`;
 }

@@ -101,6 +101,16 @@ describe('le validateur détecte les corruptions', () => {
     writeFileSync(join(d, rel), pretty ? JSON.stringify(x, null, 2) : JSON.stringify(x));
   };
 
+  it('les sigles gardés par prettyName (« UZ-VUB », « RTBF ») ne sont pas des noms restés en majuscules', () => {
+    const d = join(copy, 'sigles');
+    cpSync(dir, d, { recursive: true });
+    edit<AreaFile>(d, 'areas/stib/6357F.json', (a) => {
+      a.patterns[0].head = { fr: 'UZ-VUB', nl: 'UZ-VUB' };
+      a.patterns[1].head = { fr: 'RTBF', nl: 'VRT' };
+    });
+    expect(validateData(d).errors.filter((e) => /majuscules/.test(e))).toEqual([]);
+  });
+
   mutate('départs non triés', (d) => edit<AreaFile>(d, 'areas/stib/6357F.json', (a) => a.deps.reverse()), /non triés/);
   mutate('index de motif invalide', (d) => edit<AreaFile>(d, 'areas/delijn/308611.json', (a) => (a.deps[0][2] = 99)), /hors de patterns/);
   mutate('index d’arrêt invalide', (d) => edit<AreaFile>(d, 'areas/tec/N508aga.json', (a) => (a.deps[0][3] = 7)), /hors de stops/);
@@ -113,6 +123,7 @@ describe('le validateur détecte les corruptions', () => {
   mutate('index de gare des trains invalide', (d) => edit<TrainsDay>(d, 'trains/2026-11-10.json', (t) => (t.trips[0].s[0][0] = 99)), /index de gare/);
   mutate('JSON indenté', (d) => edit<Meta>(d, 'meta.json', () => undefined, true), /indenté/);
   mutate('nom vide', (d) => edit<AreaFile>(d, 'areas/tec/N509aaa.json', (a) => (a.n.nl = '')), /nom nl vide/);
+  mutate('nom resté en majuscules', (d) => edit<AreaFile>(d, 'areas/stib/6357F.json', (a) => (a.n.fr = 'GARE DU NORD')), /tout en majuscules « GARE DU NORD »/);
   mutate('départ en double', (d) => edit<AreaFile>(d, 'areas/sncb/8812005.json', (a) => a.deps.splice(3, 0, a.deps[3])), /en double/);
   mutate('train absent des départs', (d) => edit<AreaFile>(d, 'areas/sncb/8863008.json', (a) => (a.deps = a.deps.slice(1))), /sans départ dans la zone/);
 });

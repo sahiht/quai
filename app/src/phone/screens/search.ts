@@ -55,7 +55,7 @@ export function rideDetail(j: Journey, lang: 'fr' | 'nl' | 'local'): string {
   const delay = first.delayMin ?? 0;
   const status = first.cancelled ? 'supprimé' : delay > 0 ? `retard de ${delay} min annoncé` : first.rt ? 'à l’heure' : 'horaire prévu, sans temps réel';
   if (first.mode === 'train' && p) return `Voie ${p} à ${where}, ${status}`;
-  return `${vehicleOf(first)} à ${where}, ${status}`;
+  return `${vehicleOf(first)} à ${where}, ${status}${first.last && !first.cancelled ? ', dernier passage' : ''}`;
 }
 
 export function searchScreen(ctx: PhoneCtx): HTMLElement {
@@ -234,7 +234,7 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
       const now = after ?? ctx.clock.now();
       const needHere = from.kind === 'here' || to.kind === 'here';
       const fix = needHere ? ctx.location.last() ?? (await ctx.location.current(8000)) : ctx.location.last();
-      if (needHere && !fix) throw new Error('Position inconnue : autorise la position pour Quai.');
+      if (needHere && !fix) throw new Error(ctx.web ? 'Position inconnue : autorise-la dans le navigateur, ou choisis un arrêt (onglet Lunettes, rubrique Position).' : 'Position inconnue : autorise la position pour Quai.');
       let fromSt: AreaRef | null = from.kind === 'area' && from.area.op === 'sncb' ? from.area : null;
       if (!fromSt && from.kind === 'here' && fix) {
         const near = await c.nearby(fix.lat, fix.lon, 300);
@@ -272,6 +272,7 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
     else route = { screen: 'steps', journey: j, label: to.label, leaveAt0: j.leaveAt };
     await g.show(route);
     live.say('Affiché dans les lunettes.');
+    ctx.showGlasses?.();
   });
 
   // Liens directs : #/recherche?q=Gand (saisie), ?de=ici&vers=sncb:8892007 (recherche lancée).

@@ -29,6 +29,12 @@ export interface PhoneCtx {
   freshness(): Freshness | null;
   coreError(): string | null;
   configured: boolean;
+  /** Quai Web : la page n'est pas dans l'appli Even (textes adaptés, lunettes dans l'onglet Lunettes). */
+  web?: boolean;
+  /** Quai Web : montre l'onglet Lunettes (après « Afficher dans les lunettes »). */
+  showGlasses?(): void;
+  /** Quai Web : choix de la position (navigateur ou arrêt), pour l'écran « Position et langue ». */
+  positionPicker?(): HTMLElement;
   go(hash: string): void;
   /** Paramètres de l'ancre courante (#/recherche?q=Gand). */
   params: URLSearchParams;
@@ -49,6 +55,8 @@ const SCREENS: Record<string, { screen: Screen; grey?: boolean; title: string }>
 
 export interface PhoneDeps extends Omit<PhoneCtx, 'go' | 'params'> {
   root: HTMLElement;
+  /** Élément qui reçoit la classe « grey » des écrans à fond gris (défaut : body). */
+  themeTarget?: HTMLElement;
 }
 
 export function parseHash(hash: string): { name: string; sub: string[]; params: URLSearchParams } {
@@ -74,7 +82,7 @@ export function mountPhone(deps: PhoneDeps): { refresh(): void } {
         else location.hash = hash;
       },
     };
-    document.body.classList.toggle('grey', !!def.grey);
+    (deps.themeTarget ?? document.body).classList.toggle('grey', !!def.grey);
     document.title = def.title === 'Quai' ? 'Quai' : `${def.title} · Quai`;
     let el: HTMLElement;
     try {

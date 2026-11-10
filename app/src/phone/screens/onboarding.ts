@@ -23,18 +23,28 @@ export function onboardingScreen(ctx: PhoneCtx): HTMLElement {
     await ctx.settings.update((x) => ({ ...x, lang, onboarded: true }));
     ctx.go('#/?accueil=1');
   });
+  // Quai Web : position du navigateur ou arrêt choisi (même rubrique que sous l'écran des lunettes).
+  const position = ctx.positionPicker
+    ? h(
+        'section',
+        { class: 'box pad', 'aria-labelledby': 'pos-title' },
+        h('h2', { id: 'pos-title' }, 'Ta position'),
+        h('p', { class: 'small', style: 'font-size:14px;line-height:20px' }, 'Elle sert à trouver les arrêts proches et à proposer le bon trajet. Quai la demande au navigateur et ne l’envoie nulle part.'),
+        ctx.positionPicker(),
+      )
+    : h(
+        'section',
+        { class: 'box pad', 'aria-labelledby': 'pos-title' },
+        h('h2', { id: 'pos-title' }, 'Ta position'),
+        h('p', { class: 'small', style: 'font-size:14px;line-height:20px' }, 'Elle sert à trouver les arrêts proches et à proposer le bon trajet. Quai s’en sert sur le téléphone et ne l’enregistre nulle part.'),
+        allow,
+        live.el,
+      );
   return h(
     'div',
     { style: 'display:flex;flex-direction:column;gap:16px' },
     first ? header(ctx, 'Bienvenue', 'Deux réglages, et Quai est prêt.') : header(ctx, 'Position et langue', undefined, { label: 'Accueil', hash: '#/' }),
-    h(
-      'section',
-      { class: 'box pad', 'aria-labelledby': 'pos-title' },
-      h('h2', { id: 'pos-title' }, 'Ta position'),
-      h('p', { class: 'small', style: 'font-size:14px;line-height:20px' }, 'Elle sert à trouver les arrêts proches et à proposer le bon trajet. Quai s’en sert sur le téléphone et ne l’enregistre nulle part.'),
-      allow,
-      live.el,
-    ),
+    position,
     h(
       'section',
       { class: 'box', style: 'padding:16px 16px 6px' },

@@ -23,10 +23,14 @@ export const HINTS = {
   message: `double toucher${NB}: retour`,
   retry: `toucher${NB}: réessayer   double${NB}: retour`,
   firstRun: `toucher${NB}: continuer   double${NB}: quitter`,
+  /** Quai Web : rien à quitter, l'onglet se ferme dans le navigateur. */
+  firstRunWeb: `toucher${NB}: continuer`,
 } as const;
 
 export const NOTE_PLANNED = '~ horaire prévu, sans temps réel';
 export const NOTE_NO_RT = `Pas de réseau${NB}: horaires prévus ~`;
+/** Marque du dernier passage annoncé d'une ligne (STIB « Dernier passage »), en fin de colonne. */
+export const LAST_MARK = ', dernier';
 
 const MODE_WORD: Record<Mode, string> = { train: 'train', metro: 'métro', tram: 'tram', bus: 'bus' };
 const MODE_TITLE: Record<Mode, string> = { train: 'Train', metro: 'Métro', tram: 'Tram', bus: 'Bus' };

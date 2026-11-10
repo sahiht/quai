@@ -18,5 +18,5 @@
     "noImplicitOverride": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*", "test/**/*", "scripts/**/*", "../shared/**/*", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src/**/*", "test/**/*", "scripts/**/*", "../shared/**/*", "vite.config.ts", "vite.web.config.ts", "vitest.config.ts"]
 }

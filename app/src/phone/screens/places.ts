@@ -101,7 +101,7 @@ export function placeEditScreen(ctx: PhoneCtx, id: string): HTMLElement {
   here.addEventListener('click', async () => {
     live.say('Recherche de la position…');
     const fix = await ctx.location.current(10_000);
-    if (!fix) return live.say('Position indisponible : autorise la position pour Quai dans l’appli Even.', true);
+    if (!fix) return live.say(ctx.web ? 'Position indisponible : autorise-la dans le navigateur, ou place le lieu près d’un arrêt ci-dessous.' : 'Position indisponible : autorise la position pour Quai dans l’appli Even.', true);
     draft.lat = Math.round(fix.lat * 1e5) / 1e5;
     draft.lon = Math.round(fix.lon * 1e5) / 1e5;
     live.say('Position actuelle enregistrée pour ce lieu.');

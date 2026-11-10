@@ -1,0 +1,96 @@
+/* Quai Web : page à deux vues (Lunettes, Réglages), mobile d'abord ; palette des maquettes (styles.css). */
+html, body { background: var(--bg); }
+body { min-height: 100vh; min-height: 100dvh; overscroll-behavior-y: none; }
+.w-boot { margin: 32px 20px; color: var(--muted); }
+
+.w-app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+
+/* Barre du haut : nom et choix de la vue */
+.w-top {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: calc(8px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
+  background: var(--card); border-bottom: 1px solid var(--border);
+}
+.w-brand { display: flex; align-items: center; gap: 8px; font-size: 19px; line-height: 24px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
+.w-logo { display: block; flex-shrink: 0; }
+.w-tabs { flex: 0 1 260px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: var(--seg); border-radius: 12px; }
+.w-tab { min-height: 44px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: var(--body); font-size: 15px; line-height: 20px; font-weight: 500; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.w-tab[aria-selected="true"] { background: var(--card); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(22, 26, 23, 0.12); }
+
+.w-main { flex: 1; }
+.w-panel-title { margin: 0; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--muted); align-self: flex-start; }
+
+/* Vue Lunettes : l'écran (2:1, net à toutes les tailles), les gestes, la position */
+.w-panel-lunettes {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 12px max(8px, env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+}
+.w-stage {
+  display: flex; flex-direction: column; gap: 10px;
+  width: min(100%, 900px);
+  /* téléphone à l'horizontale : écran et gestes tiennent dans la hauteur */
+  width: min(100%, 900px, max(288px, calc((100vh - 176px) * 2)));
+  width: min(100%, 900px, max(288px, calc((100dvh - 176px) * 2)));
+}
+.w-screen { width: 100%; }
+.w-canvas {
+  display: block; width: 100%; aspect-ratio: 2 / 1; background: #000; border-radius: 12px;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+}
+.w-canvas:focus { outline: none; }
+.w-canvas:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+
+.w-gestures { display: grid; grid-template-columns: 1fr 1fr 1.35fr 1.75fr; gap: 8px; }
+.w-g {
+  min-height: 56px; padding: 4px 6px; border: 1px solid var(--btn-border); border-radius: 14px; background: var(--card);
+  color: var(--text); font-size: 16px; line-height: 19px; font-weight: 600; cursor: pointer;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+}
+.w-g-up, .w-g-down { font-size: 22px; color: var(--accent); }
+@media (hover: hover) { .w-g:hover { border-color: var(--accent); } }
+.w-g:active { background: var(--accent-soft); border-color: var(--accent); }
+
+.w-help { margin: 0; max-width: 900px; font-size: 13px; line-height: 19px; color: var(--muted); text-align: center; }
+.w-help-keys { display: none; }
+@media (hover: hover) and (pointer: fine) { .w-help-keys { display: inline; } }
+
+.w-extra { width: 100%; max-width: 560px; }
+.w-pos { display: flex; flex-direction: column; gap: 10px; }
+.w-pos-status { font-size: 14px; line-height: 20px; }
+.w-pos .btn-link { align-self: flex-start; margin-left: -4px; }
+
+/* Vue Réglages : l'interface du téléphone */
+.w-panel-reglages { background: var(--card); }
+.w-panel-reglages.grey { background: var(--bg); }
+.w-panel-reglages.grey .box { background: var(--card); }
+.w-panel-reglages #app { padding-bottom: calc(32px + env(safe-area-inset-bottom)); }
+
+/* Aperçus des réglages dessinés comme l'écran des lunettes */
+.preview .w-preview-canvas { display: block; width: 100%; height: 100%; }
+
+/* Écran étroit : une vue à la fois */
+@media (max-width: 1023.98px) {
+  .w-app[data-panel="lunettes"] .w-panel-reglages,
+  .w-app[data-panel="reglages"] .w-panel-lunettes { display: none; }
+  .w-panel-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+@media (max-width: 359.98px) {
+  .w-brand span { display: none; }
+  .w-gestures { gap: 6px; }
+  .w-g { font-size: 15px; }
+}
+
+/* Grand écran : les deux vues côte à côte, l'écran des lunettes reste en vue */
+@media (min-width: 1024px) {
+  .w-tabs { display: none; }
+  .w-top { padding-top: calc(12px + env(safe-area-inset-top)); padding-bottom: 12px; }
+  .w-main { display: grid; grid-template-columns: minmax(0, 1fr) 480px; align-items: start; }
+  .w-panel-lunettes { position: sticky; top: var(--w-top, 69px); max-height: calc(100vh - var(--w-top, 69px)); overflow-y: auto; padding: 24px 28px 32px; }
+  .w-panel-lunettes .w-panel-title { align-self: center; width: min(100%, 900px); }
+  .w-stage { width: min(100%, 900px); }
+  .w-panel-reglages { min-height: calc(100vh - var(--w-top, 69px)); border-left: 1px solid var(--border); }
+  .w-panel-reglages .w-panel-title { padding: 24px 20px 0; max-width: 480px; margin: 0 auto; }
+  .w-panel-reglages #app { padding-top: 12px; }
+}

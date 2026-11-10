@@ -1,5 +1,8 @@
 # Quai : préparation de nuit des données (GTFS officiels SNCB, STIB, De Lijn, TEC -> fichiers JSON)
-# et publication sur GitHub Pages. Voir pipeline/README.md.
+# et publication sur GitHub Pages, avec Quai Web (l'appli dans le navigateur, dossier app/).
+# Voir pipeline/README.md et docs/INSTALL.md (« Utiliser Quai sans les lunettes : Quai Web »).
+# Variable du dépôt (Settings > Secrets and variables > Actions > Variables) :
+#   QUAI_RELAY_BASE  adresse https du relais Vercel, sans / final ; sans elle, seules les données sont publiées.
 name: Données de nuit
 
 on:
@@ -7,6 +10,13 @@ on:
     # 01:15 UTC = 02:15 à Bruxelles en hiver (03:15 en été)
     - cron: '15 1 * * *'
   workflow_dispatch:
+  # Après un changement de l'appli : Quai Web est republié (les données sont refaites aussi, GTFS gardés en repli).
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'shared/**'
+      - '.github/workflows/nightly.yml'
 
 # Droits par défaut du flux. Chaque job déclare ses propres droits, qui remplacent ceux-ci,
 # limités à ce dont il a besoin (voir plus bas).
@@ -49,7 +59,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: pipeline/package-lock.json
+          cache-dependency-path: |
+            pipeline/package-lock.json
+            app/package-lock.json
 
       - name: Installer les dépendances du pipeline
         working-directory: pipeline
@@ -78,6 +90,74 @@ jobs:
         with:
           path: gtfs-cache
           key: gtfs-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # Quai Web, publié dans site/app/ (lien « Ouvrir Quai Web » sur la page d'état). Les données sont publiées
+      # même si Quai Web ne peut pas être construit : une page d'explication le remplace alors.
+      - name: Adresses de Quai Web
+        id: web
+        env:
+          VAR_RELAY_BASE: ${{ vars.QUAI_RELAY_BASE }}
+        run: |
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          owner="$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')"
+          if [ "$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')" = "$owner.github.io" ]; then
+            path="/"
+          else
+            path="/$repo/"
+          fi
+          build=true
+          if [ -z "$VAR_RELAY_BASE" ]; then
+            echo "::notice title=Quai Web non publié::La variable de dépôt QUAI_RELAY_BASE (adresse https du relais Vercel, sans / final) manque : Quai Web n'est pas construit, les données sont publiées quand même. Ajoute la variable dans Settings > Secrets and variables > Actions > Variables, puis relance ce workflow."
+            build=false
+          fi
+          {
+            echo "data=https://$owner.github.io${path}data"
+            echo "base=${path}app/"
+            echo "url=https://$owner.github.io${path}app/"
+            echo "build=$build"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Construire Quai Web (site/app)
+        id: webapp
+        if: ${{ steps.web.outputs.build == 'true' }}
+        continue-on-error: true
+        working-directory: app
+        env:
+          QUAI_DATA_BASE: ${{ steps.web.outputs.data }}
+          QUAI_RELAY_BASE: ${{ vars.QUAI_RELAY_BASE }}
+          QUAI_WEB_BASE: ${{ steps.web.outputs.base }}
+          WEB_URL: ${{ steps.web.outputs.url }}
+        run: |
+          npm ci || { echo "Nouvel essai de npm ci dans 20 s."; sleep 20; npm ci; }
+          npm run build:web
+          mkdir -p ../site
+          rm -rf ../site/app
+          cp -R dist-web ../site/app
+          echo "Quai Web construit : $WEB_URL"
+
+      - name: Page d'attente de Quai Web
+        if: ${{ steps.web.outputs.build != 'true' || steps.webapp.outcome != 'success' }}
+        env:
+          WEB_BUILD: ${{ steps.web.outputs.build }}
+        run: |
+          if [ "$WEB_BUILD" = "true" ]; then
+            echo "::warning title=Quai Web non construit::La construction de Quai Web a échoué (voir l'étape « Construire Quai Web ») : les données sont publiées, Quai Web est remplacé par une page d'explication jusqu'à la prochaine exécution réussie."
+            why="La dernière construction de Quai Web a échoué. Le journal se trouve sur GitHub, onglet Actions, workflow « Données de nuit »."
+          else
+            why="La variable de dépôt QUAI_RELAY_BASE (adresse du relais temps réel) n’est pas encore définie : voir docs/INSTALL.md, étape 5, puis relancer le workflow « Données de nuit »."
+          fi
+          rm -rf site/app
+          mkdir -p site/app
+          cat > site/app/index.html <<HTML
+          <!DOCTYPE html>
+          <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Quai Web</title>
+          <style>body{font-family:Georgia,"Times New Roman",serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#222;line-height:1.5}</style></head><body>
+          <h1>Quai Web n’est pas disponible pour l’instant</h1>
+          <p>$why</p>
+          <p><a href="../">Retour à la page d’état des données</a></p>
+          </body></html>
+          HTML
 
       - name: Configurer GitHub Pages
         uses: actions/configure-pages@v6

@@ -1,0 +1,3 @@
+STIB : les horaires théoriques sont signalés par ~ et les véhicules qui terminent à l’arrêt ne sont plus proposés.
+Le dernier passage d’une ligne est marqué « dernier », et une destination manquante est complétée.
+Les sigles des arrêts restent en majuscules (WTC, ULB, UZ-VUB).

@@ -13,7 +13,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AreaFile, AreaSummary, Meta, Mode, Names, Op, SearchFile, TileFile, TrainsDay } from '../../shared/types';
 import { normalizeId, tileKey } from '../../shared/types';
-import { searchKey, searchWords } from '../../shared/names';
+import { prettyName, searchKey, searchWords } from '../../shared/names';
 
 export const OPS: Op[] = ['sncb', 'stib', 'delijn', 'tec'];
 export const MODES: Mode[] = ['train', 'metro', 'tram', 'bus'];
@@ -104,7 +104,8 @@ export function validateData(dirArg: string): ValidationReport {
       else {
         if (v !== v.trim() || /\s{2,}/.test(v)) err(`${where} : nom ${k} mal espacé « ${v} »`);
         const letters = v.replace(/[^\p{L}]/gu, '');
-        if (letters.length >= 4 && letters === letters.toUpperCase() && letters !== letters.toLowerCase()) {
+        // tout en majuscules alors que prettyName l'aurait remis en casse (les sigles « WTC », « UZ-VUB » restent permis)
+        if (letters.length >= 4 && letters === letters.toUpperCase() && letters !== letters.toLowerCase() && prettyName(v) !== v) {
           err(`${where} : nom ${k} tout en majuscules « ${v} » (prettyName non appliqué)`);
         }
       }

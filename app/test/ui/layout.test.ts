@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { validateEvenHubPageContainer } from '@evenrealities/even_hub_sdk';
 import { toTextProperty } from '../../src/platform/even';
-import { ensureVisible, geometry, IDS, layoutPage, LAYOUTS, shapeKey, visibleRange, wrapLines } from '../../src/glasses/layout';
+import { ensureVisible, geometry, IDS, layoutPage, LAYOUTS, shapeKey, visibleRange, withOptionalTail, withTail, wrapLines } from '../../src/glasses/layout';
 import { textWidth } from '../../src/glasses/font';
 import type { GlassesView, Item, Layout } from '../../src/glasses/types';
 import { overflowing } from './helpers';
@@ -89,5 +89,34 @@ describe('mise en page des conteneurs', () => {
     expect(lines.length).toBeGreaterThan(1);
     for (const l of lines) expect(textWidth(l)).toBeLessThanOrEqual(300);
     expect(wrapLines(['rayon de 500 m'], 1000)).toEqual(['rayon de 500 m']);
+  });
+});
+
+describe('fins de colonne protégées (« , dernier »)', () => {
+  it('withTail : la fin reste entière, le début est coupé au pixel', () => {
+    expect(withTail('Churchill', ', dernier', 300)).toBe('Churchill, dernier');
+    const long = withTail('Une destination beaucoup trop longue pour la place', ', dernier', 200);
+    expect(long.endsWith('…, dernier')).toBe(true);
+    expect(textWidth(long)).toBeLessThanOrEqual(200);
+    expect(withTail('', ', dernier', 200)).toBe('dernier');
+    expect(withTail('Churchill', undefined, 300)).toBe('Churchill');
+  });
+
+  it('withOptionalTail : ajoutée seulement si tout tient, la colonne n’est jamais coupée pour elle', () => {
+    expect(withOptionalTail('T3 2 min', ', dernier', 180)).toBe('T3 2 min, dernier');
+    expect(withOptionalTail('T3 2 min', ', dernier', 100)).toBe('T3 2 min');
+    expect(withOptionalTail('', ', dernier', 180)).toBe('');
+  });
+
+  it('tableau : la colonne b garde « , dernier », sans déborder sur l’heure', () => {
+    const p = layoutPage(
+      view({ items: [{ a: 'T3', b: 'Simonis (Elisabeth) par le boulevard Léopold II et la basilique', bTail: ', dernier', c: '12 min' }] }),
+      { sel: 0, top: 0 },
+    );
+    expect(p.lines[0]).toMatch(/^T3 {3}Simonis .*…, dernier {3}12 min$/);
+    expect(overflowing(p)).toEqual([]);
+    const colB = p.containers.find((c) => c.name === 'colB')!;
+    const colC = p.containers.find((c) => c.name === 'colC')!;
+    expect(colB.x + textWidth(colB.content.split('\n')[0])).toBeLessThan(colC.x);
   });
 });

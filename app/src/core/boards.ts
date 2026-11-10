@@ -1,7 +1,7 @@
 /**
  * Tableaux de départs : horaires statiques + temps réel (par lots, pour plusieurs zones à la fois).
  */
-import type { Mode, Op } from '../../../shared/types';
+import type { Mode, Names, Op } from '../../../shared/types';
 import { prettyName } from '../../../shared/names';
 import type { Board, Departure, LineFilter } from './api';
 import { lowerBound, type PreparedArea } from './areas';
@@ -116,9 +116,96 @@ function modeOfLine(prep: PreparedArea, line: string): Mode {
   return prep.file.patterns.find((p) => p.line === line)?.mode ?? 'bus';
 }
 
+/** Écart maximal entre un passage sans destination et le départ prévu qui la lui donne. */
+const BLANK_HEAD_MS = 2 * 3_600_000;
+
 /**
- * STIB : les passages en direct (ligne + destination) remplacent les départs prévus du même motif
+ * Motif d'un passage STIB sans destination (cas réel) : celui du départ prévu le plus proche de la même ligne
+ * à cet arrêt (2 h au plus) ; sinon la direction la plus fréquente de la ligne à cet arrêt, puis dans la zone ;
+ * -1 si la ligne est inconnue ici.
+ */
+export function patternForLine(prep: PreparedArea, stopIdx: number, line: string, t: number): number {
+  const ofLine = (pi: number): boolean => prep.file.patterns[pi]?.line === line;
+  const here = (di: number): boolean => {
+    const dep = prep.file.deps[di];
+    return dep[3] === stopIdx && ofLine(dep[2]);
+  };
+  let best = -1;
+  let bestGap = Infinity;
+  const k0 = lowerBound(prep, t);
+  for (let k = k0; k < prep.order.length; k++) {
+    const di = prep.order[k];
+    const gap = prep.times[di] - t;
+    if (gap > BLANK_HEAD_MS) break;
+    if (here(di)) {
+      best = prep.file.deps[di][2];
+      bestGap = gap;
+      break;
+    }
+  }
+  for (let k = k0 - 1; k >= 0; k--) {
+    const di = prep.order[k];
+    const gap = t - prep.times[di];
+    if (gap > BLANK_HEAD_MS || gap >= bestGap) break;
+    if (here(di)) {
+      best = prep.file.deps[di][2];
+      break;
+    }
+  }
+  if (best >= 0) return best;
+  for (const atStop of [true, false]) {
+    const count = new Map<number, number>();
+    for (const dep of prep.file.deps) if ((!atStop || dep[3] === stopIdx) && ofLine(dep[2])) count.set(dep[2], (count.get(dep[2]) ?? 0) + 1);
+    let top = -1;
+    let n = 0;
+    for (const [pi, c] of count) if (c > n || (c === n && pi < top)) [top, n] = [pi, c];
+    if (top >= 0) return top;
+  }
+  return prep.file.patterns.findIndex((p) => p.line === line);
+}
+
+/** Passage STIB prêt à afficher : jamais de « Ne pas embarquer », destination toujours connue. */
+export interface StibPassage {
+  t: number;
+  line: string;
+  /** Motif statique correspondant, -1 si aucun (ligne ou destination inconnue des horaires). */
+  pi: number;
+  head: Names;
+  /** Faux pour un « Temps théorique » : horaire prévu (~). */
+  rt: boolean;
+  last: boolean;
+  msg?: string;
+}
+
+/**
+ * Passages d'un point d'arrêt (index `stopIdx` de la zone) entre `from` et `to` : les véhicules qui terminent ici
+ * (« Ne pas embarquer ») sont retirés ; une destination vide prend celle du motif statique (patternForLine), et
+ * un passage dont la destination reste introuvable est ignoré.
+ */
+export function stibPassages(prep: PreparedArea, stopIdx: number, entries: readonly StibEntry[], from: number, to: number): StibPassage[] {
+  const out: StibPassage[] = [];
+  for (const e of entries) {
+    if (e.noBoarding) continue;
+    const times = e.times.filter((t) => t >= from && t <= to);
+    if (!times.length) continue;
+    const blank = !e.dest.fr.trim() && !e.dest.nl.trim();
+    const matched = blank ? -1 : matchStibPattern(prep, stopIdx, e);
+    for (const t of times) {
+      const pi = blank ? patternForLine(prep, stopIdx, e.line, t) : matched;
+      const p = pi >= 0 ? prep.file.patterns[pi] : undefined;
+      if (!p && blank) continue;
+      const x: StibPassage = { t, line: e.line, pi, head: p?.head ?? { fr: prettyName(e.dest.fr), nl: prettyName(e.dest.nl) }, rt: !e.planned, last: !!e.last };
+      if (e.msg) x.msg = e.msg;
+      out.push(x);
+    }
+  }
+  return out;
+}
+
+/**
+ * STIB : les passages annoncés (ligne + destination) remplacent les départs prévus du même motif
  * jusqu'au dernier passage annoncé ; au-delà, l'horaire prévu reste (~). Lignes absentes : prévu.
+ * Un « Temps théorique » compte comme passage annoncé mais reste un horaire prévu (rt faux, « ~ »).
  */
 export function mergeStib(
   prep: PreparedArea,
@@ -135,36 +222,31 @@ export function mergeStib(
     prep.file.stops.forEach((st, stopIdx) => {
       const entries = points.get(stibPoint(st.rt || st.id));
       if (!entries) return;
-      for (const e of entries) {
-        const times = e.times.filter((t) => t >= now - PAST_MS && t <= now + STIB_AHEAD_MS);
-        if (!times.length) continue;
-        const pi = matchStibPattern(prep, stopIdx, e);
-        const p = pi >= 0 ? prep.file.patterns[pi] : undefined;
+      for (const x of stibPassages(prep, stopIdx, entries, now - PAST_MS, now + STIB_AHEAD_MS)) {
+        const p = x.pi >= 0 ? prep.file.patterns[x.pi] : undefined;
         if (p) {
-          if (!ok(pi)) continue;
-          const key = `${stopIdx}|${pi}`;
-          horizon.set(key, Math.max(horizon.get(key) ?? 0, ...times));
+          if (!ok(x.pi)) continue;
+          const key = `${stopIdx}|${x.pi}`;
+          horizon.set(key, Math.max(horizon.get(key) ?? 0, x.t));
         } else if (fkeys.length) {
-          const hk = headKey(e.dest.fr);
-          if (!fkeys.some((f) => f.line === e.line && headScore(f.head, hk) > 0)) continue;
+          const hk = headKey(x.head.fr);
+          if (!fkeys.some((f) => f.line === x.line && headScore(f.head, hk) > 0)) continue;
         }
-        const head = p?.head ?? { fr: prettyName(e.dest.fr), nl: prettyName(e.dest.nl) };
-        for (const t of times) {
-          const d: Departure = {
-            op: 'stib',
-            mode: p?.mode ?? modeOfLine(prep, e.line),
-            line: e.line,
-            head,
-            sched: t,
-            est: t,
-            rt: true,
-            delayMin: 0,
-            cancelled: false,
-            stopId: st.id,
-          };
-          if (e.msg) d.msg = e.msg;
-          out.push(d);
-        }
+        const d: Departure = {
+          op: 'stib',
+          mode: p?.mode ?? modeOfLine(prep, x.line),
+          line: x.line,
+          head: x.head,
+          sched: x.t,
+          est: x.t,
+          rt: x.rt,
+          delayMin: 0,
+          cancelled: false,
+          stopId: st.id,
+        };
+        if (x.msg) d.msg = x.msg;
+        if (x.last) d.last = true;
+        out.push(d);
       }
     });
   }

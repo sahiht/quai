@@ -83,12 +83,12 @@ Codes de sortie : 0 si au moins un réseau a réussi ; 1 si tous ont échoué (l
 
 ## Flux de nuit (`.github/workflows/nightly.yml`)
 
-- Chaque nuit à 01:15 UTC (02:15 à Bruxelles en hiver, 03:15 en été) et à la demande (« Run workflow »).
-- Job « Préparer les données » (droits : lecture du dépôt et de la configuration Pages) : vérifie le secret `BMC_KEY` (message clair en français s'il manque), Node 22 avec cache npm, `npm ci`, `npm run build-data -- --out ../site/data --site ../site`, puis `actions/configure-pages` et `actions/upload-pages-artifact` (dossier `site`).
+- Chaque nuit à 01:15 UTC (02:15 à Bruxelles en hiver, 03:15 en été), à la demande (« Run workflow ») et après chaque envoi sur `main` qui touche `app/`, `shared/` ou ce workflow (Quai Web republié ; les données sont refaites aussi, avec les GTFS gardés en repli).
+- Job « Préparer les données » (droits : lecture du dépôt et de la configuration Pages) : vérifie le secret `BMC_KEY` (message clair en français s'il manque), Node 22 avec cache npm, `npm ci`, `npm run build-data -- --out ../site/data --site ../site`, puis Quai Web (`npm ci` et `npm run build:web` dans `app/`, copié dans `site/app/`, avec `QUAI_DATA_BASE` = `https://<compte>.github.io/<dépôt>/data` et `QUAI_RELAY_BASE` = variable de dépôt `vars.QUAI_RELAY_BASE`), puis `actions/configure-pages` et `actions/upload-pages-artifact` (dossier `site`). Sans la variable `QUAI_RELAY_BASE`, ou si Quai Web ne se construit pas, les données sont publiées quand même et `site/app/` contient une page d'explication (avis ou avertissement en français dans le journal).
 - Job « Publier sur GitHub Pages » (droits : `pages: write`, `id-token: write`) : `actions/deploy-pages`. Une seule publication à la fois, jamais interrompue.
 - Job « Garder la tâche planifiée active » : GitHub désactive sans prévenir les tâches planifiées d'un dépôt public après 60 jours sans activité. Si le dernier commit de la branche par défaut a plus de 30 jours, ce job committe `.github/keepalive.txt` (la date du jour) avec le jeton du flux, au nom de `github-actions[bot]`. C'est le seul job autorisé à écrire (`contents: write`). Un envoi refusé (branche protégée par exemple) ne fait jamais échouer le flux : simple avertissement, il faut alors faire un commit à la main avant 60 jours.
 
-Mise en place, une fois : Settings > Pages > Source : « GitHub Actions » ; Settings > Secrets and variables > Actions > New repository secret, nom `BMC_KEY`. Les données sont ensuite à `https://<utilisateur>.github.io/<dépôt>/data/` (c'est `DATA_BASE`), la page d'état à la racine du site.
+Mise en place, une fois : Settings > Pages > Source : « GitHub Actions » ; Settings > Secrets and variables > Actions > New repository secret, nom `BMC_KEY`. Les données sont ensuite à `https://<utilisateur>.github.io/<dépôt>/data/` (c'est `DATA_BASE`), la page d'état à la racine du site (avec le lien « Ouvrir Quai Web »), Quai Web à `https://<utilisateur>.github.io/<dépôt>/app/`.
 
 ## Zips de test (`fixtures/pipeline/`)
 

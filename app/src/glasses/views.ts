@@ -7,6 +7,7 @@ import { OP_NAME, areaLabel, displayName, hhmm, lineLabel, minutesUntil } from '
 import type { AreaRef, GlassesView, Intent, Item, Route, TopLine } from './types';
 import {
   HINTS,
+  LAST_MARK,
   NB,
   NOTE_NO_RT,
   NOTE_PLANNED,
@@ -36,6 +37,8 @@ export interface ViewCtx {
   settings: Settings;
   /** Horaires périmés (dataFreshness, ok = false) : message affiché à la place des listes vides. */
   stale?: string;
+  /** Quai Web : les réglages sont dans l'onglet Réglages de la page, pas dans l'appli du téléphone. */
+  web?: boolean;
 }
 
 const lang = (c: ViewCtx): NameLang => c.settings.lang;
@@ -70,6 +73,14 @@ export function errorView(title: string, text: string, ctx: ViewCtx): GlassesVie
 }
 
 export function firstRunView(ctx: ViewCtx): GlassesView {
+  if (ctx.web) {
+    return messageView(
+      'Quai',
+      ['Bienvenue dans Quai !', `Termine les réglages dans l’onglet Réglages${NB}:`, 'position et langue des noms, en deux gestes.'],
+      ctx,
+      { hints: HINTS.firstRunWeb, tap: { kind: 'continue' } },
+    );
+  }
   return messageView(
     'Quai',
     [
@@ -166,6 +177,7 @@ export function nearbyView(list: NearbyItem[], ctx: ViewCtx): GlassesView {
       a: areaLabel(it.area, lang(ctx)),
       b: distanceText(it.distanceM),
       c: nextText(it.next, ctx.now, mp(ctx)),
+      cTail: lastMark(it.next),
       action: { kind: 'open', route: { screen: 'board', areaId: it.area.id } },
     });
   }
@@ -192,7 +204,7 @@ export function boardView(b: Board, ctx: ViewCtx, opts: { isFavorite: boolean; l
     v.items.push(
       train
         ? { a: d.line, b: head, c: trainCell(d, mp(ctx)), action: fav }
-        : { a: lineLabel(d.mode, d.line), b: head, c: minutesText(d, ctx.now, mp(ctx)), action: fav },
+        : { a: lineLabel(d.mode, d.line), b: head, bTail: lastMark(d), c: minutesText(d, ctx.now, mp(ctx)), action: fav },
     );
   }
   if (!deps.length) v.items.push({ a: ctx.stale ?? 'Aucun départ dans les prochaines heures', action: fav });
@@ -207,7 +219,13 @@ export function boardView(b: Board, ctx: ViewCtx, opts: { isFavorite: boolean; l
 
 /* ------------------------------ Mes favoris ------------------------------ */
 
-export interface FavoriteNext { text: string; planned: boolean }
+/** Prochain départ d'un favori ; `last` : dernier passage annoncé de la ligne (« , dernier » s'il tient). */
+export interface FavoriteNext { text: string; planned: boolean; last?: boolean }
+
+/** « , dernier » pour le dernier passage annoncé d'une ligne (jamais pour un départ supprimé). */
+export function lastMark(d: Pick<Departure, 'last' | 'cancelled'> | Pick<Leg, 'last' | 'cancelled'> | undefined): string | undefined {
+  return d?.last && !d.cancelled ? LAST_MARK : undefined;
+}
 
 export function favoriteLabel(f: Favorite, settings: Settings): string {
   if (f.kind === 'stop') return `${displayName(f.name, settings.lang)} (${OP_NAME[f.op]})`;
@@ -217,14 +235,15 @@ export function favoriteLabel(f: Favorite, settings: Settings): string {
 export function favoritesView(next: Record<string, FavoriteNext | null | undefined>, ctx: ViewCtx): GlassesView {
   const favs = ctx.settings.favorites;
   if (!favs.length) {
-    return messageView('Mes favoris', ['Aucun favori pour l’instant.', 'Ajoute-les dans Quai, sur le téléphone.'], ctx, { hints: HINTS.message });
+    const where = ctx.web ? 'Ajoute-les dans l’onglet Réglages.' : 'Ajoute-les dans Quai, sur le téléphone.';
+    return messageView('Mes favoris', ['Aucun favori pour l’instant.', where], ctx, { hints: HINTS.message });
   }
   const v = base('favorites', 'menu', 'Mes favoris', ctx);
   let planned = false;
   for (const f of favs) {
     const n = next[f.id];
     if (n?.planned) planned = true;
-    v.items.push({ a: favoriteLabel(f, ctx.settings), c: n === undefined ? '…' : n ? n.text : '', action: { kind: 'open', route: favoriteRoute(f, ctx.settings) } });
+    v.items.push({ a: favoriteLabel(f, ctx.settings), c: n === undefined ? '…' : n ? n.text : '', cTail: n?.last ? LAST_MARK : undefined, action: { kind: 'open', route: favoriteRoute(f, ctx.settings) } });
   }
   v.note = ctx.stale ?? (planned && mp(ctx) ? NOTE_PLANNED : undefined);
   v.reserveNote = true;
@@ -281,10 +300,18 @@ export function placesView(summary: Record<string, string | undefined>, ctx: Vie
       action: { kind: 'open', route: { screen: 'journeys', from: { type: 'here' }, to: { type: 'place', placeId: p.id }, label: p.label } },
     });
   }
-  if (!ctx.settings.places.length) {
-    v.items.push({ a: 'Aucun lieu enregistré', c: 'sur le téléphone', action: { kind: 'toast', text: 'Ajoute Maison ou Bureau dans Quai, sur le téléphone' } });
+  if (ctx.web) {
+    // Quai Web : l'onglet Réglages est sur la même page, le toucher l'ouvre directement.
+    if (!ctx.settings.places.length) {
+      v.items.push({ a: 'Aucun lieu enregistré', c: 'dans Réglages', action: { kind: 'phone', hash: '#/lieux/nouveau', text: 'Ajoute Maison ou Bureau dans l’onglet Réglages' } });
+    }
+    v.items.push({ a: 'Autre lieu', c: 'dans Réglages', action: { kind: 'phone', hash: '#/recherche', text: 'Cherche un autre lieu dans l’onglet Réglages' } });
+  } else {
+    if (!ctx.settings.places.length) {
+      v.items.push({ a: 'Aucun lieu enregistré', c: 'sur le téléphone', action: { kind: 'toast', text: 'Ajoute Maison ou Bureau dans Quai, sur le téléphone' } });
+    }
+    v.items.push({ a: 'Autre lieu', c: 'sur le téléphone', action: { kind: 'toast', text: 'Cherche un autre lieu dans Quai, sur le téléphone' } });
   }
-  v.items.push({ a: 'Autre lieu', c: 'sur le téléphone', action: { kind: 'toast', text: 'Cherche un autre lieu dans Quai, sur le téléphone' } });
   if (ctx.stale) v.note = ctx.stale;
   v.hints = hints(ctx, HINTS.places);
   return v;
@@ -368,6 +395,7 @@ export function stepsView(route: Extract<Route, { screen: 'steps' }>, j: Journey
     v.items.push({
       a: `${plannedMark(leg.rt ?? false, mp(ctx))}${hhmm(leg.schedDep)}`,
       b: `${vehicleOf(leg)}${head}${plat}`,
+      bTail: lastMark(leg),
       c: leg.cancelled ? 'SUPPRIMÉ' : delay > 0 ? `+${delay} min` : '',
       action: { kind: 'open', route: { screen: 'train', journey: j, leg: i, label: route.label } },
     });
@@ -430,7 +458,7 @@ export function arrivalView(stationName: string, arrivalAt: number, deps: Depart
   const shown = deps.slice(0, 4);
   for (const d of shown) {
     const head = headText(d.head, lang(ctx), d.op);
-    v.items.push({ a: vehicleLong(d.mode, d.line), b: minutesUntil(d.est, ctx.now) >= 60 ? withDay(head, d.est, ctx.now) : head, c: minutesText(d, ctx.now, mp(ctx)), action: save });
+    v.items.push({ a: vehicleLong(d.mode, d.line), b: minutesUntil(d.est, ctx.now) >= 60 ? withDay(head, d.est, ctx.now) : head, bTail: lastMark(d), c: minutesText(d, ctx.now, mp(ctx)), action: save });
   }
   if (!shown.length) v.items.push({ a: 'Aucun départ devant la gare', action: save });
   if (mp(ctx) && shown.some((d) => !d.rt && !d.cancelled)) v.note = NOTE_PLANNED;

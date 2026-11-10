@@ -32,8 +32,11 @@ export function feedState(f: Meta['feeds'][Op]): string {
   return 'à jour';
 }
 
-/** Page HTML minimale, en français : date de génération, état de chaque réseau, attribution. */
-export function statusPage(meta: Meta, dataPath = 'data'): string {
+/** Chemin de Quai Web à côté des données (dossier app/ publié par le flux de nuit, à côté de data/). */
+export const WEB_APP_PATH = 'app/';
+
+/** Page HTML minimale, en français : date de génération, état de chaque réseau, lien vers Quai Web, attribution. */
+export function statusPage(meta: Meta, dataPath = 'data', webPath = WEB_APP_PATH): string {
   const rows = OPS.map((op: Op) => {
     const f = meta.feeds[op];
     const state = nbsp(esc(feedState(f)));
@@ -55,6 +58,8 @@ export function statusPage(meta: Meta, dataPath = 'data'): string {
     th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #ddd; vertical-align: top; }
     td:nth-child(3), td:nth-child(4) { text-align: right; }
     .small { font-size: .9rem; color: #555; }
+    .web { margin: 1.4rem 0; padding: .8rem 1rem; border: 1px solid #ccc; border-radius: 6px; }
+    .web a { font-weight: bold; color: #1f5e37; }
   </style>
 </head>
 <body>
@@ -69,6 +74,7 @@ export function statusPage(meta: Meta, dataPath = 'data'): string {
 ${rows}
     </tbody>
   </table>
+  <p class="web"><a href="${esc(webPath)}">Ouvrir Quai Web</a>&nbsp;: Quai dans le navigateur, sans les lunettes (sur le téléphone, ajoute la page à l’écran d’accueil).</p>
   <p>${nbsp(esc(ATTRIBUTION))} (<a href="https://creativecommons.org/licenses/by/4.0/deed.fr">texte de la licence</a>).</p>
   <p class="small">Fichiers&nbsp;: <a href="${esc(dataPath)}/meta.json">${esc(dataPath)}/meta.json</a>, <a href="${esc(dataPath)}/LICENSE-DATA.txt">${esc(dataPath)}/LICENSE-DATA.txt</a>.</p>
 </body>

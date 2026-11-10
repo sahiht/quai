@@ -62,6 +62,31 @@ describe('lecture des réponses WaitingTimes', () => {
     ]);
   });
 
+  it('un groupe par message : « Temps théorique », « Ne pas embarquer », « Dernier passage » jamais mélangés aux autres passages', () => {
+    // Forme des vraies réponses : message sur un seul passage, destination parfois vide.
+    const { rows } = extractRows({ results: [
+      { pointid: '6357', lineid: '3', passingtimes: JSON.stringify([
+        pt('3', T('12:12')),
+        pt('3', T('12:20'), { fr: 'CHURCHILL', nl: 'CHURCHILL' }, { message: { fr: 'Temps théorique', nl: 'Theoretische tijd' } }),
+        pt('3', T('12:28')),
+        pt('3', T('12:36'), { fr: 'CHURCHILL', nl: 'CHURCHILL' }, { message: { fr: 'Dernier passage', nl: 'Laatste doorgang' } }),
+      ]) },
+      { pointid: '6357', lineid: '4', passingtimes: JSON.stringify([
+        pt('4', T('12:11'), { fr: 'STALLE (P)', nl: 'STALLE (P)' }, { message: { fr: 'Ne pas embarquer', nl: 'Niet instappen' } }),
+        pt('4', T('12:15'), { fr: 'STALLE (P)', nl: 'STALLE (P)' }),
+        pt('4', T('12:23'), {}),
+      ]) },
+    ] });
+    expect(groupWaitingTimes(rows, ['6357']).get('6357')).toEqual([
+      { line: '4', dest: { fr: 'STALLE (P)', nl: 'STALLE (P)' }, times: [T('12:11')], msg: 'Ne pas embarquer' },
+      { line: '3', dest: { fr: 'CHURCHILL', nl: 'CHURCHILL' }, times: [T('12:12'), T('12:28')] },
+      { line: '4', dest: { fr: 'STALLE (P)', nl: 'STALLE (P)' }, times: [T('12:15')] },
+      { line: '3', dest: { fr: 'CHURCHILL', nl: 'CHURCHILL' }, times: [T('12:20')], msg: 'Temps théorique' },
+      { line: '4', dest: { fr: '', nl: '' }, times: [T('12:23')] },
+      { line: '3', dest: { fr: 'CHURCHILL', nl: 'CHURCHILL' }, times: [T('12:36')], msg: 'Dernier passage' },
+    ]);
+  });
+
   it('regroupe par ligne et destination, trie et dédoublonne les heures, normalise les fuseaux', () => {
     const { rows } = extractRows({ results: [
       { pointid: '9', lineid: '3', passingtimes: JSON.stringify([

@@ -9,14 +9,17 @@
   },
   "scripts": {
     "dev": "vite",
+    "dev:web": "vite --config vite.web.config.ts",
     "build": "vite build",
+    "build:web": "vite build --config vite.web.config.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "configure": "node scripts/configure.mjs",
     "pack": "node scripts/check-configured.mjs && npm run build && evenhub pack app.json dist -o quai.ehpk --sdk-ver 0.0.16",
-    "sim-tour": "node scripts/sim-tour.mjs"
+    "sim-tour": "node scripts/sim-tour.mjs",
+    "icons:web": "node scripts/make-web-icons.mjs"
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "0.0.16",

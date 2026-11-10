@@ -5,6 +5,7 @@
  */
 import type { AlertsResponse, HealthResponse, Names, Op, RtResponse } from '../../../shared/types';
 import { normalizeId } from '../../../shared/types';
+import { normalizeForSearch } from '../../../shared/names';
 import { brusselsParts, tzOffsetMs } from './util';
 import { chunks, getText, safeJson, type FetchLike } from './net';
 
@@ -16,9 +17,53 @@ export interface RtTrip {
 /** Passages STIB à un point d'arrêt (heures en epoch ms). */
 export interface StibEntry {
   line: string;
+  /** Destination telle que donnée par la STIB (peut être vide). */
   dest: Names;
   times: number[];
+  /** Message de l'opérateur à montrer (travaux, déviation), hors mentions reconnues ci-dessous. */
   msg?: string;
+  /** « Temps théorique » : heure prévue par la STIB, pas un passage suivi en direct. */
+  planned?: boolean;
+  /** « Dernier passage » de la ligne à cet arrêt. */
+  last?: boolean;
+  /** « Ne pas embarquer » : véhicule qui termine ici, jamais montré. */
+  noBoarding?: boolean;
+}
+
+export interface StibMessageKind {
+  planned: boolean;
+  last: boolean;
+  noBoarding: boolean;
+}
+
+const STIB_PLANNED = /\btheor(?:i|e)/;
+const STIB_NO_BOARDING = /\b(?:ne pas (?:embarquer|monter)|pas d embarquement|ne montez pas|niet (?:instappen|opstappen)|do not board|no boarding)\b/;
+const STIB_LAST =
+  /\b(?:dernier|derniere) (?:passage|depart|vehicule|tram|bus|metro)\b|\blaatste (?:doorgang|passage|vertrek|doortocht|rit|tram|bus|metro)\b|\blast (?:departure|passage|vehicle|service|tram|bus|metro)\b/;
+
+/**
+ * Mentions de service des passages STIB (vues dans les vraies réponses WaitingTimes), en français, néerlandais
+ * ou anglais, sans casse ni accents : « Temps théorique », « Ne pas embarquer », « Dernier passage ».
+ * null : message ordinaire (travaux, déviation…), à montrer tel quel.
+ */
+export function stibMessageKind(text: string | undefined): StibMessageKind | null {
+  const k = normalizeForSearch(text ?? '');
+  if (!k) return null;
+  const kind = { planned: STIB_PLANNED.test(k), last: STIB_LAST.test(k), noBoarding: STIB_NO_BOARDING.test(k) };
+  return kind.planned || kind.last || kind.noBoarding ? kind : null;
+}
+
+/** Range un message dans une entrée : mention reconnue (drapeaux) ou message à montrer (`msg`). */
+function applyStibMessage(entry: StibEntry, text: string | undefined): StibEntry {
+  const kind = stibMessageKind(text);
+  if (!kind) {
+    if (text) entry.msg = text;
+    return entry;
+  }
+  if (kind.planned) entry.planned = true;
+  if (kind.last) entry.last = true;
+  if (kind.noBoarding) entry.noBoarding = true;
+  return entry;
 }
 export type AlertItem = AlertsResponse['alerts'][number];
 
@@ -238,6 +283,12 @@ export function parseStibTime(x: unknown, now: number): number | null {
   return Number.isFinite(t) ? t : null;
 }
 
+/**
+ * Réponse /api/stib. Le relais regroupe les passages par ligne, destination et message : `msg` vaut pour toutes
+ * les heures de l'entrée. Des passages bruts (`times` en objets avec leur propre `message`) sont aussi acceptés :
+ * une entrée par message. Les mentions de service (« Temps théorique », « Ne pas embarquer », « Dernier passage »)
+ * deviennent des drapeaux et ne sont jamais montrées comme un message de l'opérateur.
+ */
 export function parseStib(body: unknown, now: number): Map<string, StibEntry[]> {
   if (!isObj(body) || !isObj(body.points)) throw new Error('réponse /api/stib invalide');
   const out = new Map<string, StibEntry[]>();
@@ -250,13 +301,22 @@ export function parseStib(body: unknown, now: number): Map<string, StibEntry[]> 
       let times: unknown = e.times;
       if (typeof times === 'string') times = safeJson(times);
       if (!Array.isArray(times)) continue;
-      const ms = times.map((t) => parseStibTime(isObj(t) ? t.expectedArrivalTime : t, now)).filter((t): t is number => t !== null);
       const line = String(e.line ?? e.lineId ?? '').trim();
       if (!line) continue;
-      const entry: StibEntry = { line, dest: namesOf(e.dest ?? e.destination), times: ms.sort((a, b) => a - b) };
-      const msg = textOf(e.msg ?? e.message);
-      if (msg) entry.msg = msg;
-      entries.push(entry);
+      const dest = namesOf(e.dest ?? e.destination);
+      const groupMsg = textOf(e.msg ?? e.message);
+      const byMsg = new Map<string, number[]>();
+      for (const t of times) {
+        const ms = parseStibTime(isObj(t) ? t.expectedArrivalTime : t, now);
+        if (ms === null) continue;
+        const own = isObj(t) ? textOf(t.message ?? t.msg) : undefined;
+        const key = own ?? groupMsg ?? '';
+        const arr = byMsg.get(key);
+        if (arr) arr.push(ms);
+        else byMsg.set(key, [ms]);
+      }
+      if (!byMsg.size) byMsg.set(groupMsg ?? '', []);
+      for (const [msg, ms] of byMsg) entries.push(applyStibMessage({ line, dest: { ...dest }, times: ms.sort((a, b) => a - b) }, msg || undefined));
     }
     out.set(pid, [...(out.get(pid) ?? []), ...entries]);
   }

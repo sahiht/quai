@@ -131,7 +131,11 @@ export interface RtResponse {
   error?: string;
 }
 
-/** GET /api/stib?points=5153,5154 (max 30 pointid) */
+/**
+ * GET /api/stib?points=5153,5154 (max 30 pointid). Un groupe par ligne, destination et message : `msg` vaut pour
+ * toutes les heures du groupe (« Temps théorique », « Ne pas embarquer », « Dernier passage » ou message de travaux).
+ * `dest` est tel que donné par la STIB (majuscules, parfois vide).
+ */
 export interface StibResponse {
   fetchedAt: string;
   points: Record<string, { line: string; dest: Names; times: string[]; msg?: string }[]>;

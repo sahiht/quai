@@ -15,6 +15,13 @@ on:
       - 'app/**'
       # Les notes d'une future version s'ajoutent avant de changer la version : pas de paquet pour elles seules.
       - '!app/store/changelog/**'
+      # Fichiers propres à Quai Web (publié par « Données de nuit ») : pas de paquet des lunettes pour eux seuls.
+      - '!app/web/**'
+      - '!app/src/web/**'
+      - '!app/test/web/**'
+      - '!app/vite.web.config.ts'
+      - '!app/scripts/web-config.mjs'
+      - '!app/scripts/make-web-icons.mjs'
       - 'shared/**'
       - '.github/workflows/build-app.yml'
 

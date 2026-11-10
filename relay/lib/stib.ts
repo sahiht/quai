@@ -74,7 +74,9 @@ function message(m: unknown): string | undefined {
 }
 
 /**
- * Regroupe par arrêt, puis par ligne + destination ; heures triées, en ISO avec le décalage de Bruxelles.
+ * Regroupe par arrêt, puis par ligne + destination + message ; heures triées, en ISO avec le décalage de Bruxelles.
+ * Le message vaut donc pour toutes les heures de son groupe : un passage « Temps théorique », « Ne pas embarquer »
+ * ou « Dernier passage » n'est jamais mélangé aux autres passages de la même ligne (l'appli les traite à part).
  * Seuls les arrêts demandés sont gardés ; chacun est présent dans le résultat (liste vide si rien).
  */
 export function groupWaitingTimes(rows: readonly Obj[], points: readonly string[]): Map<string, StibGroup[]> {
@@ -92,11 +94,14 @@ export function groupWaitingTimes(rows: readonly Obj[], points: readonly string[
       const t = parseTime(pt.expectedArrivalTime ?? pt.expectedarrivaltime ?? pt.expected_arrival_time);
       const dest = names(pt.destination);
       const msg = message(pt.message);
-      const key = `${line}\u0001${dest.fr}\u0001${dest.nl}`;
+      const key = `${line}\u0001${dest.fr}\u0001${dest.nl}\u0001${msg ?? ''}`;
       let g = groups.get(key);
-      if (!g) groups.set(key, (g = { line, dest, times: new Set() }));
+      if (!g) {
+        g = { line, dest, times: new Set() };
+        if (msg) g.msg = msg;
+        groups.set(key, g);
+      }
       if (t != null) g.times.add(t);
-      if (msg && !g.msg) g.msg = msg;
     }
   }
   const out = new Map<string, StibGroup[]>();

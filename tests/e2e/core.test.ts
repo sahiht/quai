@@ -416,7 +416,9 @@ describe('horaires périmés (dernière publication le 2026-11-01)', () => {
     expect(f.ok).toBe(false);
     expect(f.message).toBe('Horaires périmés : mise à jour arrêtée le 02/11');
     checkTexts(f.message);
-    expect(f.ageHours).toBeGreaterThan(0);
+    // âge compté depuis meta.generatedAt, l'heure réelle où les données de test ont été préparées
+    // (pas forcément avant 12:10 le 10/11 : on ne compare donc pas à zéro)
+    expect(f.ageHours).toBe(Math.round(((now - Date.parse(meta.generatedAt)) / 3_600_000) * 10) / 10);
     const b = await core.board('stib:6357F', { limit: 5 });
     expect(b.departures).toEqual([]);
     expect(b.area.id).toBe('stib:6357F');

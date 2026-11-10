@@ -3,10 +3,11 @@
  * Le vrai cœur (createCore de ./core/index) est utilisé, le faux cœur seulement avec ?fake=1 (dév. ou e2e).
  */
 import './phone/styles.css';
-import type { Core, CoreOptions, KV, Meta } from './core/api';
+import type { CoreOptions } from './core/api';
+import { applyTestSettings, loadCore, prefixed, type CoreModule } from './boot';
 import { parseEnv } from './env';
 import { CONFIGURED, DATA_BASE, RELAY_BASE } from './generated/config';
-import { GlassesController, type Freshness } from './glasses/controller';
+import { GlassesController } from './glasses/controller';
 import { messageView } from './glasses/views';
 import { layoutPage } from './glasses/layout';
 import { mountPhone } from './phone/app';
@@ -15,14 +16,9 @@ import { createClock } from './platform/clock';
 import { createEvenPlatform, detectEvenHost } from './platform/even';
 import { mockLocation } from './platform/location';
 import type { Platform } from './platform/types';
-import { clearSettings, loadSettings, migrateSettings, saveSettings, SettingsStore } from './settings';
+import { loadSettings, SettingsStore } from './settings';
 import { DEFAULT_SETTINGS } from './core/api';
 import { fitScreen } from './phone/dom';
-
-interface CoreModule {
-  createCore(opts: CoreOptions): Core;
-  dataFreshness(meta: Meta, now: number): Freshness;
-}
 
 /* État d'arrière-plan : l'hôte Even appelle ces fonctions (migration vers une WebView sans écran quand
  * le téléphone se verrouille). Enregistrées au chargement du module, avant tout await. */
@@ -33,23 +29,6 @@ w.__restoreState = (snap: unknown) => {
   if (bg.controller) bg.controller.restore(snap);
   else bg.pending = snap;
 };
-
-/** KV préfixé (cache du cœur séparé des réglages). */
-function prefixed(kv: KV, prefix: string): KV {
-  return { get: (k) => kv.get(prefix + k), set: (k, v) => kv.set(prefix + k, v) };
-}
-
-/** Charge le cœur ; un échec de chargement passager (WebView qui démarre) est retenté deux fois. */
-async function loadCore(fake: boolean): Promise<CoreModule> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return fake ? await import('./dev/fake-core') : await import('./core/index');
-    } catch (e) {
-      if (attempt >= 3) throw e;
-      await new Promise((r) => setTimeout(r, 400 * attempt));
-    }
-  }
-}
 
 async function main(): Promise<void> {
   const env = parseEnv(location.search, import.meta.env.DEV);
@@ -66,16 +45,7 @@ async function main(): Promise<void> {
   const started = platform.glasses.start(loading.containers);
 
   // Réglages (mode test : remise à zéro, réglages de démonstration).
-  if (env.reset) await clearSettings(platform.kv);
-  if (env.preset) {
-    try {
-      const r = await fetch(env.preset);
-      if (r.ok) await saveSettings(platform.kv, migrateSettings(await r.json()));
-      else console.warn(`[Quai] preset ${env.preset} : HTTP ${r.status}`);
-    } catch (e) {
-      console.warn('[Quai] preset illisible', e);
-    }
-  }
+  await applyTestSettings(env, platform.kv);
   const settings = new SettingsStore(platform.kv, await loadSettings(platform.kv));
 
   const dataBase = env.data ?? DATA_BASE;

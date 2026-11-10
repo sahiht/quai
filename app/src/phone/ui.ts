@@ -2,7 +2,7 @@
 import { paintContainers } from '../platform/browser';
 import { layoutPage, geometry } from '../glasses/layout';
 import { effectiveFrame, initNav } from '../glasses/nav';
-import type { GlassesView } from '../glasses/types';
+import type { ContainerSpec, GlassesView } from '../glasses/types';
 import { fitScreen, h, ICON, type Child } from './dom';
 
 let uid = 0;
@@ -104,14 +104,26 @@ export function listRow(opts: { icon: Child; title: string; sub?: string; sub2?:
   );
 }
 
+/** Dessin d'un aperçu dans sa boîte (Quai Web : même rendu que l'écran des lunettes de la page). */
+export type PreviewPainter = (box: HTMLElement, containers: ContainerSpec[]) => void;
+let previewPainter: PreviewPainter | null = null;
+export function setPreviewPainter(p: PreviewPainter | null): void {
+  previewPainter = p;
+}
+
 /** Aperçu fidèle des lunettes : même mise en page que l'appareil, réduite. */
 export function glassesPreview(title: string, view: GlassesView): HTMLElement {
-  const screen = h('div', { class: 'g-screen' });
-  const box = h('div', { class: 'preview', role: 'img', 'aria-label': `${title} : ${[view.title, ...view.items.map((i) => [i.a, i.b, i.c].filter(Boolean).join(' '))].join(', ')}` }, screen);
+  const box = h('div', { class: 'preview', role: 'img', 'aria-label': `${title} : ${[view.title, ...view.items.map((i) => [i.a, i.b, i.c].filter(Boolean).join(' '))].join(', ')}` });
   const nav = initNav({ screen: 'home' });
   const g = geometry(view);
   const frame = effectiveFrame(nav.stack[0], view, g.capacity);
-  paintContainers(screen, layoutPage(view, frame).containers);
-  queueMicrotask(() => fitScreen(box, screen));
+  const containers = layoutPage(view, frame).containers;
+  if (previewPainter) previewPainter(box, containers);
+  else {
+    const screen = h('div', { class: 'g-screen' });
+    box.appendChild(screen);
+    paintContainers(screen, containers);
+    queueMicrotask(() => fitScreen(box, screen));
+  }
   return h('div', { class: 'preview-wrap' }, h('span', { class: 'label' }, title), box);
 }

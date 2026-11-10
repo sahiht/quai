@@ -16,6 +16,8 @@ Ta clé BMC reste secrète : elle est enregistrée chez GitHub et Vercel, jamais
 
 Dans ce guide, `ton-nom` est ton nom d'utilisateur GitHub, écrit en minuscules.
 
+Pas encore de lunettes ? Après les étapes 1 à 4 et le point 1 de l'étape 5, Quai fonctionne déjà dans le navigateur du téléphone : voir « Utiliser Quai sans les lunettes : Quai Web », plus bas.
+
 ## Étape 1 : la clé des données officielles (10 min)
 
 1. Ouvre https://api-management-opendata-production.developer.azure-api.net et choisis « Sign up ». Confirme ton adresse e-mail.
@@ -63,7 +65,7 @@ Ensuite, tout se refait seul chaque nuit vers 2 h (3 h en été).
 
 1. Dans ton dépôt GitHub : « Settings », « Secrets and variables », « Actions », onglet « Variables », « New repository variable ». Nom : `QUAI_RELAY_BASE`. Valeur : l'adresse Vercel de l'étape 4, sans `/` à la fin. Puis « Add variable ».
 2. Onglet « Actions », workflow « Paquet de l'appli », « Run workflow », puis le bouton vert « Run workflow ».
-3. Quand il est vert (environ 3 minutes), ouvre « Releases » (page d'accueil du dépôt, colonne de droite), puis « Quai v1.0.0 ». Télécharge `quai.ehpk` et `icon.png` sur ton téléphone.
+3. Quand il est vert (environ 3 minutes), ouvre « Releases » (page d'accueil du dépôt, colonne de droite), puis la plus récente (par exemple « Quai v1.0.1 »). Télécharge `quai.ehpk` et `icon.png` sur ton téléphone.
 
 ## Étape 6 : installer Quai sur tes lunettes (10 min)
 
@@ -73,6 +75,31 @@ Ensuite, tout se refait seul chaque nuit vers 2 h (3 h en été).
 4. Onglet « Builds » : touche l'étiquette grise « Private », choisis « Beta », confirme « Promote to Beta ».
 5. Sur le téléphone : appli Even Realities, « Me », « Beta tester », « Install ». Quai apparaît dans le menu des lunettes.
 6. Ouvre Quai une première fois sur le téléphone : autorise la position, choisis la langue des noms, ajoute tes lieux et tes favoris.
+
+## Utiliser Quai sans les lunettes : Quai Web
+
+Quai Web, c'est la même appli dans le navigateur : l'écran des lunettes reproduit sur le téléphone, avec les mêmes horaires, le même temps réel et les mêmes écrans que sur les G2. Adresse : `https://ton-nom.github.io/quai/app/` (lien « Ouvrir Quai Web » sur la page d'état `https://ton-nom.github.io/quai/`).
+
+Le workflow « Données de nuit » la publie chaque nuit et après chaque changement de l'appli, dès que la variable `QUAI_RELAY_BASE` existe (étape 5, point 1). La première fois, lance-le à la main : onglet « Actions », « Données de nuit », « Run workflow ». Sans cette variable, l'adresse affiche une page d'explication ; les horaires sont publiés quand même.
+
+L'ajouter à l'écran d'accueil (elle s'ouvre alors en plein écran, comme une appli) :
+- iPhone : ouvre l'adresse dans Safari, bouton « Partager », « Sur l'écran d'accueil », puis « Ajouter ».
+- Android : ouvre l'adresse dans Chrome, menu « ⋮ », « Ajouter à l'écran d'accueil » (ou « Installer l'appli »), puis « Installer ».
+
+Premier lancement : l'onglet « Réglages » s'ouvre. Accepte la demande de position du navigateur, choisis la langue des noms, puis ajoute tes lieux et tes favoris comme sur le téléphone. Si la position est refusée ou imprécise, choisis un arrêt ou une gare dans la rubrique « Position », sous l'écran des lunettes : Quai fait comme si tu y étais.
+
+Les gestes, dans l'onglet « Lunettes » :
+- les boutons sous l'écran : « ▲ », « ▼ », « Toucher », « Double toucher » ;
+- sur l'écran : glisser vers le haut ou le bas, toucher une ou deux fois ;
+- au clavier d'un ordinateur : flèches haut et bas, Entrée pour toucher, Échap ou Retour arrière pour double toucher (la molette fait défiler).
+
+« Rechercher un trajet », puis « Afficher dans les lunettes », montre le résultat dans l'onglet « Lunettes ». Sur un grand écran, les deux onglets sont côte à côte.
+
+Limites :
+- la page doit rester ouverte et l'écran allumé : Quai garde l'écran allumé tant que l'onglet « Lunettes » est affiché, si le navigateur le permet ; page cachée ou téléphone verrouillé, le temps réel s'arrête et reprend au retour ;
+- pas d'usage mains libres : il faut regarder et toucher le téléphone ;
+- les réglages sont gardés dans ce navigateur, séparés de ceux de l'appli des lunettes (une navigation privée les oublie) ;
+- sur le web, rien à quitter : double toucher sur l'accueil rappelle de fermer simplement l'onglet.
 
 ## Mettre à jour Quai
 
@@ -106,6 +133,8 @@ C'est possible depuis le portail Even Hub. La fiche doit être complète : infor
 | « Horaires périmés » | La préparation de nuit est arrêtée : GitHub, « Actions », workflow « Données de nuit », « Enable workflow » si proposé, puis « Run workflow ». |
 | « horaires du 12/11 » à côté d'un réseau (écran Données, page d'état) | Le portail n'a pas fourni ce réseau cette nuit : Quai reprend ses horaires gardés (7 jours au plus). Rien à faire si cela ne dure pas ; sinon, vérifie la clé `BMC_KEY` et le journal de « Données de nuit ». |
 | « test version expired » sur le téléphone | Le paquet n'est pas en « Beta » ou ton invitation n'est pas « Active ». |
+| Quai Web affiche « Quai Web n'est pas disponible pour l'instant » | La variable `QUAI_RELAY_BASE` manque (étape 5, point 1) ou la construction a échoué (journal de « Données de nuit ») ; corrige, puis relance « Données de nuit ». |
+| Quai Web : « Position refusée par le navigateur » | Autorise la position dans les réglages du site (cadenas à côté de l'adresse ; sur iPhone : Réglages, Safari, Position), ou choisis un arrêt dans la rubrique « Position ». |
 | Even Hub refuse le paquet : la version existe déjà | Suis « Mettre à jour Quai » : chaque paquet déposé doit avoir un nouveau numéro. |
 | L'adresse du relais a changé | Mets à jour la variable `QUAI_RELAY_BASE`, puis suis « Mettre à jour Quai » : l'appli n'accepte que l'adresse inscrite dans le paquet. |
 | Peu de trains SNCB en temps réel | La copie du portail BMC ne reprend qu'une partie des trains. Demande à la SNCB l'accès à son flux temps réel direct (page « Données publiques » de belgiantrain.be), ajoute son adresse dans Vercel sous `SNCB_RT_URL`, puis redéploie. |

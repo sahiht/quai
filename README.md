@@ -40,7 +40,7 @@ Lunettes G2 (576 × 288, vert monochrome)
 |---|---|
 | `pipeline/` | Préparation de nuit : GTFS officiels vers fichiers JSON statiques ([README](pipeline/README.md)). |
 | `relay/` | Relais temps réel pour Vercel, dossier autonome (Root Directory `relay`) ([README](relay/README.md)). |
-| `app/` | Appli Even Hub (Vite + TypeScript) : `src/core/` logique sans interface, `src/glasses/` lunettes, `src/phone/` téléphone, `scripts/` configuration et paquet, `store/` textes de la fiche et confidentialité. |
+| `app/` | Appli Even Hub (Vite + TypeScript) : `src/core/` logique sans interface, `src/glasses/` lunettes, `src/phone/` téléphone, `src/web/` et `web/` Quai Web (la même appli dans le navigateur, `npm run build:web`), `scripts/` configuration et paquet, `store/` textes de la fiche et confidentialité. |
 | `shared/` | Types communs et mise en forme des noms, importés par chaque paquet. |
 | `fixtures/` | Mini-réseau de test commun ([README](fixtures/README.md)), zips GTFS et flux temps réel générés. |
 | `tests/e2e/` | Tests de bout en bout : vraies commandes du pipeline et du relais, cœur de l'appli. |
@@ -72,6 +72,10 @@ cd app && npm run dev
 Puis ouvrir dans un navigateur (émulateur des lunettes sur la page) :
 `http://localhost:5173/?e2e=1&data=http://localhost:8787&relay=http://localhost:8788&mockLat=50.86&mockLon=4.359&mockNow=2026-11-10T12:10:00%2B01:00`.
 Sans pile locale, `?fake=1` utilise un faux cœur. Paramètres du mode test : SPEC.md, section 5.3.
+
+Quai Web en local (port 5174, mêmes paramètres) : `cd app && npm run dev:web`, puis
+`http://localhost:5174/quai/app/?e2e=1&data=http://localhost:8787&relay=http://localhost:8788&mockLat=50.86&mockLon=4.359`.
+Version publiée : `QUAI_DATA_BASE=https://… QUAI_RELAY_BASE=https://… npm run build:web` (dossier `app/dist-web/`, chemin `QUAI_WEB_BASE`, défaut `/quai/app/`) ; le flux de nuit s'en charge.
 
 Simulateur Even Hub : `cd app && npm run sim-tour` parcourt les écrans et enregistre les captures dans `app/test/screens/` (voir l'en-tête de `app/scripts/sim-tour.mjs`).
 

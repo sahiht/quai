@@ -159,6 +159,22 @@ function room(def: LayoutDef, col: 'a' | 'b' | 'c', next: { b?: string; c?: stri
   return X_END - c.x - GEO.SAFETY;
 }
 
+/** Colonne b avec une fin protégée : le début est coupé (« … ») pour que `tail` tienne toujours en entier. */
+export function withTail(text: string, tail: string | undefined, maxPx: number): string {
+  if (!tail) return text ? truncate(text, maxPx) : '';
+  const end = truncate(tail, maxPx);
+  if (!text.trim()) return truncate(tail.replace(/^[,\s]+/, ''), maxPx);
+  const head = truncate(text, maxPx - textWidth(end));
+  return head ? head + end : truncate(tail.replace(/^[,\s]+/, ''), maxPx);
+}
+
+/** Colonne c avec une fin facultative : ajoutée seulement si le tout tient dans `maxPx`. */
+export function withOptionalTail(text: string, tail: string | undefined, maxPx: number): string {
+  if (!tail || !text) return text ? truncate(text, maxPx) : '';
+  const full = text + tail;
+  return textWidth(full) <= maxPx ? truncate(full, maxPx) : truncate(text, maxPx);
+}
+
 export interface LayoutOptions {
   /** Message temporaire affiché dans la ligne d'aides (ex. « ★ Ajouté aux favoris »). */
   toast?: string;
@@ -187,9 +203,10 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     const it = items[i];
     const b = it.b ?? '';
     const c = it.c ?? '';
-    const a = truncate(it.a, room(def, 'a', { b, c }));
-    const bt = b ? truncate(b, room(def, 'b', { c })) : '';
-    const ctext = c ? truncate(c, room(def, 'c', {})) : '';
+    const bAny = b || it.bTail ? `${b}${it.bTail ?? ''}` : '';
+    const a = truncate(it.a, room(def, 'a', { b: bAny, c }));
+    const bt = bAny ? withTail(b, it.bTail, room(def, 'b', { c })) : '';
+    const ctext = c ? withOptionalTail(c, it.cTail, room(def, 'c', {})) : '';
     colA.push(a);
     colB.push(bt);
     colC.push(ctext && def.c.align === 'right' ? padLeftTo(ctext, Math.min(def.c.w ?? 0, X_END - def.c.x) - GEO.SAFETY) : ctext);

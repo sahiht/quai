@@ -6,6 +6,7 @@ import type { Op } from '../../../shared/types';
 import { normalizeId } from '../../../shared/types';
 import type { Alert, Journey, Leg, Settings } from './api';
 import type { PreparedArea } from './areas';
+import { stibPassages, type StibPassage } from './boards';
 import type { RealtimeClient, RtTrip, StibEntry } from './realtime';
 import { stibPoint } from './realtime';
 import { delayMinutes, headKey, headScore, rtAtStop, rtOccurrence, type TripContext } from './rtmerge';
@@ -77,6 +78,7 @@ function resetPlanned(l: Leg): void {
   l.delayMin = 0;
   l.cancelled = false;
   delete l.newPlatform;
+  delete l.last;
   for (const s of l.stops ?? []) s.est = s.sched;
 }
 
@@ -135,34 +137,45 @@ function applyTrip(l: Leg, trip: RtTrip | null | undefined, days: DayIndex[]): v
   });
 }
 
-function applyStib(l: Leg, entries: StibEntry[]): void {
+/**
+ * Passage STIB le plus proche de l'horaire prévu (même ligne, destination proche). Un « Temps théorique »
+ * laisse l'étape en horaire prévu ; « Dernier passage » est retenu dans les deux cas.
+ */
+function applyStib(l: Leg, passages: StibPassage[]): void {
   const want = headKey(l.head?.fr ?? '');
   const wantNl = headKey(l.head?.nl ?? '');
-  let best: number | undefined;
-  for (const e of entries) {
-    if (e.line !== l.line) continue;
-    const score = Math.max(headScore(headKey(e.dest.fr), want), headScore(headKey(e.dest.nl), wantNl));
+  let best: StibPassage | undefined;
+  for (const x of passages) {
+    if (x.line !== l.line) continue;
+    const score = Math.max(headScore(headKey(x.head.fr), want), headScore(headKey(x.head.nl), wantNl));
     if (score <= 0) continue;
-    for (const t of e.times) {
-      if (t < l.schedDep - STIB_BEFORE_MS || t > l.schedDep + STIB_AFTER_MS) continue;
-      if (best === undefined || Math.abs(t - l.schedDep) < Math.abs(best - l.schedDep)) best = t;
-    }
+    if (x.t < l.schedDep - STIB_BEFORE_MS || x.t > l.schedDep + STIB_AFTER_MS) continue;
+    if (!best || Math.abs(x.t - l.schedDep) < Math.abs(best.t - l.schedDep)) best = x;
   }
-  if (best === undefined) {
+  if (!best || !best.rt) {
     resetPlanned(l);
+    if (best?.last) l.last = true;
     return;
   }
-  const shift = best - l.schedDep;
+  const shift = best.t - l.schedDep;
   l.rt = true;
   l.cancelled = false;
-  l.dep = best;
+  l.dep = best.t;
   l.arr = l.schedArr + shift;
-  l.delayMin = delayMinutes(best, l.schedDep);
+  l.delayMin = delayMinutes(best.t, l.schedDep);
   delete l.newPlatform;
+  if (best.last) l.last = true;
+  else delete l.last;
   const stops = l.stops ?? [];
   stops.forEach((so, q) => {
     so.est = q === 0 ? l.dep : q === stops.length - 1 ? l.arr : so.sched + shift;
   });
+}
+
+/** Passages STIB autour de l'horaire prévu d'une étape, sur tous les points d'arrêt de sa zone de départ. */
+function legPassages(l: Leg, prep: PreparedArea | null, map: Map<string, StibEntry[] | null>): StibPassage[] {
+  if (!prep) return [];
+  return prep.file.stops.flatMap((st, i) => stibPassages(prep, i, map.get(stibPoint(st.rt || st.id)) ?? [], l.schedDep - STIB_BEFORE_MS, l.schedDep + STIB_AFTER_MS));
 }
 
 /** Applique le temps réel aux étapes en véhicule (en place). Une source en erreur → horaire prévu. */
@@ -179,7 +192,7 @@ export async function applyRealtime(legs: Leg[], env: RefreshEnv): Promise<void>
     set.add(normalizeId(l.tripId));
   }
   const stibLegs = rides.filter((l) => l.op === 'stib' && live(l));
-  const stibPointsOf = new Map<Leg, string[]>();
+  const stibAreaOf = new Map<Leg, PreparedArea | null>();
   await Promise.all(
     stibLegs.map(async (l) => {
       let prep: PreparedArea | null = null;
@@ -188,10 +201,10 @@ export async function applyRealtime(legs: Leg[], env: RefreshEnv): Promise<void>
       } catch {
         prep = null;
       }
-      stibPointsOf.set(l, prep ? prep.file.stops.map((st) => stibPoint(st.rt || st.id)) : []);
+      stibAreaOf.set(l, prep);
     }),
   );
-  const allPoints = [...new Set([...stibPointsOf.values()].flat())];
+  const allPoints = [...new Set([...stibAreaOf.values()].flatMap((prep) => (prep ? prep.file.stops.map((st) => stibPoint(st.rt || st.id)) : [])))];
   const [tripRes, stibRes, days] = await Promise.all([
     Promise.all([...tripIds].map(async ([op, ids]) => [op, await env.rt.trips(op, [...ids])] as const)),
     allPoints.length ? env.rt.stib(allPoints) : Promise.resolve(null),
@@ -204,9 +217,7 @@ export async function applyRealtime(legs: Leg[], env: RefreshEnv): Promise<void>
       continue;
     }
     if (l.op === 'stib') {
-      const pts = stibPointsOf.get(l) ?? [];
-      const entries = stibRes && !stibRes.error ? pts.flatMap((p) => stibRes.map.get(p) ?? []) : [];
-      applyStib(l, entries);
+      applyStib(l, stibRes && !stibRes.error ? legPassages(l, stibAreaOf.get(l) ?? null, stibRes.map) : []);
       continue;
     }
     const res = l.op ? byOp.get(l.op) : undefined;

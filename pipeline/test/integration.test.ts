@@ -351,6 +351,8 @@ describe('cohérence de tous les fichiers', () => {
     expect(html).toContain('Données&nbsp;: SNCB, STIB, De Lijn, TEC via Belgian Mobility Company, licence CC BY 4.0');
     expect(html).toContain('mardi 10 novembre 2026');
     expect(html).toContain('href="data/meta.json"');
+    // lien vers Quai Web, publié par le flux de nuit dans site/app/
+    expect(html).toContain('<a href="app/">Ouvrir Quai Web</a>');
     expect(html).toMatch(/Données générées le .*2026/);
     expect(html).not.toContain('\u2014');
     for (const label of ['SNCB', 'STIB', 'De Lijn', 'TEC']) expect(html).toContain(`<th scope="row">${label}</th>`);

@@ -10,7 +10,7 @@ import { deadline } from '../platform/queue';
 import type { Fix, Platform } from '../platform/types';
 import { newId, type SettingsStore } from '../settings';
 import { dayWord, platformText, vehicleOf, delaySuffix, nextText } from './format';
-import { GestureFilter, type HubSignal } from './gestures';
+import { DEBOUNCE, GestureFilter, type HubSignal } from './gestures';
 import { geometry, layoutPage, shapeKey } from './layout';
 import { current, effectiveFrame, handleGesture, initNav, parseNav, pop, push, replace, reset, updateRoute, type Gesture, type NavState } from './nav';
 import type { GlassesView, Intent, PageSpec, Route } from './types';
@@ -58,7 +58,28 @@ export interface ControllerDeps {
   log?: (line: string) => void;
   /** Vrai si createStartUpPageContainer a déjà été appelé (page de chargement de main.ts). */
   pageStarted?: boolean;
+  /**
+   * Quai Web (page publiée, sans lunettes) : textes qui renvoient à l'onglet Réglages, pas de sortie
+   * (double toucher sur l'accueil : simple message), gestes sans l'anti-rebond du matériel G2.
+   */
+  web?: boolean;
+  /** Quai Web : ouvre un écran des réglages (ancre #/…), par exemple « Autre lieu » → recherche. */
+  openPhone?: (hash: string) => void;
 }
+
+/** Quai Web : boutons, clavier et écran tactile n'ont pas les doublons du pavé des G2 ; seul un défilement très rapide est freiné. */
+export const WEB_DEBOUNCE: typeof DEBOUNCE = {
+  tapDuplicateMs: 0,
+  doubleDuplicateMs: 0,
+  tapCooldownMs: 0,
+  scrollSameDirMs: 60,
+  scrollDirChangeMs: 0,
+  scrollAfterTapMs: 0,
+  scrollAfterRenderMs: 0,
+};
+
+/** Double toucher sur l'accueil de Quai Web : rien à fermer. */
+export const WEB_EXIT_HINT = 'Sur le web, ferme simplement l’onglet';
 
 const REFRESH_MS = 30_000;
 const LOCATION_MS = 30_000;
@@ -104,7 +125,7 @@ export class GlassesController {
   private page: PageSpec | null = null;
   private view: GlassesView | null = null;
   private capacity = 1;
-  private filter = new GestureFilter();
+  private filter: GestureFilter;
   /** Message temporaire, lié à l'écran où il a été donné (jamais reporté sur l'écran suivant). */
   private toast: { text: string; until: number; route: string } | null = null;
   private toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -127,6 +148,7 @@ export class GlassesController {
   private pendingRestore: NavState | null = null;
 
   constructor(private d: ControllerDeps) {
+    this.filter = new GestureFilter(d.web ? WEB_DEBOUNCE : DEBOUNCE);
     d.settings.subscribe(() => this.onSettingsChanged());
   }
 
@@ -314,6 +336,11 @@ export class GlassesController {
         void this.onRouteChanged();
         return;
       case 'exit':
+        // Quai Web : il n'y a rien à fermer, la page reste ouverte.
+        if (this.d.web) {
+          this.showToast(WEB_EXIT_HINT);
+          return;
+        }
         // Boîte de confirmation système ; le nettoyage se fait sur SYSTEM_EXIT_EVENT.
         void this.d.platform.glasses.exit(1);
         return;
@@ -333,6 +360,10 @@ export class GlassesController {
         return;
       case 'toast':
         this.showToast(i.text);
+        return;
+      case 'phone':
+        if (this.d.openPhone) this.d.openPhone(i.hash);
+        else this.showToast(i.text);
         return;
       case 'toggleFavoriteStop':
         await this.toggleFavoriteStop();
@@ -485,11 +516,29 @@ export class GlassesController {
     const f = this.freshNow();
     const ctx: ViewCtx = { now: this.d.clock.now(), settings: this.settings() };
     if (f && !f.ok) ctx.stale = f.message || `Horaires périmés${NB}: mise à jour de nuit en panne`;
+    if (this.d.web) ctx.web = true;
     return ctx;
   }
 
   private hereLL(): { lat: number; lon: number } | null {
     return this.here ? { lat: this.here.lat, lon: this.here.lon } : null;
+  }
+
+  /**
+   * Nouvelle position demandée tout de suite (Quai Web : arrêt choisi, retour au GPS, permission accordée).
+   * Contrairement au rafraîchissement de 30 s, une position absente remplace l'ancienne.
+   */
+  async relocate(): Promise<void> {
+    if (this.stopped) return;
+    const prev = this.here;
+    const fix = await this.d.platform.location.current(8000);
+    this.here = fix;
+    if (prev && fix && distanceM(prev, fix) <= MOVE_M) return;
+    for (const k of [...this.cache.keys()]) if (USES_POSITION.has(k.split(':')[0] as Route['screen'])) this.cache.delete(k);
+    if (!this.ready) return;
+    const r = current(this.nav).route;
+    if (r.screen === 'home') await this.loadSuggestion();
+    if (USES_POSITION.has(r.screen)) await this.render();
   }
 
   private async updateLocation(): Promise<void> {
@@ -649,7 +698,7 @@ export class GlassesController {
     if (f.kind === 'stop') {
       const b = await core.board(f.areaId, { limit: 1, filter: f.filter });
       const d = b.departures[0];
-      return d ? { text: nextText(d, now, s.display.markPlanned), planned: !d.rt && !d.cancelled } : null;
+      return d ? { text: nextText(d, now, s.display.markPlanned), planned: !d.rt && !d.cancelled, ...(d.last && !d.cancelled ? { last: true } : {}) } : null;
     }
     let js: Journey[];
     if (f.from.type === 'area' && f.to.type === 'area' && f.from.op === 'sncb' && f.to.op === 'sncb') {
@@ -664,9 +713,10 @@ export class GlassesController {
     if (!j || !ride) return j ? { text: 'à pied', planned: false } : null;
     const mark = !ride.rt && s.display.markPlanned ? '~' : '';
     const day = dayWord(ride.schedDep, now);
-    if (day) return { text: `${vehicleOf(ride)} ${mark}${day} ${hhmm(ride.schedDep)}`, planned: !ride.rt };
+    const last = ride.last && !ride.cancelled ? { last: true } : {};
+    if (day) return { text: `${vehicleOf(ride)} ${mark}${day} ${hhmm(ride.schedDep)}`, planned: !ride.rt, ...last };
     const plat = ride.mode === 'train' ? platformText(ride.platform, ride.newPlatform, true) : '';
-    return { text: `${vehicleOf(ride)} ${mark}${hhmm(ride.schedDep)}${delaySuffix(ride.delayMin)}${plat ? ' ' + plat : ''}`, planned: !ride.rt };
+    return { text: `${vehicleOf(ride)} ${mark}${hhmm(ride.schedDep)}${delaySuffix(ride.delayMin)}${plat ? ' ' + plat : ''}`, planned: !ride.rt, ...last };
   }
 
   private async arrivalDepartures(r: Extract<Route, { screen: 'arrival' }>): Promise<{ deps: Departure[] }> {
@@ -957,7 +1007,10 @@ function titleFor(r: Route, ctx: ViewCtx): string {
 }
 
 function noLocationView(title: string, ctx: ViewCtx): GlassesView {
-  return messageView(title, ['Position indisponible.', 'Autorise la position pour Quai dans l’appli Even.'], ctx, {
+  const lines = ctx.web
+    ? ['Position indisponible.', 'Autorise-la dans le navigateur, ou choisis un arrêt sous l’écran (rubrique Position).']
+    : ['Position indisponible.', 'Autorise la position pour Quai dans l’appli Even.'];
+  return messageView(title, lines, ctx, {
     hints: HINTS.retry,
     tap: { kind: 'retry' },
   });

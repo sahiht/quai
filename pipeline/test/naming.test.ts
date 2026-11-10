@@ -5,6 +5,7 @@ import { afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AreaFile } from '../../shared/types.ts';
+import { prettyName } from '../../shared/names.ts';
 
 afterAll(cleanupTempDirs);
 
@@ -45,6 +46,26 @@ describe('noms', () => {
     expect(resolveNames('stib', 'GARE DU NORD', { fr: 'GARE DU NORD', nl: 'NOORDSTATION' }, true)).toEqual({ fr: 'Gare du Nord', nl: 'Noordstation' });
     expect(resolveNames('stib', 'STALLE (P)', { fr: 'STALLE (P)', nl: 'STALLE (P)' }, false)).toEqual({ fr: 'Stalle (P)', nl: 'Stalle (P)' });
     expect(resolveNames('stib', 'DE BROUCKERE', undefined, true)).toEqual({ fr: 'De Brouckere', nl: 'De Brouckere' });
+  });
+
+  it('STIB : les sigles restent en majuscules (mots sans voyelle, liste courte), pas les abréviations', () => {
+    expect(resolveNames('stib', 'WTC', undefined, true)).toEqual({ fr: 'WTC', nl: 'WTC' });
+    expect(resolveNames('stib', 'UZ-VUB', { fr: 'UZ-VUB', nl: 'UZ-VUB' }, true)).toEqual({ fr: 'UZ-VUB', nl: 'UZ-VUB' });
+    expect(prettyName('CPAS DE SCHAERBEEK')).toBe('CPAS de Schaerbeek');
+    expect(prettyName('OCMW SCHAARBEEK')).toBe('OCMW Schaarbeek');
+    expect(prettyName('CHU BRUGMANN')).toBe('CHU Brugmann');
+    expect(prettyName('RTBF-VRT')).toBe('RTBF-VRT');
+    expect(prettyName('PLACE DE L’ULB')).toBe('Place de l’ULB');
+    expect(prettyName('OTAN')).toBe('OTAN');
+    // abréviations et mots ordinaires : casse normale
+    expect(prettyName('ST-GUIDON')).toBe('St-Guidon');
+    expect(prettyName('BD DU MIDI')).toBe('Bd du Midi');
+    expect(prettyName('MGR. LADEUZE')).toBe('Mgr. Ladeuze');
+    expect(prettyName('LÉOPOLD II')).toBe('Léopold II');
+    expect(prettyName('STALLE (P)')).toBe('Stalle (P)');
+    expect(prettyName('TRONE')).toBe('Trone');
+    // casse mixte : inchangé
+    expect(prettyName('Wtc')).toBe('Wtc');
   });
 
   it('De Lijn : nl = nom d’origine sans « perron N », fr = frName(nl), l = nl', () => {

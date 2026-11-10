@@ -11,7 +11,7 @@ interface Step { name?: string; uses?: string; run?: string; with?: Record<strin
 interface Job { needs?: string | string[]; if?: string; permissions?: Record<string, string>; environment?: { name: string; url?: string }; steps: Step[]; 'timeout-minutes'?: number }
 interface Workflow {
   name: string;
-  on: { schedule: { cron: string }[]; workflow_dispatch: unknown };
+  on: { schedule: { cron: string }[]; workflow_dispatch: unknown; push?: { branches: string[]; paths: string[] } };
   permissions: Record<string, string>;
   concurrency: { group: string; 'cancel-in-progress': boolean };
   jobs: Record<string, Job>;
@@ -48,7 +48,8 @@ describe('nightly.yml', () => {
     expect(check.run).toContain('exit 1');
     expect(uses('build')).toEqual(['actions/checkout@v7', 'actions/setup-node@v7', 'actions/cache/restore@v6', 'actions/cache/save@v6', 'actions/configure-pages@v6', 'actions/upload-pages-artifact@v5']);
     const node = b.steps.find((s) => s.uses === 'actions/setup-node@v7');
-    expect(node?.with).toEqual({ 'node-version': 22, cache: 'npm', 'cache-dependency-path': 'pipeline/package-lock.json' });
+    // cache npm du pipeline et de l'appli (Quai Web)
+    expect(node?.with).toEqual({ 'node-version': 22, cache: 'npm', 'cache-dependency-path': 'pipeline/package-lock.json\napp/package-lock.json\n' });
     const ci = b.steps.find((s) => s.run === 'npm ci');
     expect(ci?.['working-directory']).toBe('pipeline');
     const data = b.steps.find((s) => s.run?.startsWith('npm run build-data'));
@@ -73,6 +74,47 @@ describe('nightly.yml', () => {
     expect(save.with).toEqual({ path: 'gtfs-cache', key: 'gtfs-${{ github.run_id }}-${{ github.run_attempt }}' });
     expect(save.if).toBe("${{ !cancelled() && steps.data.outcome != 'skipped' }}");
     // moindre privilège : le cache ne demande aucun droit supplémentaire
+    expect(wf.jobs.build.permissions).toEqual({ contents: 'read', pages: 'read' });
+  });
+
+  it('republie après un changement de l’appli : push sur main limité à app/, shared/ et ce workflow', () => {
+    expect(wf.on.push).toEqual({ branches: ['main'], paths: ['app/**', 'shared/**', '.github/workflows/nightly.yml'] });
+  });
+
+  it('Quai Web : construit dans site/app après les données et avant l’envoi, adresses dérivées du dépôt, données publiées quoi qu’il arrive', () => {
+    const steps = wf.jobs.build.steps;
+    const i = (pred: (s: Step) => boolean) => steps.findIndex(pred);
+    const addr = steps[i((s) => s.id === 'web')];
+    const build = steps[i((s) => s.id === 'webapp')];
+    const wait = steps[i((s) => s.name === "Page d'attente de Quai Web")];
+    expect(i((s) => s.id === 'web')).toBeGreaterThan(i((s) => !!s.run?.startsWith('npm run build-data')));
+    expect(i((s) => s.id === 'web')).toBeGreaterThan(i((s) => s.uses === 'actions/cache/save@v6'));
+    expect(i((s) => s.id === 'webapp')).toBeGreaterThan(i((s) => s.id === 'web'));
+    expect(i((s) => s.name === "Page d'attente de Quai Web")).toBeGreaterThan(i((s) => s.id === 'webapp'));
+    expect(i((s) => s.uses === 'actions/upload-pages-artifact@v5')).toBeGreaterThan(i((s) => s.name === "Page d'attente de Quai Web"));
+    // adresse des données : https://<compte en minuscules>.github.io/<dépôt>/data ; base de la page /<dépôt>/app/
+    expect(addr.env).toEqual({ VAR_RELAY_BASE: '${{ vars.QUAI_RELAY_BASE }}' });
+    expect(addr.run).toContain("tr '[:upper:]' '[:lower:]'");
+    expect(addr.run).toContain('echo "data=https://$owner.github.io${path}data"');
+    expect(addr.run).toContain('echo "base=${path}app/"');
+    expect(addr.run).toContain('} >> "$GITHUB_OUTPUT"');
+    // variable absente : avis en français, pas d'échec
+    expect(addr.run).toContain('if [ -z "$VAR_RELAY_BASE" ]');
+    expect(addr.run).toContain('::notice title=Quai Web non publié::');
+    expect(addr.run).toContain('les données sont publiées quand même');
+    expect(addr.run).not.toContain('exit 1');
+    expect(addr.run).toContain('build=false');
+    expect(build.if).toBe("${{ steps.web.outputs.build == 'true' }}");
+    expect(build['continue-on-error']).toBe(true);
+    expect(build['working-directory']).toBe('app');
+    expect(build.env).toMatchObject({ QUAI_DATA_BASE: '${{ steps.web.outputs.data }}', QUAI_RELAY_BASE: '${{ vars.QUAI_RELAY_BASE }}', QUAI_WEB_BASE: '${{ steps.web.outputs.base }}' });
+    expect(build.run).toContain('npm run build:web');
+    expect(build.run).toContain('cp -R dist-web ../site/app');
+    expect(wait.if).toBe("${{ steps.web.outputs.build != 'true' || steps.webapp.outcome != 'success' }}");
+    expect(wait.run).toContain('site/app/index.html');
+    // aucune expression ${{ }} dans les scripts (valeurs passées par l'environnement)
+    for (const st of [addr, build, wait]) expect(st.run).not.toContain('${{');
+    // moindre privilège inchangé
     expect(wf.jobs.build.permissions).toEqual({ contents: 'read', pages: 'read' });
   });
 

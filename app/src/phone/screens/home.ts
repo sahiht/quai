@@ -14,7 +14,7 @@ export function homeScreen(ctx: PhoneCtx): HTMLElement {
   return h(
     'div',
     { class: 'stack', style: 'display:flex;flex-direction:column;gap:16px' },
-    h('header', { class: 'head' }, h('span', { class: 'eyebrow' }, 'Quai'), h('h1', null, 'Bonjour'), h('p', { class: 'lead' }, 'Les départs en direct s’affichent dans tes lunettes.')),
+    h('header', { class: 'head' }, h('span', { class: 'eyebrow' }, 'Quai'), h('h1', null, 'Bonjour'), h('p', { class: 'lead' }, ctx.web ? 'Les départs en direct s’affichent dans l’onglet Lunettes.' : 'Les départs en direct s’affichent dans tes lunettes.')),
     !ctx.configured
       ? h('div', { class: 'warn', role: 'alert' }, h('strong', null, 'Quai n’est pas configuré.'), 'Les adresses des horaires et du relais manquent : lancez « npm run configure » avant de créer le paquet.')
       : fresh && !fresh.ok

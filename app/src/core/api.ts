@@ -90,6 +90,7 @@ export interface Departure {
   stopSeq?: number;
   stopId?: string;
   msg?: string;                 // message de l'opérateur (STIB)
+  last?: boolean;               // dernier passage annoncé de la ligne à cet arrêt (STIB « Dernier passage »)
 }
 
 export interface Board {
@@ -117,6 +118,7 @@ export interface Leg {
   tripId?: string; fromSeq?: number; toSeq?: number;
   platform?: string; newPlatform?: string;
   rt?: boolean; delayMin?: number; cancelled?: boolean;
+  last?: boolean;                         // dernier passage annoncé de la ligne (STIB « Dernier passage »)
   stops?: Stopover[];                     // de la montée à la descente comprises (pour « Dans le train »)
 }
 

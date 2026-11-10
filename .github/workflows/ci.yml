@@ -123,6 +123,15 @@ jobs:
           npm run pack
           ls -l quai.ehpk
 
+      - name: Quai Web de contrôle (adresses d'exemple, rien n'est publié)
+        env:
+          QUAI_DATA_BASE: https://example.github.io/quai/data
+          QUAI_RELAY_BASE: https://example.vercel.app
+        run: |
+          npm run build:web
+          test -f dist-web/index.html && test -f dist-web/manifest.webmanifest
+          ls -l dist-web
+
   e2e:
     name: Bout en bout (sans simulateur)
     runs-on: ubuntu-latest

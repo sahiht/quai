@@ -12,9 +12,24 @@ const LOWER_WORDS = new Set([
   'het', 'van', 'der', 'den', 'ter', 'te', 'op', 'aan', 'bij', 'in', 'tot', 'voor',
 ]);
 
-function capPart(p: string): string {
+/** Sigles avec voyelle gardés en majuscules (« ULB », « UZ-VUB », « CPAS »), écrits ici en minuscules. */
+export const ACRONYMS: ReadonlySet<string> = new Set([
+  'ulb', 'vub', 'uz', 'chu', 'chr', 'cpas', 'ocmw', 'vrt', 'rtbf', 'stib', 'mivb', 'sncb', 'nmbs', 'tec', 'otan', 'nato',
+]);
+
+/**
+ * Vrai pour un sigle à garder en majuscules : liste ACRONYMS, ou mot de 3 lettres ou plus sans voyelle (« WTC »).
+ * `abbrev` : le mot est suivi d'un point (« MGR. ») ; c'est une abréviation, pas un sigle.
+ */
+function isAcronym(p: string, abbrev: boolean): boolean {
+  if (ACRONYMS.has(p)) return true;
+  if (abbrev || p.length < 3 || !/^[a-z]+$/.test(p)) return false;
+  return !/[aeiouy]/.test(p);
+}
+
+function capPart(p: string, abbrev = false): string {
   if (!p) return p;
-  if (KEEP_UPPER.test(p)) return p.toUpperCase();
+  if (KEEP_UPPER.test(p) || isAcronym(p, abbrev)) return p.toUpperCase();
   return p.charAt(0).toUpperCase() + p.slice(1);
 }
 
@@ -28,11 +43,13 @@ function capWord(w: string, first: boolean): string {
   // l'esplanade -> L'Esplanade (en tête) ; d'ieteren -> d'Ieteren (ailleurs)
   const apos = /^([ldjmnst])['’](.+)$/u.exec(core);
   if (apos) return pre + (first ? apos[1].toUpperCase() : apos[1]) + '’' + capWord(apos[2], true) + post;
-  return pre + core.split('-').map(capPart).join('-') + post;
+  const parts = core.split('-');
+  return pre + parts.map((p, i) => capPart(p, i === parts.length - 1 && post.startsWith('.'))).join('-') + post;
 }
 
 /**
  * Remet en casse normale un nom écrit tout en majuscules (STIB : « GARE DU NORD » → « Gare du Nord »).
+ * Les sigles restent en majuscules (« WTC », « ULB », « UZ-VUB » ; voir ACRONYMS).
  * Les noms déjà en casse mixte sont seulement nettoyés (espaces).
  */
 export function prettyName(s: string): string {

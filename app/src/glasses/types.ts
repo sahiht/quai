@@ -42,6 +42,8 @@ export type Intent =
   | { kind: 'toggleFavoriteStop' }
   | { kind: 'saveTrip' }
   | { kind: 'toast'; text: string }
+  /** Quai Web : ouvrir un écran des réglages (#/…) ; dans l'appli Even, `text` s'affiche en message. */
+  | { kind: 'phone'; hash: string; text: string }
   | { kind: 'retry' }
   | { kind: 'continue' };
 
@@ -52,6 +54,10 @@ export interface Item {
   c?: string;
   a2?: string;
   b2?: string;
+  /** Fin de la colonne b jamais coupée (ex. « , dernier ») : la colonne b est raccourcie avant elle. */
+  bTail?: string;
+  /** Fin de la colonne c ajoutée seulement si elle tient en entier (la colonne c n'est jamais coupée pour elle). */
+  cTail?: string;
   action?: Intent;
 }
 

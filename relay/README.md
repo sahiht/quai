@@ -35,7 +35,7 @@ Source : `${BMC_BASE}/api/gtfs/feed/{nmbssncb|delijn|tec}/rt/trip-update?format=
 
 ### `GET /api/stib?points=5153,5154` (StibResponse)
 
-Prochains passages STIB (pas de GTFS-RT) : 30 `pointid` numériques au maximum. Un identifiant statique à lettre finale (`6357F`) est ramené au pointid (`6357`). Chaque arrêt demandé figure dans `points` (liste vide si rien), regroupé par ligne et destination, heures triées en ISO 8601 avec le décalage de Bruxelles. Les destinations sont rendues telles que la STIB les donne (majuscules : l’appli les met en forme) ; `msg` est le texte français du message éventuel.
+Prochains passages STIB (pas de GTFS-RT) : 30 `pointid` numériques au maximum. Un identifiant statique à lettre finale (`6357F`) est ramené au pointid (`6357`). Chaque arrêt demandé figure dans `points` (liste vide si rien), regroupé par ligne, destination et message (le `msg` d’un groupe vaut pour toutes ses heures : un passage « Temps théorique », « Ne pas embarquer » ou « Dernier passage » forme son propre groupe), heures triées en ISO 8601 avec le décalage de Bruxelles. Les destinations sont rendues telles que la STIB les donne (majuscules, parfois vides : l’appli les met en forme et complète les vides) ; `msg` est le texte français du message éventuel.
 
 ```json
 {"fetchedAt":"2026-11-10T11:10:00.000Z","points":{"8041":[{"line":"2","dest":{"fr":"GARE DU MIDI","nl":"ZUIDSTATION"},

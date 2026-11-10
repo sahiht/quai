@@ -1,6 +1,7 @@
 /**
  * Couche plateforme : ce dont l'interface a besoin, indépendamment du SDK Even.
- * Deux implémentations : appli Even (src/platform/even.ts) et navigateur (src/platform/browser.ts).
+ * Implémentations : appli Even (src/platform/even.ts), navigateur de développement (src/platform/browser.ts)
+ * et Quai Web (src/web/, page publiée sans lunettes).
  */
 import type { KV } from '../core/api';
 import type { HubSignal } from '../glasses/gestures';
@@ -24,7 +25,8 @@ export interface Fix {
   lon: number;
   accuracy?: number;
   at: number;
-  source: 'sdk' | 'browser' | 'mock';
+  /** manual : arrêt choisi à la main (Quai Web, position refusée ou imprécise). */
+  source: 'sdk' | 'browser' | 'mock' | 'manual';
 }
 
 export interface LocationPort {
@@ -35,7 +37,7 @@ export interface LocationPort {
 }
 
 export interface Platform {
-  kind: 'even' | 'browser';
+  kind: 'even' | 'browser' | 'web';
   glasses: GlassesPort;
   kv: KV;
   location: LocationPort;
