@@ -118,12 +118,19 @@ describe('nightly.yml', () => {
     expect(wf.jobs.build.permissions).toEqual({ contents: 'read', pages: 'read' });
   });
 
-  it('job deploy : environnement github-pages, deploy-pages', () => {
+  it('job deploy : environnement github-pages, deploy-pages avec délai de 30 min et un nouvel essai', () => {
     const d = wf.jobs.deploy;
     expect(d.needs).toBe('build');
     expect(d.permissions).toEqual({ pages: 'write', 'id-token': 'write' });
-    expect(d.environment).toEqual({ name: 'github-pages', url: '${{ steps.deployment.outputs.page_url }}' });
-    expect(d.steps).toEqual([{ name: 'Publier', id: 'deployment', uses: 'actions/deploy-pages@v5' }]);
+    expect(d.environment).toEqual({ name: 'github-pages', url: '${{ steps.deployment.outputs.page_url || steps.retry.outputs.page_url }}' });
+    expect(d['timeout-minutes']).toBeGreaterThanOrEqual(65);
+    const [first, wait, retry] = d.steps;
+    expect(first).toMatchObject({ name: 'Publier', id: 'deployment', uses: 'actions/deploy-pages@v5', 'continue-on-error': true });
+    expect(Number(first.with.timeout)).toBeGreaterThanOrEqual(1_800_000);
+    expect(wait.if).toBe("steps.deployment.outcome == 'failure'");
+    expect(retry).toMatchObject({ id: 'retry', uses: 'actions/deploy-pages@v5', if: "steps.deployment.outcome == 'failure'" });
+    expect(Number(retry.with.timeout)).toBeGreaterThanOrEqual(1_800_000);
+    expect(d.steps).toHaveLength(3);
   });
 
   it('job keepalive : seul à pouvoir écrire, commit daté après 30 jours d’inactivité, jamais bloquant', () => {

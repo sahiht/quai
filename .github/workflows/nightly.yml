@@ -171,17 +171,31 @@ jobs:
     name: Publier sur GitHub Pages
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 75
     permissions:
       pages: write
       id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.retry.outputs.page_url }}
     steps:
+      # La nuit, GitHub Pages met parfois plus de 10 minutes à traiter le site (environ 100 Mo) :
+      # on lui laisse 30 minutes, puis on retente une fois. En cas d'échec, le site de la veille reste en ligne.
       - name: Publier
         id: deployment
+        continue-on-error: true
         uses: actions/deploy-pages@v5
+        with:
+          timeout: 1800000
+      - name: Attendre avant un nouvel essai
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 120
+      - name: Publier (nouvel essai)
+        id: retry
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v5
+        with:
+          timeout: 1800000
 
   # GitHub désactive sans prévenir les tâches planifiées d'un dépôt public après 60 jours sans activité.
   # Si le dernier commit de la branche par défaut a plus de 30 jours, on committe un petit fichier daté.
