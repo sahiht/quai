@@ -11,7 +11,13 @@ import {
   type Board,
   type Core,
   type CoreOptions,
+  type CoreStatus,
   type Endpoint,
+  type Favorite,
+  type FavoriteAnswer,
+  type FavoriteRank,
+  type GeocodeAnswer,
+  type PlanResult,
   type Journey,
   type LineFilter,
   type Mode,
@@ -252,6 +258,40 @@ export function createCore(opts: CoreOptions): Core {
 
     works(op: Op, routes: string[], stops: string[]): Promise<string[]> {
       return works(op, routes, stops).catch(() => []);
+    },
+
+    /* --- 1.1 : points d'attache provisoires (remplacés par les équipes cœur et routage) --- */
+    async route(from: Endpoint, to: Endpoint, after: number, settings: Settings, here?: { lat: number; lon: number } | null): Promise<PlanResult> {
+      try {
+        const journeys = await core.plan(from, to, after, settings, here ?? undefined);
+        return journeys.length ? { journeys } : { journeys, empty: 'noTrip' };
+      } catch (e) {
+        if ((from.type === 'here' || to.type === 'here') && !here) return { journeys: [], empty: 'noPosition' };
+        throw e;
+      }
+    },
+
+    orderFavorites(_here: { lat: number; lon: number } | null, settings: Settings): FavoriteRank[] {
+      return settings.favorites.map((f) => ({ favoriteId: f.id, rule: 4 as const }));
+    },
+
+    async answer(fav: Favorite, here: { lat: number; lon: number } | null, settings: Settings): Promise<FavoriteAnswer> {
+      const t = now();
+      if (fav.kind === 'stop') {
+        const board = await core.board(fav.areaId, { limit: settings.display.depsPerStop, filter: fav.filter });
+        return { favoriteId: fav.id, kind: 'stop', state: board.departures.length ? 'ok' : 'none', board, updatedAt: t };
+      }
+      if ((fav.from.type === 'here' || fav.to.type === 'here') && !here) return { favoriteId: fav.id, kind: 'trip', state: 'noPosition', updatedAt: t };
+      const plan = await core.route(fav.from, fav.to, t, settings, here);
+      return { favoriteId: fav.id, kind: 'trip', state: plan.empty === 'here' ? 'here' : plan.journeys.length ? 'ok' : 'none', plan, updatedAt: t };
+    },
+
+    async geocode(): Promise<GeocodeAnswer> {
+      return { results: [], error: 'down' };
+    },
+
+    status(): CoreStatus {
+      return { rt: 'unknown' };
     },
 
     health(): Promise<HealthResponse> {

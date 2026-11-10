@@ -191,6 +191,7 @@ export function atLabel(label: string): string {
 export function endpointName(ep: Endpoint, settings: Settings, lang: NameLang): string {
   if (ep.type === 'here') return 'Ici';
   if (ep.type === 'area') return displayName(ep.name, lang);
+  if (ep.type === 'address') return ep.label.split(',')[0];
   return settings.places.find((p) => p.id === ep.placeId)?.label ?? 'Lieu';
 }
 

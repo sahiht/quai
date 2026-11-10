@@ -6,9 +6,38 @@ import { createKV, memoryBackend } from '../../src/platform/kv';
 import { PRESET_PATH } from './helpers';
 
 describe('validation des réglages', () => {
-  it('le préréglage de démonstration passe tel quel', () => {
+  it('le préréglage de démonstration (1.0) passe tel quel, complété en v2', () => {
     const raw = JSON.parse(readFileSync(PRESET_PATH, 'utf8'));
-    expect(validateSettings(raw)).toEqual(raw);
+    const v2 = { ...raw, v: 2, recent: [], seenVersion: '1.0.0', display: { ...raw.display, favOrder: 'smart' } };
+    expect(migrateSettings(raw)).toEqual(v2);
+    expect(validateSettings(v2)).toEqual(v2);
+  });
+
+  it('1.0 vers 1.1 : lieux, favoris, ordre et réglages gardés, nouveautés à montrer une fois', () => {
+    const raw = JSON.parse(readFileSync(PRESET_PATH, 'utf8'));
+    const s = migrateSettings(raw);
+    expect(s.v).toBe(2);
+    expect(s.places).toEqual(raw.places);
+    expect(s.favorites.map((f) => f.id)).toEqual(raw.favorites.map((f: { id: string }) => f.id));
+    expect(s.favorites).toEqual(raw.favorites);
+    expect(s.display.favOrder).toBe('smart');
+    expect(s.recent).toEqual([]);
+    expect(s.seenVersion).toBe('1.0.0');
+    expect(validateSettings({}).seenVersion).toBe('');
+  });
+
+  it('extrémité adresse, lieu par adresse et adresses récentes', () => {
+    const s = validateSettings({
+      places: [{ id: 'p1', label: 'Rendez-vous', lat: 51.0537, lon: 3.7225, address: 'Veldstraat 1, 9000 Gent', src: 'address' }, { id: 'p2', label: 'X', lat: 50, lon: 4, src: 'nimporte' }],
+      favorites: [{ kind: 'trip', id: 'f1', from: { type: 'here' }, to: { type: 'address', label: 'Rue Neuve, 1000 Bruxelles', lat: 50.852, lon: 4.3555, approx: true }, propose: 'never' }],
+      recent: [{ label: 'Veldstraat 1, 9000 Gent', lat: 51.0537, lon: 3.7225, at: 5 }, { label: 'Veldstraat 1, 9000 Gent', lat: 51.0537, lon: 3.7225, at: 4 }, { label: 'sans position' }],
+      display: { favOrder: 'mine' },
+    });
+    expect(s.places[0].src).toBe('address');
+    expect(s.places[1].src).toBeUndefined();
+    expect(s.favorites[0]).toMatchObject({ to: { type: 'address', label: 'Rue Neuve, 1000 Bruxelles', approx: true } });
+    expect(s.recent).toHaveLength(1);
+    expect(s.display.favOrder).toBe('mine');
   });
 
   it('valeurs par défaut pour une entrée vide ou invalide', () => {
@@ -67,7 +96,7 @@ describe('migration selon v', () => {
   it('réglages v0 (sans v) : champs à plat repris', () => {
     expect(versionOf({})).toBe(0);
     const s = migrateSettings({ onboarded: true, radius: 300, deps: 6, hints: false, lang: 'nl' });
-    expect(s.v).toBe(1);
+    expect(s.v).toBe(2);
     expect(s.display.radiusM).toBe(300);
     expect(s.display.depsPerStop).toBe(6);
     expect(s.display.gestureHints).toBe(false);
@@ -77,7 +106,7 @@ describe('migration selon v', () => {
 
   it('version plus récente lue au mieux', () => {
     const s = migrateSettings({ v: 7, lang: 'local', futur: true });
-    expect(s.v).toBe(1);
+    expect(s.v).toBe(2);
     expect(s.lang).toBe('local');
   });
 });

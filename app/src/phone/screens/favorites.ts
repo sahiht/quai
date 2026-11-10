@@ -32,6 +32,7 @@ function endpointText(e: Endpoint, ctx: PhoneCtx): string {
   const s = ctx.settings.get();
   if (e.type === 'here') return 'Ma position';
   if (e.type === 'area') return displayName(e.name, s.lang);
+  if (e.type === 'address') return e.label;
   return s.places.find((p) => p.id === e.placeId)?.label ?? 'Lieu';
 }
 

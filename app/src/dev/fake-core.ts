@@ -9,8 +9,14 @@ import type {
   Board,
   Core,
   CoreOptions,
+  CoreStatus,
   Departure,
   Endpoint,
+  Favorite,
+  FavoriteAnswer,
+  FavoriteRank,
+  GeocodeAnswer,
+  PlanResult,
   Journey,
   Leg,
   LineFilter,
@@ -308,6 +314,7 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
       return { ...here, name: N('Ma position') };
     }
     if (e.type === 'area') return { lat: e.lat, lon: e.lon, name: e.name, areaId: e.areaId };
+    if (e.type === 'address') return { lat: e.lat, lon: e.lon, name: N(e.label) };
     const p = settings.places.find((x) => x.id === e.placeId);
     if (!p) throw new Error('Lieu introuvable dans tes réglages');
     return { lat: p.lat, lon: p.lon, name: N(p.label) };
@@ -485,6 +492,40 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
       if (op === 'tec' && routes.some((r) => r === '51' || r === 'N51')) return ['Ligne 51 déviée rue de Fer'];
       return [];
     },
+    /* --- 1.1 : points d'attache provisoires (remplacés par les équipes cœur et routage) --- */
+    async route(from: Endpoint, to: Endpoint, after: number, settings: Settings, here?: { lat: number; lon: number } | null): Promise<PlanResult> {
+      try {
+        const journeys = await core.plan(from, to, after, settings, here ?? undefined);
+        return journeys.length ? { journeys } : { journeys, empty: 'noTrip' };
+      } catch (e) {
+        if ((from.type === 'here' || to.type === 'here') && !here) return { journeys: [], empty: 'noPosition' };
+        throw e;
+      }
+    },
+
+    orderFavorites(_here: { lat: number; lon: number } | null, settings: Settings): FavoriteRank[] {
+      return settings.favorites.map((f) => ({ favoriteId: f.id, rule: 4 as const }));
+    },
+
+    async answer(fav: Favorite, here: { lat: number; lon: number } | null, settings: Settings): Promise<FavoriteAnswer> {
+      const t = now();
+      if (fav.kind === 'stop') {
+        const board = await core.board(fav.areaId, { limit: settings.display.depsPerStop, filter: fav.filter });
+        return { favoriteId: fav.id, kind: 'stop', state: board.departures.length ? 'ok' : 'none', board, updatedAt: t };
+      }
+      if ((fav.from.type === 'here' || fav.to.type === 'here') && !here) return { favoriteId: fav.id, kind: 'trip', state: 'noPosition', updatedAt: t };
+      const plan = await core.route(fav.from, fav.to, t, settings, here);
+      return { favoriteId: fav.id, kind: 'trip', state: plan.empty === 'here' ? 'here' : plan.journeys.length ? 'ok' : 'none', plan, updatedAt: t };
+    },
+
+    async geocode(): Promise<GeocodeAnswer> {
+      return { results: [], error: 'down' };
+    },
+
+    status(): CoreStatus {
+      return { rt: 'unknown' };
+    },
+
     async health(): Promise<HealthResponse> {
       const ok = !flags.noRt;
       const src = { ok, ms: 120, error: ok ? undefined : 'Portail injoignable (503)' };

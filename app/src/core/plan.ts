@@ -81,6 +81,7 @@ function resolve(e: Endpoint, settings: Settings, here?: { lat: number; lon: num
     if (!p) throw new QuaiError('placeUnknown');
     return { name: { fr: p.label, nl: p.label }, lat: p.lat, lon: p.lon };
   }
+  if (e.type === 'address') return { name: { fr: e.label, nl: e.label }, lat: e.lat, lon: e.lon };
   return { name: e.name, lat: e.lat, lon: e.lon, areaId: e.areaId, op: e.op };
 }
 

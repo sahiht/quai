@@ -2,22 +2,25 @@
  * Réglages de Quai : validation, migration selon `v`, lecture et écriture via le KV du SDK.
  * Aucune fonction ne lève d'exception sur une entrée invalide : on retombe sur les valeurs par défaut.
  */
-import type { Endpoint, Favorite, FavoriteStop, FavoriteTrip, KV, LineFilter, NameLang, Place, Propose, Settings } from './core/api';
+import type { Endpoint, Favorite, FavoriteStop, FavoriteTrip, KV, LineFilter, NameLang, Place, Propose, RecentAddress, Settings } from './core/api';
 import { DEFAULT_SETTINGS } from './core/api';
 import type { Names, Op } from '../../shared/types';
 
 export const SETTINGS_KEY = 'quai.settings';
-export const CURRENT_VERSION = 1;
+export const CURRENT_VERSION = 2;
 
 const OPS: readonly Op[] = ['sncb', 'stib', 'delijn', 'tec'];
 const LANGS: readonly NameLang[] = ['fr', 'nl', 'local'];
 const PROPOSE: readonly Propose[] = ['never', 'near', 'morning', 'evening'];
 const OPENING: readonly Settings['display']['opening'][] = ['suggest', 'home', 'firstFavorite'];
 const RADII: readonly Settings['display']['radiusM'][] = [300, 500, 800];
+const FAV_ORDER: readonly Settings['display']['favOrder'][] = ['smart', 'mine'];
+const PLACE_SRC: readonly NonNullable<Place['src']>[] = ['address', 'stop', 'here'];
 
 export const LIMITS = {
   places: 12,
   favorites: 20,
+  recent: 5,
   label: 30,
   address: 120,
   maxWalkMin: [5, 20] as const,
@@ -75,7 +78,23 @@ function place(x: unknown): Place | undefined {
   const p: Place = { id, label, lat: la, lon: lo };
   const address = str(x.address, LIMITS.address);
   if (address) p.address = address;
+  if (PLACE_SRC.includes(x.src as NonNullable<Place['src']>)) p.src = x.src as NonNullable<Place['src']>;
+  if (x.approx === true) p.approx = true;
+  const a = areaId(x.areaId);
+  if (a) p.areaId = a;
   return p;
+}
+
+function recentAddress(x: unknown): RecentAddress | undefined {
+  if (!isObj(x)) return undefined;
+  const label = str(x.label, LIMITS.address);
+  const la = lat(x.lat);
+  const lo = lon(x.lon);
+  const at = num(x.at);
+  if (!label || la === undefined || lo === undefined) return undefined;
+  const r: RecentAddress = { label, lat: la, lon: lo, at: at !== undefined && at > 0 ? Math.round(at) : 0 };
+  if (x.approx === true) r.approx = true;
+  return r;
 }
 
 function areaId(x: unknown): string | undefined {
@@ -89,6 +108,15 @@ function endpoint(x: unknown, placeIds: Set<string>): Endpoint | undefined {
   if (x.type === 'place') {
     const placeId = str(x.placeId, 60);
     return placeId && placeIds.has(placeId) ? { type: 'place', placeId } : undefined;
+  }
+  if (x.type === 'address') {
+    const label = str(x.label, LIMITS.address);
+    const la = lat(x.lat);
+    const lo = lon(x.lon);
+    if (!label || la === undefined || lo === undefined) return undefined;
+    const e: Endpoint = { type: 'address', label, lat: la, lon: lo };
+    if (x.approx === true) e.approx = true;
+    return e;
   }
   if (x.type === 'area') {
     const id = areaId(x.areaId);
@@ -144,7 +172,7 @@ function favorite(x: unknown, placeIds: Set<string>): Favorite | undefined {
   return undefined;
 }
 
-/** Valide et complète des réglages (format v1). Ne lève jamais. */
+/** Valide et complète des réglages (format v2). Ne lève jamais. */
 export function validateSettings(input: unknown): Settings {
   const d = DEFAULT_SETTINGS;
   const x = isObj(input) ? input : {};
@@ -161,21 +189,31 @@ export function validateSettings(input: unknown): Settings {
     if (ok && !favorites.some((g) => g.id === ok.id)) favorites.push(ok);
     if (favorites.length >= LIMITS.favorites) break;
   }
+  const recent: RecentAddress[] = [];
+  for (const r of Array.isArray(x.recent) ? x.recent : []) {
+    const ok = recentAddress(r);
+    if (ok && !recent.some((q) => q.label === ok.label)) recent.push(ok);
+    if (recent.length >= LIMITS.recent) break;
+  }
+  const seen = typeof x.seenVersion === 'string' && /^\d+\.\d+\.\d+$/.test(x.seenVersion.trim()) ? x.seenVersion.trim() : '';
   const disp = isObj(x.display) ? x.display : {};
   const al = isObj(x.alerts) ? x.alerts : {};
   return {
-    v: 1,
+    v: 2,
     onboarded: bool(x.onboarded, d.onboarded),
     lang: oneOf(x.lang, LANGS, d.lang),
     places,
     maxWalkMin: clampInt(x.maxWalkMin, LIMITS.maxWalkMin, d.maxWalkMin),
     favorites,
+    recent,
+    seenVersion: seen,
     display: {
       depsPerStop: clampInt(disp.depsPerStop, LIMITS.depsPerStop, d.display.depsPerStop),
       radiusM: nearestRadius(disp.radiusM),
       gestureHints: bool(disp.gestureHints, d.display.gestureHints),
       markPlanned: bool(disp.markPlanned, d.display.markPlanned),
       opening: oneOf(disp.opening, OPENING, d.display.opening),
+      favOrder: oneOf(disp.favOrder, FAV_ORDER, d.display.favOrder),
     },
     alerts: {
       platform: bool(al.platform, d.alerts.platform),
@@ -202,6 +240,12 @@ const MIGRATIONS: Record<number, (x: Obj) => Obj> = {
     if (display.gestureHints === undefined && x.hints !== undefined) display.gestureHints = x.hints;
     const { radius: _r, deps: _d, hints: _h, ...rest } = x;
     return { ...rest, display, v: 1 };
+  },
+  /** 1.0 vers 1.1 : tout est gardé ; le message « Quai 1.1 » s'affichera une fois (seenVersion 1.0.0). */
+  1: (x) => {
+    const display = isObj(x.display) ? { ...x.display } : {};
+    if (display.favOrder === undefined) display.favOrder = 'smart';
+    return { ...x, display, recent: Array.isArray(x.recent) ? x.recent : [], seenVersion: typeof x.seenVersion === 'string' && x.seenVersion ? x.seenVersion : '1.0.0', v: 2 };
   },
 };
 
