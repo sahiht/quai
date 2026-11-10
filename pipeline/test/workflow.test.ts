@@ -126,10 +126,10 @@ describe('nightly.yml', () => {
     expect(d['timeout-minutes']).toBeGreaterThanOrEqual(65);
     const [first, wait, retry] = d.steps;
     expect(first).toMatchObject({ name: 'Publier', id: 'deployment', uses: 'actions/deploy-pages@v5', 'continue-on-error': true });
-    expect(Number(first.with.timeout)).toBeGreaterThanOrEqual(1_800_000);
+    expect(Number(first.with?.timeout)).toBeGreaterThanOrEqual(1_800_000);
     expect(wait.if).toBe("steps.deployment.outcome == 'failure'");
     expect(retry).toMatchObject({ id: 'retry', uses: 'actions/deploy-pages@v5', if: "steps.deployment.outcome == 'failure'" });
-    expect(Number(retry.with.timeout)).toBeGreaterThanOrEqual(1_800_000);
+    expect(Number(retry.with?.timeout)).toBeGreaterThanOrEqual(1_800_000);
     expect(d.steps).toHaveLength(3);
   });
 
