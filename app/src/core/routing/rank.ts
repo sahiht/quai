@@ -1,33 +1,33 @@
 /**
- * Classement « le trajet le plus facile » et propositions étiquetées (PRD § 4.1 à § 4.3, design-routing.md § 4.8).
+ * Classement « Le plus court » et propositions étiquetées (PRD-1.2 § 1 ; design-routing.md § 4.8).
  *
- * « Le plus simple » (PRD § 4.1) : (1) le moins de changements, chaque marche d'au moins 1,5 × maxWalkMin comptant
- * pour un changement de plus ; (2) le moins de marche au total, moins de 5 min d'écart = égalité ; (3) sans
- * escaliers : donnée absente, critère inactif ; (4) l'arrivée la plus tôt ; (5) le moins de véhicules, puis le départ
- * le plus tard. Lecture séquentielle (§ 4.8, précision 1) : on part du trajet qui arrive le plus tôt et on ne le
- * remplace que par un trajet avec moins de changements, ou autant de changements et au moins 5 min de marche en moins.
+ * « Le plus court » (§ 1.1), une seule fonction pour la proposition 1 comme pour les autres : un trajet en devance un
+ * autre s'il arrive au moins 5 min plus tôt (la nuit, aucun départ dans l'heure demandée, sans partir plus de 30 min
+ * avant lui) ; parmi les trajets que rien ne devance : la durée la plus courte, à 5 min près ; puis le moins de
+ * changements de véhicule ; puis le moins de marche au total, à 5 min près ; puis l'arrivée la plus tôt ; puis le
+ * départ le plus tard.
  *
- * Garde-fou (§ 4.8, précision 2 ; moins-de-marche.md § 5) : de jour (un départ dans l'heure demandée), « Le plus
- * simple » n'arrive jamais plus de 30 min après la référence (la première arrivée de l'heure, à égalité celle qui
- * marche le moins), ni plus de 15 min après s'il ne fait pas marcher au moins 5 min de moins qu'elle ; la nuit, même
- * double seuil face aux seuls trajets qui ne partent pas plus de 30 min plus tôt.
+ * Marche (§ 1.2) : une préférence, plus un mur. Marche longue : au moins la marche maximale plus 5 min ; elle ne
+ * compte plus comme un changement. Un trajet avec une marche longue n'est « Le plus court » que s'il arrive au moins
+ * 10 min avant le plus court des trajets sans marche longue. Filtres de la 1.1 (trajets dominés, correspondance qui ne
+ * fait gagner que moins de 5 min sur le même premier véhicule) : jamais un trajet sans marche longue écarté au profit
+ * d'un trajet avec marche longue.
  *
- * Propositions, dans l'ordre (3 au plus, sans doublon) : Le plus simple ; Le plus rapide (≥ 5 min plus tôt, départ au
- * plus 30 min avant) ; Plus tôt (≥ 5 min plus tôt, départ plus de 30 min avant) ; Moins de marche (moins-de-marche.md
- * § 1 : une marche du plus simple d'au moins la marche maximale ; au moins 5 min de marche en moins, au plus un
- * changement de plus, départ au plus 5 min avant, arrivée au plus 5 min après ; « Le plus rapide » en tient lieu s'il
- * remplit ces conditions) ; Sans changement ou Moins de changements (écarté par le garde-fou, au plus max(45 min,
- * moitié de la durée) après le plus simple, § 4.8 précision 4) ; À pied (≤ 30 min, au plus 5 min après le plus
- * simple) ; Le suivant (même structure : mêmes lignes et sens, mêmes montées et descentes ; train : mêmes gares et
- * même catégorie ; départs successifs) ; Plus tard (la suite du classement). Fenêtre (§ 4.8, précision 3) : départs
- * dans l'heure demandée ; la nuit, jusqu'à 90 min après le premier départ possible ; « Le suivant » et « Plus tard »
- * au plus 2 h après.
+ * Propositions (§ 1.3), dans l'ordre, 3 au plus, sans doublon : Le plus court ; Plus tôt (le trajet qui arrive le plus
+ * tôt, s'il arrive au moins 5 min avant) ; Moins de marche (« Le plus court » a une marche longue : le plus court des
+ * trajets sans marche longue qui marchent au moins 5 min de moins, arrivée au plus 20 min après) ; Sans changement ou
+ * Moins de changements (le plus court des trajets avec moins de changements, arrivée au plus 20 min après ; pas de
+ * marche longue, sauf s'il n'arrive pas plus tard ou si « Le plus court » en a une) ; À pied (marche seule de 30 min
+ * au plus, arrivée au plus 5 min après) ; Le suivant (même structure : mêmes lignes et sens, mêmes montées et
+ * descentes ; train : mêmes gares et même catégorie ; départs successifs) ; Plus tard (la suite, jamais un trajet
+ * devancé de plus de 30 min par un trajet parti au plus 30 min avant). Fenêtre : départs dans l'heure demandée ; la
+ * nuit, jusqu'à 90 min après le premier départ possible ; « Le suivant » et « Plus tard » au plus 2 h après.
  *
- * Toutes les heures du classement sont en minutes (heures estimées quand le temps réel est connu, PRD § 4.5).
+ * Toutes les heures du classement sont en minutes (heures estimées quand le temps réel est connu, PRD 1.1 § 4.5).
  */
 import type { Journey, JourneyLabel, Leg } from '../api';
 import { headKey } from '../rtmerge';
-import { P } from './params';
+import { P, walkRadii } from './params';
 import { walksOf } from './reason';
 
 /** Ce que le classement lit d'un trajet. */
@@ -54,7 +54,7 @@ export interface RankItem {
 export interface Ranked<T> {
   item: T;
   label: JourneyLabel;
-  /** Référence : « Le plus simple » (Le plus rapide, Moins de marche) ou proposition précédente de même structure (Le suivant). */
+  /** Référence : « Le plus court » (autres propositions) ou proposition précédente de même structure (Le suivant). */
   ref?: T;
 }
 
@@ -101,18 +101,13 @@ export function itemOf(j: Journey): RankItem & { j: Journey } {
   };
 }
 
-/** Changements au sens du PRD § 4.1 : changements de véhicule, plus une par marche longue. */
-export function changesOf(x: Pick<RankItem, 'transfers' | 'walks'>, maxWalk: number): number {
-  const long = Math.ceil(P.longWalkFactor * maxWalk);
-  return x.transfers + x.walks.filter((w) => w >= long).length;
-}
-
 /**
- * Propositions étiquetées, dans l'ordre d'affichage (`max` au plus). `after` : heure demandée (min).
- * Avec `max` > 3, les suivantes servent de réserves (temps réel).
+ * Propositions étiquetées, dans l'ordre d'affichage (`max` au plus). `after` : heure demandée (min) ; `maxWalk` :
+ * marche maximale réglée (préférence). Avec `max` > 3, les suivantes servent de réserves (temps réel).
  */
 export function rank<T extends RankItem>(cands: readonly T[], after: number, maxWalk: number, max: number = P.proposals): Ranked<T>[] {
-  const changes = (x: T) => changesOf(x, maxWalk);
+  const R = walkRadii(maxWalk);
+  const isLong = (x: T) => x.walks.some((w) => w >= R.long);
   // un trajet par identité : le départ le plus tard
   const byId = new Map<string, T>();
   for (const c of cands) {
@@ -122,106 +117,105 @@ export function rank<T extends RankItem>(cands: readonly T[], after: number, max
   const unique = [...byId.values()];
   const walkOnly = unique.filter((x) => x.rides === 0).sort((a, b) => a.arr - b.arr)[0];
   let list = unique.filter((x) => x.rides > 0);
-  // trajets dominés : part plus tôt, arrive plus tard, sans moins de changements, sans 5 min de marche en moins
-  // (égalité de marche du PRD § 4.1) ; au moins un critère strictement meilleur, donc jamais deux trajets qui se
-  // dominent l'un l'autre
+  // filtres de la 1.1 ; jamais un trajet sans marche longue écarté au profit d'un trajet avec marche longue
+  const spare = (o: T, c: T) => isLong(o) && !isLong(c);
+  // trajets dominés : part plus tôt, arrive plus tard, sans moins de changements, sans 5 min de marche en moins ; au
+  // moins un critère strictement meilleur, donc jamais deux trajets qui se dominent l'un l'autre
   list = list.filter(
     (c) =>
       !list.some(
         (o) =>
           o !== c &&
+          !spare(o, c) &&
           o.dep >= c.dep &&
           o.arr <= c.arr &&
-          changes(o) <= changes(c) &&
-          o.walk < c.walk + P.walkTieMin &&
-          (o.dep > c.dep || o.arr < c.arr || changes(o) < changes(c) || o.walk < c.walk),
+          o.transfers <= c.transfers &&
+          o.walk < c.walk + P.tieMin &&
+          (o.dep > c.dep || o.arr < c.arr || o.transfers < c.transfers || o.walk < c.walk),
       ),
   );
-  // jamais une correspondance qui ne fait gagner que moins de 5 min sur le même premier véhicule, sauf si elle fait
-  // marcher au moins 5 min de moins (moins-de-marche.md § 1 : « même train, puis tram »)
-  list = list.filter(
-    (c) => !list.some((o) => o !== c && o.firstRide === c.firstRide && o.rides < c.rides && o.arr < c.arr + P.uselessTransferMin && c.walk > o.walk - P.walkTieMin),
-  );
+  // jamais une correspondance qui ne fait gagner que moins de 5 min sur le même premier véhicule
+  list = list.filter((c) => !list.some((o) => o !== c && !spare(o, c) && o.firstRide === c.firstRide && o.rides < c.rides && o.arr < c.arr + P.uselessTransferMin));
   const all = list.length ? list : walkOnly ? [walkOnly] : [];
   if (!all.length) return [];
 
-  // fenêtre des propositions
+  // fenêtre des propositions ; la marche seule (30 min au plus) concourt avec les autres
   const inWin = all.filter((x) => x.dep <= after + P.windowMin);
-  const firstDep = Math.min(...all.map((x) => x.dep));
-  const pool = inWin.length ? inWin : all.filter((x) => x.dep <= firstDep + P.nightPoolMin);
-  // référence du garde-fou : la première arrivée (à égalité, celle qui marche le moins)
-  const fastestRef = [...pool].sort((a, b) => a.arr - b.arr || a.walk - b.walk)[0];
-
-  const pickSimple = (set: readonly T[]): T => {
-    const sorted = [...set].sort((a, b) => a.arr - b.arr || changes(a) - changes(b) || a.walk - b.walk || a.rides - b.rides || b.dep - a.dep);
-    let best = sorted[0];
-    for (const x of sorted.slice(1)) {
-      if (changes(x) < changes(best) || (changes(x) === changes(best) && x.walk <= best.walk - P.walkTieMin)) best = x;
-    }
-    return best;
-  };
-  const orderSimple = (set: readonly T[]): T[] => {
-    const rest = [...set];
-    const out: T[] = [];
-    while (rest.length) {
-      const b = pickSimple(rest);
-      out.push(b);
-      rest.splice(rest.indexOf(b), 1);
-    }
-    return out;
-  };
   const night = !inWin.length;
-  // x arrive trop tard face à y : plus de 30 min après, ou plus de 15 min après sans 5 min de marche en moins
-  const tooLate = (x: T, y: T) => y.arr < x.arr - P.guardMin || (y.arr < x.arr - P.guardSameWalkMin && x.walk > y.walk - P.walkTieMin);
-  const blockedIn = (set: readonly T[], x: T) => set.some((y) => y !== x && y.dep >= x.dep - P.guardMin && tooLate(x, y));
-  const blocked = (x: T) => (night ? blockedIn(pool, x) : x !== fastestRef && tooLate(x, fastestRef));
-  const eligible = pool.filter((x) => !blocked(x));
-  const simplest = orderSimple(eligible.length ? eligible : pool)[0];
-  // « Le suivant » et « Plus tard » : au plus 2 h après le départ du plus simple (ou l'heure demandée)
-  const later = all.filter((x) => x.dep <= Math.max(after, simplest.dep) + P.laterMaxMin);
+  const firstDep = Math.min(...all.map((x) => x.dep));
+  const pool0 = inWin.length ? inWin : all.filter((x) => x.dep <= firstDep + P.nightPoolMin);
+  const pool = walkOnly && walkOnly.walk <= P.walkOnlyMaxMin && !pool0.includes(walkOnly) ? [...pool0, walkOnly] : pool0;
 
-  const out: Ranked<T>[] = [{ item: simplest, label: 'simple' }];
+  const dur = (x: T) => x.arr - x.dep;
+  // y devance x : il arrive au moins 5 min plus tôt (la nuit, sans partir plus de 30 min avant)
+  const ahead = (y: T, x: T) => y.arr <= x.arr - P.tieMin && (!night || y.dep >= x.dep - P.nightAheadMin);
+  /** Le plus court d'un ensemble (§ 1.1). */
+  const shortest = (set: readonly T[]): T | undefined => {
+    if (!set.length) return undefined;
+    const free = set.filter((x) => !set.some((y) => y !== x && ahead(y, x)));
+    const d = Math.min(...free.map(dur));
+    let c = free.filter((x) => dur(x) < d + P.tieMin);
+    const k = Math.min(...c.map((x) => x.transfers));
+    c = c.filter((x) => x.transfers === k);
+    const w = Math.min(...c.map((x) => x.walk));
+    c = c.filter((x) => x.walk < w + P.tieMin);
+    return [...c].sort((a, b) => a.arr - b.arr || b.dep - a.dep)[0];
+  };
+  /**
+   * Le plus court, avec une marche longue seulement s'il arrive au moins 10 min avant les trajets sans marche longue
+   * (§ 1.2 : avant le plus court d'entre eux ; CA-1.2 : avant chacun d'eux), sinon le plus court sans marche longue.
+   */
+  const pick = (set: readonly T[]): T | undefined => {
+    const s0 = shortest(set);
+    if (!s0 || !isLong(s0)) return s0;
+    const rest = set.filter((x) => !isLong(x));
+    return rest.length && rest.some((x) => s0.arr > x.arr - P.longWalkGainMin) ? shortest(rest) : s0;
+  };
+
+  const first = pick(pool)!;
+  const out: Ranked<T>[] = [{ item: first, label: 'short' }];
   const shown = (x: T) => out.some((r) => r.item === x);
   const add = (x: T | undefined, label: JourneyLabel, ref?: T): boolean => {
     if (!x || out.length >= max || shown(x)) return false;
     out.push(ref ? { item: x, label, ref } : { item: x, label });
     return true;
   };
-  const byArr = (a: T, b: T) => a.arr - b.arr || changes(a) - changes(b) || a.walk - b.walk || b.dep - a.dep;
 
-  if (simplest.rides > 0) {
-    const faster = pool.filter((x) => x !== simplest && x.arr <= simplest.arr - P.fastGainMin);
-    add(faster.filter((x) => x.dep >= simplest.dep - P.fastMaxEarlierMin).sort(byArr)[0], 'fast', simplest);
-    add(faster.filter((x) => x.dep < simplest.dep - P.fastMaxEarlierMin).sort(byArr)[0], 'earlier');
-    // moins de marche : une marche du plus simple d'au moins la marche maximale (minutes affichées) ; le premier, dans
-    // l'ordre du plus simple, des trajets du même créneau qui font marcher nettement moins ; « Le plus rapide » en
-    // tient lieu s'il remplit ces conditions
-    const lessWalk = (x: T) =>
-      x !== simplest &&
-      x.rides > 0 &&
-      x.walk <= simplest.walk - P.lessWalkGainMin &&
-      x.transfers <= simplest.transfers + P.lessWalkExtraTransfers &&
-      x.dep >= simplest.dep - P.lessWalkSlotMin &&
-      x.arr <= simplest.arr + P.lessWalkSlotMin;
-    if (Math.max(0, ...simplest.walks) >= maxWalk && !out.some((r) => lessWalk(r.item))) {
-      add(orderSimple(pool.filter((x) => !shown(x) && lessWalk(x)))[0], 'lesswalk', simplest);
-    }
-    const fewerBound = simplest.arr + Math.max(P.fewerMinMin, Math.round((simplest.arr - simplest.dep) / 2));
-    const fewer = orderSimple(pool.filter((x) => !shown(x) && blocked(x) && changes(x) < changes(simplest) && x.arr <= fewerBound))[0];
-    if (fewer) add(fewer, changes(fewer) === 0 ? 'none' : 'fewer');
-    if (walkOnly && walkOnly.walk <= P.walkOnlyMaxMin && walkOnly.arr <= simplest.arr + P.walkOnlyLateMin) add(walkOnly, 'walk');
+  // plus tôt : le trajet qui arrive le plus tôt, s'il arrive au moins 5 min avant « Le plus court »
+  const earliest = [...pool].sort((a, b) => a.arr - b.arr || a.transfers - b.transfers || a.walk - b.walk || b.dep - a.dep)[0];
+  if (earliest !== first && earliest.arr <= first.arr - P.tieMin) add(earliest, earliest.rides ? 'earlier' : 'walk', first);
+  // moins de marche : « Le plus court » a une marche longue
+  if (isLong(first)) {
+    add(pick(pool.filter((x) => !shown(x) && x.rides > 0 && !isLong(x) && x.walk <= first.walk - P.tieMin && x.arr <= first.arr + P.optionLateMin)), 'lesswalk', first);
+  }
+  // sans changement, moins de changements
+  const fewer = pick(
+    pool.filter((x) => !shown(x) && x.rides > 0 && x.transfers < first.transfers && x.arr <= first.arr + P.optionLateMin && (!isLong(x) || isLong(first) || x.arr <= first.arr)),
+  );
+  if (fewer) add(fewer, fewer.transfers === 0 ? 'none' : 'fewer', first);
+  // à pied
+  if (walkOnly && walkOnly.walk <= P.walkOnlyMaxMin && walkOnly.arr <= first.arr + P.walkOnlyLateMin) add(walkOnly, 'walk', first);
+  if (first.rides > 0) {
     // le suivant : même trajet, départs successifs. Seul un départ plus tardif du même trajet qui n'arrive pas plus
     // tard l'écarte (un autre trajet un peu meilleur ne fait pas sauter un départ du même trajet).
-    const laterLimit = Math.max(after, simplest.dep) + P.laterMaxMin;
-    const same = unique.filter((x) => x !== simplest && x.rides > 0 && x.structure === simplest.structure && x.dep <= laterLimit);
+    const laterLimit = Math.max(after, first.dep) + P.laterMaxMin;
+    const same = unique.filter((x) => x !== first && x.rides > 0 && x.structure === first.structure && x.dep <= laterLimit);
     const nextPool = same.filter((c) => !same.some((o) => o !== c && o.dep >= c.dep && o.arr <= c.arr && (o.dep > c.dep || o.arr < c.arr)));
-    let cur = simplest;
+    let cur = first;
     for (;;) {
       const next = nextPool.filter((x) => !shown(x) && x.dep > cur.dep).sort((a, b) => a.dep - b.dep || a.arr - b.arr)[0];
       if (!next || !add(next, 'next', cur)) break;
       cur = next;
     }
-    for (const x of orderSimple(later.filter((y) => !shown(y) && y.dep > simplest.dep && !blockedIn(later, y)))) add(x, 'later');
+    // plus tard : la suite, jamais un trajet devancé de plus de 30 min par un trajet parti au plus 30 min avant
+    const later = all.filter((x) => x.dep <= laterLimit);
+    const blocked = (y: T) => later.some((z) => z !== y && z.dep >= y.dep - P.laterGuardMin && z.arr < y.arr - P.laterGuardMin);
+    let rest = later.filter((y) => !shown(y) && y.dep > first.dep && !blocked(y));
+    while (rest.length && out.length < max) {
+      const b = shortest(rest)!;
+      add(b, 'later');
+      rest = rest.filter((x) => x !== b);
+    }
   }
   return out;
 }

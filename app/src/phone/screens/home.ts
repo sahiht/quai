@@ -1,13 +1,14 @@
 /**
- * Accueil du téléphone (T1) : champ « Où vas-tu ? » qui ouvre la recherche, « Mes favoris » avec leur réponse courte
- * et un bouton « Lunettes » (S8), réglages, état des données.
+ * Accueil du téléphone (T1) : champ « Où vas-tu ? » qui ouvre la recherche, « Mes favoris » (lieux compris) avec
+ * leur réponse courte et un bouton « Lunettes » (S8), réglages, état des données.
  */
 import type { Core, Favorite, FavoriteAnswer, Settings } from '../../core/api';
+import { asTrip, favoriteTitle } from '../../core/favorites';
 import type { PhoneCtx } from '../app';
 import { h, icon, ICON } from '../dom';
 import { glassesButton, showBoard, showTrip } from '../glasses-link';
 import { catchable } from '../../glasses/format';
-import { favoriteName, shortAnswer, T, towardsText, typo } from '../text';
+import { favoriteName, shortAnswer, T, typo } from '../text';
 import { listRow, messageHub } from '../ui';
 
 const LANG_TEXT = { fr: 'Noms en français', nl: 'Noms en néerlandais', local: 'Noms comme sur place' } as const;
@@ -90,7 +91,9 @@ function favoritesSection(ctx: PhoneCtx, answered?: () => void): HTMLElement {
         lastAnswers.set(fav.id, a);
       }
       const result = a.plan ?? { journeys: [], empty: a.state === 'noPosition' ? ('noPosition' as const) : a.state === 'here' ? ('here' as const) : ('noTrip' as const) };
-      return showTrip(ctx, { title: towardsText(fav.to, st, fav.label), from: fav.from, to: fav.to, favoriteId: fav.id, result, index: 0 });
+      // Un lieu : le trajet « Ma position → lieu » (même identifiant).
+      const trip = asTrip(fav);
+      return showTrip(ctx, { title: favoriteTitle(fav, st), from: trip.from, to: trip.to, favoriteId: fav.id, result, index: 0 });
     });
     list.appendChild(h('li', { class: 'fav-row' }, h('span', { class: 'txt' }, name, answer), button, message));
   }
@@ -191,8 +194,7 @@ export function homeScreen(ctx: PhoneCtx): HTMLElement {
       'ul',
       { class: 'list box', style: 'background:#fff' },
       listRow({ icon: icon('lang'), title: 'Position et langue', sub: LANG_TEXT[s.lang], onClick: () => ctx.go('#/bienvenue') }),
-      listRow({ icon: icon('home'), title: 'Mes lieux', sub: s.places.length ? s.places.map((p) => p.label).join(', ') : 'Aucun lieu', onClick: () => ctx.go('#/lieux') }),
-      listRow({ icon: icon('trip'), title: 'Mes favoris', sub: n ? `${n} favori${n > 1 ? 's' : ''}` : 'Aucun favori', onClick: () => ctx.go('#/favoris') }),
+      listRow({ icon: icon('trip'), title: T.myFavs, sub: n ? `${n} favori${n > 1 ? 's' : ''}` : 'Aucun favori', onClick: () => ctx.go('#/favoris') }),
       listRow({ icon: icon('display'), title: 'Affichage', sub: `${s.display.depsPerStop} départs par arrêt, rayon ${typo(`${s.display.radiusM} m`)}`, onClick: () => ctx.go('#/affichage') }),
       listRow({ icon: icon('alert'), title: 'Alertes', sub: alertsSummary(s.alerts), onClick: () => ctx.go('#/alertes') }),
       dataRow,

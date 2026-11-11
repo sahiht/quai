@@ -56,7 +56,7 @@ function bureau(p: { delay?: number; newPlatform?: string; rt?: boolean } = {}):
     platform: '4', newPlatform: p.newPlatform, rt: p.rt ?? true, delayMin: p.delay ?? 0, cancelled: false,
   };
   const legs = [walk('Ma position', 'Namur', at(7, 35) + d, 7), ride, walk('Bruxelles-Central', 'Bureau', at(8, 46) + d, 12)];
-  return { id: 'j1', legs, dep: legs[0].dep, arr: at(8, 58) + d, leaveAt: at(7, 33) + d, transfers: 0, rt: p.rt ?? true, alerts: [], label: 'simple' };
+  return { id: 'j1', legs, dep: legs[0].dep, arr: at(8, 58) + d, leaveAt: at(7, 33) + d, transfers: 0, rt: p.rt ?? true, alerts: [], label: 'short' };
 }
 
 describe('mise en forme', () => {

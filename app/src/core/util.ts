@@ -3,7 +3,7 @@
  * Heures toujours affichées à l'heure belge, quel que soit le fuseau du téléphone.
  */
 import type { Op, Mode, Names, AreaSummary } from '../../../shared/types';
-import type { NameLang } from './api';
+import type { FavoritePlace, NameLang, Place, Settings } from './api';
 
 export const TZ = 'Europe/Brussels';
 
@@ -120,4 +120,21 @@ export function lineLabel(mode: Mode, line: string): string {
 export function fit(text: string, max = 48): string {
   const t = text.replace(/[^\S\u00a0]+/g, ' ').trim();
   return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';
+}
+
+/**
+ * 1.2 : les favoris lieux, dans l'ordre de la liste (« Aller à… », champ unique). Des réglages d'avant la migration
+ * (v1, v2, passés tels quels, par exemple un préréglage dans un test) : leurs `places` en repli, comme plan.ts.
+ */
+export function placesOf(settings: Settings): FavoritePlace[] {
+  const out = settings.favorites.filter((f): f is FavoritePlace => f.kind === 'place');
+  for (const p of (settings as { places?: Place[] }).places ?? []) {
+    if (!out.some((q) => q.id === p.id)) out.push({ ...p, kind: 'place', propose: 'never' });
+  }
+  return out;
+}
+
+/** 1.2 : le favori lieu désigné par un Endpoint { type: 'place', placeId } (même repli que placesOf). */
+export function placeOf(settings: Settings, id: string): FavoritePlace | undefined {
+  return placesOf(settings).find((p) => p.id === id);
 }

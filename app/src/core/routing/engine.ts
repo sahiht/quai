@@ -1,18 +1,21 @@
 /**
- * route() : trajets porte à porte classés « le trajet le plus facile » (PRD § 4, M3, M5, M8 ; design-routing.md § 4).
+ * route() : trajets porte à porte, « Le plus court » d'abord (PRD-1.2 § 1 ; PRD 1.1 § 4, M3, M5, M8 ;
+ * design-routing.md § 4).
  *
  * 1. Extrémités : « Ma position » (sinon empty 'noPosition'), lieu, zone (0 min de marche), adresse (M5a).
  *    Arrivée à 300 m au plus : empty 'here' ; à maxWalkMin à pied ou moins : la marche seule.
  * 2. Vagues de fichiers (select.ts) : index, tuiles et tuiles de lignes ; lignes L_O et L_D et trains/ des jours
- *    utiles ; lignes du milieu. Aucun arrêt à 2 × maxWalkMin : empty 'noStopFrom' / 'noStopTo' (accessMin).
- * 3. Réseau (network.ts) et RAPTOR par rondes sur la plage de départs de l'heure demandée (raptor.ts), trois passes
- *    d'accès et de sortie (marche maximale ; longues marches : 1,5 × pour une zone urbaine, 2 × pour une gare ; peu de
- *    marche : 5 min). Attente en correspondance de 60 min au plus ; jamais un véhicule plus lent que d'y aller à pied
- *    (jusqu'à 60 min de marche). Nuit : plage de 12 h, puis trains du lendemain, puis à partir de 04:00 du jour suivant.
+ *    utiles ; lignes du milieu. Recherche toujours élargie (PRD-1.2 § 1.2) : arrêts jusqu'à 15 min à pied, gares
+ *    jusqu'à 25 min (ou la marche maximale plus 5 min) ; aucun arrêt : empty 'noStopFrom' / 'noStopTo', accessMin 15.
+ * 3. Réseau (network.ts) et RAPTOR par rondes sur la plage de départs de l'heure demandée (raptor.ts), passes
+ *    d'accès et de sortie : large (15 et 25 min), préférence tolérée (sans marche longue : la marche maximale plus
+ *    4 min), préférence (la marche maximale), courte (5 min). Attente en
+ *    correspondance de 60 min au plus ; jamais un véhicule plus lent que d'y aller à pied (jusqu'à 60 min de marche).
+ *    Nuit : plage de 12 h, puis trains du lendemain, puis à partir de 04:00 du jour suivant.
  *    Premier véhicule en retard mais attrapable (PRD § 4.2, § 4.5) : la plage commence 30 min avant l'heure demandée,
  *    sur le même réseau ; un trajet parti à l'heure prévue n'est gardé que si le temps réel le rend attrapable.
  * 4. « Le suivant » : départs suivants de la même structure (mêmes lignes et sens, mêmes montées et descentes ;
- *    train : mêmes gares et même catégorie), jusqu'à 2 h après le plus simple.
+ *    train : mêmes gares et même catégorie), jusqu'à 2 h après « Le plus court ».
  * 5. Classement sur les horaires prévus (rank.ts), temps réel sur les propositions, 3 réserves et les trajets au
  *    premier véhicule déjà parti à l'heure prévue (un appel par opérateur pour tous) ; véhicule supprimé : trajet
  *    retiré ; correspondance devenue impossible : reste du trajet recalculé (repair.ts) ; seuls les trajets encore
@@ -31,7 +34,7 @@ import { resolveEndpoint, type PlanPoint } from '../plan';
 import { distanceM, serviceDayBase, walkMinutes } from '../util';
 import { candLegs, walkOnlyLegs, type EndPoint } from './legs';
 import { accessMap, linePart, Net, trainPart, trainTripOf, type RRoute } from './network';
-import { maxWalkOf, P, walkReachM } from './params';
+import { maxWalkOf, P, walkRadii, walkReachM } from './params';
 import { earliestTrip, raptor, type Cand, type RideRef } from './raptor';
 import { itemOf, rank, type RankItem } from './rank';
 import { reasonText } from './reason';
@@ -196,7 +199,7 @@ export function nextOfStructure(net: Net, c: Cand, count: number, until: number)
 
 /** Trajets étiquetés, dans l'ordre d'affichage, avec leur raison. */
 function labeled(ranked: { item: Item; label: Journey['label']; ref?: Item }[]): Journey[] {
-  return ranked.map(({ item, label, ref }) => ({ ...item.j, label, reason: reasonText(label ?? 'simple', item.j, ref?.j) }));
+  return ranked.map(({ item, label, ref }) => ({ ...item.j, label, reason: reasonText(label ?? 'short', item.j, ref?.j) }));
 }
 
 /**
@@ -231,15 +234,16 @@ export async function computeRoute(
   if (directWalk <= maxWalk) {
     if (debug) debug.mode = 'walk';
     const [j] = await env.refresh([walkJourney()], true);
-    return { journeys: labeled([{ item: itemOf(j), label: 'simple' }]) };
+    return { journeys: labeled([{ item: itemOf(j), label: 'short' }]) };
   }
 
   const src = env.source;
   const meta = src.meta;
   const tune: Tune = { middleK: P.middleK, urbanUrbanMax: P.urbanUrbanMax, allLines: false, ...env.tune };
-  const w1 = await wave1(src, O, D, maxWalk, !!meta.lines);
+  const R = walkRadii(maxWalk);
+  const w1 = await wave1(src, O, D, R, !!meta.lines);
   // aucun arrêt connu autour (tuiles ; tuiles de lignes, qui comptent aussi les arrêts d'arrivée seule)
-  const accessMin = 2 * maxWalk;
+  const accessMin = R.urban;
   if (!O.areaId && !w1.nearO.length && !w1.ltO.size) return { journeys: [], empty: 'noStopFrom', accessMin };
   if (!D.areaId && !w1.nearD.length && !w1.ltD.size) return { journeys: [], empty: 'noStopTo', accessMin };
 
@@ -266,9 +270,9 @@ export async function computeRoute(
 
   if (index) {
     // ---------- calcul 1.1 sur les fichiers de ligne ----------
-    const r15 = walkReachM(Math.floor(P.longWalkFactor * maxWalk));
-    const LO = tune.allLines ? [] : pickLines(w1.nearO, w1.ltO, r15);
-    const LD = tune.allLines ? [] : pickLines(w1.nearD, w1.ltD, r15);
+    const rUrban = walkReachM(R.urban);
+    const LO = tune.allLines ? [] : pickLines(w1.nearO, w1.ltO, rUrban);
+    const LD = tune.allLines ? [] : pickLines(w1.nearD, w1.ltD, rUrban);
     let wanted = usefulDates(dates, after);
     if (!wanted.length) wanted = dates.slice(0, 1);
     const first = tune.allLines ? index.lines.map((_, i) => i) : [...new Set([...LO, ...LD])];
@@ -276,7 +280,7 @@ export async function computeRoute(
     const requestDay = trains.find((f) => serviceDayBase(f.date) <= after && after < serviceDayBase(f.date) + 24 * HOUR) ?? trains[0] ?? null;
     const middle = tune.allLines
       ? []
-      : middleLines({ index, O, D, maxWalk, nearO: w1.nearO, nearD: w1.nearD, LO, LD, files, day: requestDay, K: tune.middleK, urbanUrbanMax: tune.urbanUrbanMax });
+      : middleLines({ index, O, D, radii: R, nearO: w1.nearO, nearD: w1.nearD, LO, LD, files, day: requestDay, K: tune.middleK, urbanUrbanMax: tune.urbanUrbanMax });
     const mfiles = middle.length ? await loadLines(src, index, middle) : new Map<number, LineFile>();
     const lineFiles = [...files.values(), ...mfiles.values()];
     fileCount = lineFiles.length;
@@ -296,12 +300,15 @@ export async function computeRoute(
     };
     let trainFiles = trains;
     net = build(trainFiles);
-    // aucun arrêt à 2 × maxWalkMin, ni dans les tuiles ni dans le réseau chargé
-    if (!O.areaId && !w1.nearO.length && !accessMap(net, O, accessMin, accessMin).size) return { journeys: [], empty: 'noStopFrom', accessMin };
-    if (!D.areaId && !w1.nearD.length && !accessMap(net, D, accessMin, accessMin).size) return { journeys: [], empty: 'noStopTo', accessMin };
+    // aucun arrêt dans la recherche élargie, ni dans les tuiles ni dans le réseau chargé
+    if (!O.areaId && !w1.nearO.length && !accessMap(net, O, R.urban, R.station).size) return { journeys: [], empty: 'noStopFrom', accessMin };
+    if (!D.areaId && !w1.nearD.length && !accessMap(net, D, R.urban, R.station).size) return { journeys: [], empty: 'noStopTo', accessMin };
     const afterMin = (after - base0) / MIN;
-    const passes: [number, number][] = [[maxWalk, maxWalk], [Math.floor(P.longWalkFactor * maxWalk), 2 * maxWalk]];
-    if (Math.min(5, maxWalk) < maxWalk) passes.push([5, 5]);
+    // passes d'accès et de sortie (PRD-1.2 § 1.2) : large, préférence, courte ; plus la préférence tolérée (toute
+    // marche qui n'est pas longue) : un trajet sans marche longue que la passe large cache derrière un trajet avec
+    // marche longue (parti plus tard, arrivé plus tôt) reste candidat
+    const passes: [number, number][] = [[R.urban, R.station]];
+    for (const m of [R.long - 1, R.pref, R.short]) if (m < Math.min(R.urban, passes[passes.length - 1][0])) passes.push([m, m]);
     const run = (n: Net, from: number, windowMin: number): Cand[] => {
       const out: Cand[] = [];
       passes.forEach(([lu, ls], pass) => {
@@ -361,17 +368,17 @@ export async function computeRoute(
     };
     for (const c of cands) addCand(c);
     if (directWalk <= P.walkOnlyMaxMin) journeys.push(walkJourney());
-    // « Le suivant » : départs suivants de la structure du plus simple
+    // « Le suivant » : départs suivants de la structure du plus court
     const first0 = rank(
       [...byKey.values()].map((x) => itemOf(x.j)),
       after / MIN,
       maxWalk,
     )[0];
-    const simpleCand = first0 ? [...byKey.values()].find((x) => x.j === first0.item.j)?.c : undefined;
-    if (simpleCand) {
-      const until = Math.max(afterMin, simpleCand.dep) + P.laterMaxMin;
+    const shortCand = first0 ? [...byKey.values()].find((x) => x.j === first0.item.j)?.c : undefined;
+    if (shortCand) {
+      const until = Math.max(afterMin, shortCand.dep) + P.laterMaxMin;
       // départs suivants dans les 2 h (au plus 8) : le classement retire ceux qu'un départ plus tardif domine
-      for (const c of nextOfStructure(net, simpleCand, 8, until)) addCand(c);
+      for (const c of nextOfStructure(net, shortCand, 8, until)) addCand(c);
     }
     journeys.push(...[...byKey.values()].map((x) => x.j));
     if (!tune.allLines) recipe = { gen: meta.generatedAt, lines: lineFiles.map((f) => f.id), days: trainFiles.map((f) => f.date) };

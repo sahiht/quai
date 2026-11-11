@@ -48,11 +48,12 @@ import { distanceM, gtfsTime, hhmm, localDate, localMinutes, walkMinutes } from 
 import type { AreaSummary, GeocodeResponse, GeocodeResult, HealthResponse, Mode, Names, Op } from '../../../shared/types';
 import { normalizeForSearch, prettyName } from '../../../shared/names';
 import { QuaiError } from '../core/errors';
-import { answerFavorite, orderFavorites, relocateAmong, type PlanMemo } from '../core/favorites';
+import { answerFavorite, asTrip, orderFavorites, placeOf, relocateAmong, type PlanMemo } from '../core/favorites';
 import { GeocodeClient, GeoError, type GeoTransport } from '../core/geocode';
 import { reasonText } from '../core/routing/reason';
 import { rankSearch } from '../core/search';
-import { cancelAlert, delayAlert, leaveAlert, NB, platformAlert } from '../core/text';
+import { tripLabel } from '../core/suggest';
+import { cancelAlert, delayAlert, forLabel, leaveAlert, NB, platformAlert } from '../core/text';
 
 export interface FakeFlags {
   stale?: boolean;
@@ -637,7 +638,8 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
     if (e.type === 'here') return here ? { ...here, name: N('Ma position', 'Mijn positie') } : null;
     if (e.type === 'area') return { lat: e.lat, lon: e.lon, name: e.name, areaId: AREA.has(e.areaId) ? e.areaId : undefined };
     if (e.type === 'address') return { lat: e.lat, lon: e.lon, name: N(e.label) };
-    const p = settings.places.find((x) => x.id === e.placeId);
+    // 1.2 : un favori lieu
+    const p = placeOf(settings, e.placeId);
     if (!p) throw new QuaiError('placeUnknown');
     return { lat: p.lat, lon: p.lon, name: N(p.label) };
   }
@@ -661,7 +663,8 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
 
   interface Cand {
     j: Journey;
-    changes: number; // changements + marches longues (PRD § 4.1)
+    changes: number; // changements de véhicule (1.2 : une marche longue n'en est plus un)
+    long: boolean; // marche longue : la marche maximale plus 5 min, ou davantage (PRD-1.2 § 1.2)
     walk: number;
     rides: number;
     firstDep: number;
@@ -671,12 +674,12 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
 
   function score(j: Journey, settings: Settings): Cand {
     const walks = j.legs.filter((l) => l.kind === 'walk').map((l) => l.walkMin ?? 0);
-    const long = walks.filter((w) => w >= 1.5 * settings.maxWalkMin).length;
     const rides = j.legs.filter((l) => l.kind === 'ride');
     const sigOf = (l: Leg) => (l.kind === 'walk' ? 'w' : `${l.op}/${l.cat ?? l.line}/${l.from.areaId}/${l.to.areaId}`);
     return {
       j,
-      changes: j.transfers + long,
+      changes: j.transfers,
+      long: rides.length > 0 && walks.some((w) => w >= settings.maxWalkMin + 5),
       walk: walks.reduce((s, w) => s + w, 0),
       rides: rides.length,
       firstDep: rides[0]?.dep ?? j.dep,
@@ -740,11 +743,11 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
   }
 
   /**
-   * Classement simplifié du PRD § 4 (sur les heures estimées) : changements (marche longue = 1 de plus), marche
-   * (5 min d'écart), arrivée ; garde-fou de 30 min, 15 min sans 5 min de marche en moins (moins-de-marche.md § 5) ;
-   * propositions simple, rapide ou plus tôt, moins de marche (§ 1), sans changement ou moins de changements, à pied,
-   * le suivant, plus tard ; 3 au plus, avec la raison (core/routing/reason.ts). Exemple de « Moins de marche » : de
-   * S1 (Maison) vers « Place Saint-Géry 1 » à 07:31, sans temps réel (IC jusqu'à Bruxelles-Nord puis tram 3).
+   * Classement simplifié de la 1.2 (docs/v1.2/PRD-1.2.md § 1, sur les heures estimées) : « Le plus court » (celui
+   * que rien ne devance de 5 min à l'arrivée ; puis durée, changements, marche à 5 min près, arrivée, départ ; une
+   * marche longue seulement pour 10 min de gagnées), puis « Plus tôt », « Moins de marche », « Sans changement » ou
+   * « Moins de changements », « À pied », « Le suivant », « Plus tard » ; 3 au plus, avec la raison
+   * (core/routing/reason.ts).
    */
   function rank(all: Journey[], walkOnly: Journey | null, settings: Settings, after: number): Journey[] {
     const t = now();
@@ -754,7 +757,7 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
       if (j.legs.some((l) => l.kind === 'ride' && l.cancelled)) return false;
       if (first && first.dep - w0 < t - 30_000) return false;
       // Règle 1.0 : jamais plus lent que la marche seule, quand elle n'est pas une marche longue (cas E du PRD).
-      if (walkOnly && (walkOnly.legs[0].walkMin ?? 0) < 1.5 * settings.maxWalkMin && j.arr > walkOnly.arr) return false;
+      if (walkOnly && (walkOnly.legs[0].walkMin ?? 0) < settings.maxWalkMin + 5 && j.arr > walkOnly.arr) return false;
       return true;
     });
     const scored = [...ok, ...(walkOnly ? [walkOnly] : [])].map((j) => score(j, settings));
@@ -768,42 +771,43 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
     const earliest = Math.min(...pool.map((c) => c.j.dep));
     const windowEnd = earliest <= after + 60 * MIN ? after + 60 * MIN : earliest + 90 * MIN;
     const win = pool.filter((c) => c.j.dep <= windowEnd);
-    // Garde-fou : jamais plus de 30 min après la première arrivée (à égalité, celle qui marche le moins), ni plus de
-    // 15 min après sans au moins 5 min de marche en moins qu'elle.
-    const first = [...win].sort((x, y) => x.j.arr - y.j.arr || x.walk - y.walk)[0];
-    const blocked = (c: Cand) => c !== first && (c.j.arr > first.j.arr + 30 * MIN || (c.j.arr > first.j.arr + 15 * MIN && c.walk > first.walk - 5));
-    /** Le premier dans l'ordre de « Le plus simple » : arrivée, puis moins de changements ou 5 min de marche en moins. */
-    const firstSimple = (list: Cand[]): Cand | undefined => {
-      const sorted = [...list].sort((x, y) => x.j.arr - y.j.arr || x.changes - y.changes || x.walk - y.walk || x.rides - y.rides || y.j.dep - x.j.dep);
-      let best = sorted[0];
-      for (const c of sorted.slice(1)) if (c.changes < best.changes || (c.changes === best.changes && c.walk <= best.walk - 5)) best = c;
-      return best;
+    const night = earliest > after + 60 * MIN;
+    const M5 = 5 * MIN;
+    const isWalk = (c: Cand) => c.rides === 0;
+    // § 1.1 : un trajet en devance un autre s'il arrive au moins 5 min plus tôt (la nuit, sans partir plus de 30 min
+    // avant lui) ; parmi ceux que rien ne devance : durée, changements, marche (à 5 min près), arrivée, départ.
+    const beats = (d: Cand, c: Cand) => d.j.arr <= c.j.arr - M5 && (!night || d.j.dep >= c.j.dep - 30 * MIN);
+    const order = (x: Cand, y: Cand) => {
+      const dx = x.j.arr - x.j.dep;
+      const dy = y.j.arr - y.j.dep;
+      if (Math.abs(dx - dy) >= M5) return dx - dy;
+      if (x.changes !== y.changes) return x.changes - y.changes;
+      if (Math.abs(x.walk - y.walk) >= 5) return x.walk - y.walk;
+      return x.j.arr - y.j.arr || y.j.dep - x.j.dep;
     };
-    const simple = firstSimple(win.filter((c) => !blocked(c)))!;
-    const props: { c: Cand; label: JourneyLabel }[] = [{ c: simple, label: 'simple' }];
+    const shortest = (list: Cand[]): Cand | undefined => list.filter((c) => !list.some((d) => d !== c && beats(d, c))).sort(order)[0];
+    // § 1.2 : une marche longue n'est « Le plus court » que pour arriver au moins 10 min avant le plus court sans
+    // marche longue
+    const best = shortest(win)!;
+    const plain = shortest(win.filter((c) => !c.long));
+    const simple = best.long && plain && best.j.arr > plain.j.arr - 10 * MIN ? plain : best;
+    const props: { c: Cand; label: JourneyLabel }[] = [{ c: simple, label: 'short' }];
     const used = new Set([simple.keyRides]);
     const add = (c: Cand | undefined, label: JourneyLabel) => {
       if (!c || props.length >= 3 || used.has(c.keyRides)) return;
       used.add(c.keyRides);
       props.push({ c, label });
     };
-    const isWalk = (c: Cand) => c.rides === 0;
-    const fast = win.filter((c) => !isWalk(c) && c.j.arr <= simple.j.arr - 5 * MIN).sort((x, y) => x.j.arr - y.j.arr || x.changes - y.changes || x.walk - y.walk)[0];
-    if (fast) add(fast, fast.j.dep >= simple.j.dep - 30 * MIN ? 'fast' : 'earlier');
-    // Moins de marche : une marche du plus simple d'au moins la marche maximale ; même créneau (départ au plus 5 min
-    // avant, arrivée au plus 5 min après), au moins 5 min de marche en moins, au plus un changement de plus ; « Le
-    // plus rapide » en tient lieu s'il remplit ces conditions.
-    const lessWalk = (c: Cand) =>
-      c !== simple && !isWalk(c) && c.walk <= simple.walk - 5 && c.j.transfers <= simple.j.transfers + 1 && c.j.dep >= simple.j.dep - 5 * MIN && c.j.arr <= simple.j.arr + 5 * MIN;
-    const longest = Math.max(0, ...simple.j.legs.filter((l) => l.kind === 'walk').map((l) => l.walkMin ?? 0));
-    if (!isWalk(simple) && longest >= settings.maxWalkMin && !props.some((p) => lessWalk(p.c))) {
-      add(firstSimple(win.filter((c) => lessWalk(c) && !used.has(c.keyRides))), 'lesswalk');
+    // § 1.3, dans l'ordre : Plus tôt, Moins de marche, Sans changement ou Moins de changements, À pied, Le suivant, Plus tard
+    const first = win.filter((c) => !isWalk(c)).sort((x, y) => x.j.arr - y.j.arr || order(x, y))[0];
+    if (first && first.j.arr <= simple.j.arr - M5) add(first, 'earlier');
+    if (simple.long) {
+      add(shortest(win.filter((c) => !c.long && !isWalk(c) && c !== simple && c.walk <= simple.walk - 5 && c.j.arr <= simple.j.arr + 20 * MIN)), 'lesswalk');
     }
-    const dur = simple.j.arr - simple.j.dep;
-    const fewer = pool
-      .filter((c) => !isWalk(c) && c.changes < simple.changes && blocked(c) && c.j.arr <= simple.j.arr + Math.max(45 * MIN, dur / 2))
-      .sort((x, y) => x.j.arr - y.j.arr)[0];
-    if (fewer) add(fewer, fewer.j.transfers === 0 && fewer.changes === 0 ? 'none' : 'fewer');
+    const fewer = shortest(
+      win.filter((c) => !isWalk(c) && c.changes < simple.changes && c.j.arr <= simple.j.arr + 20 * MIN && (!c.long || c.j.arr <= simple.j.arr || simple.long)),
+    );
+    if (fewer) add(fewer, fewer.changes === 0 ? 'none' : 'fewer');
     if (walkOnly && !isWalk(simple)) {
       const w = pool.find(isWalk);
       if (w && w.walk <= 30 && w.j.arr <= simple.j.arr + 5 * MIN) add(w, 'walk');
@@ -819,16 +823,17 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
       // « Plus tard » : un autre trajet, sans reprendre un véhicule déjà proposé.
       const trips = (c: Cand) => c.keyRides.split('+').map((r) => r.split(':')[0]);
       const rides = new Set(props.flatMap((p) => trips(p.c)));
+      // jamais un trajet devancé de plus de 30 min par un trajet parti au plus 30 min avant (1.1)
+      const outrun = (c: Cand) => pool.some((d) => d.j.arr <= c.j.arr - 30 * MIN && d.j.dep >= c.j.dep - 30 * MIN);
       const later = pool
-        .filter((c) => !isWalk(c) && !used.has(c.keyRides) && !trips(c).some((r) => rides.has(r)) && c.firstDep > simple.firstDep && c.j.arr > simple.j.arr && c.firstDep <= simple.firstDep + 2 * 3_600_000)
+        .filter((c) => !isWalk(c) && !used.has(c.keyRides) && !trips(c).some((r) => rides.has(r)) && c.firstDep > simple.firstDep && c.j.arr > simple.j.arr && c.firstDep <= simple.firstDep + 2 * 3_600_000 && !outrun(c))
         .sort((x, y) => x.changes - y.changes || x.j.arr - y.j.arr || x.walk - y.walk);
       for (const c of later) add(c, 'later');
     }
     const out = props.map(({ c, label }) => ({ ...c.j, label }));
     out.forEach((j, i) => {
       let r: Journey | undefined;
-      if (j.label === 'fast') r = out[0];
-      if (j.label === 'next') for (let k = i - 1; k >= 0 && !r; k--) if (out[k].label === 'next' || out[k].label === 'simple') r = out[k];
+      if (j.label === 'next') for (let k = i - 1; k >= 0 && !r; k--) if (out[k].label === 'next' || out[k].label === 'short') r = out[k];
       j.reason = reasonText(j.label!, j, r);
     });
     return out;
@@ -985,19 +990,20 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
       if (!slot) return null;
       for (const f of settings.favorites) {
         if (f.propose !== slot) continue;
-        if (f.kind === 'trip') {
-          const js = await core.plan(f.from, f.to, t, settings, here ?? undefined).catch(() => [] as Journey[]);
+        if (f.kind === 'trip' || f.kind === 'place') {
+          // un lieu : le trajet « Ma position → lieu »
+          const tr = asTrip(f);
+          const js = await core.plan(tr.from, tr.to, t, settings, here ?? undefined).catch(() => [] as Journey[]);
           const j = js[0];
           const ride = j?.legs.find((l) => l.kind === 'ride');
           if (!j || !ride) continue;
-          const label = f.label ?? 'trajet';
           const p = ride.newPlatform ?? ride.platform;
           const walk = j.legs[0]?.kind === 'walk' ? j.legs[0].walkMin ?? 0 : 0;
           return {
             kind: 'favoriteTrip',
             favoriteId: f.id,
             autoOpen: false,
-            title: `Pour le ${label}${NB}: ${ride.cat ?? ride.line} ${hhmm(ride.dep)}${p ? `, voie ${p}` : ''}`,
+            title: `${forLabel(tripLabel(f, settings))}${NB}: ${ride.cat ?? ride.line} ${hhmm(ride.dep)}${p ? `, voie ${p}` : ''}`,
             subtitle: walk ? `partir à ${hhmm(j.leaveAt)}, ${walk}${NB}min à pied` : undefined,
             journey: j,
           };

@@ -68,10 +68,10 @@ const NAMUR = area('sncb:8863008', 'sncb', 'Namur', 'Namen', ['train'], 50.4685,
 const GDN = area('stib:6357F', 'stib', 'Gare du Nord', 'Noordstation', ['tram'], 50.86, 4.36);
 const train = (t: number, opts: Partial<Departure>): Departure => ({ op: 'sncb', mode: 'train', line: 'IC', head: n('Bruxelles-Midi', 'Brussel-Zuid'), sched: t, est: t, rt: true, delayMin: 0, cancelled: false, platform: '4', ...opts });
 
-/** Favoris d'exemple, dans l'ordre du téléphone : l'ordre intelligent met le bureau en tête le matin. */
+/** Favoris d'exemple, dans l'ordre du téléphone : l'ordre intelligent met le bureau (un lieu) en tête le matin. */
 const SAMPLE_FAVORITES: Favorite[] = [
   { kind: 'stop', id: 'ex-gdn', areaId: GDN.id, op: 'stib', name: GDN.n, lat: GDN.lat, lon: GDN.lon, propose: 'never' },
-  { kind: 'trip', id: 'ex-bureau', from: { type: 'here' }, to: { type: 'place', placeId: 'ex-lieu-bureau' }, propose: 'morning' },
+  { kind: 'place', id: 'ex-bureau', label: 'Bureau', lat: 50.8441, lon: 4.3474, propose: 'morning' },
   { kind: 'stop', id: 'ex-namur', areaId: NAMUR.id, op: 'sncb', name: NAMUR.n, lat: NAMUR.lat, lon: NAMUR.lon, propose: 'never' },
 ];
 
@@ -79,7 +79,7 @@ function sampleAnswers(): Map<string, FavoriteAnswer> {
   const j = morningJourney(true, true);
   const board = (a: AreaSummary, departures: Departure[]) => ({ area: a, departures, anyPlanned: departures.some((d) => !d.rt), rtErrors: [], updatedAt: HOME_NOW });
   return new Map<string, FavoriteAnswer>([
-    ['ex-bureau', { favoriteId: 'ex-bureau', kind: 'trip', state: 'ok', plan: { journeys: [{ ...j, label: 'simple' }] }, updatedAt: HOME_NOW }],
+    ['ex-bureau', { favoriteId: 'ex-bureau', kind: 'trip', state: 'ok', plan: { journeys: [{ ...j, label: 'short' }] }, updatedAt: HOME_NOW }],
     ['ex-namur', { favoriteId: 'ex-namur', kind: 'stop', state: 'ok', board: board(NAMUR, [train(at(7, 42), { est: at(7, 44), delayMin: 2, newPlatform: '6' }), train(at(8, 42), { rt: false })]), updatedAt: HOME_NOW }],
     ['ex-gdn', { favoriteId: 'ex-gdn', kind: 'stop', state: 'ok', board: board(GDN, [dep('stib', 'tram', '3', n('Churchill'), at(7, 37), true), dep('stib', 'tram', '4', n('Stalle (P)'), at(7, 40), true)]), updatedAt: HOME_NOW }],
   ]);
@@ -90,11 +90,7 @@ function sampleAnswers(): Map<string, FavoriteAnswer> {
  * « Ordre des favoris », rayon, aides, signe ~). Exemple : 07:31 à la maison, à Namur.
  */
 export function homePreview(settings: Settings): GlassesView {
-  const s: Settings = {
-    ...settings,
-    places: [{ id: 'ex-lieu-bureau', label: 'Bureau', lat: 50.8441, lon: 4.3474 }],
-    favorites: SAMPLE_FAVORITES,
-  };
+  const s: Settings = { ...settings, favorites: SAMPLE_FAVORITES };
   const answers = sampleAnswers();
   // Ordre intelligent le matin : le trajet du bureau (créneau), puis la gare de Namur (utilisable d'ici).
   const smart = ['ex-bureau', 'ex-namur', 'ex-gdn'];

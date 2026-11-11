@@ -180,7 +180,7 @@ describe('tableaux STIB : destination vide', () => {
 });
 
 describe('trajets porte à porte : étape STIB', () => {
-  const bourse = (preset: Settings): Settings => ({ ...preset, places: [...preset.places, { id: 'bourse', label: 'Bourse', lat: 50.8483, lon: 4.3497 }] });
+  const bourse = (preset: Settings): Settings => ({ ...preset, favorites: [...preset.favorites, { kind: 'place', id: 'bourse', label: 'Bourse', lat: 50.8483, lon: 4.3497, propose: 'never' }] });
   const plan = async (points: Record<string, unknown[]>) => {
     const env = makeEnv({ now: NOW });
     Object.assign(env.server.relay.stib.points, points);

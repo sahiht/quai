@@ -5,9 +5,9 @@
  *    (2) sinon le premier favori « matin » (5h-11h) ou « soir » (15h-21h) selon l'heure belge, s'il donne un
  *    résultat → ligne de suggestion ; (3) sinon rien.
  */
-import type { Board, Endpoint, Favorite, Journey, LineFilter, Settings, Suggestion } from './api';
-import { forLabel, departureSummary, NB, rideSummary, shortAddress } from './text';
-import { brusselsParts, displayName, distanceM, fit, hhmm } from './util';
+import type { Board, Endpoint, Favorite, FavoritePlace, FavoriteTrip, Journey, LineFilter, Settings, Suggestion } from './api';
+import { forLabel, departureSummary, NB, placeNoun, rideSummary, shortAddress } from './text';
+import { brusselsParts, displayName, distanceM, fit, hhmm, placeOf } from './util';
 
 export interface SuggestEnv {
   now: number;
@@ -26,29 +26,31 @@ export function slotOf(now: number): 'morning' | 'evening' | null {
   return null;
 }
 
+/** Point de départ fixe d'un favori ; null pour « Ma position » (dont un lieu). */
 function originOf(f: Favorite, settings: Settings): { lat: number; lon: number } | null {
   if (f.kind === 'stop') return { lat: f.lat, lon: f.lon };
+  if (f.kind === 'place') return null;
   const e = f.from;
-  if (e.type === 'area') return { lat: e.lat, lon: e.lon };
+  if (e.type === 'area' || e.type === 'address') return { lat: e.lat, lon: e.lon };
   if (e.type === 'place') {
-    const p = settings.places.find((x) => x.id === e.placeId);
+    const p = placeOf(settings, e.placeId);
     return p ? { lat: p.lat, lon: p.lon } : null;
   }
   return null;
 }
 
-/** « bureau » (label du favori) ou libellé du lieu en minuscules ; nom de la zone sinon. */
-export function tripLabel(f: Extract<Favorite, { kind: 'trip' }>, settings: Settings): string {
+/**
+ * Nom d'un trajet favori ou d'un lieu, prêt pour l'article (forLabel, vers) : « bureau », « maison »,
+ * « Gand-Saint-Pierre », « Veldstraat 1 » (text.ts placeNoun).
+ */
+export function tripLabel(f: FavoriteTrip | FavoritePlace, settings: Settings): string {
+  if (f.kind === 'place') return placeNoun(f.label);
   const own = f.label?.trim();
-  if (own) {
-    // « Bureau » saisi comme un lieu enregistré : nom commun → « Pour le bureau »
-    const isPlace = settings.places.some((p) => p.label.trim().toLowerCase() === own.toLowerCase());
-    return isPlace ? own.toLowerCase() : own;
-  }
+  if (own) return placeNoun(own);
   const to = f.to;
   if (to.type === 'place') {
-    const p = settings.places.find((x) => x.id === to.placeId);
-    if (p) return p.label.toLowerCase();
+    const p = placeOf(settings, to.placeId);
+    if (p) return placeNoun(p.label);
   }
   if (to.type === 'area') return displayName(to.name, settings.lang);
   if (to.type === 'address') return shortAddress(to.label);
@@ -89,9 +91,12 @@ async function forFavorite(
     return s;
   }
   const label = forLabel(tripLabel(f, settings));
+  // un lieu : le trajet « Ma position → lieu »
+  const from: Endpoint = f.kind === 'place' ? { type: 'here' } : f.from;
+  const to: Endpoint = f.kind === 'place' ? { type: 'place', placeId: f.id } : f.to;
   let journeys: Journey[] = [];
   try {
-    journeys = await env.plan(f.from, f.to, env.now, settings, here ?? undefined);
+    journeys = await env.plan(from, to, env.now, settings, here ?? undefined);
   } catch {
     journeys = [];
   }
@@ -139,7 +144,8 @@ export async function suggestOpening(here: { lat: number; lon: number } | null, 
   if (!slot) return null;
   for (const f of favs) {
     if (f.propose !== slot) continue;
-    if (f.kind === 'trip' && f.from.type === 'here' && !here) continue;
+    // trajet depuis « Ma position » (dont un lieu) : rien sans position
+    if ((f.kind === 'place' || (f.kind === 'trip' && f.from.type === 'here')) && !here) continue;
     const s = await forFavorite(f, false, true, here, settings, env);
     if (s) return s;
   }

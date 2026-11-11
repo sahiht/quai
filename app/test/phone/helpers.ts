@@ -15,9 +15,9 @@ import type { Fix } from '../../src/platform/types';
 import { migrateSettings, SettingsStore } from '../../src/settings';
 
 export const PRESET_PATH = fileURLToPath(new NodeURL('../../../fixtures/app/preset.json', import.meta.url));
-/** Réglages de démonstration de la 1.0 (lieux à adresse libre), migrés en v2. */
+/** Réglages de démonstration de la 1.0 (lieux à adresse libre), migrés en réglages v3 (lieux dans les favoris). */
 export const preset = (): Settings => migrateSettings(JSON.parse(readFileSync(PRESET_PATH, 'utf8')));
-/** Préréglage de la 1.1 (PRD annexe A.2) : preset.json et le favori « fav-maison ». */
+/** Préréglage de la 1.1 (PRD annexe A.2) : preset.json et le favori « fav-maison », migrés en réglages v3. */
 export const preset11 = (): Settings => migrateSettings(JSON.parse(readFileSync(fileURLToPath(new NodeURL('../../../fixtures/app/preset-1.1.json', import.meta.url)), 'utf8')));
 export const defaults = (patch: Partial<Settings> = {}): Settings => ({ ...structuredClone(DEFAULT_SETTINGS), onboarded: true, ...patch });
 

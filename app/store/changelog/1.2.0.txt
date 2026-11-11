@@ -1,0 +1,3 @@
+Le trajet le plus court d’abord : celui qui t’amène le plus tôt, avec la raison. Une longue marche seulement si elle fait gagner au moins 10 min.
+Un seul écran « Mes favoris » : tes lieux, tes arrêts et tes trajets, sans rien perdre.
+Dans Quai Web, ta position peut être une adresse. L’accès d’un lieu nomme d’abord l’arrêt le plus proche.

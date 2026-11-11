@@ -117,3 +117,15 @@ Ensuite : contrôle qualité de bout en bout (`tests/e2e/**`, simulateur), puis 
 - Brussels (Paradigm) : chemin `api/v1` de la spécification Geoloc (février 2026), structure de réponse relevée en
   direct le 11/11/2026 ; `api/v2` ne répond pas.
 
+## 8. Version 1.2 (docs/v1.2/PRD-1.2.md)
+
+- Pas de 1.1.1 publiée : son travail (accès d'un lieu, phrases, version) est repris par la 1.2.0.
+- Contrat : réglages v3 (`places` fondu dans `favorites`, type `FavoritePlace`), étiquette `short` (« Le plus court »)
+  au lieu de `simple` et `fast`, `labelOf()` pour relire un trajet suivi gardé par la 1.1.
+- Routage, écarts validés : quatre passes de recherche au lieu de trois (une passe « marche maximale + 4 min » en plus,
+  sans laquelle le bus W de CA-1.10 restait caché avec une marche maximale de 5 min) ; une marche longue n'est en tête
+  que si elle arrive au moins 10 min avant tous les trajets sans marche longue ; avec les gares à 25 min, des
+  propositions « Plus tôt » ou « Moins de changements » à 22 min de marche peuvent apparaître en 2e ou 3e position.
+- Migration, lecture stricte du § 2.4 : un lieu sans favori « Ma position → lieu » devient un lieu « Jamais » en fin de
+  liste ; avec le favori, ils fusionnent (id, place, nom affiché et créneau du favori).
+

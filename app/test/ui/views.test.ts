@@ -111,7 +111,7 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     const journeys = map.get('fav-bureau')!.plan!.journeys;
     const v = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: 0, followedId: journeys[0].id, leaveAt0: journeys[0].leaveAt, fresh: true }, ctxOf(now, s));
     expect(nb(v.title)).toBe('Vers le bureau : 07:35 → 09:00');
-    expect(v.log).toEqual({ page: 1, pages: 3, label: 'simple', followed: true });
+    expect(v.log).toEqual({ page: 1, pages: 3, label: 'short', followed: true });
     expect(check(v)).toEqual([
       '! Voie modifiée : l’IC part de la voie 6',
       '07:35   Partir à pied vers la gare (7 min)   dans 4 min',
@@ -132,7 +132,7 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     const ctx = ctxOf(now, s);
     const p1 = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: 0, followedId: journeys[0].id, fresh: true }, ctx);
     const l1 = check(p1);
-    expect(l1[0]).toBe('Le plus simple : direct, à pied 7 + 12 min');
+    expect(l1[0]).toBe('Le plus court : direct, à pied 7 + 12 min');
     expect(l1).toContain('▼ Le suivant : 08:33 → 09:58');
     const p2 = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: 1, followedId: journeys[0].id }, ctx);
     expect(nb(p2.title)).toBe('Vers le bureau : 08:33 → 09:58');
@@ -190,7 +190,7 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     expect(lines.at(-1)).toBe('▲▼ arrêt   toucher : départs   double : retour');
   });
 
-  it('Aller à… : lieux, adresses récentes (S4), « Autre adresse   sur le téléphone » (L8)', async () => {
+  it('CA-2.2 : « Aller à… » : les lieux des favoris, adresses récentes (S4), « Autre adresse   sur le téléphone » (L8)', async () => {
     const s = settings();
     s.recent = [
       { label: 'Veldstraat 1, 9000 Gent', lat: 51.0537, lon: 3.7225, at: 3 },
@@ -198,14 +198,21 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
       { label: 'Rue de Fer 25, 5000 Namur', lat: 50.4662, lon: 4.8648, at: 1 },
       { label: 'Avenue Winston Churchill 100, 1180 Uccle', lat: 50.808, lon: 4.365, at: 0 },
     ];
-    const v = placesView({ maison: 'ici', bureau: 'arrivée 08:58', 'recent:Veldstraat 1, 9000 Gent': 'arrivée 10:51' }, ctxOf(now, s));
-    expect(check(v)).toEqual(['Maison   ici', 'Bureau   arrivée 08:58', 'Veldstraat 1   arrivée 10:51', 'Rue Neuve 1   …', 'Rue de Fer 25   …', 'Autre adresse   sur le téléphone', '▲▼ choisir   toucher : trajet   double : retour']);
-    expect(v.items[0].action).toEqual({ kind: 'go', key: 'maison', to: { type: 'place', placeId: 'maison' }, label: 'maison' });
+    const v = placesView({ 'fav-bureau': 'arrivée 08:58', 'fav-maison': 'ici', 'recent:Veldstraat 1, 9000 Gent': 'arrivée 10:51' }, ctxOf(now, s));
+    // 1.2 : les lieux sont des favoris, dans l'ordre du téléphone (Bureau, puis Maison).
+    expect(check(v)).toEqual(['Bureau   arrivée 08:58', 'Maison   ici', 'Veldstraat 1   arrivée 10:51', 'Rue Neuve 1   …', 'Rue de Fer 25   …', 'Autre adresse   sur le téléphone', '▲▼ choisir   toucher : trajet   double : retour']);
+    expect(v.items[0].action).toEqual({ kind: 'go', key: 'fav-bureau', to: { type: 'place', placeId: 'fav-bureau' }, label: 'Bureau' });
     expect(v.items[2].action).toEqual({ kind: 'go', key: 'recent:Veldstraat 1, 9000 Gent', to: { type: 'address', label: 'Veldstraat 1, 9000 Gent', lat: 51.0537, lon: 3.7225 }, label: 'Veldstraat 1' });
     expect(v.items.at(-1)!.action).toEqual({ kind: 'toast', text: 'Tape l’adresse dans Quai, sur le téléphone' });
-    const empty = placesView({}, ctxOf(now, { ...s, places: [], recent: [] }));
-    expect(check(empty)).toEqual(['Aucun lieu enregistré   sur le téléphone', 'Autre adresse   sur le téléphone', '▲▼ choisir   toucher : trajet   double : retour']);
-    const js = (await fakeCore(() => now).route({ type: 'here' }, { type: 'place', placeId: 'bureau' }, now, s, here)).journeys;
+    // sans lieu (arrêts et trajets fixes seulement) : « Aucun lieu enregistré » ; Quai Web : « Nouveau favori »
+    const noPlace = { ...s, favorites: s.favorites.filter((f) => f.kind !== 'place'), recent: [] };
+    expect(check(placesView({}, ctxOf(now, noPlace)))).toEqual(['Aucun lieu enregistré   sur le téléphone', 'Autre adresse   sur le téléphone', '▲▼ choisir   toucher : trajet   double : retour']);
+    const web = placesView({}, ctxOf(now, noPlace, { web: true }));
+    expect(web.items.map((i) => i.action)).toEqual([
+      { kind: 'phone', hash: '#/favoris/nouveau', text: 'Ajoute Maison ou Bureau dans l’onglet Réglages' },
+      { kind: 'phone', hash: '#/recherche', text: 'Tape l’adresse dans l’onglet Réglages' },
+    ]);
+    const js = (await fakeCore(() => now).route({ type: 'here' }, { type: 'place', placeId: 'fav-bureau' }, now, s, here)).journeys;
     expect(placeSummary(js, now)).toBe('arrivée 09:00');
   });
 });
@@ -285,7 +292,7 @@ describe('scénario 3 : l’après-midi vers Gand (S3, 13:55)', () => {
     const v = stepsPage({ title: 'Vers Gand-Saint-Pierre', label: '' }, { journeys, index: 0, followedId: journeys[0].id, fresh: true }, ctxOf(now, s));
     expect(nb(v.title)).toBe('Vers Gand-Saint-Pierre : 14:10 → 14:39');
     const lines = check(v);
-    expect(lines[0]).toBe('Le plus simple : direct');
+    expect(lines[0]).toBe('Le plus court : direct');
     expect(lines[1]).toMatch(/^14:10   IC vers Bruges, voie 4/);
     expect(lines[2]).toBe('14:39   Arrivée à Gand-Saint-Pierre');
     expect(lines).toContain('▼ Le suivant : 14:25 → 14:56');
@@ -297,7 +304,7 @@ describe('scénario 3 : l’après-midi vers Gand (S3, 13:55)', () => {
     const res = await fakeCore(() => now).route({ type: 'here' }, to, now, s, here);
     const v = stepsPage({ title: 'Vers Veldstraat 1', label: '' }, { journeys: res.journeys, index: 0, followedId: res.journeys[0].id, fresh: true }, ctxOf(now, s));
     const lines = check(v);
-    expect(lines[0]).toBe('Le plus simple : 1 changement, à pied 1 + 3 min');
+    expect(lines[0]).toBe('Le plus court : 1 changement, à pied 1 + 3 min');
     expect(lines.slice(1, 7).map((l) => l.replace(/   (dans|en) .*$/, ''))).toEqual([
       '14:10   IC vers Bruges, voie 4',
       '14:39   Descendre à Gand-Saint-Pierre',
@@ -345,12 +352,12 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     const now = at(10, 0);
     const s = settings();
     const here = { lat: 50.848, lon: 4.352 };
-    const res = await fakeCore(() => now).route({ type: 'here' }, { type: 'place', placeId: 'bureau' }, now, s, here);
+    const res = await fakeCore(() => now).route({ type: 'here' }, { type: 'place', placeId: 'fav-bureau' }, now, s, here);
     const j = res.journeys[0];
     expect(j.legs.some((l) => l.kind === 'ride')).toBe(false);
     const v = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: res.journeys, index: 0, followedId: j.id, fresh: true }, ctxOf(now, s));
     const lines = check(v);
-    expect(lines[0]).toBe('Le plus simple : à pied, 9 min');
+    expect(lines[0]).toBe('Le plus court : à pied, 9 min');
     expect(lines[1]).toMatch(/^10:00   Partir à pied \(9 min\)/);
     expect(lines[2]).toBe('10:09   Arrivée au bureau');
     expect(lines.at(-1)).toBe('▲▼ autre trajet   double : retour');
@@ -395,7 +402,8 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     expect(empty.items[0].action).toEqual({ kind: 'open', route: { screen: 'favorites' } });
     const list = favoritesView({}, ctxOf(now, none));
     expect(list.screen).toBe('message');
-    expect(check(list)).toEqual(['Aucun favori pour l’instant.', 'Ouvre un arrêt dans Autour de moi et touche-le,', 'ou ajoute un trajet sur le téléphone.', 'double toucher : retour']);
+    expect(check(list)).toEqual(['Aucun favori pour l’instant.', 'Ouvre un arrêt dans Autour de moi et touche-le,', 'ou ajoute un favori sur le téléphone.', 'double toucher : retour']);
+    expect(check(favoritesView({}, ctxOf(now, none, { web: true }))).at(-2)).toBe('ou ajoute un favori dans l’onglet Réglages.');
     // « Accueil sans favoris » : « Mes favoris   6 » et « Près de … »
     const plain = homeView({ noFavorites: true, nearbyCount: 3, near: 'Namur' }, ctxOf(now, s));
     expect(check(plain)).toEqual(['Près de Namur', 'Autour de moi   3 arrêts', 'Mes favoris   6', 'Aller à…', '▲▼ choisir   toucher : ouvrir   double : quitter']);
@@ -410,7 +418,7 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     expect(v.items[0].action).toEqual({ kind: 'resume' });
   });
 
-  it('messages : bienvenue, « Quai 1.1 », erreur au lancement, attente', () => {
+  it('messages : bienvenue, « Quai 1.2 », erreur au lancement, attente', () => {
     const ctx = ctxOf(SCENARIO.s2.now, settings());
     expect(check(firstRunView(ctx))).toEqual([
       'Bienvenue dans Quai !',
@@ -421,9 +429,12 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     ]);
     expect(check(firstRunView({ ...ctx, web: true })).at(-2)).toBe('position, langue et tes lieux, en une minute.');
     const news = newsView(ctx);
-    expect(news.title).toBe('Quai 1.1');
-    expect(check(news)).toEqual(['Nouveau : tes favoris donnent la réponse.', 'Toucher un favori : le trajet, étape par étape.', 'Sur un trajet, ▼ : un autre trajet.', 'Les adresses se tapent sur le téléphone.', 'toucher : continuer']);
+    expect(news.title).toBe('Quai 1.2');
+    expect(check(news)).toEqual(['Nouveau : le trajet le plus court d’abord.', 'Tes lieux sont maintenant dans tes favoris.', 'Sur un trajet, ▼ : un autre trajet.', 'toucher : continuer']);
     expect(news.tap).toEqual({ kind: 'continue' });
+    // espaces insécables devant « : » (PRD), mêmes lignes sur Quai Web
+    expect(news.items[0].a).toBe('Nouveau : le trajet le plus court d’abord.');
+    expect(newsView({ ...ctx, web: true }).items).toEqual(news.items);
     const root = errorView('Quai', 'Horaires injoignables : nouvel essai dans 30 s', ctx, { root: true });
     expect(check(root)).toEqual(['Horaires injoignables : nouvel essai dans 30 s', 'toucher : réessayer   double : quitter']);
     expect(check(errorView('Autour de moi', 'Pas de réseau : réessaie dans un instant.', ctx)).at(-1)).toBe('toucher : réessayer   double : retour');

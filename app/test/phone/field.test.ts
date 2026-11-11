@@ -40,16 +40,17 @@ describe('texte qui ressemble à une adresse (M4.2)', () => {
 });
 
 describe('propositions du champ unique', () => {
-  it('au focus : « Ma position », mes lieux, puis les adresses récentes, chacun avec son type', async () => {
+  it('au focus : « Ma position », mes lieux (favoris lieux), puis les adresses récentes, chacun avec son type', async () => {
     const s = preset();
     s.recent = [{ label: 'Veldstraat 1, 9000 Gent', lat: 51.0537, lon: 3.7225, at: 1 }];
     const { f } = setup({ settings: s });
     f.input.focus();
     await settle();
+    // préréglage 1.0 migré : les lieux dans l'ordre de « Mes favoris »
     expect(options(f.list)).toEqual([
       ['Ma position', 'position actuelle'],
-      ['Maison', 'mon lieu'],
       ['Bureau', 'mon lieu'],
+      ['Maison', 'mon lieu'],
       ['Veldstraat 1, 9000 Gent', 'récent'],
     ]);
     expect(f.list.getAttribute('role')).toBe('listbox');

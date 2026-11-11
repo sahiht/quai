@@ -1,7 +1,8 @@
 /**
  * Interface du téléphone (page web de l'appli dans l'onglet Even Hub) : routeur par ancre (#/…)
- * et contexte partagé. Écrans : accueil, bienvenue et « Tes lieux » (Config1, S1), lieux (Config2),
- * favoris (Config3), affichage (Config4), alertes (Config5), données (Config6), recherche (Visite3).
+ * et contexte partagé. Écrans : accueil, bienvenue et « Tes favoris » (Config1, S1), « Mes favoris » (lieux,
+ * arrêts et trajets fixes, PRD-1.2 § 2.2), affichage (Config4), alertes (Config5), données (Config6), recherche
+ * (Visite3). « Mes lieux » (#/lieux) n'existe plus : son ancre mène à « Mes favoris ».
  */
 import type { Core, GlassesApi, Meta } from '../core/api';
 import type { Freshness } from '../glasses/controller';
@@ -13,10 +14,10 @@ import { h, ICON, svgNode } from './dom';
 import { alertsScreen } from './screens/alerts';
 import { dataScreen } from './screens/data';
 import { displayScreen } from './screens/display';
-import { favoriteEditScreen, favoritesScreen } from './screens/favorites';
+import { favoriteEditScreen, fixedTripScreen, newFavoriteScreen } from './screens/favorite-edit';
+import { favoritesScreen } from './screens/favorites';
 import { homeScreen } from './screens/home';
-import { onboardingScreen, yourPlacesScreen } from './screens/onboarding';
-import { placeEditScreen, placesScreen } from './screens/places';
+import { onboardingScreen, yourFavoritesScreen } from './screens/onboarding';
 import { searchScreen } from './screens/search';
 
 export interface PhoneCtx {
@@ -35,7 +36,7 @@ export interface PhoneCtx {
   web?: boolean;
   /** Quai Web : montre l'onglet Lunettes (après « Afficher dans les lunettes »). */
   showGlasses?(): void;
-  /** Quai Web : choix de la position (navigateur ou arrêt), pour l'écran « Position et langue ». */
+  /** Quai Web : choix de la position (navigateur, adresse ou arrêt), pour l'écran « Position et langue ». */
   positionPicker?(): HTMLElement;
   go(hash: string): void;
   /** Paramètres de l'ancre courante (#/recherche?q=Gand). */
@@ -43,7 +44,7 @@ export interface PhoneCtx {
   /**
    * Bannière de l'accueil après la mise à jour (T1), une fois : visible si les réglages lus au lancement venaient
    * d'une version antérieure (seenVersion non vide et inférieure à la version courante), jusqu'à « OK ».
-   * Le téléphone n'écrit pas seenVersion pour elle : les lunettes s'en servent pour leur message « Quai 1.1 ».
+   * Le téléphone n'écrit pas seenVersion pour elle : les lunettes s'en servent pour leur message « Quai 1.2 ».
    */
   news?: { visible(): boolean; dismiss(): void };
 }
@@ -52,14 +53,27 @@ export type Screen = (ctx: PhoneCtx, sub: string[]) => HTMLElement | Promise<HTM
 
 const SCREENS: Record<string, { screen: Screen; grey?: boolean; title: string }> = {
   '': { screen: homeScreen, grey: true, title: 'Quai' },
-  bienvenue: { screen: (c, s) => (s[0] === 'lieux' ? yourPlacesScreen(c) : onboardingScreen(c)), title: 'Bienvenue' },
-  lieux: { screen: (c, s) => (s[0] ? placeEditScreen(c, s[0]) : placesScreen(c)), title: 'Mes lieux' },
-  favoris: { screen: (c, s) => (s[0] ? favoriteEditScreen(c, s[0]) : favoritesScreen(c)), title: 'Mes favoris' },
+  bienvenue: { screen: (c, s) => (s[0] === 'favoris' || s[0] === 'lieux' ? yourFavoritesScreen(c) : onboardingScreen(c)), title: 'Bienvenue' },
+  favoris: { screen: favoritesRoute, title: 'Mes favoris' },
   affichage: { screen: displayScreen, title: 'Affichage' },
   alertes: { screen: alertsScreen, title: 'Alertes' },
   donnees: { screen: dataScreen, title: 'Données' },
   recherche: { screen: searchScreen, grey: true, title: 'Rechercher un trajet' },
 };
+
+/** « Mes favoris », « Nouveau favori », « Trajet fixe », ou la modification d'un favori. */
+function favoritesRoute(c: PhoneCtx, s: string[]): HTMLElement {
+  if (s[0] === 'nouveau') return newFavoriteScreen(c);
+  if (s[0] === 'trajet') return fixedTripScreen(c);
+  return s[0] ? favoriteEditScreen(c, s[0]) : favoritesScreen(c);
+}
+
+/** Ancre de la 1.1 vers « Mes lieux » (#/lieux, #/lieux/nouveau, #/lieux/{id}) : la même chose dans « Mes favoris ». */
+export function legacyHash(hash: string): string | null {
+  const m = /^#\/?lieux(?=$|[/?])(\/[^?]*)?(\?.*)?$/.exec(hash);
+  if (!m) return null;
+  return `#/favoris${m[1] ?? ''}`;
+}
 
 export interface PhoneDeps extends Omit<PhoneCtx, 'go' | 'params'> {
   root: HTMLElement;
@@ -74,12 +88,13 @@ export function parseHash(hash: string): { name: string; sub: string[]; params: 
   return { name: parts[0] ?? '', sub: parts.slice(1), params: new URLSearchParams(query) };
 }
 
-/** Version qui a apporté les nouveautés de la bannière (adresses, trajet le plus simple) : la 1.1. */
-export const NEWS_SINCE = '1.1.0';
+/** Version qui a apporté les nouveautés de la bannière (le plus court d'abord, lieux dans les favoris) : la 1.2. */
+export const NEWS_SINCE = '1.2.0';
 
 /**
- * Bannière « Nouveau » : seulement au passage de la 1.0 à la 1.1.x (réglages vus avant 1.1.0 au lancement), jusqu'à
- * « OK ». Une mise à jour 1.1.0 → 1.1.1 ne la remontre pas (comme le message « Quai 1.1 » des lunettes).
+ * Bannière « Nouveau » : une fois, au passage d'une version antérieure (1.0, 1.1) à la 1.2.x (réglages vus avant
+ * 1.2.0 au lancement), jusqu'à « OK ». Une mise à jour 1.2.0 → 1.2.1 ne la remontre pas (comme le message « Quai 1.2 »
+ * des lunettes) ; jamais après une installation neuve.
  */
 export function newsState(seenAtStart: string, since = NEWS_SINCE): { visible(): boolean; dismiss(): void } {
   let shown = !!seenAtStart && compareVersions(seenAtStart, since) < 0;
@@ -93,10 +108,13 @@ export function newsState(seenAtStart: string, since = NEWS_SINCE): { visible():
 
 export function mountPhone(deps: PhoneDeps): { refresh(): void } {
   let seq = 0;
-  // Lu avant que les lunettes n'écrivent la version courante (message « Quai 1.1 »).
+  // Lu avant que les lunettes n'écrivent la version courante (message « Quai 1.2 »).
   const news = deps.news ?? newsState(deps.settings.get().seenVersion);
   const render = async (): Promise<void> => {
     const my = ++seq;
+    // « Mes lieux » de la 1.1 : l'ancre est remplacée par celle de « Mes favoris » (sans entrée d'historique).
+    const legacy = legacyHash(location.hash);
+    if (legacy) history.replaceState(null, '', legacy);
     let { name, sub, params } = parseHash(location.hash);
     // Premier lancement : l'écran de bienvenue (Config1) tant que la configuration n'est pas faite.
     if (!deps.settings.get().onboarded && name === '' && !params.has('accueil')) name = 'bienvenue';

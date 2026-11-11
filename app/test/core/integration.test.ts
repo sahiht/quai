@@ -187,7 +187,7 @@ function suite(label: string, dataDir: string) {
       const { core, preset } = env('2026-11-10T12:10');
       for (const f of preset.favorites) {
         if (f.kind === 'stop') expect((await core.board(f.areaId, { filter: f.filter })).departures.length, f.id).toBeGreaterThan(0);
-        else if (f.from.type !== 'here') expect((await core.plan(f.from, f.to, at('2026-11-10T13:55'), preset as Settings)).length, f.id).toBeGreaterThan(0);
+        else if (f.kind === 'trip' && f.from.type !== 'here') expect((await core.plan(f.from, f.to, at('2026-11-10T13:55'), preset as Settings)).length, f.id).toBeGreaterThan(0);
       }
     });
   });

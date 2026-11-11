@@ -91,7 +91,7 @@ describe('alertes', () => {
   it('suppression : jamais proposée (PRD § 4.2) ; sur le trajet affiché, « ! IC 07:42 supprimé », étiquette gardée', async () => {
     const env = makeEnv({ now: '2026-11-10T07:20' });
     const j0 = await morning(env);
-    expect(j0).toMatchObject({ label: 'simple' });
+    expect(j0).toMatchObject({ label: 'short' });
     env.server.relay.rt.sncb.trips[IC_0742] = { cancelled: true, u: [] };
     env.clock.advance(21_000); // au-delà du cache du temps réel (20 s)
     const j1 = await env.core.refresh(j0, env.preset);
@@ -100,7 +100,7 @@ describe('alertes', () => {
     const js = await env.core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, env.clock.t, env.preset, MAISON);
     expect(js.some((j) => j.legs.some((l) => l.cancelled))).toBe(false);
     expect(js.map((j) => hhmm(j.legs[1].schedDep))).toEqual(['08:42']);
-    expect(js[0].label).toBe('simple');
+    expect(js[0].label).toBe('short');
   });
 
   it('réglages : chaque alerte se désactive', async () => {

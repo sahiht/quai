@@ -1,5 +1,5 @@
 /**
- * Version de Quai affichée sur le téléphone (écran Données, « Version de Quai   1.1.1 »).
+ * Version de Quai affichée sur le téléphone (écran Données, « Version de Quai   1.2.0 »).
  * Source unique : app.json. Les builds (vite.config.ts, vite.web.config.ts) l'inscrivent dans le code par
  * __QUAI_VERSION__ ; les tests (vitest, sans ces configurations) relisent app.json.
  */

@@ -88,6 +88,17 @@ const FEMININE = new Set([
   'mer', 'montagne', 'ville', 'societe', 'boite', 'usine', 'agence', 'maternite', 'salle de sport', 'garderie', 'cite',
 ]);
 const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+/**
+ * 1.2 : noms communs d'un lieu (en plus de FEMININE), qui prennent l'article : « Bureau » → « Vers le bureau ».
+ * Tout autre nom est gardé tel quel, comme un nom propre ou une adresse (« Vers Gand-Saint-Pierre », « Vers Namur »).
+ */
+const COMMON = new Set([
+  'bureau', 'travail', 'boulot', 'job', 'taf', 'college', 'lycee', 'athenee', 'institut', 'stade', 'parc', 'jardin',
+  'cinema', 'theatre', 'musee', 'hopital', 'restaurant', 'resto', 'magasin', 'supermarche', 'marche', 'club', 'local',
+  'appartement', 'appart', 'studio', 'domicile', 'atelier', 'garage', 'depot', 'entrepot', 'campus', 'kot', 'gymnase',
+  'centre', 'hotel', 'aeroport', 'chantier', 'siege', 'labo', 'laboratoire', 'cabinet', 'dentiste', 'medecin',
+  'docteur', 'kine', 'sport', 'fitness', 'conservatoire', 'internat', 'zoo', 'ecole', 'unif', 'univ', 'bercail',
+]);
 
 /**
  * Début du titre d'une suggestion de trajet : « Pour le bureau », « Pour la maison », « Pour l’école »,
@@ -98,7 +109,7 @@ export function forLabel(label: string): string {
   if (!t) return 'Trajet';
   if (/^chez\s/i.test(t)) return `Vers ${t}`;
   if (/^(le|la|les|mon|ma|mes|ton|ta|tes|son|sa|ses|notre|votre|nos|vos)\s/i.test(t) || /^l['’]/i.test(t)) return `Pour ${t}`;
-  if (/^[A-ZÀ-Ý]/.test(t)) return `Vers ${t}`;
+  if (/^[A-ZÀ-Ý0-9]/.test(t)) return `Vers ${t}`;
   const first = fold(t.split(' ')[0]);
   if (/^[aeiouy]/.test(first) || /^h[aeiouy]/.test(first)) return `Pour l’${t}`;
   if (FEMININE.has(fold(t)) || FEMININE.has(first) || /(tion|sion|ette|ence|ance|erie|ure|elle|ie)$/.test(first)) return `Pour la ${t}`;
@@ -112,6 +123,29 @@ export function forLabel(label: string): string {
  */
 export function vers(label: string): string {
   return forLabel(label).replace(/^Pour /, 'Vers ');
+}
+
+/**
+ * 1.2 : nom d'un lieu prêt pour l'article de la 1.0 (forLabel, vers) : nom commun connu en minuscule
+ * (« Bureau » → « bureau », « Salle de sport » → « salle de sport », « Le bureau » → « le bureau »,
+ * « Chez Karim » → « chez Karim », « Ma mère » → « ma mère ») ; adresse (chiffre) et autre nom gardés tels quels
+ * (« Veldstraat 1 », « Gand-Saint-Pierre », « La Louvière »).
+ */
+export function placeNoun(name: string): string {
+  const t = name.trim().replace(/\s+/g, ' ');
+  if (!t || /\d/.test(t)) return t;
+  const lower = t.charAt(0).toLowerCase() + t.slice(1);
+  if (/^chez\s/i.test(t) || /^(mon|ma|mes|ton|ta|tes|son|sa|ses|notre|votre|nos|vos)\s/i.test(t)) return lower;
+  const words = t.split(' ');
+  // article en tête : nom commun seulement si le mot suivant en est un (« La Louvière » reste un nom propre)
+  const head = /^(le|la|les)$/i.test(words[0]) ? (words[1] ?? '') : /^l['’]/i.test(words[0]) ? words[0].slice(2) : words[0];
+  const common = COMMON.has(fold(head)) || FEMININE.has(fold(head)) || FEMININE.has(fold(t));
+  return common ? lower : t;
+}
+
+/** 1.2 : titre d'un lieu, « Vers le bureau », « Vers l’école », « Vers Veldstraat 1 », « Vers Gand-Saint-Pierre ». */
+export function placeTitle(name: string): string {
+  return vers(placeNoun(name));
 }
 
 /** Adresse courte (avant la première virgule) : « Veldstraat 1, 9000 Gent » → « Veldstraat 1 ». */

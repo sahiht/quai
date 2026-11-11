@@ -6,7 +6,7 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { AreaSummary, TileFile } from '../../../shared/types';
-import type { Favorite, FavoriteAnswer, FavoriteStop, FavoriteTrip, Journey, Settings } from '../../src/core/api';
+import type { Favorite, FavoriteAnswer, FavoritePlace, FavoriteStop, FavoriteTrip, Journey, Settings } from '../../src/core/api';
 import { answerFavorite, answerTime, favoriteTitle, isLastAnswer, orderFavorites, relocateAmong, type AnswerEnv, type PlanMemo } from '../../src/core/favorites';
 import { netOf } from '../../src/core/routing/repair';
 import { distanceM, hhmm, walkMinutes } from '../../src/core/util';
@@ -33,7 +33,8 @@ const ids = (o: { favoriteId: string }[]) => o.map((r) => r.favoriteId);
 describe('ordre intelligent (M1.4)', () => {
   it('le préréglage 1.1 est du v2 valide (A.2) : préréglage 1.0 plus fav-maison « Le soir », en dernier', () => {
     expect(PRESET_11.favorites.map((f) => f.id)).toEqual(['fav-bureau', 'fav-gdn', 'fav-gand', 'fav-namur', 'fav-dl-nord', 'fav-maison']);
-    expect(PRESET_11.favorites[5]).toMatchObject({ kind: 'trip', from: { type: 'here' }, to: { type: 'place', placeId: 'maison' }, label: 'maison', propose: 'evening' });
+    // 1.2 : migré en réglages v3 (PRD-1.2 § 2.4) : « Ma position → Maison » est devenu le lieu « Maison »
+    expect(PRESET_11.favorites[5]).toMatchObject({ kind: 'place', id: 'fav-maison', label: 'Maison', propose: 'evening' });
   });
 
   it('CA-M1.1 S1 : bureau (créneau), Namur (utilisable d’ici), le reste, maison en fin (« tu y es »)', async () => {
@@ -66,7 +67,7 @@ describe('ordre intelligent (M1.4)', () => {
     const gand = last.get('fav-gand')!;
     expect(gand.fromStation).toBeUndefined();
     const j = gand.plan!.journeys[0];
-    expect(j.label).toBe('simple');
+    expect(j.label).toBe('short');
     expect(j.legs[0].kind).toBe('ride'); // déjà à la gare : pas d'étape à pied
     expect(hhmm(j.leaveAt)).toBe('14:08');
     expect(hhmm(j.arr)).toBe('14:39');
@@ -113,9 +114,19 @@ describe('ordre intelligent (M1.4)', () => {
   });
 
   it('titre d’un trajet favori : article de la 1.0', () => {
-    const t = (f: Favorite) => (f.kind === 'trip' ? favoriteTitle(f, PRESET_11) : '');
-    expect(PRESET_11.favorites.filter((f) => f.kind === 'trip').map(t)).toEqual(['Vers le bureau', 'Vers Gand-Saint-Pierre', 'Vers la maison']);
-    expect(favoriteTitle({ kind: 'trip', id: 'x', from: { type: 'here' }, to: { type: 'address', label: 'Veldstraat 1, 9000 Gent', lat: 51.0537, lon: 3.7225 }, propose: 'never' }, PRESET_11)).toBe('Vers Veldstraat 1');
+    const t = (f: Favorite) => (f.kind !== 'stop' ? favoriteTitle(f, PRESET_11) : '');
+    expect(PRESET_11.favorites.filter((f) => f.kind !== 'stop').map(t)).toEqual(['Vers le bureau', 'Vers Gand-Saint-Pierre', 'Vers la maison']);
+    expect(favoriteTitle({ kind: 'trip', id: 'x', from: { type: 'area', areaId: 'sncb:8813003', op: 'sncb', name: { fr: 'Bruxelles-Central', nl: 'Brussel-Centraal' }, lat: 50.8454, lon: 4.3571 }, to: { type: 'address', label: 'Veldstraat 1, 9000 Gent', lat: 51.0537, lon: 3.7225 }, propose: 'never' }, PRESET_11)).toBe('Vers Veldstraat 1');
+  });
+
+  it('1.2 : titre d’un lieu : article de la 1.0 pour un nom commun, sinon le nom tel quel (PRD-1.2 § 2.1)', () => {
+    const place = (label: string): FavoritePlace => ({ kind: 'place', id: 'p', label, lat: 50.85, lon: 4.35, propose: 'never' });
+    const titles = ['Bureau', 'Maison', 'École', 'Salle de sport', 'Chez Karim', 'Mon bureau', 'Le bureau', 'Veldstraat 1', 'Gand-Saint-Pierre', 'Namur', 'La Louvière', 'Rue Neuve 1'].map((n) => favoriteTitle(place(n), PRESET_11));
+    expect(titles).toEqual(['Vers le bureau', 'Vers la maison', 'Vers l’école', 'Vers la salle de sport', 'Vers chez Karim', 'Vers mon bureau', 'Vers le bureau', 'Vers Veldstraat 1', 'Vers Gand-Saint-Pierre', 'Vers Namur', 'Vers La Louvière', 'Vers Rue Neuve 1']);
+    // destination d'une recherche : lieu, adresse, arrêt
+    expect(favoriteTitle({ type: 'place', placeId: 'fav-bureau' }, PRESET_11)).toBe('Vers le bureau');
+    expect(favoriteTitle({ type: 'address', label: 'Veldstraat 1, 9000 Gent', lat: 51.0537, lon: 3.7225 }, PRESET_11)).toBe('Vers Veldstraat 1');
+    expect(favoriteTitle({ type: 'area', areaId: 'sncb:8892007', op: 'sncb', name: { fr: 'Gand-Saint-Pierre', nl: 'Gent-Sint-Pieters' }, lat: 51.0359, lon: 3.7107 }, PRESET_11)).toBe('Vers Gand-Saint-Pierre');
   });
 });
 
@@ -123,10 +134,12 @@ describe('réponses des favoris (M1.5)', () => {
   it('CA-M1.1 S1 noRT : proposition 1 = IC de 07:42 avec la marche, partir à 07:33, arrivée 08:58 ; étiquette et raison', async () => {
     const { last } = await answers('2026-11-10T07:31', POS.s1, 'noRT');
     const a = last.get('fav-bureau')!;
-    expect(a.state).toBe('ok');
+    // 1.2 : fav-bureau est un lieu ; sa réponse est celle du trajet « Ma position → lieu »
+    expect(PRESET_11.favorites[0].kind).toBe('place');
+    expect(a).toMatchObject({ kind: 'trip', state: 'ok' });
     const j = a.plan!.journeys[0];
-    expect(j.label).toBe('simple');
-    expect(j.reason).toBe('Le plus simple : direct, à pied 7 + 12 min');
+    expect(j.label).toBe('short');
+    expect(j.reason).toBe('Le plus court : direct, à pied 7 + 12 min');
     expect(hhmm(j.leaveAt)).toBe('07:33');
     expect(hhmm(j.arr)).toBe('08:58');
     const ride = j.legs.find((l) => l.kind === 'ride')!;
@@ -149,7 +162,7 @@ describe('réponses des favoris (M1.5)', () => {
     const j = a.plan!.journeys[0];
     expect(j.legs[0]).toMatchObject({ kind: 'walk', walkMin: 7, to: { areaId: 'sncb:8813003' } });
     expect(hhmm(j.leaveAt)).toBe('14:01'); // 14:10 - 7 min - 2 min de marge
-    expect(j.reason).toBe('Le plus simple : direct, à pied 7 min');
+    expect(j.reason).toBe('Le plus court : direct, à pied 7 min');
   });
 
   it('arrêt favori : départs filtrés ; zone fusionnée retrouvée par `aka`, puis par nom et position ; sinon introuvable', async () => {
@@ -215,7 +228,7 @@ describe('réponses des favoris (M1.5)', () => {
       }
       const first = a.plan!.journeys[0];
       expect(hhmm(first.legs[1].dep)).toBe('14:36');
-      expect(first.reason).toBe(`Le plus simple\u00a0: direct, à pied ${first.legs[0].walkMin} + 3\u00a0min`);
+      expect(first.reason).toBe(`Le plus court\u00a0: direct, à pied ${first.legs[0].walkMin} + 3\u00a0min`);
     }
   });
 
@@ -274,8 +287,8 @@ describe('réponses des favoris (M1.5)', () => {
       transfers: 0,
       rt: false,
       alerts: [],
-      label: 'simple',
-      reason: 'Le plus simple : direct, à pied 5 min',
+      label: 'short',
+      reason: 'Le plus court : direct, à pied 5 min',
     });
     const env: AnswerEnv = {
       now: () => t,
@@ -353,7 +366,7 @@ describe('réponses des favoris (M1.5)', () => {
     const journey = (dep: number, label: Journey['label']): Journey => ({
       id: `j${dep}`,
       legs: [{ kind: 'ride', from: stop, to: dest, dep, arr: dep + Q, schedDep: dep, schedArr: dep + Q, op: 'stib', mode: 'tram', line: '3', tripId: `t${dep}` }],
-      dep, arr: dep + Q, leaveAt: dep, transfers: 0, rt: false, alerts: [], label, reason: 'Le plus simple : direct',
+      dep, arr: dep + Q, leaveAt: dep, transfers: 0, rt: false, alerts: [], label, reason: 'Le plus court : direct',
     });
     const second = at('2026-11-10T08:30');
     const env: AnswerEnv = {
@@ -361,7 +374,7 @@ describe('réponses des favoris (M1.5)', () => {
       board: () => Promise.reject(new Error('inutile')),
       route: async () => {
         routes++;
-        return { journeys: [journey(at('2026-11-10T08:15'), 'simple'), journey(second, 'next')] };
+        return { journeys: [journey(at('2026-11-10T08:15'), 'short'), journey(second, 'next')] };
       },
       relocate: async () => null,
       refresh: async (js) => js.map((j) => ({ ...j, legs: j.legs.map((l) => ({ ...l, cancelled: cancelSecond && l.schedDep === second })) })),

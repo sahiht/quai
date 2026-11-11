@@ -236,7 +236,7 @@ describe('M1 : favoris « réponse directe »', () => {
     expect(s.lines.slice(1)).toEqual(['Ajouter un favori', 'Autour de moi   3 arrêts', 'Aller à…', '▲▼ choisir   toucher : ouvrir   double : quitter']);
     expect(s.lines[0]).toBe('Près de Namur');
     await gesture('tap');
-    expect((await until((x) => x.screen === 'message')).lines).toEqual(['Aucun favori pour l’instant.', 'Ouvre un arrêt dans Autour de moi et touche-le,', 'ou ajoute un trajet sur le téléphone.', 'double toucher : retour']);
+    expect((await until((x) => x.screen === 'message')).lines).toEqual(['Aucun favori pour l’instant.', 'Ouvre un arrêt dans Autour de moi et touche-le,', 'ou ajoute un favori sur le téléphone.', 'double toucher : retour']);
     c.stop();
   });
 
@@ -269,7 +269,7 @@ describe('M2 : un toucher, le trajet ; un glissement, un autre trajet', () => {
     await until(homeReady);
     await gesture('tap');
     const s = await until(stepsReady);
-    expect(s).toMatchObject({ page: 1, pages: 3, label: 'simple', followed: true, title: 'Vers le bureau : 07:35 → 09:00', sel: 0 });
+    expect(s).toMatchObject({ page: 1, pages: 3, label: 'short', followed: true, title: 'Vers le bureau : 07:35 → 09:00', sel: 0 });
     expect(s.lines).toEqual([
       '! Voie modifiée : l’IC part de la voie 6',
       '07:35   Partir à pied vers la gare (7 min)   dans 4 min',
@@ -290,7 +290,7 @@ describe('M2 : un toucher, le trajet ; un glissement, un autre trajet', () => {
     const { c, gesture, until, last } = await setupController({ flags: { noRt: true } });
     await until(homeReady);
     await gesture('tap');
-    expect((await until(stepsReady)).lines[0]).toBe('Le plus simple : direct, à pied 7 + 12 min');
+    expect((await until(stepsReady)).lines[0]).toBe('Le plus court : direct, à pied 7 + 12 min');
     await gesture('down');
     expect(last()).toMatchObject({ page: 2, label: 'next', followed: false, title: 'Vers le bureau : 08:33 → 09:58', sel: -1 });
     expect(last().lines[0]).toBe('Le suivant : même trajet, 1 h plus tard');
@@ -316,11 +316,14 @@ describe('M2 : un toucher, le trajet ; un glissement, un autre trajet', () => {
     await until(homeReady);
     await gesture('down', 'down', 'down', 'down', 'tap');
     const places = await until((s) => s.screen === 'places' && s.lines.some((l) => l.startsWith('Bureau   arrivée')));
-    expect(places.lines).toEqual(['Maison   ici', 'Bureau   arrivée 09:00', 'Autre adresse   sur le téléphone', '▲▼ choisir   toucher : trajet   double : retour']);
-    await gesture('down', 'tap');
+    // 1.2 : les lieux sont des favoris, dans l'ordre du téléphone (Bureau, puis Maison).
+    expect(places.lines).toEqual(['Bureau   arrivée 09:00', 'Maison   ici', 'Autre adresse   sur le téléphone', '▲▼ choisir   toucher : trajet   double : retour']);
+    await gesture('tap');
     const s = await until(stepsReady);
     expect(s).toMatchObject({ title: 'Vers le bureau : 07:35 → 09:00', page: 1, followed: true });
     expect(screens().some((x) => x.screen === 'journeys' || x.screen === 'trip')).toBe(false);
+    // Le trajet suivi est rattaché au favori lieu : « ★ garder ce trajet » dira qu'il y est déjà.
+    expect(c.followed?.favoriteId).toBe('fav-bureau');
     c.stop();
   });
 
@@ -331,10 +334,10 @@ describe('M2 : un toucher, le trajet ; un glissement, un autre trajet', () => {
     await until(homeReady);
     await gesture('down', 'down', 'down', 'down', 'tap');
     const places = await until((x) => x.screen === 'places' && x.lines.some((l) => l.startsWith('Veldstraat 1   arrivée')));
-    expect(places.lines).toEqual(['Maison   arrivée 18:23', 'Bureau   12 min à pied', 'Veldstraat 1   arrivée 14:57', 'Autre adresse   sur le téléphone', '▲▼ choisir   toucher : trajet   double : retour']);
+    expect(places.lines).toEqual(['Bureau   12 min à pied', 'Maison   arrivée 18:23', 'Veldstraat 1   arrivée 14:57', 'Autre adresse   sur le téléphone', '▲▼ choisir   toucher : trajet   double : retour']);
     await gesture('down', 'down', 'tap');
     const st = await until(stepsReady);
-    expect(st).toMatchObject({ title: 'Vers Veldstraat 1 : 14:10 → 14:57', page: 1, followed: true, label: 'simple' });
+    expect(st).toMatchObject({ title: 'Vers Veldstraat 1 : 14:10 → 14:57', page: 1, followed: true, label: 'short' });
     expect(st.lines).toContain('14:39   À pied vers l’arrêt du tram (1 min)');
     await gesture('double');
     await settings.update((x) => ({ ...x, recent: [] }));
@@ -347,10 +350,10 @@ describe('M2 : un toucher, le trajet ; un glissement, un autre trajet', () => {
     const { c, gesture, until, last } = await setupController();
     await until(homeReady);
     await gesture('down', 'down', 'down', 'down', 'tap');
-    await until((s) => s.screen === 'places' && s.lines[0] === 'Maison   ici');
-    await gesture('tap');
+    await until((s) => s.screen === 'places' && s.lines[1] === 'Maison   ici');
+    await gesture('down', 'tap');
     expect(await until((s) => s.screen === 'message')).toMatchObject({ title: 'Vers la maison', lines: ['Tu es déjà à la maison.', 'double toucher : retour'] });
-    await gesture('double', 'down', 'down', 'tap');
+    await gesture('double', 'down', 'tap');
     expect(last().lines.at(-1)).toBe('Tape l’adresse dans Quai, sur le téléphone');
     c.stop();
   });
@@ -361,7 +364,7 @@ describe('M2 : un toucher, le trajet ; un glissement, un autre trajet', () => {
     await gesture('tap');
     const s = await until(stepsReady);
     expect(s.title).toBe('Vers Gand-Saint-Pierre : 14:10 → 14:39');
-    expect(s.lines.slice(0, 3)).toEqual(['Le plus simple : direct', '14:10   IC vers Bruges, voie 4   dans 15 min', '14:39   Arrivée à Gand-Saint-Pierre']);
+    expect(s.lines.slice(0, 3)).toEqual(['Le plus court : direct', '14:10   IC vers Bruges, voie 4   dans 15 min', '14:39   Arrivée à Gand-Saint-Pierre']);
     expect(s.lines).toContain('▼ Le suivant : 14:25 → 14:56');
     goTo(at(14, 10, 20));
     await c.refreshCurrent();
@@ -402,7 +405,7 @@ describe('M2 : un toucher, le trajet ; un glissement, un autre trajet', () => {
     expect(home.lines.slice(0, 2)).toEqual(['Vers le bureau   à pied 9 min', 'à pied, arrivée 10:09']);
     await gesture('tap');
     const s = await until(stepsReady);
-    expect(s.lines[0]).toBe('Le plus simple : à pied, 9 min');
+    expect(s.lines[0]).toBe('Le plus court : à pied, 9 min');
     expect(s.lines.slice(1, 3)).toEqual(['10:00   Partir à pied (9 min)   en cours', '10:09   Arrivée au bureau']);
     expect(s.lines.at(-1)).toBe('▲▼ autre trajet   double : retour');
     await gesture('tap');
@@ -736,7 +739,7 @@ describe('état d’arrière-plan : instantané pris au mauvais moment (revue)',
   });
 });
 
-describe('1.1.1 : « Moins de marche » (docs/v1.1/moins-de-marche.md, CA-MW.6, CA-MW.12)', () => {
+describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court » de la 1.2', () => {
   const N = (fr: string) => ({ fr, nl: fr });
   const NB = '\u00a0';
   const walk = (from: string, to: string, dep: number, min: number): Leg => ({ kind: 'walk', from: { name: N(from), lat: 0, lon: 0 }, to: { name: N(to), lat: 0, lon: 0 }, dep, arr: dep + min * 60_000, schedDep: dep, schedArr: dep + min * 60_000, walkMin: min });
@@ -749,7 +752,7 @@ describe('1.1.1 : « Moins de marche » (docs/v1.1/moins-de-marche.md, CA-MW.6, 
   });
   /** CA-MW.6, scène noRT : Maison (S1) vers « Saint-Géry » (50.8470, 4.3480). */
   const proposals = (): Journey[] => [
-    journey('simple', 'simple', `Le plus simple${NB}: direct, à pied 7 + 11${NB}min`, [walk('Ma position', 'Namur', at(7, 35), 7), ride({ dep: at(7, 42), arr: at(8, 46) }), walk('Bruxelles-Central', 'Saint-Géry', at(8, 46), 11)], at(7, 33)),
+    journey('short', 'short', `Le plus court${NB}: direct, à pied 7 + 11${NB}min`, [walk('Ma position', 'Namur', at(7, 35), 7), ride({ dep: at(7, 42), arr: at(8, 46) }), walk('Bruxelles-Central', 'Saint-Géry', at(8, 46), 11)], at(7, 33)),
     journey('lesswalk', 'lesswalk', `Moins de marche${NB}: 1 changement, à pied 7 + 2 + 4${NB}min`, [
       walk('Ma position', 'Namur', at(7, 35), 7),
       ride({ dep: at(7, 42), arr: at(8, 40), to: { name: N('Bruxelles-Nord'), lat: 0, lon: 0 } }),
@@ -773,8 +776,8 @@ describe('1.1.1 : « Moins de marche » (docs/v1.1/moins-de-marche.md, CA-MW.6, 
     const msg = await h.c.showTrip({ title: 'Vers Saint-Géry', from: { type: 'here' }, to, result: { journeys: proposals() }, index: 0 });
     expect(msg).toBe(`Affiché dans les lunettes${NB}: IC 07:42, voie 4.`);
     const p1 = await h.until(stepsReady);
-    expect(p1).toMatchObject({ page: 1, pages: 3, label: 'simple', followed: true, title: 'Vers Saint-Géry : 07:33 → 08:57' });
-    expect(p1.lines[0]).toBe('Le plus simple : direct, à pied 7 + 11 min');
+    expect(p1).toMatchObject({ page: 1, pages: 3, label: 'short', followed: true, title: 'Vers Saint-Géry : 07:33 → 08:57' });
+    expect(p1.lines[0]).toBe('Le plus court : direct, à pied 7 + 11 min');
     expect(p1.lines.at(-2)).toBe('▼ Moins de marche : 07:33 → 08:53');
     fits(p1);
     await h.gesture('down');
@@ -799,13 +802,16 @@ describe('1.1.1 : « Moins de marche » (docs/v1.1/moins-de-marche.md, CA-MW.6, 
     h.c.stop();
   });
 
-  it('CA-MW.12 : la raison la plus longue (« 2 changements, à pied 12 + 13 + 14 min ») tient au pixel, sans « … »', () => {
+  it('CA-MW.12 et CA-3.2 : les raisons les plus longues tiennent au pixel, sans « … »', () => {
     const s = preset11();
-    const [simple, lesswalk] = proposals();
+    const [short, lesswalk] = proposals();
     lesswalk.reason = `Moins de marche${NB}: 2 changements, à pied 12 + 13 + 14${NB}min`;
+    // PRD-1.2 § 1.3 : la plus longue des raisons de la 1.2, 538 px
+    const fewer: Journey = { ...lesswalk, id: 'fewer', label: 'fewer', reason: `Moins de changements${NB}: 1 changement, à pied 12 + 13 + 14${NB}min` };
     const cases: [StepsData, string][] = [
-      [{ journeys: [simple, lesswalk], index: 1, fresh: true }, 'Moins de marche : 2 changements, à pied 12 + 13 + 14 min'],
-      [{ journeys: [simple, lesswalk], index: 0, followedId: 'simple', fresh: true }, 'Le plus simple : direct, à pied 7 + 11 min'],
+      [{ journeys: [short, lesswalk], index: 1, fresh: true }, 'Moins de marche : 2 changements, à pied 12 + 13 + 14 min'],
+      [{ journeys: [short, lesswalk], index: 0, followedId: 'short', fresh: true }, 'Le plus court : direct, à pied 7 + 11 min'],
+      [{ journeys: [short, fewer], index: 1, fresh: true }, 'Moins de changements : 1 changement, à pied 12 + 13 + 14 min'],
     ];
     for (const [d, top] of cases) {
       const v = stepsPage({ title: 'Vers Saint-Géry', label: '' }, d, { now: at(7, 31), settings: s });
@@ -820,23 +826,42 @@ describe('1.1.1 : « Moins de marche » (docs/v1.1/moins-de-marche.md, CA-MW.6, 
   });
 });
 
-describe('S2 : message « Quai 1.1 », GlassesApi', () => {
-  it('CA-S2.2 et CA-M7.1 : « Quai 1.1 » une seule fois après la mise à jour ; T mène à l’accueil', async () => {
-    const a = await setupController({ settings: preset() });
-    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.1' });
-    expect(a.last().lines).toEqual(['Nouveau : tes favoris donnent la réponse.', 'Toucher un favori : le trajet, étape par étape.', 'Sur un trajet, ▼ : un autre trajet.', 'Les adresses se tapent sur le téléphone.', 'toucher : continuer']);
+describe('S2 : message « Quai 1.2 », GlassesApi', () => {
+  it('CA-3.2 (et CA-S2.2, CA-M7.1) : « Quai 1.2 » une seule fois après la mise à jour depuis la 1.0 ; T mène à l’accueil', async () => {
+    const a = await setupController({ settings: preset(), keepSeen: true });
+    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2' });
+    expect(a.last().lines).toEqual(['Nouveau : le trajet le plus court d’abord.', 'Tes lieux sont maintenant dans tes favoris.', 'Sur un trajet, ▼ : un autre trajet.', 'toucher : continuer']);
     await a.gesture('tap');
     expect((await a.until(homeReady)).screen).toBe('home');
     await a.settle();
     expect(a.settings.get().seenVersion).toBe(APP_VERSION);
     a.c.stop();
-    const b = await setupController({ settings: a.settings.get() });
+    const b = await setupController({ settings: a.settings.get(), keepSeen: true });
     expect((await b.until(homeReady)).screen).toBe('home');
-    expect(b.screens().some((s) => s.title === 'Quai 1.1')).toBe(false);
+    expect(b.screens().some((s) => s.title === 'Quai 1.2')).toBe(false);
     b.c.stop();
   });
 
-  it('nouvelle installation : bienvenue, jamais « Quai 1.1 » ; la version vue est écrite', async () => {
+  it('« Quai 1.2 » depuis la 1.1 aussi, une seule fois ; jamais avec une version vue de la 1.2', async () => {
+    const a = await setupController({ settings: preset11(), keepSeen: true });
+    expect(preset11().seenVersion).toBe('1.1.0');
+    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2' });
+    for (const l of [a.last().title, ...a.last().lines]) expect(textWidth(l), l).toBeLessThanOrEqual(WIDTHS.full);
+    await a.gesture('tap');
+    await a.until(homeReady);
+    await a.settle();
+    a.c.stop();
+    const b = await setupController({ settings: a.settings.get(), keepSeen: true });
+    await b.until(homeReady);
+    expect(b.screens().some((s) => s.title === 'Quai 1.2')).toBe(false);
+    b.c.stop();
+    const c = await setupController({ settings: { ...preset11(), seenVersion: '1.2.0' }, keepSeen: true });
+    await c.until(homeReady);
+    expect(c.screens().some((s) => s.title === 'Quai 1.2')).toBe(false);
+    c.c.stop();
+  });
+
+  it('nouvelle installation : bienvenue, jamais « Quai 1.2 » ; la version vue est écrite', async () => {
     const { c, last, gesture, until, settings, settle } = await setupController({ settings: defaults({ onboarded: false }) });
     await settle();
     expect(last()).toMatchObject({ screen: 'message', title: 'Quai' });
@@ -881,7 +906,7 @@ describe('S2 : message « Quai 1.1 », GlassesApi', () => {
     const h = await setupController();
     await h.until(homeReady);
     const s = preset11();
-    const to = { type: 'place' as const, placeId: 'bureau' };
+    const to = { type: 'place' as const, placeId: 'fav-bureau' };
     const old = await h.core.route({ type: 'here' }, to, h.clock.now(), s, { lat: 50.4655, lon: 4.859 });
     // le téléphone envoie à 08:10 le plan calculé à 07:31 (IC de 07:42 parti)
     h.goTo(at(8, 10));
@@ -902,7 +927,7 @@ describe('S2 : message « Quai 1.1 », GlassesApi', () => {
     const h = await setupController({ wrap: empty });
     await h.until(homeReady);
     const s = preset11();
-    const to = { type: 'place' as const, placeId: 'bureau' };
+    const to = { type: 'place' as const, placeId: 'fav-bureau' };
     const old = await h.core.route({ type: 'here' }, to, h.clock.now(), s, { lat: 50.4655, lon: 4.859 });
     expect(old.journeys).toHaveLength(0);
     const plan = await fakeCoreFor(h.clock.now).route({ type: 'here' }, to, h.clock.now(), s, { lat: 50.4655, lon: 4.859 });
@@ -917,8 +942,8 @@ describe('S2 : message « Quai 1.1 », GlassesApi', () => {
   it('showTrip : trajet à pied, message « à pied »', async () => {
     const h = await setupController({ pos: { lat: 50.848, lon: 4.352 }, now: at(10, 0) });
     await h.until(homeReady);
-    const result = await h.core.route({ type: 'here' }, { type: 'place', placeId: 'bureau' }, h.clock.now(), preset11(), { lat: 50.848, lon: 4.352 });
-    expect(await h.c.showTrip({ title: 'Vers le bureau', from: { type: 'here' }, to: { type: 'place', placeId: 'bureau' }, result, index: 0 })).toBe('Affiché dans les lunettes : à pied, 9 min.');
+    const result = await h.core.route({ type: 'here' }, { type: 'place', placeId: 'fav-bureau' }, h.clock.now(), preset11(), { lat: 50.848, lon: 4.352 });
+    expect(await h.c.showTrip({ title: 'Vers le bureau', from: { type: 'here' }, to: { type: 'place', placeId: 'fav-bureau' }, result, index: 0 })).toBe('Affiché dans les lunettes : à pied, 9 min.');
     expect((await h.until(stepsReady)).followed).toBe(true);
     h.c.stop();
   });
@@ -952,5 +977,151 @@ describe('trajet suivi : règles de fin (M6.3)', () => {
     const t = parseTrip({ v: 1, journey: j(1, 2, 0), title: 'Vers le bureau', leaveAt0: 0, startedAt: 0 });
     expect(t).toMatchObject({ title: 'Vers le bureau', index: 0, key: 'trip-x' });
     expect(t?.journeys).toHaveLength(1);
+  });
+});
+
+describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-2.2)', () => {
+  const NB = ' ';
+  const s3 = { lat: 50.8454, lon: 4.3571 };
+  /** S3 : jusqu'à l'aide à l'arrivée de Gand-Saint-Pierre (« Dans le train » à 14:10, arrivée à 14:36). */
+  const toArrival = async (h: Awaited<ReturnType<typeof setupController>>) => {
+    await h.until(stepsReady);
+    h.goTo(at(14, 10, 20));
+    await h.c.refreshCurrent();
+    h.goTo(at(14, 36, 20));
+    await h.c.refreshCurrent();
+    expect(h.last()).toMatchObject({ screen: 'arrival', title: 'Arrivée à Gand-Saint-Pierre' });
+  };
+  const gandTrip = () => {
+    const f = preset11().favorites.find((x) => x.id === 'fav-gand')!;
+    if (f.kind !== 'trip' || f.to.type !== 'area') throw new Error('fav-gand');
+    return { ...f, to: f.to };
+  };
+
+  it('CA-2.2 : S1, accueil de CA-M1.1 avec le lieu « Bureau » ; « Aller à… » : « Bureau   arrivée 08:58 », « Maison   ici » ; « Autres favoris » : « Vers la maison »', async () => {
+    expect(preset11().favorites.map((f) => [f.id, f.kind])).toEqual([['fav-bureau', 'place'], ['fav-gdn', 'stop'], ['fav-gand', 'trip'], ['fav-namur', 'stop'], ['fav-dl-nord', 'stop'], ['fav-maison', 'place']]);
+    const { c, gesture, until, last } = await setupController({ flags: { noRt: true } });
+    const home = await until(homeReady);
+    expect(home.order?.[0]).toBe('fav-bureau');
+    expect(home.lines.slice(1, 3)).toEqual(['Vers le bureau   partir dans 2 min', 'IC à ~07:42, voie 4, direct, arrivée 08:58']);
+    await gesture('down', 'down', 'down', 'down', 'tap');
+    const places = await until((x) => x.screen === 'places' && !x.lines.some((l) => /   …$/.test(l)));
+    expect(places.lines).toEqual(['Bureau   arrivée 08:58', 'Maison   ici', 'Autre adresse   sur le téléphone', '▲▼ choisir   toucher : trajet   double : retour']);
+    // « Autres favoris » : le lieu « Maison » comme le trajet « Ma position → maison » de la 1.1, en fin de liste
+    await gesture('double', 'up', 'tap');
+    const list = await until(listReady);
+    expect(list.order).toEqual(['fav-gdn', 'fav-gand', 'fav-dl-nord', 'fav-maison']);
+    expect(list.lines).toContain('Vers la maison   tu y es');
+    for (let i = 0; i < 3; i++) c.onGesture('down');
+    await gesture('tap');
+    expect(last()).toMatchObject({ screen: 'message', title: 'Vers la maison', lines: ['Tu es déjà à la maison.', 'double toucher : retour'] });
+    c.stop();
+  });
+
+  it('« Aller à… », T sur le lieu du trajet en cours : ce trajet, pas un autre', async () => {
+    const { c, gesture, until, goTo, last } = await setupController();
+    await until(homeReady);
+    await gesture('tap');
+    await until(stepsReady);
+    goTo(at(7, 36));
+    await c.refreshCurrent();
+    const id = c.followed?.journey.id;
+    await gesture('double');
+    const home = await until(homeReady);
+    expect(home.lines[0]).toMatch(/^En cours : vers le bureau/);
+    await gesture('down', 'down', 'down', 'down', 'down', 'tap');
+    await until((x) => x.screen === 'places' && x.lines[0].startsWith('Bureau'));
+    await gesture('tap');
+    expect(last()).toMatchObject({ screen: 'steps', followed: true, title: 'Vers le bureau : 07:35 → 09:00' });
+    expect(c.followed?.journey.id).toBe(id);
+    c.stop();
+  });
+
+  it('« ★ garder ce trajet » : parti de « Ma position », un lieu (l’arrêt d’arrivée) ; une seconde fois, « Déjà dans les favoris »', async () => {
+    const h = await setupController({ scenario: 's3' });
+    await h.until(homeReady);
+    const gand = gandTrip();
+    const result = await h.core.route({ type: 'here' }, gand.to, h.clock.now(), h.settings.get(), s3);
+    await h.c.showTrip({ title: 'Vers Gand-Saint-Pierre', from: { type: 'here' }, to: gand.to, result, index: 0 });
+    await toArrival(h);
+    await h.gesture('tap');
+    expect(h.last().lines.at(-1)).toBe('★ Trajet ajouté aux favoris');
+    expect(h.settings.get().favorites).toHaveLength(7);
+    expect(h.settings.get().favorites.at(-1)).toMatchObject({ kind: 'place', label: 'Gand-Saint-Pierre', src: 'stop', areaId: gand.to.areaId, address: 'Près de Gand-Saint-Pierre', propose: 'never' });
+    expect(h.settings.get().favorites.some((f) => f.kind === 'trip' && f.from.type === 'here')).toBe(false);
+    await h.gesture('tap');
+    expect(h.last().lines.at(-1)).toBe('★ Déjà dans les favoris');
+    expect(h.settings.get().favorites).toHaveLength(7);
+    h.c.stop();
+  });
+
+  it('« ★ garder ce trajet » : de gare à gare, hors favoris, un trajet fixe ; le trajet d’un favori : « Déjà dans les favoris »', async () => {
+    const gand = gandTrip();
+    const base = preset11();
+    const h = await setupController({ scenario: 's3', settings: { ...base, favorites: base.favorites.filter((f) => f.id !== 'fav-gand') } });
+    await h.until(homeReady);
+    const result = await h.core.route(gand.from, gand.to, h.clock.now(), h.settings.get(), s3);
+    await h.c.showTrip({ title: 'Vers Gand-Saint-Pierre', from: gand.from, to: gand.to, result, index: 0 });
+    await toArrival(h);
+    await h.gesture('tap');
+    expect(h.last().lines.at(-1)).toBe('★ Trajet ajouté aux favoris');
+    expect(h.settings.get().favorites.at(-1)).toMatchObject({ kind: 'trip', from: { type: 'area', areaId: gand.from.type === 'area' ? gand.from.areaId : '' }, to: { type: 'area', areaId: gand.to.areaId }, propose: 'never' });
+    await h.gesture('tap');
+    expect(h.last().lines.at(-1)).toBe('★ Déjà dans les favoris');
+    expect(h.settings.get().favorites).toHaveLength(6);
+    h.c.stop();
+    // le favori « Vers Gand-Saint-Pierre » ouvert depuis l'accueil : rien n'est ajouté
+    const f = await setupController({ scenario: 's3' });
+    await f.until(homeReady);
+    await f.gesture('tap');
+    await toArrival(f);
+    await f.gesture('tap');
+    expect(f.last().lines.at(-1)).toBe('★ Déjà dans les favoris');
+    expect(f.settings.get().favorites).toHaveLength(6);
+    f.c.stop();
+  });
+
+  it('quai.trip gardé par la 1.1 (« simple », « fast ») : étiquettes relues par labelOf, la raison suit', () => {
+    const leg = { kind: 'ride' as const, from: { name: { fr: 'A', nl: 'A' }, lat: 0, lon: 0 }, to: { name: { fr: 'B', nl: 'B' }, lat: 0, lon: 0 }, dep: 1, arr: 2, schedDep: 1, schedArr: 2 };
+    const j = (id: string, label: string, reason: string) => ({ id, label, reason, legs: [leg], dep: 1, arr: 2, leaveAt: 0, transfers: 0, rt: false, alerts: [] });
+    const t = parseTrip({
+      v: 1, title: 'Vers le bureau', leaveAt0: 0, startedAt: 0, index: 0, key: 'k',
+      journey: j('a', 'simple', `Le plus simple${NB}: direct`),
+      journeys: [j('a', 'simple', `Le plus simple${NB}: direct`), j('b', 'fast', `Le plus rapide${NB}: 1 changement, à pied 19 + 3${NB}min`), j('c', 'next', `Le suivant${NB}: même trajet, 1${NB}h plus tard`), j('d', 'autre', 'Autre')],
+    })!;
+    expect([t.journey.label, t.journey.reason]).toEqual(['short', `Le plus court${NB}: direct`]);
+    expect(t.journeys.map((x) => [x.label, x.reason])).toEqual([
+      ['short', `Le plus court${NB}: direct`],
+      ['earlier', `Plus tôt${NB}: 1 changement, à pied 19 + 3${NB}min`],
+      ['next', `Le suivant${NB}: même trajet, 1${NB}h plus tard`],
+      [undefined, 'Autre'],
+    ]);
+  });
+
+  it('trajet en cours écrit par la 1.1 : repris après la mise à jour, avec « Le plus court »', async () => {
+    // sans l'alerte « Partir maintenant », la ligne du haut montre la raison
+    const p = preset11();
+    const settings = { ...p, alerts: { ...p.alerts, leave: false } };
+    const a = await setupController({ flags: { noRt: true }, settings });
+    await a.until(homeReady);
+    await a.gesture('tap');
+    await a.until(stepsReady);
+    a.goTo(at(7, 36));
+    await a.c.refreshCurrent();
+    a.c.stop();
+    await a.settle();
+    const saved = JSON.parse((await a.kv.get(TRIP_KEY))!) as { journey: Journey; journeys: Journey[] };
+    expect(saved.journey.label).toBe('short');
+    // le même trajet, tel que la 1.1 l'a écrit
+    const old = (x: Journey) => ({ ...x, label: x.label === 'short' ? 'simple' : x.label, reason: x.reason?.replace(/^Le plus court/, 'Le plus simple') });
+    await a.kv.set(TRIP_KEY, JSON.stringify({ ...saved, journey: old(saved.journey), journeys: saved.journeys.map(old) }));
+    const b = await setupController({ kv: a.kv, now: at(7, 36), flags: { noRt: true }, settings });
+    const st = await b.until(stepsReady);
+    expect(st).toMatchObject({ page: 1, label: 'short', followed: true });
+    expect(st.lines[0]).toBe('Le plus court : direct, à pied 7 + 12 min');
+    expect(b.c.followed?.journeys.map((j) => j.label)).toEqual(['short', 'next', 'next']);
+    expect(st.lines).toContain('▼ Le suivant : 08:33 → 09:58');
+    expect(st.lines.join('\n')).not.toMatch(/simple|undefined/);
+    b.c.stop();
   });
 });

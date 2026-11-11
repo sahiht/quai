@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { getAdvW } from '@evenrealities/pretext';
 import { frenchSpaces, glyphSafe, hasGlyph, missingGlyphs, padLeftTo, textWidth, truncate } from '../../src/glasses/font';
 import { HINTS, NOTE_OFFLINE, NOTE_PLANNED, NOTE_RT_DOWN } from '../../src/glasses/format';
+import { LABEL_TEXT } from '../../src/core/api';
 import { emptyFavoritesLines, newsLines } from '../../src/glasses/views';
 import { CURSOR } from '../../src/glasses/layout';
 
@@ -15,6 +16,10 @@ describe('police des lunettes', () => {
       CURSOR,
       ...newsLines(),
       ...emptyFavoritesLines(),
+      ...emptyFavoritesLines(true),
+      ...Object.values(LABEL_TEXT),
+      '★ Trajet ajouté aux favoris',
+      '★ Déjà dans les favoris',
       '★ Ajouté aux favoris',
       '★ Retiré. Toucher encore : annuler',
       '★ Favori rétabli',

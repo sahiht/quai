@@ -1,2 +1,0 @@
-« Moins de marche » est proposé quand un trajet fait nettement moins marcher, et le trajet le plus simple est plus direct, par exemple de Waterloo vers Madou.
-L’accès d’un lieu nomme d’abord l’arrêt le plus proche, puis la gare quand elle est utile.

@@ -38,11 +38,11 @@ describe('petits réseaux', () => {
     const { core } = miniEnv(m, '2026-11-10T07:05');
     const r = await core.route(at({ lat: 50.8003, lon: 4.3 }), at({ lat: 50.8003, lon: 4.4 }), atTime('2026-11-10T07:05'), SETTINGS);
     expect(summary(r)).toEqual([
-      'simple: marche 1 | 07:15 1 Alpha → Beta 07:35 | marche 1',
+      'short: marche 1 | 07:15 1 Alpha → Beta 07:35 | marche 1',
       'next: marche 1 | 07:30 1 Alpha → Beta 07:50 | marche 1',
       'next: marche 1 | 07:45 1 Alpha → Beta 08:05 | marche 1',
     ]);
-    expect(plain(r.journeys[0].reason)).toBe('Le plus simple : direct, à pied 1 + 1 min');
+    expect(plain(r.journeys[0].reason)).toBe('Le plus court : direct, à pied 1 + 1 min');
     expect(plain(r.journeys[1].reason)).toBe('Le suivant : même trajet, 15 min plus tard');
     const ride = r.journeys[0].legs[1];
     expect(ride).toMatchObject({ op: 'tec', mode: 'bus', line: '1', tripId: 'L1-0715', fromStop: 'A1', toStop: 'B1' });
@@ -71,7 +71,7 @@ describe('petits réseaux', () => {
     const { core } = miniEnv(m, '2026-11-10T07:05');
     const r = await core.route(at({ lat: 50.8003, lon: 4.3 }), at({ lat: 50.8503, lon: 4.4005 }), atTime('2026-11-10T07:05'), SETTINGS);
     expect(legsOf(r.journeys[0])).toBe('marche 1 | 07:20 1 Alpha → Beta 07:40 | marche 3 | 07:50 T7 Gamma → Epsilon 08:05 | marche 1');
-    expect(plain(r.journeys[0].reason)).toBe('Le plus simple : 1 changement, à pied 1 + 3 + 1 min');
+    expect(plain(r.journeys[0].reason)).toBe('Le plus court : 1 changement, à pied 1 + 3 + 1 min');
     expect(r.journeys[0].legs[3]).toMatchObject({ op: 'stib', fromStop: '9001', toStop: '9002' });
     expect(r.journeys[0].legs[3].tripId).toBeUndefined();
   });
@@ -108,7 +108,7 @@ describe('petits réseaux', () => {
     const r = await core.route(at({ lat: 50.7003, lon: 4.2 }), at({ lat: 50.9503, lon: 4.5 }), atTime('2026-11-10T07:20'), SETTINGS);
     expect(legsOf(r.journeys[0])).toBe('marche 1 | 07:30 1 Alpha → Pi Gare 07:50 | marche 2 | 08:00 IC Pi → Qu 08:30 | marche 2 | 08:40 T8 Qu Gare → Omega 08:52 | marche 1');
     expect(r.journeys[0].transfers).toBe(2);
-    expect(plain(r.journeys[0].reason)).toBe('Le plus simple : 2 changements, 6 min à pied');
+    expect(plain(r.journeys[0].reason)).toBe('Le plus court : 2 changements, 6 min à pied');
   });
 
   it('M5c : trois trains, deux correspondances (route et trains)', async () => {
@@ -127,8 +127,8 @@ describe('petits réseaux', () => {
     };
     const { core } = miniEnv(m, '2026-11-10T07:30');
     const r = await core.route(station('8000001', 'Pi', 50.6, 4.0), station('8000004', 'Ta', 50.9, 4.3), atTime('2026-11-10T07:30'), SETTINGS);
-    expect(summary(r)).toEqual(['simple: 08:00 IC Pi → Qu 08:20 | 08:30 IC Qu → Ro 08:50 | 09:00 S1 Ro → Ta 09:20']);
-    expect(plain(r.journeys[0].reason)).toBe('Le plus simple : 2 changements');
+    expect(summary(r)).toEqual(['short: 08:00 IC Pi → Qu 08:20 | 08:30 IC Qu → Ro 08:50 | 09:00 S1 Ro → Ta 09:20']);
+    expect(plain(r.journeys[0].reason)).toBe('Le plus court : 2 changements');
     const tr = await core.trains('sncb:8000001', 'sncb:8000004', atTime('2026-11-10T07:30'));
     expect(tr.map((j) => j.legs.map((l) => `${hhmm(l.dep)} ${l.cat}`).join(' + '))).toEqual(['08:00 IC + 08:30 IC + 09:00 S1']);
     expect(tr[0].transfers).toBe(2);
@@ -185,7 +185,7 @@ describe('petits réseaux', () => {
   it('attente en correspondance : 60 min acceptées, 61 min refusées', async () => {
     const ok = miniEnv(waits('09:00'), '2026-11-10T07:30');
     const r = await ok.core.route(station('8000001', 'Pi', 50.6, 4.0), station('8000003', 'Ro', 50.8, 4.2), atTime('2026-11-10T07:30'), SETTINGS);
-    expect(summary(r)).toEqual(['simple: 07:40 IC Pi → Qu 08:00 | 09:00 IC Qu → Ro 09:30']);
+    expect(summary(r)).toEqual(['short: 07:40 IC Pi → Qu 08:00 | 09:00 IC Qu → Ro 09:30']);
     const ko = miniEnv(waits('09:01'), '2026-11-10T07:30');
     const r2 = await ko.core.route(station('8000001', 'Pi', 50.6, 4.0), station('8000003', 'Ro', 50.8, 4.2), atTime('2026-11-10T07:30'), SETTINGS);
     expect(r2).toMatchObject({ journeys: [], empty: 'noTrip' });
@@ -206,7 +206,7 @@ describe('petits réseaux', () => {
     };
     const { core } = miniEnv(m, '2026-11-10T08:00');
     const r = await core.route(station('8000001', 'Pi', 50.6, 4.0), station('8000003', 'Ro', 50.8, 4.2), atTime('2026-11-10T08:00'), SETTINGS);
-    expect(summary(r)).toEqual(['simple: 08:25 IC Pi → Ro 09:24']);
+    expect(summary(r)).toEqual(['short: 08:25 IC Pi → Ro 09:24']);
     const tr = await core.trains('sncb:8000001', 'sncb:8000003', atTime('2026-11-10T08:00'));
     expect(tr.map((j) => j.legs.length)).toEqual([1]);
   });
@@ -256,7 +256,7 @@ describe('petits réseaux', () => {
     const to = station('8000002', 'Qu', 50.85, 4.35);
     const a = miniEnv(m, '2026-11-10T09:10', forbid);
     const r = await a.core.route(from, to, atTime('2026-11-10T09:10'), SETTINGS);
-    expect(summary(r)[0]).toBe('simple: 09:27 IC Pi → Qu 10:35');
+    expect(summary(r)[0]).toBe('short: 09:27 IC Pi → Qu 10:35');
     expect(r.journeys.some((j) => j.legs.some((l) => l.cat === 'NJ'))).toBe(false);
     expect((await a.core.trains('sncb:8000001', 'sncb:8000002', atTime('2026-11-10T09:10'))).map((j) => j.legs[0].cat)).toEqual(['IC']);
     // fichier 1.0 (aucun -1) : tout est permis, le Nightjet part le premier
@@ -292,7 +292,7 @@ describe('petits réseaux', () => {
       delete (files['meta.json'] as Meta).lines;
     });
     const r = await env.core.route(at({ lat: 50.703, lon: 4.3 }), at({ lat: 50.903, lon: 4.5 }), atTime('2026-11-10T07:40'), SETTINGS);
-    expect(summary(r)).toEqual(['simple: marche 6 | 08:00 IC Pi → Qu 08:30 | marche 6', 'next: marche 6 | 08:30 IC Pi → Qu 09:00 | marche 6']);
+    expect(summary(r)).toEqual(['short: marche 6 | 08:00 IC Pi → Qu 08:30 | marche 6', 'next: marche 6 | 08:30 IC Pi → Qu 09:00 | marche 6']);
     expect(plain(r.journeys[1].reason)).toBe('Le suivant : même trajet, 30 min plus tard');
     expect(env.server.count((u) => u.includes('/lines/'))).toBe(0);
   });

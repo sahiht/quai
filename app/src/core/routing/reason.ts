@@ -1,19 +1,19 @@
 /**
- * Raisons des propositions (PRD § 4.3 et § 6.1 L3), une seule source pour le cœur, le faux cœur et les tests.
- * Fonctions pures : elles ne lisent que les étapes et les heures du trajet.
+ * Raisons des propositions (PRD-1.2 § 1.3, règles de la 1.1 : PRD § 6.1 L3), une seule source pour le cœur, le faux
+ * cœur et les tests. Fonctions pures : elles ne lisent que les étapes et les heures du trajet.
  *
  * - Espace insécable (U+00A0) devant « : » et entre un nombre et son unité (« 12 min », « 1 h »).
  * - Changements : « direct », « 1 changement », « {n} changements » (changements de véhicule).
  * - Marches : chacune d'au moins 1 min, dans l'ordre (« à pied 7 + 12 min ») ; au-delà de 3 marches : « {total} min à
- *   pied ». Une raison tient sur une ligne des lunettes (542 px) : au plus 55 caractères avec trois marches de deux
- *   chiffres (« Le plus simple : 2 changements, à pied 12 + 14 + 13 min », 474 px) ; au-delà de REASON_MAX
- *   caractères (cas extrême), forme « {total} min à pied », puis coupure avec « … ».
- * - « Moins de marche » (moins-de-marche.md § 3) : mêmes règles que « Le plus simple » (« Moins de marche : 1
- *   changement, à pied 7 + 2 + 4 min » ; le plus long, trois marches de deux chiffres, 497 px).
+ *   pied ». Une raison tient sur une ligne des lunettes (542 px) : la plus longue, « Moins de changements : 1
+ *   changement, à pied 12 + 13 + 14 min », fait 60 caractères et 538 px ; au-delà de REASON_MAX caractères (cas
+ *   extrême), forme « {total} min à pied », puis coupure avec « … ».
+ * - Le plus court, Plus tôt, Moins de marche : « {étiquette} : {changements}, à pied {a} + {b} min » ; marche seule :
+ *   « Le plus court : à pied, {n} min ». Sans changement : « Sans changement : à pied {a} + {b} min » (sans marche :
+ *   « arrivée {HH:MM} ») ; Moins de changements : « Moins de changements : {changements}, à pied {a} + {b} min ».
  * - « Le suivant » : écart entre les départs prévus du premier véhicule du trajet et de `ref` (la proposition
  *   précédente de même structure), comme dans l'horaire : « 15 min plus tard », « 1 h plus tard ».
- * - « Le plus rapide » : écart des arrivées avec `ref` (« Le plus simple »).
- * - « départ {HH:MM} » : heure de départ du trajet (marche comprise), comme le titre des étapes.
+ * - « départ {HH:MM} » (Plus tard) : heure de départ du trajet (marche comprise), comme le titre des étapes.
  */
 import type { Journey, JourneyLabel, Leg } from '../api';
 import { LABEL_TEXT } from '../api';
@@ -21,8 +21,8 @@ import { hhmm } from '../util';
 
 /** Espace insécable. */
 export const NB = ' ';
-/** Longueur maximale d'une raison (une ligne des lunettes, 542 px : 56 caractères de ce texte tiennent). */
-export const REASON_MAX = 56;
+/** Longueur maximale d'une raison (une ligne des lunettes, 542 px : 60 caractères de ces textes tiennent). */
+export const REASON_MAX = 60;
 
 type Trip = Pick<Journey, 'legs' | 'dep' | 'arr' | 'transfers'>;
 
@@ -65,34 +65,35 @@ function firstRideDep(j: Trip): number {
 }
 
 /**
- * Raison affichée d'une proposition (PRD § 6.1 L3), REASON_MAX caractères au plus.
- * `ref` : « Le plus simple » pour « Le plus rapide » ; trajet précédent de même structure pour « Le suivant ».
+ * Raison affichée d'une proposition (PRD-1.2 § 1.3), REASON_MAX caractères au plus.
+ * `ref` : trajet précédent de même structure pour « Le suivant ».
  */
 export function reasonText(label: JourneyLabel, j: Trip, ref?: Trip): string {
-  const head = `${LABEL_TEXT[label]}${NB}: `;
+  const head = `${LABEL_TEXT[label]}${NB}:`;
   const rides = j.legs.filter(isRide).length;
   const walks = walksOf(j);
   const walkTotal = walks.reduce((s, m) => s + m, 0) || Math.max(1, minutes(j.arr - j.dep));
   const ch = changesText(j.transfers);
+  /** `{début}{sép}à pied {a} + {b} min` (forme « {total} min à pied » si trop long) ; sans marche : `{début}`. */
+  const withWalks = (start: string, sep: string) => {
+    if (!walks.length) return cap(start);
+    const all = `${start}${sep}${walksText(walks)}`;
+    return cap(all.length <= REASON_MAX ? all : `${start}${sep}${walksText(walks, true)}`);
+  };
   switch (label) {
-    case 'simple':
-    case 'lesswalk': {
-      if (!rides) return cap(`${head}à pied, ${walkTotal}${NB}min`);
-      if (!walks.length) return cap(`${head}${ch}`);
-      const listed = `${head}${ch}, ${walksText(walks)}`;
-      return cap(listed.length <= REASON_MAX ? listed : `${head}${ch}, ${walksText(walks, true)}`);
-    }
-    case 'fast':
-      return cap(`${head}${Math.max(1, minutes((ref ?? j).arr - j.arr))}${NB}min plus tôt, ${ch}`);
+    case 'short':
+      return rides ? withWalks(`${head} ${ch}`, ', ') : cap(`${head} à pied, ${walkTotal}${NB}min`);
     case 'earlier':
-    case 'later':
-      return cap(`${head}${ch}, départ ${hhmm(j.dep)}`);
-    case 'none':
+    case 'lesswalk':
     case 'fewer':
-      return cap(`${head}arrivée ${hhmm(j.arr)}`);
+      return withWalks(`${head} ${ch}`, ', ');
+    case 'none':
+      return walks.length ? withWalks(head, ' ') : cap(`${head} arrivée ${hhmm(j.arr)}`);
+    case 'later':
+      return cap(`${head} ${ch}, départ ${hhmm(j.dep)}`);
     case 'walk':
-      return cap(`${head}${walkTotal}${NB}min, arrivée ${hhmm(j.arr)}`);
+      return cap(`${head} ${walkTotal}${NB}min, arrivée ${hhmm(j.arr)}`);
     case 'next':
-      return cap(`${head}même trajet, ${laterText(ref ? (firstRideDep(j) - firstRideDep(ref)) / 60_000 : 0)}`);
+      return cap(`${head} même trajet, ${laterText(ref ? (firstRideDep(j) - firstRideDep(ref)) / 60_000 : 0)}`);
   }
 }

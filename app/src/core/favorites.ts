@@ -19,6 +19,7 @@ import type {
   Endpoint,
   Favorite,
   FavoriteAnswer,
+  FavoritePlace,
   FavoriteRank,
   FavoriteStop,
   FavoriteTrip,
@@ -33,8 +34,8 @@ import type {
 import { QuaiError } from './errors';
 import { reasonText } from './routing/reason';
 import { slotOf, tripLabel } from './suggest';
-import { vers } from './text';
-import { distanceM, walkMinutes } from './util';
+import { placeTitle, shortAddress, vers } from './text';
+import { displayName, distanceM, placeOf, placesOf, walkMinutes } from './util';
 
 /** Règle 1 (tout près) et « tu y es ». */
 export const NEAR_M = 300;
@@ -49,19 +50,37 @@ export const AT_STATION_M = 100;
 
 const HERE_NAMES = { fr: 'Ma position', nl: 'Mijn positie' };
 
+/** 1.2 : placesOf (lieux dans l'ordre) et placeOf (lieu d'un Endpoint « place ») viennent de util.ts. */
+export { placeOf, placesOf };
+
+/** 1.2 : un lieu se comporte comme le trajet « Ma position → lieu » de la 1.1 (même identifiant, même créneau). */
+export function asTrip(f: FavoriteTrip | FavoritePlace): FavoriteTrip {
+  return f.kind === 'trip' ? f : { kind: 'trip', id: f.id, from: { type: 'here' }, to: { type: 'place', placeId: f.id }, propose: f.propose };
+}
+
 /** Position d'une extrémité fixe (zone, lieu, adresse) ; null pour « Ma position » ou un lieu disparu. */
 export function endpointPoint(e: Endpoint, settings: Settings): LatLon | null {
   if (e.type === 'area' || e.type === 'address') return { lat: e.lat, lon: e.lon };
   if (e.type === 'place') {
-    const p = settings.places.find((x) => x.id === e.placeId);
+    const p = placeOf(settings, e.placeId);
     return p ? { lat: p.lat, lon: p.lon } : null;
   }
   return null;
 }
 
-/** Titre d'un trajet favori : « Vers le bureau », « Vers Gand-Saint-Pierre », « Vers Veldstraat 1 ». */
-export function favoriteTitle(f: FavoriteTrip, settings: Settings): string {
-  return vers(tripLabel(f, settings));
+/**
+ * Titre d'un trajet favori, d'un lieu ou d'une destination : « Vers le bureau », « Vers la maison »,
+ * « Vers l’école », « Vers Gand-Saint-Pierre », « Vers Veldstraat 1 » (PRD-1.2 § 2.1).
+ */
+export function favoriteTitle(x: FavoriteTrip | FavoritePlace | Endpoint, settings: Settings): string {
+  if ('kind' in x) return x.kind === 'place' ? placeTitle(x.label) : vers(tripLabel(x, settings));
+  if (x.type === 'place') {
+    const p = placeOf(settings, x.placeId);
+    return p ? placeTitle(p.label) : vers('');
+  }
+  if (x.type === 'area') return vers(displayName(x.name, settings.lang));
+  if (x.type === 'address') return vers(shortAddress(x.label));
+  return vers('ma position');
 }
 
 /** Heure qui compte dans une réponse : départ conseillé du trajet 1, ou premier départ de l'arrêt (non supprimé). */
@@ -98,9 +117,10 @@ export function orderFavorites(here: LatLon | null, settings: Settings, now: num
   const slot = slotOf(now);
   const mine = settings.display.favOrder === 'mine';
   const items = settings.favorites.map((f, i) => {
-    const fixed = f.kind === 'stop' ? { lat: f.lat, lon: f.lon } : endpointPoint(f.from, settings);
+    // un lieu : le trajet « Ma position → lieu » (aucun départ fixe)
+    const fixed = f.kind === 'stop' ? { lat: f.lat, lon: f.lon } : f.kind === 'trip' ? endpointPoint(f.from, settings) : null;
     const d = here && fixed ? distanceM(here, fixed) : undefined;
-    const dest = f.kind === 'trip' ? (f.to.type === 'here' ? null : endpointPoint(f.to, settings)) : null;
+    const dest = f.kind === 'place' ? { lat: f.lat, lon: f.lon } : f.kind === 'trip' && f.to.type !== 'here' ? endpointPoint(f.to, settings) : null;
     const atDest = !!here && !!dest && distanceM(here, dest) <= NEAR_M;
     let rule: FavoriteRank['rule'] = 4;
     let sub = 0;
@@ -108,7 +128,7 @@ export function orderFavorites(here: LatLon | null, settings: Settings, now: num
     else if (mine) rule = 4;
     else if (d !== undefined && d <= NEAR_M) rule = 1;
     else if (slot && f.propose === slot) rule = 2;
-    else if (here && f.kind === 'trip' && f.from.type === 'here') rule = 3;
+    else if (here && (f.kind === 'place' || (f.kind === 'trip' && f.from.type === 'here'))) rule = 3;
     else if (d !== undefined && d <= USABLE_M) {
       rule = 3;
       sub = 1;
@@ -198,12 +218,10 @@ export const REPLAN_MS = 5 * 60_000;
 export const REPLAN_MOVE_M = 100;
 const PLANS_MAX = 50;
 
-/** Proposition de référence d'une raison : « Le plus simple » pour « Le plus rapide », la précédente de même
- *  structure pour « Le suivant ». */
+/** Proposition de référence d'une raison : pour « Le suivant », la précédente de même structure. */
 function refFor(label: JourneyLabel | undefined, list: readonly Journey[], i: number): Journey | undefined {
-  if (label === 'fast') return list[0];
   if (label !== 'next') return undefined;
-  for (let k = i - 1; k >= 0; k--) if (list[k].label === 'next' || list[k].label === 'simple') return list[k];
+  for (let k = i - 1; k >= 0; k--) if (list[k].label === 'next' || list[k].label === 'short') return list[k];
   return list[0];
 }
 
@@ -354,7 +372,7 @@ async function tripAnswer(fav: FavoriteTrip, here: LatLon | null, settings: Sett
   return out;
 }
 
-/** Réponse d'un favori (PRD M1.5). */
+/** Réponse d'un favori (PRD M1.5) ; un lieu répond comme le trajet « Ma position → lieu » (kind 'trip'). */
 export function answerFavorite(fav: Favorite, here: LatLon | null, settings: Settings, env: AnswerEnv): Promise<FavoriteAnswer> {
-  return fav.kind === 'stop' ? stopAnswer(fav, settings, env) : tripAnswer(fav, here, settings, env);
+  return fav.kind === 'stop' ? stopAnswer(fav, settings, env) : tripAnswer(asTrip(fav), here, settings, env);
 }

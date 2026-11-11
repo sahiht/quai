@@ -59,12 +59,12 @@ describe('suggest', () => {
 
   it('soir : favori « soir » ; sans libellé, le lieu en minuscules ; sans position, pas de trajet « ici »', async () => {
     const { core, preset } = makeEnv({ now: '2026-11-10T16:00', scene: 'noRT' });
+    // 1.2 : deux lieux « Maison » (Namur, Bruxelles), proposés le soir : des trajets « Ma position → lieu »
     const evening: Settings = {
       ...preset,
-      places: [...preset.places, { id: 'maison-bxl', label: 'Maison', lat: 50.8483, lon: 4.3497 }],
       favorites: [
-        { kind: 'trip', id: 'fav-namur', from: { type: 'here' }, to: { type: 'place', placeId: 'maison' }, propose: 'evening' },
-        { kind: 'trip', id: 'fav-retour', from: { type: 'here' }, to: { type: 'place', placeId: 'maison-bxl' }, propose: 'evening' },
+        { kind: 'place', id: 'fav-namur', label: 'Maison', lat: 50.4655, lon: 4.859, propose: 'evening' },
+        { kind: 'place', id: 'fav-retour', label: 'Maison', lat: 50.8483, lon: 4.3497, propose: 'evening' },
         { kind: 'stop', id: 'fav-dl', areaId: 'delijn:308611', op: 'delijn', name: { fr: 'Bruxelles-Nord', nl: 'Brussel Noordstation', l: 'nl' }, lat: 50.86183, lon: 4.35906, propose: 'evening' },
       ],
     };

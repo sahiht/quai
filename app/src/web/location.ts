@@ -1,6 +1,7 @@
 /**
- * Quai Web : position du navigateur (navigator.geolocation, en https) ou arrêt choisi à la main quand
- * la position est refusée, indisponible ou trop imprécise. L'arrêt choisi est gardé dans ce navigateur.
+ * Quai Web : position du navigateur (navigator.geolocation, en https) ou endroit choisi à la main (adresse, lieu,
+ * gare ou arrêt) quand la position est refusée, indisponible ou trop imprécise. L'endroit choisi est gardé dans ce
+ * navigateur.
  * Ne lève jamais ; l'état sert aux messages (rubrique « Position »).
  */
 import type { Fix, LocationPort } from '../platform/types';
@@ -26,7 +27,7 @@ export interface WebLocation extends LocationPort {
   state(): WebLocationState;
   /** Prévenu à chaque changement d'état (et quand la permission passe à « accordée »). */
   subscribe(cb: (s: WebLocationState) => void): () => void;
-  /** Arrêt choisi (null : revenir à la position du navigateur). */
+  /** Endroit choisi (null : revenir à la position du navigateur). */
   setManual(p: ManualPosition | null): void;
   manual(): ManualPosition | null;
   /** Mode test (?e2e=1&mockLat&mockLon) : position fixe. */
@@ -181,7 +182,7 @@ export function createWebLocation(now: () => number, options: WebLocationOptions
       return () => listeners.delete(cb);
     },
     setManual(p) {
-      manual = p && valid(p.lat, p.lon) ? { lat: p.lat, lon: p.lon, label: p.label.trim().slice(0, 80) || 'Arrêt choisi' } : null;
+      manual = p && valid(p.lat, p.lon) ? { lat: p.lat, lon: p.lon, label: p.label.trim().slice(0, 80) || 'Endroit choisi' } : null;
       try {
         if (manual) o.store?.setItem(MANUAL_KEY, JSON.stringify(manual));
         else o.store?.removeItem(MANUAL_KEY);
@@ -230,17 +231,17 @@ export function locationText(s: WebLocationState): string {
       return 'Recherche de ta position…';
     case 'gps': {
       if (s.accuracy === undefined) return 'Position du navigateur.';
-      if (s.accuracy > 1000) return 'Position du navigateur très approximative : choisis un arrêt pour plus de précision.';
+      if (s.accuracy > 1000) return 'Position du navigateur très approximative : choisis une adresse ou un arrêt pour plus de précision.';
       return `Position du navigateur, précise à ${Math.max(10, Math.round(s.accuracy / 10) * 10)} m.`;
     }
     case 'denied':
-      return 'Position refusée par le navigateur. Pour l’autoriser : réglages du site (le cadenas à côté de l’adresse), Position, Autoriser. Ou choisis un arrêt ci-dessous.';
+      return 'Position refusée par le navigateur. Pour l’autoriser : réglages du site (le cadenas à côté de l’adresse), Position, Autoriser. Ou choisis une adresse ou un arrêt ci-dessous.';
     case 'unavailable':
-      return 'Position indisponible pour l’instant (pas de signal ou délai dépassé). Choisis un arrêt ci-dessous, ou réessaie.';
+      return 'Position indisponible pour l’instant (pas de signal ou délai dépassé). Choisis une adresse ou un arrêt ci-dessous, ou réessaie.';
     case 'insecure':
-      return 'La position du navigateur demande une adresse en https. Choisis un arrêt ci-dessous.';
+      return 'La position du navigateur demande une adresse en https. Choisis une adresse ou un arrêt ci-dessous.';
     case 'unsupported':
-      return 'Ce navigateur ne donne pas la position. Choisis un arrêt ci-dessous.';
+      return 'Ce navigateur ne donne pas la position. Choisis une adresse ou un arrêt ci-dessous.';
     case 'manual':
       return `Position choisie : ${s.label}. Gardée dans ce navigateur.`;
     case 'mock':

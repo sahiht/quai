@@ -216,12 +216,12 @@ describe('position de Quai Web', () => {
     expect(loc.last()).toMatchObject({ lat: 50.86 });
   });
 
-  it('refusée : message clair, aucune position ; puis arrêt choisi, gardé dans le navigateur', async () => {
+  it('refusée : message clair, aucune position ; puis endroit choisi, gardé dans le navigateur', async () => {
     const store = fakeStore();
     const loc = createWebLocation(now, { geo: geo((_, err) => err({ code: 1 })), secure: true, store, permissions: null });
     expect(await loc.current(100)).toBeNull();
     expect(loc.state().kind).toBe('denied');
-    expect(locationText(loc.state())).toMatch(/^Position refusée par le navigateur\. .*choisis un arrêt ci-dessous\.$/);
+    expect(locationText(loc.state())).toMatch(/^Position refusée par le navigateur\. .*Ou choisis une adresse ou un arrêt ci-dessous\.$/);
     loc.setManual({ lat: 50.86004, lon: 4.36017, label: 'Gare du Nord (tram STIB)' });
     expect(await loc.current()).toMatchObject({ lat: 50.86004, source: 'manual' });
     expect(locationText(loc.state())).toBe('Position choisie : Gare du Nord (tram STIB). Gardée dans ce navigateur.');
@@ -260,8 +260,14 @@ describe('position de Quai Web', () => {
     expect(loc.state().kind).toBe('denied');
   });
 
-  it('aucun texte avec un tiret cadratin', () => {
-    for (const kind of ['idle', 'pending', 'denied', 'unavailable', 'insecure', 'unsupported', 'mock'] as const) expect(locationText({ kind })).not.toMatch(/—/);
+  it('aucun texte avec un tiret cadratin ; « une adresse ou un arrêt » partout (PRD-1.2 § 3) ; espaces insécables', () => {
+    for (const kind of ['idle', 'pending', 'denied', 'unavailable', 'insecure', 'unsupported', 'mock'] as const) expect(locationText({ kind })).not.toMatch(/[—–]/);
+    expect(locationText({ kind: 'unavailable' })).toBe('Position indisponible pour l’instant (pas de signal ou délai dépassé). Choisis une adresse ou un arrêt ci-dessous, ou réessaie.');
+    expect(locationText({ kind: 'insecure' })).toBe('La position du navigateur demande une adresse en https. Choisis une adresse ou un arrêt ci-dessous.');
+    expect(locationText({ kind: 'unsupported' })).toBe('Ce navigateur ne donne pas la position. Choisis une adresse ou un arrêt ci-dessous.');
+    expect(locationText({ kind: 'gps', accuracy: 1500 })).toBe('Position du navigateur très approximative\u00a0: choisis une adresse ou un arrêt pour plus de précision.');
+    expect(locationText({ kind: 'manual', label: 'Rue de Fer 25' })).toBe('Position choisie\u00a0: Rue de Fer 25. Gardée dans ce navigateur.');
+    for (const kind of ['idle', 'pending', 'denied', 'unavailable', 'insecure', 'unsupported', 'mock'] as const) expect(locationText({ kind }), kind).not.toMatch(/ [:;!?]/);
   });
 });
 

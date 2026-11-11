@@ -13,6 +13,7 @@ import type { HubSignal } from '../../src/glasses/gestures';
 import { createClock } from '../../src/platform/clock';
 import { createKV, memoryBackend } from '../../src/platform/kv';
 import type { Fix, GlassesPort, LocationPort, Platform } from '../../src/platform/types';
+import { APP_VERSION } from '../../src/version';
 
 export const PRESET_PATH = fileURLToPath(new URL('../../../fixtures/app/preset.json', import.meta.url));
 export const PRESET_11_PATH = fileURLToPath(new URL('../../../fixtures/app/preset-1.1.json', import.meta.url));
@@ -121,6 +122,11 @@ export interface SetupOptions {
   beforeStart?: (c: GlassesController) => void;
   /** Ne pas attendre la fin du démarrage (cœur lent : état pendant « Chargement… »). */
   noWait?: boolean;
+  /**
+   * Garder la version vue des réglages (message « Quai 1.2 » après une mise à jour). Sinon, des réglages d'une version
+   * antérieure (préréglages 1.0 et 1.1) sont pris comme déjà vus dans la version courante : l'accueil s'ouvre directement.
+   */
+  keepSeen?: boolean;
 }
 
 /**
@@ -136,7 +142,8 @@ export async function setupController(o: SetupOptions = {}) {
   const kv = o.kv ?? createKV(memoryBackend());
   const location = movableLocation(clock.now, o.pos === undefined ? { lat: sc.lat, lon: sc.lon } : o.pos);
   const platform: Platform = { kind: 'even', glasses: rec.port, kv, location, closeWebView };
-  const settings = new SettingsStore(kv, o.settings ?? preset11());
+  const initial = o.settings ?? preset11();
+  const settings = new SettingsStore(kv, o.keepSeen || !initial.seenVersion ? initial : { ...initial, seenVersion: APP_VERSION });
   const logs: string[] = [];
   const flags: FakeFlags = o.flags ?? {};
   const base = fakeCore(clock.now, flags);

@@ -1,7 +1,8 @@
 /**
  * Quai Web : même contrôleur et mêmes écrans que les lunettes, avec les différences du web :
  * pas de sortie (message), gestes sans anti-rebond matériel, textes qui renvoient à l'onglet Réglages,
- * « Autre lieu » qui ouvre la recherche, position changée tout de suite (arrêt choisi).
+ * « Autre adresse » qui ouvre la recherche, « Aucun lieu enregistré » qui ouvre « Nouveau favori », position changée
+ * tout de suite (endroit choisi).
  */
 import { describe, expect, it, vi } from 'vitest';
 import { GlassesController, WEB_EXIT_HINT } from '../../src/glasses/controller';
@@ -11,6 +12,7 @@ import { createClock } from '../../src/platform/clock';
 import { createKV, memoryBackend } from '../../src/platform/kv';
 import type { Fix, GlassesPort, LocationPort, Platform } from '../../src/platform/types';
 import { SettingsStore } from '../../src/settings';
+import { APP_VERSION } from '../../src/version';
 import { dataFreshness } from '../../src/dev/fake-core';
 import { textWidth } from '../../src/glasses/font';
 import { defaults, fakeCore, preset11, SCENARIO } from '../ui/helpers';
@@ -36,7 +38,8 @@ async function setup(opts: { web?: boolean; onboarded?: boolean; here?: Fix | nu
   const loc = movableLocation(opts.here === undefined ? { lat: sc.lat, lon: sc.lon, at: 0, source: 'mock' } : opts.here);
   const kv = createKV(memoryBackend());
   const platform: Platform = { kind: 'web', glasses: port, kv, location: loc, closeWebView: vi.fn() };
-  const settings = new SettingsStore(kv, { ...preset11(), onboarded: opts.onboarded ?? true, display: { ...preset11().display, opening: 'home' } });
+  // version déjà vue : pas de message « Quai 1.2 » à l'ouverture (préréglage de la 1.1)
+  const settings = new SettingsStore(kv, { ...preset11(), onboarded: opts.onboarded ?? true, seenVersion: APP_VERSION, display: { ...preset11().display, opening: 'home' } });
   const logs: string[] = [];
   const opened: string[] = [];
   const c = new GlassesController({
@@ -141,14 +144,14 @@ describe('écrans des lunettes en mode web', () => {
   });
 
   it('favoris et lieux : renvoient à l’onglet Réglages', () => {
-    expect(favoritesView({}, ctx()).items.map((i) => i.a)).toEqual(['Aucun favori pour l’instant.', 'Ouvre un arrêt dans Autour de moi et touche-le,', 'ou ajoute un trajet dans l’onglet Réglages.']);
+    expect(favoritesView({}, ctx()).items.map((i) => i.a)).toEqual(['Aucun favori pour l’instant.', 'Ouvre un arrêt dans Autour de moi et touche-le,', 'ou ajoute un favori dans l’onglet Réglages.']);
     const p = placesView({}, ctx());
     expect(p.items.map((i) => [i.a, i.c])).toEqual([
       ['Aucun lieu enregistré', 'dans Réglages'],
       ['Autre adresse', 'dans Réglages'],
     ]);
     expect(p.items.map((i) => i.action)).toEqual([
-      { kind: 'phone', hash: '#/lieux/nouveau', text: 'Ajoute Maison ou Bureau dans l’onglet Réglages' },
+      { kind: 'phone', hash: '#/favoris/nouveau', text: 'Ajoute Maison ou Bureau dans l’onglet Réglages' },
       { kind: 'phone', hash: '#/recherche', text: 'Tape l’adresse dans l’onglet Réglages' },
     ]);
     // appli Even : inchangé

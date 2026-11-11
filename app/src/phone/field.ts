@@ -1,21 +1,31 @@
 /**
- * Champ unique (PRD M4) : un seul champ pour choisir un endroit, partout où l'on en choisit un (départ et arrivée
- * d'une recherche ou d'un trajet favori, adresse d'un lieu, premier lancement).
- * Propositions, type à droite : « Ma position », mes lieux, adresses récentes (S4), puis adresses et gares ou arrêts,
- * les adresses d'abord si le texte ressemble à une adresse. Au plus 4 adresses et 6 gares ou arrêts.
- * Gares et arrêts tout de suite (fichiers de recherche) ; adresses par core.geocode dès 3 caractères, après 250 ms
- * sans frappe. Seul le texte tapé part vers le service d'adresses (la position sert au tri, sur le téléphone).
+ * Champ unique (PRD M4) : un seul champ pour choisir un endroit, partout où l'on en choisit un (recherche, nouveau
+ * favori, lieu, trajet fixe, premier lancement, position de Quai Web).
+ * Propositions, type à droite : « Ma position » (ou « Ma position actuelle »), mes lieux (favoris lieux), adresses
+ * récentes (S4), puis adresses et gares ou arrêts, les adresses d'abord si le texte ressemble à une adresse. Au plus
+ * 4 adresses et 6 gares ou arrêts. Gares et arrêts tout de suite (fichiers de recherche) ; adresses par core.geocode
+ * dès 3 caractères, après 250 ms sans frappe. Seul le texte tapé part vers le service d'adresses (la position sert
+ * au tri, sur l'appareil).
  */
-import type { GeocodeAnswer, GeocodeResult, NameLang, Place, SearchItem } from '../core/api';
+import type { Core, FavoritePlace, GeocodeAnswer, GeocodeResult, NameLang, SearchItem, Settings } from '../core/api';
+import { placesOf } from '../core/favorites';
 import { displayName } from '../core/util';
+import type { LocationPort } from '../platform/types';
+import { LIMITS, type SettingsStore } from '../settings';
 import { matchesQuery } from '../../../shared/names';
-import type { PhoneCtx } from './app';
 import { h } from './dom';
 import { geoLang, letterCount, looksLikeAddress, T, typo } from './text';
 
+/** Ce dont le champ a besoin : réglages (lieux, adresses récentes, langue), cœur, position (tri). Quai Web le fournit aussi. */
+export interface FieldCtx {
+  settings: SettingsStore;
+  core(): Promise<Core>;
+  location: Pick<LocationPort, 'last'>;
+}
+
 export type FieldChoice =
   | { kind: 'here'; label: string }
-  | { kind: 'place'; place: Place; label: string }
+  | { kind: 'place'; place: FavoritePlace; label: string }
   | { kind: 'address'; label: string; lat: number; lon: number; approx?: boolean; recent: boolean }
   | { kind: 'stop'; item: SearchItem; label: string };
 
@@ -25,8 +35,11 @@ export interface FieldOptions {
   placeholder?: string;
   /** Choix déjà fait, écrit dans le champ. */
   value?: string;
-  /** Propositions locales : « Ma position », mes lieux, adresses récentes. */
-  here?: boolean;
+  /**
+   * Propositions locales : « Ma position » (true, type « position actuelle »), ou un autre libellé (« Ma position
+   * actuelle », « si tu es sur place ») ; mes lieux ; adresses récentes.
+   */
+  here?: boolean | { label: string; type: string };
   places?: boolean;
   recent?: boolean;
   onPick(c: FieldChoice): void;
@@ -69,9 +82,15 @@ export function addressLabel(r: GeocodeResult, lang: NameLang): string {
 /** Rue sans numéro : position approximative, « (sans numéro) » dans les propositions. */
 export const streetOnly = (r: GeocodeResult): boolean => r.kind === 'rue';
 
-/** Mention sous le champ (PRD M4.9, § 6.2). */
-export function privacyNote(): HTMLParagraphElement {
-  return h('p', { class: 'small muted privacy' }, typo(T.privacy));
+/** Adresses récentes (S4) : la plus récente d'abord, 5 au plus, sans doublon. */
+export function withRecent(s: Settings, a: { label: string; lat: number; lon: number; approx?: boolean }, at: number): Settings {
+  const r = { label: a.label, lat: a.lat, lon: a.lon, at, ...(a.approx ? { approx: true } : {}) };
+  return { ...s, recent: [r, ...s.recent.filter((x) => x.label.toLowerCase() !== a.label.toLowerCase())].slice(0, LIMITS.recent) };
+}
+
+/** Mention sous le champ (PRD M4.9, § 6.2) ; Quai Web a la sienne (PRD-1.2 § 3). */
+export function privacyNote(text: string = T.privacy): HTMLParagraphElement {
+  return h('p', { class: 'small muted privacy' }, typo(text));
 }
 
 interface Option {
@@ -80,7 +99,7 @@ interface Option {
   pick: () => void;
 }
 
-export function placeField(ctx: PhoneCtx, o: FieldOptions): PlaceField {
+export function placeField(ctx: FieldCtx, o: FieldOptions): PlaceField {
   const listId = `${o.id}-liste`;
   const statusId = `${o.id}-etat`;
   const label = h('label', { for: o.id }, o.label);
@@ -136,9 +155,12 @@ export function placeField(ctx: PhoneCtx, o: FieldOptions): PlaceField {
     const s = settings();
     const q = st.q;
     const items: Option[] = [];
-    if (o.here && (!q || matchesQuery(q, 'Ma position'))) items.push({ label: 'Ma position', type: 'position actuelle', pick: () => pick({ kind: 'here', label: 'Ma position' }) });
+    if (o.here) {
+      const here = o.here === true ? { label: 'Ma position', type: 'position actuelle' } : o.here;
+      if (!q || matchesQuery(q, here.label)) items.push({ label: here.label, type: here.type, pick: () => pick({ kind: 'here', label: here.label }) });
+    }
     if (o.places) {
-      for (const p of s.places) if (!q || matchesQuery(q, p.label)) items.push({ label: p.label, type: 'mon lieu', pick: () => pick({ kind: 'place', place: p, label: p.label }) });
+      for (const p of placesOf(s)) if (!q || matchesQuery(q, p.label)) items.push({ label: p.label, type: 'mon lieu', pick: () => pick({ kind: 'place', place: p, label: p.label }) });
     }
     const recentLabels = new Set<string>();
     if (o.recent) {

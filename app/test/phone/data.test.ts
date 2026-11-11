@@ -13,10 +13,10 @@ const kv = (el: HTMLElement) => Object.fromEntries([...el.querySelectorAll('.kv'
 const addressCard = (el: HTMLElement) => [...el.querySelectorAll('section')].find((s) => textOf(s.querySelector('h2')) === 'Adresses')!;
 
 describe('écran Données', () => {
-  it('« Mises à jour » : ligne « Version de Quai   1.1.1 » (CA-M7.3)', async () => {
+  it('« Mises à jour » : ligne « Version de Quai   1.2.0 » (CA-M7.3, PRD-1.2 § 4)', async () => {
     const hz = harness({ settings: defaults() });
     const el = mount(dataScreen(hz.ctx));
-    expect(kv(el)['Version de Quai']).toBe('1.1.1');
+    expect(kv(el)['Version de Quai']).toBe('1.2.0');
   });
 
   it('carte « Adresses » : services des trois Régions, « Disponible » puis « Indisponible » quand ils tombent', async () => {

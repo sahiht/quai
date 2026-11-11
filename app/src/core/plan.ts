@@ -12,7 +12,7 @@
  */
 import type { AreaSummary, Meta, Names, Op } from '../../../shared/types';
 import { normalizeId } from '../../../shared/types';
-import type { Endpoint, Journey, Leg, Settings } from './api';
+import type { Endpoint, FavoritePlace, Journey, Leg, Place, Settings } from './api';
 import { lastDepartureOfPattern, nextDeparturesOfPattern, tileReachM, type PreparedArea } from './areas';
 import { QuaiError } from './errors';
 import { skeleton } from './journeys';
@@ -79,7 +79,9 @@ export function resolveEndpoint(e: Endpoint, settings: Settings, here?: { lat: n
     return { name: HERE_NAME, lat: here.lat, lon: here.lon };
   }
   if (e.type === 'place') {
-    const p = settings.places.find((x) => x.id === e.placeId);
+    // 1.2 : un lieu est un favori lieu (PRD-1.2 § 2.1) ; réglages d'avant la migration (v1, v2) : `places` en repli
+    const legacy = (settings as { places?: Place[] }).places;
+    const p = settings.favorites.find((x): x is FavoritePlace => x.kind === 'place' && x.id === e.placeId) ?? legacy?.find((x) => x.id === e.placeId);
     if (!p) throw new QuaiError('placeUnknown');
     return { name: { fr: p.label, nl: p.label }, lat: p.lat, lon: p.lon, ...(p.areaId ? { areaId: p.areaId } : {}) };
   }

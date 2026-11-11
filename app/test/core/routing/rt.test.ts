@@ -5,7 +5,7 @@
  * véhicule parti à l'heure prévue mais en retard : proposé tant qu'il reste attrapable sur l'heure estimée.
  */
 import { describe, expect, it } from 'vitest';
-import type { Endpoint } from '../../../src/core/api';
+import type { Endpoint, Journey } from '../../../src/core/api';
 import { hhmm } from '../../../src/core/util';
 import { makeEnv, type Scene } from '../support/env';
 import { at } from '../support/network';
@@ -70,26 +70,37 @@ describe('correspondance rendue impossible par un retard (§ 4.9, point 2)', () 
   const WATERLOO = addr('Chaussée de Bruxelles 1, 1410 Waterloo', 50.7175, 4.399);
   const ROGIER = addr('Rue du Progrès 20, 1210 Saint-Josse-ten-Noode', 50.8582, 4.36);
   const late = { u: [[2, 'Bwategl1', 480, null, 0]] as [number, string, number, null, 0][] };
+  const RECALCULE = 'marche 2 | 07:44 W Waterloo Eglise → Bruxelles Midi 08:29 | marche 2 | 08:35 M2 Gare du Midi → Rogier 08:49 | marche 3';
+  /** Le bus W de 07:36 puis le métro (« Moins de marche » sous le S1 de 07:55, 19 min à pied). */
+  const busW = (js: Journey[]) => js.find((j) => j.legs.some((l) => l.tripId === 'W-0724'));
 
-  it('route() : le bus W en retard de 8 min manque le métro de 08:29 ; trajet recalculé (métro de 08:35)', async () => {
+  it('route() : S1 de 07:55 supprimé, bus W en retard de 8 min qui manque le métro de 08:29 : recalculé, en tête', async () => {
+    const probe = makeEnv({ now: '2026-11-10T07:31', scene: 'noRT' });
+    const s1 = (await probe.core.route(WATERLOO, ROGIER, at('2026-11-10T07:31'), probe.preset)).journeys[0].legs.find((l) => l.kind === 'ride');
+    expect(s1).toMatchObject({ cat: 'S1' });
     const env = makeEnv({ now: '2026-11-10T07:31' });
+    env.server.relay.rt.sncb.trips[s1?.tripId ?? ''] = { cancelled: true, u: [] };
     env.server.relay.rt.tec.trips['W-0724'] = late;
     const r = await env.core.route(WATERLOO, ROGIER, at('2026-11-10T07:31'), env.preset);
-    const w = r.journeys.find((j) => j.legs.some((l) => l.tripId === 'W-0724'));
-    expect(w && legsOf(w)).toBe('marche 2 | 07:44 W Waterloo Eglise → Bruxelles Midi 08:29 | marche 2 | 08:35 M2 Gare du Midi → Rogier 08:49 | marche 3');
+    const w = busW(r.journeys);
+    expect(w && legsOf(w)).toBe(RECALCULE);
+    expect(w?.label).toBe('short');
     expect(w?.alerts[0]?.text).toBe('! Correspondance recalculée');
+    expect(r.journeys.some((j) => j.legs.some((l) => l.tripId === s1?.tripId))).toBe(false);
   });
 
   it('refresh() d’un trajet suivi : même identifiant, étapes recalculées, alerte en tête', async () => {
     const env = makeEnv({ now: '2026-11-10T07:31' });
     const r = await env.core.route(WATERLOO, ROGIER, at('2026-11-10T07:31'), env.preset);
-    const j0 = r.journeys[0];
+    const j0 = busW(r.journeys);
+    if (!j0) throw new Error('bus W');
+    expect(j0.label).toBe('lesswalk');
     expect(legsOf(j0)).toContain('08:29 M2');
     env.server.relay.rt.tec.trips['W-0724'] = late;
     env.clock.set('2026-11-10T07:40');
     const j1 = await env.core.refresh(j0, env.preset);
     expect([j1.id, j1.label, j1.reason]).toEqual([j0.id, j0.label, j0.reason]);
-    expect(legsOf(j1)).toBe('marche 2 | 07:44 W Waterloo Eglise → Bruxelles Midi 08:29 | marche 2 | 08:35 M2 Gare du Midi → Rogier 08:49 | marche 3');
+    expect(legsOf(j1)).toBe(RECALCULE);
     expect(j1.alerts[0]).toMatchObject({ kind: 'delay', text: '! Correspondance recalculée' });
     expect(hhmm(j1.arr)).toBe('08:52');
   });
@@ -111,30 +122,30 @@ describe('premier véhicule en retard mais encore attrapable (PRD § 4.2 et § 4
 
   it('14:23 à Bruxelles-Central : l’IC de 14:22 (+3 min) en tête, puis l’IC de 14:40', async () => {
     const r = await route('2026-11-10T14:23', 'base');
-    expect(summary(r)).toEqual(['simple: 14:25 IC Bruxelles-Central → Gand-Saint-Pierre 14:56', 'next: 14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09']);
+    expect(summary(r)).toEqual(['short: 14:25 IC Bruxelles-Central → Gand-Saint-Pierre 14:56', 'next: 14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09']);
     const ic = r.journeys[0].legs[0];
     expect([hhmm(ic.schedDep), ic.rt, ic.delayMin]).toEqual(['14:22', true, 3]);
-    expect(plain(r.journeys[0].reason)).toBe('Le plus simple : direct');
+    expect(plain(r.journeys[0].reason)).toBe('Le plus court : direct');
     expect(plain(r.journeys[1].reason)).toBe('Le suivant : même trajet, 18 min plus tard');
   });
 
   it('parti d’après l’heure estimée (14:26), ou sans temps réel : seulement l’IC de 14:40', async () => {
-    expect(summary(await route('2026-11-10T14:26', 'base'))).toEqual(['simple: 14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09']);
-    expect(summary(await route('2026-11-10T14:23', 'noRT'))).toEqual(['simple: 14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09']);
+    expect(summary(await route('2026-11-10T14:26', 'base'))).toEqual(['short: 14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09']);
+    expect(summary(await route('2026-11-10T14:23', 'noRT'))).toEqual(['short: 14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09']);
   });
 
   it('la marche jusqu’au train compte : 4 min à pied, encore attrapable à 14:21, plus à 14:22', async () => {
     const r1 = await route('2026-11-10T14:21', 'base', here);
     expect(legsOf(r1.journeys[0])).toBe('marche 4 | 14:25 IC Bruxelles-Central → Gand-Saint-Pierre 14:56');
     const r2 = await route('2026-11-10T14:22', 'base', here);
-    expect(summary(r2)).toEqual(['simple: marche 4 | 14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09']);
+    expect(summary(r2)).toEqual(['short: marche 4 | 14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09']);
   });
 
   it('favori « Gand » à 14:23, depuis la gare : l’IC de 14:22 (+3 min) en tête', async () => {
     const env = makeEnv({ now: '2026-11-10T14:23' });
     const a = await env.core.answer(gand(), { lat: 50.8454, lon: 4.3571 }, env.preset);
     expect(a.plan?.journeys.map((j) => `${j.label}: ${legsOf(j)}`)).toEqual([
-      'simple: 14:25 IC Bruxelles-Central → Gand-Saint-Pierre 14:56',
+      'short: 14:25 IC Bruxelles-Central → Gand-Saint-Pierre 14:56',
       'next: 14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09',
     ]);
   });

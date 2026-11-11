@@ -3,8 +3,8 @@
  * données du cœur + réglages + heure → GlassesView. Testables sans SDK.
  */
 import type { Board, CoreStatus, Departure, Favorite, FavoriteAnswer, Journey, Leg, NameLang, NearbyItem, Settings } from '../core/api';
-import { LABEL_TEXT } from '../core/api';
-import { favoriteTitle } from '../core/favorites';
+import { LABEL_TEXT, labelOf } from '../core/api';
+import { favoriteTitle, placesOf } from '../core/favorites';
 import { shortAddress } from '../core/text';
 import { OP_NAME, areaLabel, displayName, hhmm, lineLabel, minutesUntil } from '../core/util';
 import { normalizeForSearch } from '../../../shared/names';
@@ -108,19 +108,17 @@ export function firstRunView(ctx: ViewCtx): GlassesView {
   );
 }
 
-/** Lignes du message « Quai 1.1 » (une fois, après la mise à jour depuis la 1.0). */
-export function newsLines(web = false): string[] {
-  return [
-    `Nouveau${NB}: tes favoris donnent la réponse.`,
-    `Toucher un favori${NB}: le trajet, étape par étape.`,
-    `Sur un trajet, ▼${NB}: un autre trajet.`,
-    web ? 'Les adresses se tapent dans l’onglet Réglages.' : 'Les adresses se tapent sur le téléphone.',
-  ];
+/** Titre du message de nouveautés (une fois, après la mise à jour depuis la 1.0 ou la 1.1). */
+export const NEWS_TITLE = 'Quai 1.2';
+
+/** Lignes du message « Quai 1.2 » (PRD-1.2 § 2.3), les mêmes sur Quai Web. */
+export function newsLines(): string[] {
+  return [`Nouveau${NB}: le trajet le plus court d’abord.`, 'Tes lieux sont maintenant dans tes favoris.', `Sur un trajet, ▼${NB}: un autre trajet.`];
 }
 
-/** Message « Quai 1.1 » : toucher mène à l'accueil. */
+/** Message « Quai 1.2 » : toucher mène à l'accueil. */
 export function newsView(ctx: ViewCtx): GlassesView {
-  return messageView('Quai 1.1', newsLines(ctx.web), ctx, { hints: HINTS.news, tap: { kind: 'continue' } });
+  return messageView(NEWS_TITLE, newsLines(), ctx, { hints: HINTS.news, tap: { kind: 'continue' } });
 }
 
 export function notConfiguredView(ctx: ViewCtx): GlassesView {
@@ -160,11 +158,14 @@ export function stopFavoriteLabel(f: Extract<Favorite, { kind: 'stop' }>, answer
   return displayName(f.name, l);
 }
 
-/** Élément d'un favori sur deux lignes (L1) ; `planned` : un « ~ » est montré. */
+/**
+ * Élément d'un favori sur deux lignes (L1) ; `planned` : un « ~ » est montré. Un lieu (1.2) paraît comme le trajet
+ * « Ma position → lieu » de la 1.1 : « Vers le bureau », puis la réponse du trajet.
+ */
 export function favoriteItem(e: FavoriteEntry, ctx: ViewCtx): { item: Item; planned: boolean } {
   const f = e.fav;
-  const line = f.kind === 'trip' ? tripAnswerLine(e.answer, ctx.now, ctx.settings) : stopAnswerLine(e.answer, ctx.now, ctx.settings);
-  const a = f.kind === 'trip' ? favoriteTitle(f, ctx.settings) : stopFavoriteLabel(f, e.answer, lang(ctx));
+  const line = f.kind === 'stop' ? stopAnswerLine(e.answer, ctx.now, ctx.settings) : tripAnswerLine(e.answer, ctx.now, ctx.settings);
+  const a = f.kind === 'stop' ? stopFavoriteLabel(f, e.answer, lang(ctx)) : favoriteTitle(f, ctx.settings);
   const item: Item = { a, c: line.right, action: { kind: 'openFavorite', id: f.id } };
   if (line.tail) item.cTail = line.tail;
   if (line.second) item.b2 = line.second;
@@ -240,9 +241,9 @@ export interface FavoritesData {
   title?: string;
 }
 
-/** Liste de favoris vide (L2) : comment en ajouter un depuis les lunettes ou le téléphone. */
+/** Liste de favoris vide (L2) : comment en ajouter un depuis les lunettes ou le téléphone (1.2 : « un favori »). */
 export function emptyFavoritesLines(web = false): string[] {
-  return ['Aucun favori pour l’instant.', 'Ouvre un arrêt dans Autour de moi et touche-le,', web ? 'ou ajoute un trajet dans l’onglet Réglages.' : 'ou ajoute un trajet sur le téléphone.'];
+  return ['Aucun favori pour l’instant.', 'Ouvre un arrêt dans Autour de moi et touche-le,', web ? 'ou ajoute un favori dans l’onglet Réglages.' : 'ou ajoute un favori sur le téléphone.'];
 }
 
 export function favoritesView(d: FavoritesData, ctx: ViewCtx): GlassesView {
@@ -353,19 +354,23 @@ export const recentKey = (label: string): string => `recent:${label}`;
 
 /** Les 3 adresses récentes montrées dans « Aller à… » (S4) : pas celles d'un lieu déjà enregistré. */
 export function recentShown(settings: Settings): Settings['recent'] {
-  const placeAddr = new Set(settings.places.map((p) => (p.address ? normalizeForSearch(p.address) : '')).filter(Boolean));
+  const places = placesOf(settings);
+  const placeAddr = new Set(places.map((p) => (p.address ? normalizeForSearch(p.address) : '')).filter(Boolean));
   return settings.recent
-    .filter((r) => !placeAddr.has(normalizeForSearch(r.label)) && !settings.places.some((p) => Math.abs(p.lat - r.lat) < 0.0004 && Math.abs(p.lon - r.lon) < 0.0006))
+    .filter((r) => !placeAddr.has(normalizeForSearch(r.label)) && !places.some((p) => Math.abs(p.lat - r.lat) < 0.0004 && Math.abs(p.lon - r.lon) < 0.0006))
     .slice(0, 3);
 }
 
+/** « Aller à… » (L8) : les lieux (« Bureau   arrivée 08:58 »), puis les adresses récentes, puis « Autre adresse ». */
 export function placesView(summary: Record<string, string | undefined>, ctx: ViewCtx): GlassesView {
   const v = base('places', 'menu', 'Aller à…', ctx);
-  for (const p of ctx.settings.places) {
+  // 1.2 : les lieux sont des favoris, dans l'ordre du téléphone.
+  const places = placesOf(ctx.settings);
+  for (const p of places) {
     v.items.push({
       a: p.label,
       c: summary[p.id] ?? '…',
-      action: { kind: 'go', key: p.id, to: { type: 'place', placeId: p.id }, label: p.label.toLowerCase() },
+      action: { kind: 'go', key: p.id, to: { type: 'place', placeId: p.id }, label: p.label },
     });
   }
   for (const r of recentShown(ctx.settings)) {
@@ -375,13 +380,13 @@ export function placesView(summary: Record<string, string | undefined>, ctx: Vie
     v.items.push({ a: short, c: summary[key] ?? '…', action: { kind: 'go', key, to, label: short } });
   }
   if (ctx.web) {
-    // Quai Web : l'onglet Réglages est sur la même page, le toucher l'ouvre directement.
-    if (!ctx.settings.places.length) {
-      v.items.push({ a: 'Aucun lieu enregistré', c: 'dans Réglages', action: { kind: 'phone', hash: '#/lieux/nouveau', text: 'Ajoute Maison ou Bureau dans l’onglet Réglages' } });
+    // Quai Web : l'onglet Réglages est sur la même page, le toucher l'ouvre directement (1.2 : « Nouveau favori »).
+    if (!places.length) {
+      v.items.push({ a: 'Aucun lieu enregistré', c: 'dans Réglages', action: { kind: 'phone', hash: '#/favoris/nouveau', text: 'Ajoute Maison ou Bureau dans l’onglet Réglages' } });
     }
     v.items.push({ a: 'Autre adresse', c: 'dans Réglages', action: { kind: 'phone', hash: '#/recherche', text: 'Tape l’adresse dans l’onglet Réglages' } });
   } else {
-    if (!ctx.settings.places.length) {
+    if (!places.length) {
       v.items.push({ a: 'Aucun lieu enregistré', c: 'sur le téléphone', action: { kind: 'toast', text: 'Ajoute Maison ou Bureau dans Quai, sur le téléphone' } });
     }
     v.items.push({ a: 'Autre adresse', c: 'sur le téléphone', action: { kind: 'toast', text: 'Tape l’adresse dans Quai, sur le téléphone' } });
@@ -527,7 +532,9 @@ function stepsBottom(hiddenBelow: number, d: StepsData, now: number): string {
   if (hiddenBelow > 0) return `▼ ${hiddenBelow} étape${hiddenBelow > 1 ? 's' : ''} de plus`;
   const next = d.journeys[d.index + 1];
   if (next) {
-    const label = next.label ? LABEL_TEXT[next.label] : 'Autre trajet';
+    // labelOf : une étiquette de la 1.1 (« simple », « fast ») d'un trajet gardé se lit dans les mots de la 1.2.
+    const known = labelOf(next.label);
+    const label = known ? LABEL_TEXT[known] : 'Autre trajet';
     return `▼ ${label}${NB}: ${spanText(journeyStart(next), next.arr, now)}`;
   }
   if (d.journeys.length > 1) return '▲ trajet précédent';
@@ -584,7 +591,7 @@ export function stepsPage(route: Pick<StepsRoute, 'title' | 'label'>, d: StepsDa
     v.hints = hints(ctx, HINTS.stepsOther);
     v.tap = { kind: 'follow' };
   }
-  v.log = { page: d.index + 1, pages: d.journeys.length, label: j.label ?? '', followed };
+  v.log = { page: d.index + 1, pages: d.journeys.length, label: labelOf(j.label) ?? '', followed };
   return v;
 }
 

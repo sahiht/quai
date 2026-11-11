@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Journey, JourneyLabel, Leg, PlanResult } from '../../src/core/api';
-import { cardPhrase, emptyState, summaryText, T, timesText, typo } from '../../src/phone/text';
+import { emptyState, labelText, summaryText, T, timesText, typo } from '../../src/phone/text';
 import { at, defaults, preset } from './helpers';
 
 const NB = ' ';
@@ -32,42 +32,20 @@ describe('typographie (§ 6.0)', () => {
 });
 
 describe('cartes (T2)', () => {
-  const simple = journey('simple', [walk(at(7, 33), 7), ride(at(7, 42), at(8, 46)), walk(at(8, 46), 10)]);
+  const short = journey('short', [walk(at(7, 33), 7), ride(at(7, 42), at(8, 46)), walk(at(8, 46), 10)]);
 
   it('heures comme le titre des étapes, durée, changements, marche', () => {
-    expect(timesText(simple, at(7, 31))).toBe('07:33 → 08:56');
-    expect(summaryText(simple)).toBe(`1${NB}h${NB}23, direct, 17 min à pied`);
+    expect(timesText(short, at(7, 31))).toBe('07:33 → 08:56');
+    expect(summaryText(short)).toBe(`1${NB}h${NB}23, direct, 17 min à pied`);
     const onFoot = journey('walk', [walk(at(8, 50), 22)]);
     expect(summaryText(onFoot)).toBe(`22${NB}min à pied`);
   });
 
-  it('phrase de chaque étiquette', () => {
-    // marche 7 + 3 + 3 = 13 contre 17 : 4 min de moins seulement (moins-de-marche.md § 1, il n'en tient pas lieu)
-    const fast = journey('fast', [walk(at(7, 33), 7), ride(at(7, 42), at(8, 40)), walk(at(8, 40), 3), ride(at(8, 44), at(8, 48), '3'), walk(at(8, 48), 3)], 1);
-    const earlier = journey('earlier', [ride(at(4, 59), at(6, 30))], 1);
-    const none = journey('none', [ride(at(9, 0), at(10, 5))]);
-    const fewer = journey('fewer', [ride(at(9, 0), at(10, 5))], 1);
-    const onFoot = journey('walk', [walk(at(8, 50), 22)]);
-    // « Le suivant » : même trajet une heure plus tard, mêmes marches
-    const next = journey('next', [walk(at(8, 33), 7), ride(at(8, 42), at(9, 46)), walk(at(9, 46), 10)]);
-    const later = journey('later', [ride(at(9, 12), at(10, 20))], 1);
-    const r: PlanResult = { journeys: [simple, fast, next] };
-    expect(cardPhrase(simple, r)).toBe('Le moins de changements et de marche.');
-    expect(cardPhrase(simple, { journeys: [simple, next] })).toBe('Le plus simple, et aussi le plus rapide.');
-    expect(typo(cardPhrase(fast, r))).toBe(`Arrive 5${NB}min plus tôt, avec 1 changement de plus.`);
-    const fast2 = { ...fast, transfers: 2 };
-    expect(cardPhrase(fast2, { journeys: [simple, fast2] })).toBe('Arrive 5 min plus tôt, avec 2 changements de plus.');
-    const fastWalk = { ...fast, transfers: 0 };
-    expect(cardPhrase(fastWalk, { journeys: [simple, fastWalk] })).toBe('Arrive 5 min plus tôt, avec plus de marche.');
-    const night = journey('simple', [ride(at(6, 20), at(6, 46))]);
-    expect(cardPhrase(earlier, { journeys: [night, earlier] })).toBe('Arrive 16 min plus tôt, en partant à 04:59.');
-    expect(cardPhrase(night, { journeys: [night, earlier] })).toBe('Le moins de changements et de marche.');
-    const quick = journey('simple', [ride(at(8, 30), at(9, 20))], 1);
-    expect(cardPhrase(none, { journeys: [quick, none] })).toBe('Aucun changement, mais arrive 45 min plus tard.');
-    expect(cardPhrase(fewer, { journeys: [quick, fewer] })).toBe('Moins de changements, mais arrive 45 min plus tard.');
-    expect(cardPhrase(onFoot, r)).toBe('Sans attendre : 22 min à pied.');
-    expect(cardPhrase(next, r)).toBe('Même trajet, départ suivant.');
-    expect(cardPhrase(later, r)).toBe('Un autre trajet, plus tard.');
+  it('étiquettes de la 1.2 : « Le plus court » remplace « Le plus simple » et « Le plus rapide » (PRD-1.2 § 1.4)', () => {
+    expect(labelText(short)).toBe('Le plus court');
+    expect(labelText({ ...short, label: 'earlier' })).toBe('Plus tôt');
+    expect(labelText({ ...short, label: 'lesswalk' })).toBe('Moins de marche');
+    expect(labelText({ ...short, label: undefined })).toBe('');
   });
 });
 
@@ -80,9 +58,13 @@ describe('états vides (§ 6.3)', () => {
     const st = emptyState({ journeys: [], empty: 'noTrip', station: { areaId: 'sncb:8892007', name: { fr: 'Gand-Saint-Pierre', nl: 'Gent-Sint-Pieters' }, lat: 51.0359, lon: 3.7107 } }, to, s);
     expect(st).toMatchObject({ kind: 'station', text: 'Pas de trajet complet. Essaie Gand-Saint-Pierre, puis le tram.', button: 'Chercher vers Gand-Saint-Pierre' });
     expect(emptyState({ journeys: [], empty: 'noTrip' }, to, s).text).toBe(T.noTripNow);
-    expect(emptyState({ journeys: [], empty: 'here' }, { type: 'place', placeId: 'bureau' }, preset()).text).toBe('Tu es déjà au bureau.');
+    // préréglage 1.0 migré (réglages v3) : le lieu « Bureau » a pris l'identifiant de son trajet favori
+    const p = preset();
+    const bureau = p.favorites.find((f) => f.kind === 'place' && f.label === 'Bureau')!;
+    expect(emptyState({ journeys: [], empty: 'here' }, { type: 'place', placeId: bureau.id }, p).text).toBe('Tu es déjà au bureau.');
     expect(emptyState({ journeys: [], empty: 'here' }, to, s).text).toBe('Tu es déjà à Rue du Bois 1.');
     expect(emptyState({ journeys: [], empty: 'noPosition' }, to, s).text).toBe('Position inconnue : autorise la position pour Quai.');
+    expect(emptyState({ journeys: [], empty: 'noPosition' }, to, s, { web: true }).text).toBe('Position inconnue : autorise-la dans le navigateur, ou choisis une adresse ou un arrêt (onglet Lunettes, rubrique Position).');
   });
 });
 
@@ -90,7 +72,7 @@ describe('sources', () => {
   it('jamais de tiret cadratin ni demi-cadratin dans les textes du téléphone et de Quai Web', () => {
     const APP = fileURLToPath(new URL('../../', import.meta.url));
     const walkDir = (dir: string): string[] => readdirSync(join(APP, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkDir(`${dir}/${e.name}`) : [`${dir}/${e.name}`]));
-    for (const f of [...walkDir('src/phone'), ...walkDir('src/web'), 'src/version.ts', 'store/changelog/1.1.0.txt', 'store/changelog/1.1.1.txt', 'store/description.txt', 'store/privacy.md']) {
+    for (const f of [...walkDir('src/phone'), ...walkDir('src/web'), 'src/version.ts', 'store/changelog/1.1.0.txt', 'store/changelog/1.2.0.txt', 'store/description.txt', 'store/privacy.md']) {
       expect(readFileSync(join(APP, f), 'utf8'), f).not.toMatch(/[—–]/);
     }
   });
@@ -106,17 +88,20 @@ describe('sources', () => {
   });
 });
 
-describe('notes de version 1.1.1 (moins-de-marche.md)', () => {
-  it('2 lignes courtes, 500 caractères au plus : « Moins de marche », trajets plus directs, accès d’un lieu', () => {
+describe('notes de version 1.2.0 (PRD-1.2 § 6)', () => {
+  it('texte du § 6 en 3 lignes (limite du magasin : les deux dernières phrases sur une ligne), 500 caractères au plus', () => {
     const APP = fileURLToPath(new URL('../../', import.meta.url));
-    const notes = readFileSync(join(APP, 'store/changelog/1.1.1.txt'), 'utf8').trim();
-    const lines = notes.split('\n');
-    expect(lines).toHaveLength(2);
+    const notes = readFileSync(join(APP, 'store/changelog/1.2.0.txt'), 'utf8').trim();
     expect([...notes].length).toBeLessThanOrEqual(500);
-    expect(notes).toContain('« Moins de marche »');
-    expect(notes).toContain('Waterloo vers Madou');
-    expect(lines[1]).toMatch(/^L’accès d’un lieu/);
-    expect(JSON.parse(readFileSync(join(APP, 'app.json'), 'utf8')).version).toBe('1.1.1');
-    expect(JSON.parse(readFileSync(join(APP, 'package.json'), 'utf8')).version).toBe('1.1.1');
+    expect(notes.split('\n')).toEqual([
+      'Le trajet le plus court d’abord : celui qui t’amène le plus tôt, avec la raison. Une longue marche seulement si elle fait gagner au moins 10 min.',
+      'Un seul écran « Mes favoris » : tes lieux, tes arrêts et tes trajets, sans rien perdre.',
+      'Dans Quai Web, ta position peut être une adresse. L’accès d’un lieu nomme d’abord l’arrêt le plus proche.',
+    ]);
+    // la 1.1.1, jamais publiée, n'a pas de notes
+    expect(readdirSync(join(APP, 'store/changelog'))).not.toContain('1.1.1.txt');
+    for (const f of ['app.json', 'package.json']) expect(JSON.parse(readFileSync(join(APP, f), 'utf8')).version, f).toBe('1.2.0');
+    const lock = JSON.parse(readFileSync(join(APP, 'package-lock.json'), 'utf8'));
+    expect([lock.version, lock.packages[''].version]).toEqual(['1.2.0', '1.2.0']);
   });
 });

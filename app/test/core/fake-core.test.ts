@@ -1,5 +1,5 @@
 /**
- * Faux cœur 1.1 (app/src/dev/fake-core.ts, ?fake=1) : ses réponses doivent rester alignées sur les scénarios de
+ * Faux cœur (1.2 ; app/src/dev/fake-core.ts, ?fake=1) : ses réponses doivent rester alignées sur les scénarios de
  * fixtures/README.md et les critères du PRD, puisque les équipes lunettes et téléphone développent dessus.
  */
 import { join } from 'node:path';
@@ -26,7 +26,7 @@ async function order(now: number, pos: { lat: number; lon: number } | null) {
   return { core, last, order: core.orderFavorites(pos, PRESET, last).map((r) => r.favoriteId) };
 }
 
-describe('faux cœur 1.1 : favoris', () => {
+describe('faux cœur 1.2 : favoris', () => {
   it('ordre intelligent des scénarios S1, S2, S3 et au Bureau', async () => {
     expect((await order(at(7, 31), POS.s1)).order).toEqual(['fav-bureau', 'fav-namur', 'fav-gdn', 'fav-gand', 'fav-dl-nord', 'fav-maison']);
     expect((await order(at(12, 10), POS.s2)).order).toEqual(['fav-gdn', 'fav-dl-nord', 'fav-bureau', 'fav-gand', 'fav-namur', 'fav-maison']);
@@ -36,13 +36,16 @@ describe('faux cœur 1.1 : favoris', () => {
     expect(b.order.slice(-2)).toContain('fav-bureau');
   });
 
-  it('réponses : bureau (simple, suivant, suivant), gare à gare hors de portée, sans position', async () => {
+  it('réponses : bureau (le plus court, suivant, suivant), gare à gare hors de portée, sans position', async () => {
     const s1 = (await order(at(7, 31), POS.s1)).last.get('fav-bureau')!;
-    expect(labels(s1.plan!)).toEqual(['simple', 'next', 'next']);
+    // 1.2 : fav-bureau est un lieu ; sa réponse est celle du trajet « Ma position → lieu » (CA-1.3)
+    expect(PRESET.favorites[0].kind).toBe('place');
+    expect(s1.kind).toBe('trip');
+    expect(labels(s1.plan!)).toEqual(['short', 'next', 'next']);
     expect(s1.plan!.journeys.map(times)).toEqual(['07:35→09:00', '08:33→09:58', '09:33→10:58']);
     expect(s1.plan!.journeys[0].legs.find((l) => l.kind === 'ride')).toMatchObject({ newPlatform: '6', delayMin: 2 });
     const noRt = await fake(at(7, 31), { noRt: true }).answer(PRESET.favorites[0], POS.s1, PRESET);
-    expect(noRt.plan!.journeys[0].reason).toBe('Le plus simple : direct, à pied 7 + 12 min');
+    expect(noRt.plan!.journeys[0].reason).toBe('Le plus court : direct, à pied 7 + 12 min');
     expect(times(noRt.plan!.journeys[0])).toBe('07:33→08:58');
     const gand = (await order(at(12, 10), POS.s2)).last.get('fav-gand')!;
     expect(gand.fromStation).toBe(true);
@@ -60,45 +63,47 @@ describe('faux cœur 1.1 : favoris', () => {
   });
 });
 
-describe('faux cœur 1.1 : trajets', () => {
-  it('CA-M3.4 noRT vers Rue Neuve 1 : simple 08:56 puis « Le plus rapide : 5 min plus tôt, 1 changement »', async () => {
+describe('faux cœur 1.2 : trajets', () => {
+  it('CA-1.4 noRT vers Rue Neuve 1 : le plus court 07:33 → 08:51 (IC puis T3), sans changement 08:56, le suivant', async () => {
     const r = await fake(at(7, 31), { noRt: true }).route(here, addr('Rue Neuve 1, 1000 Bruxelles', 50.8505, 4.3545), at(7, 31), PRESET, POS.s1);
-    expect(labels(r)).toEqual(['simple', 'fast', 'next']);
-    expect(hhmm(r.journeys[0].arr)).toBe('08:56');
-    expect(r.journeys[1].reason).toBe('Le plus rapide : 5 min plus tôt, 1 changement');
+    expect(labels(r)).toEqual(['short', 'none', 'next']);
+    expect(r.journeys.map(times)).toEqual(['07:33→08:51', '07:33→08:56', '08:33→09:55']);
+    expect(r.journeys.slice(0, 2).map((j) => j.reason)).toEqual(['Le plus court\u00a0: 1 changement, à pied 7 + 2 + 3\u00a0min', 'Sans changement\u00a0: à pied 7 + 10\u00a0min']);
   });
 
   it('CA-M5.2, M5.3, M5.4 : métro, tram puis métro, train puis tram', async () => {
     const centenaire = addr('Boulevard du Centenaire 1, 1020 Bruxelles', 50.8915, 4.334);
     const a = await fake(at(12, 10)).route(here, centenaire, at(12, 10), PRESET, POS.s2);
-    expect(a.journeys[0].reason).toBe('Le plus simple : direct, à pied 6 + 1 min');
+    expect(a.journeys[0].reason).toBe('Le plus court : direct, à pied 6 + 1 min');
     const b = await fake(at(8, 0)).route(addr('Avenue Winston Churchill 100, 1180 Uccle', 50.808, 4.365), centenaire, at(8, 0), PRESET);
     expect(b.journeys[0].legs.filter((l) => l.kind === 'ride').map((l) => l.line)).toEqual(['3', '6']);
     const c = await fake(at(13, 55)).route(here, addr('Veldstraat 1, 9000 Gent', 51.0537, 3.7225), at(13, 55), PRESET, POS.s3);
-    expect(c.journeys[0].reason).toBe('Le plus simple : 1 changement, à pied 1 + 3 min');
+    expect(c.journeys[0].reason).toBe('Le plus court : 1 changement, à pied 1 + 3 min');
     expect(times(c.journeys[0])).toBe('14:10→14:57');
     expect(c.journeys[0].legs.find((l) => l.mode === 'tram')?.stops?.length).toBe(2);
   });
 
-  it('scénario 4 (Waterloo) : bus W puis métro, ou marche et train plus rapide', async () => {
+  it('CA-1.5 Waterloo → Rogier (cas H) : marche et train le plus court, bus W puis métro en « Moins de marche »', async () => {
     const r = await fake(at(7, 31)).route(addr('Chaussée de Bruxelles 1, 1410 Waterloo', 50.7175, 4.399), addr('Rue du Progrès 20, 1210 Saint-Josse-ten-Noode', 50.8582, 4.36), at(7, 31), PRESET);
-    expect(labels(r).slice(0, 2)).toEqual(['simple', 'fast']);
-    expect(r.journeys[0].legs.filter((l) => l.kind === 'ride').map((l) => l.line)).toEqual(['W', '2']);
-    expect(r.journeys[1].legs[0]).toMatchObject({ kind: 'walk', walkMin: 19 });
+    expect(labels(r)).toEqual(['short', 'lesswalk', 'next']);
+    expect(r.journeys.map(times)).toEqual(['07:34→08:30', '07:32→08:46', '08:04→09:00']);
+    expect(r.journeys[0].legs[0]).toMatchObject({ kind: 'walk', walkMin: 19 });
+    expect(r.journeys[1].legs.filter((l) => l.kind === 'ride').map((l) => l.line)).toEqual(['W', '2']);
+    expect(r.journeys.slice(0, 2).map((j) => j.reason)).toEqual(['Le plus court\u00a0: direct, à pied 19 + 5\u00a0min', 'Moins de marche\u00a0: 1 changement, à pied 2 + 2 + 3\u00a0min']);
   });
 
   it('états vides : à pied, tu y es, sans position, aucun arrêt, pas de trajet complet', async () => {
     const core = fake(at(7, 31));
-    const walk = await core.route(here, { type: 'place', placeId: 'bureau' }, at(7, 31), PRESET, { lat: 50.848, lon: 4.352 });
-    expect(walk.journeys.map((j) => j.reason)).toEqual(['Le plus simple : à pied, 9 min']);
-    expect((await core.route(here, { type: 'place', placeId: 'bureau' }, at(7, 31), PRESET, POS.bureau)).empty).toBe('here');
-    expect((await core.route(here, { type: 'place', placeId: 'bureau' }, at(7, 31), PRESET, null)).empty).toBe('noPosition');
+    const walk = await core.route(here, { type: 'place', placeId: 'fav-bureau' }, at(7, 31), PRESET, { lat: 50.848, lon: 4.352 });
+    expect(walk.journeys.map((j) => j.reason)).toEqual(['Le plus court : à pied, 9 min']);
+    expect((await core.route(here, { type: 'place', placeId: 'fav-bureau' }, at(7, 31), PRESET, POS.bureau)).empty).toBe('here');
+    expect((await core.route(here, { type: 'place', placeId: 'fav-bureau' }, at(7, 31), PRESET, null)).empty).toBe('noPosition');
     expect(await core.route(here, addr('Rue du Bois 1, 6600 Bastogne', 50.003, 5.715), at(7, 31), PRESET, POS.s1)).toMatchObject({ empty: 'noStopTo', accessMin: 20 });
     expect(await core.route(here, addr('Rue de Nimy 50, 7000 Mons', 50.46, 3.957), at(7, 31), PRESET, POS.s1)).toMatchObject({ empty: 'noTrip', station: { areaId: 'sncb:8881000' } });
   });
 });
 
-describe('faux cœur 1.1 : adresses, état, accueil léger', () => {
+describe('faux cœur 1.2 : adresses, état, accueil léger', () => {
   it('tableau A.2 ; geo=down et offline', async () => {
     const flags: FakeFlags = {};
     const core = fake(at(12, 10), flags);

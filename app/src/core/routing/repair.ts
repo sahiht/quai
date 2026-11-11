@@ -15,7 +15,7 @@ import { brokenConnection } from '../journeys';
 import { serviceDayBase } from '../util';
 import { endRef, rideLeg, stopRef, walkLeg, type EndPoint } from './legs';
 import { accessMap, linePart, Net, trainPart } from './network';
-import { maxWalkOf, P } from './params';
+import { maxWalkOf, P, walkRadii } from './params';
 import { raptor } from './raptor';
 import { isLineFile, linePath, soft, type RoutingSource } from './select';
 
@@ -233,7 +233,8 @@ export function repairLegs(j: Journey, net: Net, D: EndPoint, maxWalk: number): 
       walkOf.set(f[i], f[i + 1]);
     }
   }
-  const egress = accessMap(net, D, Math.floor(P.longWalkFactor * maxWalk), 2 * maxWalk);
+  const R = walkRadii(maxWalk);
+  const egress = accessMap(net, D, R.urban, R.station);
   if (!egress.size) return null;
   const uuBefore = urbanPairs(ridesBefore);
   const found = raptor(net, { access, egress, after: t, windowMin: 0, rounds, urbanUrbanMax: Math.max(0, P.urbanUrbanMax - uuBefore) })

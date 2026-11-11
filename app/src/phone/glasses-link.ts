@@ -35,7 +35,7 @@ export const showBoard = (ctx: PhoneCtx, areaId: string, filter?: LineFilter[]):
 
 /**
  * Bouton « Lunettes » et son emplacement de message. `aria` : nom pour les lecteurs d'écran
- * (« Afficher Le plus simple dans les lunettes »).
+ * (« Afficher Le plus court dans les lunettes »).
  */
 export function glassesButton(hub: MessageHub, aria: string, action: () => Promise<GlassesResult>): { button: HTMLButtonElement; message: HTMLParagraphElement } {
   const message = hub.slot();

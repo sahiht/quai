@@ -98,7 +98,7 @@ async function main(): Promise<void> {
     openPhone,
   });
   const coreReady = () => controller.ensureInit().then(() => core);
-  const picker = (id: string) => positionCard({ location: loc, core: coreReady, lang: () => settings.get().lang, changed: () => void controller.relocate(), id });
+  const picker = (id: string) => positionCard({ location: loc, core: coreReady, settings, changed: () => void controller.relocate(), id, now: clock.now });
 
   shell.extra.append(h('section', { class: 'box pad w-pos-box', 'aria-labelledby': 'w-pos-title' }, h('h2', { id: 'w-pos-title' }, 'Position'), picker('w-pos')));
 

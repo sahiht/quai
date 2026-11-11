@@ -4,7 +4,7 @@
  */
 import type { Endpoint, Favorite, FavoriteAnswer, Journey, NameLang, Place, PlanResult, Propose, Settings } from '../core/api';
 import { LABEL_TEXT } from '../core/api';
-import { favoriteTitle } from '../core/favorites';
+import { favoriteTitle, placeOf } from '../core/favorites';
 import { NB, shortAddress } from '../core/text';
 import { areaLabel, displayName, hhmm } from '../core/util';
 import { atTitle, durationText, journeyStart, spanText, stopAnswerLine, transfersText, tripAnswerLine, walkMinOf } from '../glasses/format';
@@ -32,13 +32,12 @@ export const T = {
   wherePlaceholder: 'Adresse, gare, arrêt ou lieu',
   addrPlaceholder: 'Rue et numéro, commune',
   privacy: 'Adresses : services officiels des Régions bruxelloise, flamande et wallonne. Seul le texte tapé leur est envoyé, ta position reste sur le téléphone.',
+  /** Quai Web, rubrique « Position » (PRD-1.2 § 3). */
+  privacyWeb: 'Adresses : services officiels des Régions bruxelloise, flamande et wallonne. Seul le texte tapé leur est envoyé.',
   addrDown: 'Adresses indisponibles pour l’instant : gares et arrêts seulement.',
   addrOffline: 'Recherche d’adresse impossible sans connexion : gares et arrêts seulement.',
   nothing: 'Aucune adresse, gare ou arrêt ne correspond. Ajoute la commune, ou vérifie l’orthographe.',
   addrHint: 'Pour une adresse, ajoute la rue et le numéro.',
-  saveAsPlace: 'Enregistrer comme lieu',
-  saveAddressAsPlace: 'Enregistrer l’adresse comme lieu',
-  savePlace: 'Enregistrer le lieu',
   keepFavorite: 'Garder en favori',
   favAdded: 'Ajouté à tes favoris.',
   favExists: 'Déjà dans tes favoris.',
@@ -49,31 +48,50 @@ export const T = {
   toVerify: 'Adresse à vérifier',
   approx: 'Position approximative : la rue, sans numéro.',
   hereSub: 'si tu es sur place',
-  useHere: 'Utiliser ma position actuelle',
+  hereOption: 'Ma position actuelle',
+  hereSearching: 'Recherche de ta position…',
+  hereDown: 'Position indisponible : autorise la position pour Quai dans l’appli Even, ou choisis une adresse ou un arrêt.',
+  hereDownWeb: 'Position indisponible : autorise-la dans le navigateur, ou choisis une adresse ou un arrêt.',
+  needName: 'Donne un nom au lieu.',
+  needSpot: 'Choisis une adresse ou un arrêt dans la liste.',
   clearRecent: 'Effacer les adresses récentes',
-  addFav: 'Ajouter aux favoris',
-  noThanks: 'Non merci',
+  recentTitle: 'Adresses récentes',
   remove: 'Supprimer',
   cancel: 'Annuler',
   removeFav: 'Supprimer ce favori ?',
+  removeFavButton: 'Supprimer ce favori',
   stopMissing: 'Arrêt introuvable : choisis-le à nouveau',
   noFav: 'Aucun favori pour l’instant.',
   manageFavs: 'Gérer mes favoris',
   myFavs: 'Mes favoris',
+  addFav: 'Ajouter un favori',
+  newFav: 'Nouveau favori',
+  favField: 'Adresse, gare ou arrêt',
+  fixedTripLink: 'Un trajet fixe, d’un endroit à un autre',
+  fixedTrip: 'Trajet fixe',
+  allLines: 'Toutes les lignes',
+  name: 'Nom',
+  save: 'Enregistrer',
+  inGlasses: 'Dans les lunettes',
+  nextDepartures: 'Ses prochains départs',
+  tripThere: 'Le trajet pour y aller',
+  proposeLegend: 'Le proposer à l’ouverture',
   reorder: 'Changer l’ordre',
   up: 'Monter',
   down: 'Descendre',
   done: 'Terminé',
-  favsLead: 'En tête dans les lunettes selon l’heure et le lieu (réglage Affichage).',
+  favsLead: 'Tes lieux, tes arrêts et tes trajets. En tête dans les lunettes selon l’heure et le lieu (réglage Affichage).',
+  maxWalk: 'Marche maximale',
+  maxWalkSub: 'Au-delà de 5 min de plus, seulement pour arriver au moins 10 min plus tôt',
   rtDown: 'Temps réel indisponible, horaires prévus',
   offline: 'Pas de réseau : réessaie dans un instant.',
-  news: 'Nouveau : tape une adresse, Quai trouve le trajet le plus simple.',
+  news: 'Nouveau : le trajet le plus court d’abord, et tes lieux sont dans tes favoris.',
 } as const;
 
-/** « Supprimer le lieu « Piscine » ? Les trajets favoris vers ce lieu seront aussi supprimés. » */
-export const removePlaceText = (name: string): string => `Supprimer le lieu « ${name} » ? Les trajets favoris vers ce lieu seront aussi supprimés.`;
-export const placeSavedText = (name: string): string => `Lieu enregistré : ${name}.`;
-export const addTripQuestion = (name: string): string => `Ajouter le trajet vers ${name} à tes favoris ?`;
+/** Suppression d'un lieu utilisé par un trajet fixe (PRD-1.2 § 2.2). */
+export const removeUsedPlaceText = (name: string): string => `Supprimer « ${name} » ? Les trajets fixes qui l’utilisent seront aussi supprimés.`;
+/** Limite des favoris atteinte (PRD-1.2 § 2.2). */
+export const limitText = (max: number): string => `${max} favoris au plus : supprimes-en un.`;
 export const noStopText = (min: number): string => `Aucun arrêt à moins de ${min} min à pied de cette adresse.`;
 export const noFullTripText = (station: string): string => `Pas de trajet complet. Essaie ${station}, puis le tram.`;
 export const searchTowards = (station: string): string => `Chercher vers ${station}`;
@@ -87,6 +105,10 @@ export const PROPOSE_LABEL: Record<Propose, string> = {
   morning: 'Le matin (5 h à 11 h)',
   evening: 'Le soir (15 h à 21 h)',
 };
+/** Créneaux d'un lieu (PRD-1.2 § 2.2) : « Quand je suis à moins de 300 m » n'a pas de sens pour un lieu. */
+export const PLACE_PROPOSE: readonly Propose[] = ['never', 'morning', 'evening'];
+/** Fin du sous-titre d'un favori : « proposé le matin ». */
+export const PROPOSE_TEXT: Record<Propose, string> = { never: '', near: 'proposé à moins de 300 m', morning: 'proposé le matin', evening: 'proposé le soir' };
 
 /* ------------------------------ Adresses ------------------------------ */
 
@@ -137,25 +159,25 @@ export function endpointText(e: Endpoint, settings: Settings): string {
   if (e.type === 'here') return 'Ma position';
   if (e.type === 'area') return displayName(e.name, settings.lang);
   if (e.type === 'address') return e.label;
-  return settings.places.find((p) => p.id === e.placeId)?.label ?? 'Lieu';
+  return placeOf(settings, e.placeId)?.label ?? 'Lieu';
 }
 
 /**
- * « Vers le bureau », « Vers Veldstraat 1 », « Vers Gand-Saint-Pierre » : titre d'un trajet vers `to`, avec les règles
- * du cœur (vers(), nom donné au favori d'abord, lieu en nom commun), comme dans les lunettes.
+ * « Vers le bureau », « Vers Veldstraat 1 », « Vers Gand-Saint-Pierre » : titre d'un trajet vers `to`, règles du cœur
+ * (favoriteTitle : article pour un nom commun connu, sinon le nom tel quel), comme dans les lunettes.
  */
-export function towardsText(to: Endpoint, settings: Settings, label?: string): string {
-  return favoriteTitle({ kind: 'trip', id: '', from: { type: 'here' }, to, propose: 'never', ...(label?.trim() ? { label: label.trim() } : {}) }, settings);
+export function towardsText(to: Endpoint, settings: Settings): string {
+  return favoriteTitle(to, settings);
 }
 
 /** « au bureau », « à Veldstraat 1 » (« Tu es déjà au bureau. »). */
 export const atText = (to: Endpoint, settings: Settings): string => atTitle(towardsText(to, settings));
 
-/** Nom d'un favori sur l'accueil du téléphone : « Vers le bureau », ou le libellé de l'arrêt (« Gare du Nord, tram »). */
+/** Nom d'un favori sur l'accueil du téléphone : « Vers le bureau » (lieu, trajet), ou le libellé de l'arrêt. */
 export function favoriteName(f: Favorite, settings: Settings, answer?: FavoriteAnswer): string {
-  if (f.kind === 'trip') return favoriteTitle(f, settings);
+  if (f.kind !== 'stop') return favoriteTitle(f, settings);
   const area = answer?.board?.area;
-  return area ? areaLabel(area, settings.lang) : displayName(f.name, settings.lang);
+  return area ? areaLabel(area, settings.lang) : f.op === 'sncb' ? `${displayName(f.name, settings.lang)}, train` : displayName(f.name, settings.lang);
 }
 
 /** Même trajet (favori ou recherche) : même départ et même arrivée. */
@@ -208,59 +230,51 @@ const minutes = (ms: number): string => {
 /** Minute affichée d'un instant (les cartes comparent des heures « HH:MM »). */
 const minuteOf = (t: number): number => Math.floor(t / 60_000);
 
-/** Étiquette d'une carte (« Le plus simple ») ; rien si le cœur n'en a pas donné. */
+/** Étiquette d'une carte (« Le plus court ») ; rien si le cœur n'en a pas donné. */
 export const labelText = (j: Journey): string => (j.label ? LABEL_TEXT[j.label] : '');
 
-/** Économie de marche qui compte (moins-de-marche.md § 1, seuil d'égalité du PRD § 4.1). */
-export const LESS_WALK_MIN = 5;
-/** Même créneau que « Le plus simple » : départ au plus 5 min avant (moins-de-marche.md § 1, condition 4). */
-const SAME_SLOT_MIN = 5;
+/** Marche longue (PRD-1.2 § 1.2) : une marche d'au moins la marche maximale plus 5 min. */
+export const longWalkFrom = (maxWalkMin: number): number => maxWalkMin + 5;
+/** La plus longue marche d'un trajet en véhicule, en minutes (0 sans véhicule). */
+export function longestWalk(j: Journey): number {
+  if (!rides(j).length) return 0;
+  return Math.max(0, ...j.legs.filter((l) => l.kind === 'walk').map((l) => walkMinOf(l)));
+}
+export const hasLongWalk = (j: Journey, maxWalkMin: number): boolean => longestWalk(j) >= longWalkFrom(maxWalkMin);
 
 /**
- * « Le plus rapide » tient lieu de « Moins de marche » (moins-de-marche.md § 1, conditions 1 à 4) : un véhicule,
- * au moins 5 min de marche en moins, au plus un changement de plus, départ au plus 5 min avant « Le plus simple »
- * (il arrive plus tôt, par définition).
+ * Phrase d'une carte (PRD-1.2 § 1.3). `maxWalkMin` : la marche maximale réglée (marche longue à partir de + 5 min).
  */
-export function fastWalksLess(fast: Journey, simple: Journey): boolean {
-  if (!rides(fast).length) return false;
-  const w = walkMinutesOf(simple) - walkMinutesOf(fast);
-  const k = fast.transfers - simple.transfers;
-  return w >= LESS_WALK_MIN && k <= 1 && minuteOf(journeyTimes(simple).start) - minuteOf(journeyTimes(fast).start) <= SAME_SLOT_MIN;
-}
-
-/** Phrase d'une carte (PRD § 6.2 T2, « Carte, phrase » ; moins-de-marche.md § 3). */
-export function cardPhrase(j: Journey, result: PlanResult): string {
-  const simple = result.journeys.find((x) => x.label === 'simple') ?? result.journeys[0];
-  const others = result.journeys.filter((x) => x !== simple);
+export function cardPhrase(j: Journey, result: PlanResult, maxWalkMin: number): string {
+  const short = result.journeys.find((x) => x.label === 'short') ?? result.journeys[0];
+  const others = result.journeys.filter((x) => x !== j);
+  const later = (x: Journey): number => minuteOf(x.arr) - minuteOf((short ?? x).arr);
+  const changes = (prefix: string): string => {
+    const d = later(j);
+    if (d > 0) return `${prefix}, mais arrive ${minutes(d * 60_000)} plus tard.`;
+    const earlier = minuteOf(journeyTimes(short ?? j).start) - minuteOf(journeyTimes(j).start);
+    return earlier > 0 ? `${prefix}, en partant ${minutes(earlier * 60_000)} plus tôt.` : `${prefix}, même heure d’arrivée.`;
+  };
   switch (j.label) {
-    case 'simple':
-      // « … et aussi le plus rapide » seulement si aucune autre carte n'arrive plus tôt ; « Le moins de
-      // changements. » si une autre carte fait marcher au moins 5 min de moins.
-      if (!others.some((x) => minuteOf(x.arr) < minuteOf(j.arr))) return 'Le plus simple, et aussi le plus rapide.';
-      if (others.some((x) => walkMinutesOf(j) - walkMinutesOf(x) >= LESS_WALK_MIN)) return 'Le moins de changements.';
-      return 'Le moins de changements et de marche.';
-    case 'fast': {
-      const k = j.transfers - (simple?.transfers ?? j.transfers);
-      const n = minutes((simple?.arr ?? j.arr) - j.arr);
-      const changes = `${k} changement${k > 1 ? 's' : ''} de plus`;
-      if (simple && fastWalksLess(j, simple)) {
-        const w = walkMinutesOf(simple) - walkMinutesOf(j);
-        return k >= 1 ? `Arrive ${n} plus tôt, avec ${changes} et ${w} min de marche en moins.` : `Arrive ${n} plus tôt, avec ${w} min de marche en moins.`;
-      }
-      return k >= 1 ? `Arrive ${n} plus tôt, avec ${changes}.` : `Arrive ${n} plus tôt, avec plus de marche.`;
+    case 'short': {
+      const sooner = others.filter((x) => minuteOf(x.arr) < minuteOf(j.arr));
+      if (!sooner.length) return 'Arrive le plus tôt.';
+      return sooner.some((x) => hasLongWalk(x, maxWalkMin)) ? 'Le plus court sans marche longue.' : 'Le plus court sans partir plus tôt.';
+    }
+    case 'earlier': {
+      const n = minutes((minuteOf((short ?? j).arr) - minuteOf(j.arr)) * 60_000);
+      return hasLongWalk(j, maxWalkMin) ? `Arrive ${n} plus tôt, mais avec ${longestWalk(j)} min à pied.` : `Arrive ${n} plus tôt, en partant à ${hhmm(journeyTimes(j).start)}.`;
     }
     case 'lesswalk': {
-      const w = walkMinutesOf(simple ?? j) - walkMinutesOf(j);
-      const d = minuteOf(j.arr) - minuteOf((simple ?? j).arr);
-      const when = d === 0 ? 'même heure d’arrivée' : d > 0 ? `arrivée ${minutes(d * 60_000)} plus tard` : `arrivée ${minutes(-d * 60_000)} plus tôt`;
-      return `${w} min de marche en moins, ${when}.`;
+      const w = walkMinutesOf(short ?? j) - walkMinutesOf(j);
+      const d = later(j);
+      if (d > 0) return `${w} min de marche en moins, mais arrive ${minutes(d * 60_000)} plus tard.`;
+      return d === 0 ? `${w} min de marche en moins, même heure d’arrivée.` : `${w} min de marche en moins, arrivée ${minutes(-d * 60_000)} plus tôt.`;
     }
-    case 'earlier':
-      return `Arrive ${minutes((simple?.arr ?? j.arr) - j.arr)} plus tôt, en partant à ${hhmm(journeyTimes(j).start)}.`;
     case 'none':
-      return `Aucun changement, mais arrive ${minutes(j.arr - (simple?.arr ?? j.arr))} plus tard.`;
+      return changes('Aucun changement');
     case 'fewer':
-      return `Moins de changements, mais arrive ${minutes(j.arr - (simple?.arr ?? j.arr))} plus tard.`;
+      return changes('Moins de changements');
     case 'walk':
       return `Sans attendre : ${minutes(j.arr - j.dep)} à pied.`;
     case 'next':
@@ -305,7 +319,7 @@ export function emptyState(r: PlanResult, to: Endpoint, settings: Settings, opts
     case 'here':
       return { kind: 'text', text: `Tu es déjà ${atText(to, settings)}.` };
     case 'noPosition':
-      return { kind: 'text', text: opts.web ? 'Position inconnue : autorise-la dans le navigateur, ou choisis un arrêt (onglet Lunettes, rubrique Position).' : 'Position inconnue : autorise la position pour Quai.' };
+      return { kind: 'text', text: opts.web ? 'Position inconnue : autorise-la dans le navigateur, ou choisis une adresse ou un arrêt (onglet Lunettes, rubrique Position).' : 'Position inconnue : autorise la position pour Quai.' };
     case 'noStopFrom':
     case 'noStopTo':
       return { kind: 'text', text: noStopText(r.accessMin ?? settings.maxWalkMin * 2) };

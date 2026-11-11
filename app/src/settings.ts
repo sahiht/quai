@@ -1,25 +1,30 @@
 /**
  * Réglages de Quai : validation, migration selon `v`, lecture et écriture via le KV du SDK.
  * Aucune fonction ne lève d'exception sur une entrée invalide : on retombe sur les valeurs par défaut.
+ * Version 3 (1.2, docs/v1.2/PRD-1.2.md § 2.4) : lieux et favoris en une seule liste ; un lieu est un favori
+ * (kind 'place') ; un trajet fixe ne part jamais de « Ma position ».
  */
-import type { Endpoint, Favorite, FavoriteStop, FavoriteTrip, KV, LineFilter, NameLang, Place, Propose, RecentAddress, Settings } from './core/api';
+import type { Endpoint, Favorite, FavoritePlace, FavoriteStop, FavoriteTrip, KV, LineFilter, NameLang, Place, Propose, RecentAddress, Settings } from './core/api';
 import { DEFAULT_SETTINGS } from './core/api';
+import { shortAddress } from './core/text';
+import { displayName } from './core/util';
 import type { Names, Op } from '../../shared/types';
 
 export const SETTINGS_KEY = 'quai.settings';
-export const CURRENT_VERSION = 2;
+export const CURRENT_VERSION = 3;
 
 const OPS: readonly Op[] = ['sncb', 'stib', 'delijn', 'tec'];
 const LANGS: readonly NameLang[] = ['fr', 'nl', 'local'];
 const PROPOSE: readonly Propose[] = ['never', 'near', 'morning', 'evening'];
+/** Créneaux d'un lieu : « Quand je suis à moins de 300 m » n'a pas de sens pour lui et devient « Jamais ». */
+const PLACE_PROPOSE: readonly Propose[] = ['never', 'morning', 'evening'];
 const OPENING: readonly Settings['display']['opening'][] = ['suggest', 'home', 'firstFavorite'];
 const RADII: readonly Settings['display']['radiusM'][] = [300, 500, 800];
 const FAV_ORDER: readonly Settings['display']['favOrder'][] = ['smart', 'mine'];
 const PLACE_SRC: readonly NonNullable<Place['src']>[] = ['address', 'stop', 'here'];
 
 export const LIMITS = {
-  places: 12,
-  favorites: 20,
+  favorites: 32, // 1.2 : 20 favoris et 12 lieux de la 1.1, la migration ne perd rien
   recent: 5,
   label: 30,
   address: 120,
@@ -28,6 +33,9 @@ export const LIMITS = {
   delayMin: [1, 60] as const,
   leaveBeforeMin: [0, 15] as const,
 };
+
+/** 1.1 : « Mes lieux », 12 au plus (lus seulement par la migration). */
+const V2_PLACES_MAX = 12;
 
 type Obj = Record<string, unknown>;
 const isObj = (x: unknown): x is Obj => typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -143,8 +151,14 @@ function filters(x: unknown): LineFilter[] | undefined {
   return out.length ? out.slice(0, 30) : undefined;
 }
 
+function favoritePlace(x: Obj): FavoritePlace | undefined {
+  const p = place(x);
+  return p ? { ...p, kind: 'place', propose: oneOf(x.propose, PLACE_PROPOSE, 'never' as Propose) } : undefined;
+}
+
 function favorite(x: unknown, placeIds: Set<string>): Favorite | undefined {
   if (!isObj(x)) return undefined;
+  if (x.kind === 'place') return favoritePlace(x);
   const id = str(x.id, 60);
   if (!id) return undefined;
   const propose = oneOf(x.propose, PROPOSE, 'never' as Propose);
@@ -172,23 +186,65 @@ function favorite(x: unknown, placeIds: Set<string>): Favorite | undefined {
   return undefined;
 }
 
-/** Valide et complète des réglages (format v2). Ne lève jamais. */
+/** Nom d'un lieu venu d'un trajet de la 1.1 : son nom affiché (« bureau » → « Bureau »), sinon `fallback`. */
+function nameFrom(own: string | undefined, fallback: string): string {
+  const t = own?.trim();
+  if (!t || t.toLowerCase() === fallback.trim().toLowerCase()) return fallback.slice(0, LIMITS.label);
+  return (t.charAt(0).toUpperCase() + t.slice(1)).slice(0, LIMITS.label);
+}
+
+/**
+ * « Ma position → adresse » ou « Ma position → arrêt » devient un lieu (PRD-1.2 § 2.4, règle 3) : même identifiant,
+ * nom affiché, sinon adresse courte ou arrêt ; créneau gardé (« près » devient « Jamais »).
+ */
+function placeFromTrip(f: FavoriteTrip, lang: NameLang): FavoritePlace | undefined {
+  const to = f.to;
+  const propose = PLACE_PROPOSE.includes(f.propose) ? f.propose : 'never';
+  if (to.type === 'address') {
+    const p: FavoritePlace = { kind: 'place', id: f.id, label: nameFrom(f.label, shortAddress(to.label)), lat: to.lat, lon: to.lon, address: to.label, src: 'address', propose };
+    if (to.approx) p.approx = true;
+    return p;
+  }
+  if (to.type === 'area') {
+    const stop = displayName(to.name, lang);
+    return { kind: 'place', id: f.id, label: nameFrom(f.label, stop), lat: to.lat, lon: to.lon, address: `Près de ${stop}`.slice(0, LIMITS.address), src: 'stop', areaId: to.areaId, propose };
+  }
+  return undefined;
+}
+
+/**
+ * Favoris v3 dans l'ordre, identifiants uniques, 32 au plus. Un trajet « Ma position → … » n'est pas un trajet fixe :
+ * vers un lieu, c'est ce lieu (déjà dans la liste) ; vers une adresse ou un arrêt, il devient un lieu. Un trajet fixe
+ * qui cite un lieu absent est retiré (comme en 1.1).
+ */
+function favoritesOf(raw: unknown[], lang: NameLang): Favorite[] {
+  const placeIds = new Set<string>();
+  for (const r of raw) {
+    const p = isObj(r) && r.kind === 'place' ? favoritePlace(r) : undefined;
+    if (p) placeIds.add(p.id);
+  }
+  const out: Favorite[] = [];
+  for (const r of raw) {
+    let f = favorite(r, placeIds);
+    if (f?.kind === 'trip' && f.from.type === 'here') f = placeFromTrip(f, lang);
+    if (f && !out.some((g) => g.id === f.id)) out.push(f);
+    if (out.length >= LIMITS.favorites) break;
+  }
+  const kept = new Set(out.filter((f) => f.kind === 'place').map((f) => f.id));
+  const known = (e: Endpoint) => e.type !== 'place' || kept.has(e.placeId);
+  return out.filter((f) => f.kind !== 'trip' || (known(f.from) && known(f.to)));
+}
+
+/**
+ * Valide et complète des réglages (format v3). Des réglages d'une version antérieure (`v` 1 ou 2 : anciens
+ * enregistrements, préréglages) sont d'abord migrés. Ne lève jamais.
+ */
 export function validateSettings(input: unknown): Settings {
+  if (isObj(input) && typeof input.v === 'number' && input.v >= 1 && input.v < CURRENT_VERSION) return migrateSettings(input);
   const d = DEFAULT_SETTINGS;
   const x = isObj(input) ? input : {};
-  const places: Place[] = [];
-  for (const p of Array.isArray(x.places) ? x.places : []) {
-    const ok = place(p);
-    if (ok && !places.some((q) => q.id === ok.id)) places.push(ok);
-    if (places.length >= LIMITS.places) break;
-  }
-  const placeIds = new Set(places.map((p) => p.id));
-  const favorites: Favorite[] = [];
-  for (const f of Array.isArray(x.favorites) ? x.favorites : []) {
-    const ok = favorite(f, placeIds);
-    if (ok && !favorites.some((g) => g.id === ok.id)) favorites.push(ok);
-    if (favorites.length >= LIMITS.favorites) break;
-  }
+  const lang = oneOf(x.lang, LANGS, d.lang);
+  const favorites = favoritesOf(Array.isArray(x.favorites) ? x.favorites : [], lang);
   const recent: RecentAddress[] = [];
   for (const r of Array.isArray(x.recent) ? x.recent : []) {
     const ok = recentAddress(r);
@@ -199,10 +255,9 @@ export function validateSettings(input: unknown): Settings {
   const disp = isObj(x.display) ? x.display : {};
   const al = isObj(x.alerts) ? x.alerts : {};
   return {
-    v: 2,
+    v: 3,
     onboarded: bool(x.onboarded, d.onboarded),
-    lang: oneOf(x.lang, LANGS, d.lang),
-    places,
+    lang,
     maxWalkMin: clampInt(x.maxWalkMin, LIMITS.maxWalkMin, d.maxWalkMin),
     favorites,
     recent,
@@ -246,6 +301,59 @@ const MIGRATIONS: Record<number, (x: Obj) => Obj> = {
     const display = isObj(x.display) ? { ...x.display } : {};
     if (display.favOrder === undefined) display.favOrder = 'smart';
     return { ...x, display, recent: Array.isArray(x.recent) ? x.recent : [], seenVersion: typeof x.seenVersion === 'string' && x.seenVersion ? x.seenVersion : '1.0.0', v: 2 };
+  },
+  /**
+   * 1.1 vers 1.2 (PRD-1.2 § 2.4), sans perte ni doublon :
+   * 1. chaque lieu devient un favori lieu (nom, position, adresse, src, approx, areaId gardés), créneau « Jamais » ;
+   * 2. un trajet « Ma position → ce lieu » fusionne avec lui : le lieu prend sa place dans l'ordre, son
+   *    identifiant, son nom affiché et son créneau (« près » devient « Jamais ») ; s'il y en a plusieurs, le premier ;
+   * 3. « Ma position → adresse ou arrêt » devient un lieu ;
+   * 4. arrêts et autres trajets inchangés ; un trajet fixe qui citait un lieu cite son favori lieu ;
+   * 5. ordre : les favoris de la 1.1, puis les lieux restants dans l'ordre de « Mes lieux ».
+   * Adresses récentes, réglages et seenVersion gardés.
+   */
+  2: (x) => {
+    const lang = oneOf(x.lang, LANGS, DEFAULT_SETTINGS.lang);
+    const places: Place[] = [];
+    for (const r of Array.isArray(x.places) ? x.places : []) {
+      const p = place(r);
+      if (p && !places.some((q) => q.id === p.id)) places.push(p);
+      if (places.length >= V2_PLACES_MAX) break;
+    }
+    const placeIds = new Set(places.map((p) => p.id));
+    const out: Favorite[] = [];
+    const placeFav = new Map<string, string>(); // lieu de la 1.1 → identifiant de son favori lieu
+    for (const r of Array.isArray(x.favorites) ? x.favorites : []) {
+      const f = favorite(r, placeIds);
+      if (!f || f.kind === 'place' || out.some((g) => g.id === f.id)) continue;
+      if (f.kind === 'trip' && f.from.type === 'here') {
+        const to = f.to;
+        if (to.type === 'place') {
+          if (placeFav.has(to.placeId)) continue; // même trajet : disparaît
+          const p = places.find((q) => q.id === to.placeId)!;
+          placeFav.set(p.id, f.id);
+          out.push({ ...p, kind: 'place', id: f.id, label: nameFrom(f.label, p.label), propose: PLACE_PROPOSE.includes(f.propose) ? f.propose : 'never' });
+        } else {
+          const p = placeFromTrip(f, lang);
+          if (p) out.push(p);
+        }
+        continue;
+      }
+      out.push(f);
+    }
+    const taken = new Set(out.map((f) => f.id));
+    for (const p of places) {
+      if (placeFav.has(p.id)) continue;
+      let id = p.id;
+      for (let n = 2; taken.has(id); n++) id = `${p.id}-${n}`; // identifiant déjà pris par un favori
+      taken.add(id);
+      placeFav.set(p.id, id);
+      out.push({ ...p, kind: 'place', id, propose: 'never' });
+    }
+    const follow = (e: Endpoint): Endpoint => (e.type === 'place' ? { type: 'place', placeId: placeFav.get(e.placeId) ?? e.placeId } : e);
+    const favorites = out.map((f) => (f.kind === 'trip' ? { ...f, from: follow(f.from), to: follow(f.to) } : f));
+    const { places: _places, ...rest } = x;
+    return { ...rest, favorites, v: 3 };
   },
 };
 

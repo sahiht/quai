@@ -1,6 +1,6 @@
 /**
- * Réglages du calcul de trajets (PRD § 4.4, design-routing.md § 4 et § 4.8). Constantes du cœur, en minutes et en
- * mètres sauf mention. Les seuils du PRD sont validés sur les vraies données (Q5, DECISIONS.md).
+ * Réglages du calcul de trajets (PRD 1.1 § 4.4, PRD-1.2 § 1, design-routing.md § 4 et § 4.8). Constantes du cœur, en
+ * minutes et en mètres sauf mention. Les seuils sont validés sur les vraies données (Q5, DECISIONS.md).
  */
 import type { Mode } from '../../../../shared/types';
 import type { Settings } from '../api';
@@ -46,36 +46,58 @@ export const P = {
   /** Arrivée à moins de cette distance du départ : « Tu es déjà … » (PlanResult.empty 'here'). */
   hereM: 300,
 
-  /* ---------- classement (PRD § 4.1, § 4.3, § 4.4 ; design § 4.8) ---------- */
-  walkTieMin: 5,
-  fastGainMin: 5,
-  fastMaxEarlierMin: 30,
-  guardMin: 30,
-  /** Garde-fou resserré (moins-de-marche.md § 5) : 15 min seulement quand « Le plus simple » ne fait pas marcher au
-   *  moins walkTieMin de moins que la référence (première arrivée de la fenêtre). */
-  guardSameWalkMin: 15,
-  /** « Moins de marche » (moins-de-marche.md § 1) : au moins 5 min de marche en moins, au plus un changement de plus,
-   *  départ au plus 5 min avant et arrivée au plus 5 min après « Le plus simple » ; déclenché par une de ses marches
-   *  d'au moins la marche maximale. */
-  lessWalkGainMin: 5,
-  lessWalkExtraTransfers: 1,
-  lessWalkSlotMin: 5,
+  /* ---------- classement (PRD-1.2 § 1) ---------- */
+  /** « À 5 min près » : un trajet en devance un autre s'il arrive au moins 5 min plus tôt ; égalités de durée et de
+   *  marche ; une marche longue commence 5 min au-delà de la marche maximale. */
+  tieMin: 5,
+  /** La nuit (aucun départ dans l'heure), un trajet n'en devance un autre que s'il ne part pas plus de 30 min avant. */
+  nightAheadMin: 30,
+  /** Un trajet avec une marche longue n'est « Le plus court » que s'il arrive au moins 10 min avant le plus court
+   *  des trajets sans marche longue (sinon « Plus tôt » s'il fait gagner au moins 5 min). */
+  longWalkGainMin: 10,
+  /** « Moins de marche », « Sans changement », « Moins de changements » : arrivée au plus 20 min après. */
+  optionLateMin: 20,
+  /** « Plus tard » : jamais un trajet devancé de plus de 30 min par un trajet parti au plus 30 min avant. */
+  laterGuardMin: 30,
+  /** « À pied » : marche seule de 30 min au plus, arrivée au plus 5 min après « Le plus court ». */
   walkOnlyMaxMin: 30,
   walkOnlyLateMin: 5,
-  longWalkFactor: 1.5,
   /** Fenêtre des propositions la nuit (après le premier départ possible). */
   nightPoolMin: 90,
   /** « Le suivant » et « Plus tard » : au plus 2 h après. */
   laterMaxMin: 120,
-  /** « Moins de changements » : au plus max(45 min, moitié de la durée du plus simple) après lui. */
-  fewerMinMin: 45,
   proposals: 3,
   /** Réserves classées avec les propositions, pour le temps réel (design § 4.9). */
   reserves: 3,
+
+  /* ---------- marche (PRD-1.2 § 1.2) : une préférence, plus un mur ---------- */
+  /** Recherche toujours élargie : arrêts jusqu'à 15 min à pied, gares jusqu'à 25 min. */
+  wideUrbanMin: 15,
+  wideStationMin: 25,
+  /** Passe « courte » : 5 min de marche au plus. */
+  shortWalkMin: 5,
 } as const;
 
 /** Distance (m) parcourue en `min` minutes de marche (inverse de walkMinutes). */
 export const walkReachM = (min: number) => (min * 80) / 1.3;
 
-/** Marche maximale des réglages (« Mes lieux »), de 1 à 30 min, 10 par défaut. */
+/** Marche maximale des réglages (« Mes favoris »), de 1 à 30 min, 10 par défaut : une préférence (PRD-1.2 § 1.2). */
 export const maxWalkOf = (s: Pick<Settings, 'maxWalkMin'>) => Math.min(30, Math.max(1, Math.round(s.maxWalkMin || 10)));
+
+/** Rayons de marche en minutes (PRD-1.2 § 1.2), quel que soit le réglage. */
+export interface WalkRadii {
+  /** Préférence : la marche maximale réglée. */
+  pref: number;
+  /** Recherche élargie : arrêts urbains jusqu'à 15 min, gares jusqu'à 25 min (ou la marche maximale plus 5 min). */
+  urban: number;
+  station: number;
+  /** Passe courte : 5 min. */
+  short: number;
+  /** Marche longue : à partir de la marche maximale plus 5 min. */
+  long: number;
+}
+
+export function walkRadii(maxWalk: number): WalkRadii {
+  const long = maxWalk + P.tieMin;
+  return { pref: maxWalk, urban: Math.max(P.wideUrbanMin, long), station: Math.max(P.wideStationMin, long), short: P.shortWalkMin, long };
+}

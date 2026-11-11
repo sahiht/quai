@@ -89,8 +89,8 @@ export function radios<T extends string>(opts: { legend: string; big?: boolean; 
   );
 }
 
-/** Ligne de liste cliquable : icône, titre, sous-titres, chevron. */
-export function listRow(opts: { icon: Child; title: string; sub?: string; sub2?: string; label?: string; onClick: () => void }): HTMLLIElement {
+/** Ligne de liste cliquable : icône, titre, sous-titres (sub2 en texte courant, sub3 discret), chevron. */
+export function listRow(opts: { icon: Child; title: string; sub?: string; sub2?: string; sub3?: string; label?: string; onClick: () => void }): HTMLLIElement {
   return h(
     'li',
     null,
@@ -98,7 +98,14 @@ export function listRow(opts: { icon: Child; title: string; sub?: string; sub2?:
       'button',
       { type: 'button', class: 'row', onclick: opts.onClick, 'aria-label': opts.label },
       opts.icon,
-      h('span', { class: 'txt' }, h('span', { class: 't1' }, opts.title), opts.sub ? h('span', { class: 't2' }, opts.sub) : null, opts.sub2 ? h('span', { class: 't3' }, opts.sub2) : null),
+      h(
+        'span',
+        { class: 'txt' },
+        h('span', { class: 't1' }, opts.title),
+        opts.sub ? h('span', { class: 't2' }, opts.sub) : null,
+        opts.sub2 ? h('span', { class: 't3' }, opts.sub2) : null,
+        opts.sub3 ? h('span', { class: 't2 t4' }, opts.sub3) : null,
+      ),
       h('span', { class: 'chev', html: ICON.chevron }),
     ),
   );

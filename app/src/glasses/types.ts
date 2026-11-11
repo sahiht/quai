@@ -62,7 +62,7 @@ export type Route =
   | { screen: 'arrival'; journey: Journey; leg: number; trip?: { from: AreaRef; to: AreaRef } }
   | { screen: 'message'; kind: MessageKind; title: string; lines: string[] };
 
-/** news : message « Quai 1.1 » (une fois, après la mise à jour). */
+/** news : message « Quai 1.2 » (une fois, après la mise à jour depuis la 1.0 ou la 1.1). */
 export type MessageKind = 'loading' | 'error' | 'empty' | 'firstRun' | 'notConfigured' | 'info' | 'news';
 
 /** Ce que fait un toucher sur un élément. */

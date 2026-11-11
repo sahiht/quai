@@ -38,7 +38,7 @@ export const HINTS = {
   firstRun: `toucher${NB}: continuer   double${NB}: quitter`,
   /** Quai Web : rien à quitter, l'onglet se ferme dans le navigateur. */
   firstRunWeb: `toucher${NB}: continuer`,
-  /** Message « Quai 1.1 ». */
+  /** Message « Quai 1.2 ». */
   news: `toucher${NB}: continuer`,
   quit: `double toucher${NB}: quitter`,
 } as const;

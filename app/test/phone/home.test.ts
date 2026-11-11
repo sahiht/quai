@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 /**
- * Accueil du téléphone (T1, S8, M8) : « Où vas-tu ? » ouvre la recherche, section « Mes favoris » au-dessus de
- * « Réglages » (réponse courte, bouton « Lunettes », « Gérer mes favoris »), bannière après la mise à jour,
- * « Temps réel indisponible, horaires prévus » au lieu de « Tout est à jour ».
+ * Accueil du téléphone (T1, S8, M8 ; PRD-1.2 § 2.2) : « Où vas-tu ? » ouvre la recherche, section « Mes favoris »
+ * (lieux compris) au-dessus de « Réglages » (réponse courte, bouton « Lunettes », « Gérer mes favoris »), « Réglages »
+ * sans « Mes lieux », bannière après la mise à jour, « Temps réel indisponible, horaires prévus » au lieu de « Tout est
+ * à jour ».
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FavoriteAnswer, Settings } from '../../src/core/api';
-import { newsState } from '../../src/phone/app';
+import { NEWS_SINCE, newsState } from '../../src/phone/app';
 import { APP_VERSION } from '../../src/version';
 import { ANSWER_MAX_AGE_MS, homeScreen, resetAnswers, reusable } from '../../src/phone/screens/home';
 import { catchable } from '../../src/glasses/format';
@@ -70,7 +71,8 @@ describe('« Mes favoris » sur l’accueil (S8)', () => {
     btn.click();
     await until(() => textOf(row.querySelector('.msg')) !== '');
     expect(hz.glasses.trips).toHaveLength(1);
-    expect(hz.glasses.trips[0]).toMatchObject({ title: 'Vers le bureau', favoriteId: 'fav-bureau', index: 0, from: { type: 'here' }, to: { type: 'place', placeId: 'bureau' } });
+    // un lieu : le trajet « Ma position → lieu », même identifiant
+    expect(hz.glasses.trips[0]).toMatchObject({ title: 'Vers le bureau', favoriteId: 'fav-bureau', index: 0, from: { type: 'here' }, to: { type: 'place', placeId: 'fav-bureau' } });
     expect(hz.glasses.trips[0].result.journeys.length).toBeGreaterThan(0);
     expect(textOf(row.querySelector('.msg'))).toMatch(/^Affiché dans les lunettes : IC 07:42\.$/);
   });
@@ -135,6 +137,20 @@ describe('« Mes favoris » sur l’accueil (S8)', () => {
     expect(hz.glasses.boards[0].filter?.length).toBe(3);
   });
 
+  it('lieux compris (préréglage 1.1 migré) ; « Réglages » : plus de « Mes lieux », « Mes favoris   6 favoris »', async () => {
+    const hz = harness({ settings: preset11(), now: SCENARIO.s1.now, here: SCENARIO.s1, flags: { noRt: true } });
+    const el = mount(homeScreen(hz.ctx));
+    expect(favRows(el).map((r) => textOf(r.querySelector('.t1')))).toContain('Vers la maison');
+    const settingsRows = [...el.querySelectorAll('.list.box:not(.fav-list) .row')].map((r) => textOf(r.querySelector('.t1')));
+    expect(settingsRows).toEqual(['Position et langue', 'Mes favoris', 'Affichage', 'Alertes', 'Données']);
+    const favs = [...el.querySelectorAll('.row')].find((r) => textOf(r.querySelector('.t1')) === 'Mes favoris')!;
+    expect(textOf(favs.querySelector('.t2'))).toBe('6 favoris');
+    (favs as HTMLButtonElement).click();
+    expect(hz.went).toEqual(['#/favoris']);
+    const one = mount(homeScreen(harness({ settings: defaults({ favorites: [preset11().favorites[0]] }) }).ctx));
+    expect(textOf([...one.querySelectorAll('.row')].find((r) => textOf(r.querySelector('.t1')) === 'Mes favoris')!.querySelector('.t2'))).toBe('1 favori');
+  });
+
   it('sans favori : « Aucun favori pour l’instant. »', () => {
     const hz = harness({ settings: defaults() });
     const el = mount(homeScreen(hz.ctx));
@@ -156,22 +172,24 @@ describe('réponses courtes (S8, mêmes règles que les lunettes)', () => {
 });
 
 describe('bannière après la mise à jour (T1) et état des données (M8)', () => {
-  it('une fois après une mise à jour depuis la 1.0, jusqu’à « OK » ; jamais après une nouvelle installation', () => {
+  it('une fois après une mise à jour depuis la 1.0 ou la 1.1, jusqu’à « OK » ; jamais après une nouvelle installation', () => {
+    expect(NEWS_SINCE).toBe('1.2.0');
+    expect(APP_VERSION).toBe('1.2.0');
     expect(newsState('1.0.0').visible()).toBe(true);
+    expect(newsState('1.1.0').visible()).toBe(true);
     expect(newsState('').visible()).toBe(false);
-    expect(newsState('1.1.0').visible()).toBe(false);
-    // mise à jour 1.1.0 → 1.1.1 : la bannière des nouveautés de la 1.1 ne revient pas
-    expect(APP_VERSION).toBe('1.1.1');
-    expect(newsState('1.1.0').visible()).toBe(false);
+    expect(newsState('1.2.0').visible()).toBe(false);
+    // mise à jour 1.2.0 → 1.2.1 : la bannière des nouveautés de la 1.2 ne revient pas
+    expect(newsState('1.2.0').visible()).toBe(false);
     const hz = harness({ settings: defaults() });
-    hz.ctx.news = newsState('1.0.0', '1.1.0');
+    hz.ctx.news = newsState('1.1.0');
     const el = mount(homeScreen(hz.ctx));
-    expect(textOf(el.querySelector('.news p'))).toBe('Nouveau : tape une adresse, Quai trouve le trajet le plus simple.');
+    expect(textOf(el.querySelector('.news p'))).toBe('Nouveau : le trajet le plus court d’abord, et tes lieux sont dans tes favoris.');
     button(el, 'OK').click();
     expect(el.querySelector('.news')).toBeNull();
     expect(hz.ctx.news.visible()).toBe(false);
     expect(mount(homeScreen(hz.ctx)).querySelector('.news')).toBeNull();
-    // le téléphone n'écrit pas la version vue (les lunettes s'en servent pour « Quai 1.1 »)
+    // le téléphone n'écrit pas la version vue (les lunettes s'en servent pour « Quai 1.2 »)
     expect(hz.settings.get().seenVersion).toBe('');
   });
 

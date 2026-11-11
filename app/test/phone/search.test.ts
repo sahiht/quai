@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * Rechercher un trajet (T2, M3, M4, M5, S3, S4) : cartes étiquetées et expliquées, bouton « Lunettes » par carte
- * (TripRequest avec le résultat entier et l'indice ; message à côté du bouton touché seulement), choix unique
- * annoncé, « Enregistrer comme lieu », « Garder en favori », états vides avec leur issue, adresses récentes.
+ * Rechercher un trajet (T2, M3, M4, M5, S3, S4 ; PRD-1.2 § 1.3 et § 2.2) : cartes étiquetées et expliquées (« Le plus
+ * court » d'abord), bouton « Lunettes » par carte (TripRequest avec le résultat entier et l'indice ; message à côté du
+ * bouton touché seulement), choix unique annoncé, « Garder en favori » (un lieu depuis « Ma position », sinon un trajet
+ * fixe), états vides avec leur issue, adresses récentes.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { LIMITS } from '../../src/settings';
@@ -10,7 +11,7 @@ import { GEO_DELAY_MS } from '../../src/phone/field';
 import { searchScreen, withRecent } from '../../src/phone/screens/search';
 import { header } from '../../src/phone/app';
 import type { Journey } from '../../src/core/api';
-import { button, defaults, harness, mount, NB, options, preset, SCENARIO, settle, sleep, textOf, type, until } from './helpers';
+import { button, defaults, harness, mount, NB, options, preset11, SCENARIO, settle, sleep, textOf, type, until } from './helpers';
 
 afterEach(() => document.body.replaceChildren());
 
@@ -44,17 +45,17 @@ describe('cartes de résultats (M3, M4.5)', () => {
     const hz = open({ params: 'de=sncb:8813003&vers=sncb:8892007' });
     await results(hz.el);
     expect(textOf(hz.el.querySelector('.live'))).toBe('3 trajets.');
-    expect(tags(hz.el)).toEqual(['Le plus simple', 'Le suivant', 'Le suivant']);
+    expect(tags(hz.el)).toEqual(['Le plus court', 'Le suivant', 'Le suivant']);
     const first = cards(hz.el)[0];
     expect(textOf(first.querySelector('.time'))).toBe('14:10 → 14:39');
-    expect(textOf(first.querySelector('.why'))).toBe('Le plus simple, et aussi le plus rapide.');
+    expect(textOf(first.querySelector('.why'))).toBe('Arrive le plus tôt.');
     expect(textOf(cards(hz.el)[1].querySelector('.why'))).toBe('Même trajet, départ suivant.');
     // plus de grand bouton en bas
     expect(hz.el.textContent).not.toContain('Afficher dans les lunettes');
     expect(hz.el.querySelectorAll('.result .btn-glasses')).toHaveLength(3);
   });
 
-  it('choix unique pour les lecteurs d’écran : radiogroup, radio, nom du bouton « Afficher Le plus simple dans les lunettes » (CA-M4.13)', async () => {
+  it('choix unique pour les lecteurs d’écran : radiogroup, radio, nom du bouton « Afficher Le plus court dans les lunettes » (CA-M4.13)', async () => {
     const hz = open({ params: 'de=sncb:8813003&vers=sncb:8892007' });
     await results(hz.el);
     const group = hz.el.querySelector('[role="radiogroup"]')!;
@@ -63,7 +64,7 @@ describe('cartes de résultats (M3, M4.5)', () => {
     expect(radios.map((r) => r.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
     expect(radios.map((r) => r.getAttribute('tabindex'))).toEqual(['0', '-1', '-1']);
     const btns = cards(hz.el).map((c) => c.querySelector('.btn-glasses')!.getAttribute('aria-label'));
-    expect(btns).toEqual(['Afficher Le plus simple dans les lunettes', 'Afficher Le suivant dans les lunettes', 'Afficher Le suivant dans les lunettes']);
+    expect(btns).toEqual(['Afficher Le plus court dans les lunettes', 'Afficher Le suivant dans les lunettes', 'Afficher Le suivant dans les lunettes']);
     (radios[2] as HTMLElement).click();
     expect(radios.map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'false', 'true']);
     radios[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
@@ -110,69 +111,79 @@ describe('cartes de résultats (M3, M4.5)', () => {
     expect(web.glasses.trips).toHaveLength(1);
   });
 
-  it('« Le plus simple » et « Le plus rapide » différents : leurs phrases (S1, noRT, vers Rue Neuve 1 ; F3-b)', async () => {
-    const hz = open({ settings: preset(), now: SCENARIO.s1.now, here: SCENARIO.s1, flags: { noRt: true } });
+  it('CA-1.4 : « Le plus court » puis « Sans changement » et leurs phrases (S1, noRT, vers Rue Neuve 1)', async () => {
+    const hz = open({ settings: preset11(), now: SCENARIO.s1.now, here: SCENARIO.s1, flags: { noRt: true } });
     await arrive(hz, 'rue neuve 1 bruxelles', 'Rue Neuve 1, 1000 Bruxelles');
     await results(hz.el);
-    expect(tags(hz.el).slice(0, 2)).toEqual(['Le plus simple', 'Le plus rapide']);
-    const [simple, fast] = cards(hz.el);
-    // 1.1.1 (CA-MW.5) : le T3 fait marcher 5 min de moins (12 contre 17), il tient lieu de « Moins de marche »
-    expect(textOf(simple.querySelector('.why'))).toBe('Le moins de changements.');
-    expect(textOf(fast.querySelector('.why'))).toBe('Arrive 5 min plus tôt, avec 1 changement de plus et 5 min de marche en moins.');
-    expect(fast.querySelector('.why')!.textContent).toContain(`5${NB}min`);
-    expect(textOf(simple.querySelector('.time'))).toMatch(/^07:3\d → 08:56$/);
+    expect(tags(hz.el)).toEqual(['Le plus court', 'Sans changement', 'Le suivant']);
+    const [short, none] = cards(hz.el);
+    expect(textOf(short.querySelector('.time'))).toBe('07:33 → 08:51');
+    expect(textOf(short.querySelector('.why'))).toBe('Arrive le plus tôt.');
+    expect(textOf(none.querySelector('.time'))).toBe('07:33 → 08:56');
+    expect(textOf(none.querySelector('.why'))).toBe('Aucun changement, mais arrive 5 min plus tard.');
+    expect(none.querySelector('.why')!.textContent).toContain(`5${NB}min`);
   });
 });
 
-describe('adresse dans « Arrivée » (M4.4, M4.6, S4)', () => {
-  it('le choix lance la recherche, « Enregistrer comme lieu » apparaît, l’adresse devient récente', async () => {
+describe('adresse dans « Arrivée » (M4.4, S4) et « Garder en favori » (PRD-1.2 § 2.2)', () => {
+  it('le choix lance la recherche et l’adresse devient récente ; plus de « Enregistrer comme lieu »', async () => {
     const hz = open({ settings: defaults() });
     await arrive(hz, 'veldstraat 1 gent', 'Veldstraat 1, 9000 Gent');
     expect(hz.arr.value).toBe('Veldstraat 1, 9000 Gent');
     await results(hz.el);
     expect(cards(hz.el).length).toBeGreaterThan(0);
-    expect(textOf(cards(hz.el)[0].querySelector('.tag'))).toBe('Le plus simple');
-    expect(() => button(hz.el, 'Enregistrer comme lieu')).not.toThrow();
-    expect(() => button(hz.el, 'Enregistrer l’adresse comme lieu')).not.toThrow();
+    expect(textOf(cards(hz.el)[0].querySelector('.tag'))).toBe('Le plus court');
+    expect(hz.el.textContent).not.toMatch(/Enregistrer (comme lieu|l’adresse comme lieu)/);
     await hz.settings.flush();
     expect(hz.settings.get().recent[0]).toMatchObject({ label: 'Veldstraat 1, 9000 Gent', lat: 51.0537, lon: 3.7225 });
   });
 
-  it('« Enregistrer comme lieu » : nom, « Enregistrer le lieu » ; le lieu est enregistré par son adresse (CA-M4.5)', async () => {
-    const hz = open({ settings: defaults() });
-    await arrive(hz, 'veldstraat 1 gent', 'Veldstraat 1, 9000 Gent');
-    await results(hz.el);
-    button(hz.el, 'Enregistrer comme lieu').click();
-    const save = button(hz.el, 'Enregistrer le lieu');
-    expect(save.disabled).toBe(true);
-    // raccourcis de nom
-    expect([...hz.el.querySelectorAll('.save-panel .shortcut')].map((b) => textOf(b))).toEqual(['Maison', 'Bureau', 'École']);
-    const name = hz.el.querySelector<HTMLInputElement>('.save-panel input')!;
-    type(name, 'Rendez-vous');
-    expect(save.disabled).toBe(false);
-    save.click();
-    await until(() => hz.settings.get().places.length === 1);
-    expect(hz.settings.get().places[0]).toMatchObject({ label: 'Rendez-vous', address: 'Veldstraat 1, 9000 Gent', src: 'address', lat: 51.0537, lon: 3.7225 });
-    await until(() => textOf(hz.el.querySelector('.save-link .msg')) !== '');
-    expect(textOf(hz.el.querySelector('.save-link .msg'))).toBe('Lieu enregistré : Rendez-vous.');
-    // l'arrivée est désormais ce lieu ; plus de lien d'enregistrement
-    expect(hz.arr.value).toBe('Rendez-vous');
-    expect(() => button(hz.el, 'Enregistrer comme lieu')).toThrow();
-  });
-
-  it('« Garder en favori » : « Ajouté à tes favoris. », puis « Déjà dans tes favoris. » (S3, CA-S3.1)', async () => {
+  it('CA-2.4 : « Ma position » → Veldstraat 1 donne un lieu « Veldstraat 1 » ; une seconde fois : « Déjà dans tes favoris. »', async () => {
     const hz = open({ settings: defaults() });
     await arrive(hz, 'veldstraat 1 gent', 'Veldstraat 1, 9000 Gent');
     await results(hz.el);
     button(hz.el, 'Garder en favori').click();
     await until(() => hz.settings.get().favorites.length === 1);
-    expect(hz.settings.get().favorites[0]).toMatchObject({ kind: 'trip', from: { type: 'here' }, to: { type: 'address', label: 'Veldstraat 1, 9000 Gent' }, label: 'Veldstraat 1', propose: 'never' });
+    expect(hz.settings.get().favorites[0]).toMatchObject({ kind: 'place', label: 'Veldstraat 1', address: 'Veldstraat 1, 9000 Gent', src: 'address', lat: 51.0537, lon: 3.7225, propose: 'never' });
     const msg = () => textOf(hz.el.querySelector('.below-results .msg'));
     await until(() => msg() !== '');
     expect(msg()).toBe('Ajouté à tes favoris.');
     button(hz.el, 'Garder en favori').click();
     await until(() => msg() === 'Déjà dans tes favoris.');
     expect(hz.settings.get().favorites).toHaveLength(1);
+  });
+
+  it('CA-2.4 : Bruxelles-Central → Gand-Saint-Pierre donne un trajet fixe ; « Ma position » → une gare, un lieu « Près de … »', async () => {
+    const hz = open({ settings: defaults(), params: 'de=sncb:8813003&vers=sncb:8892007' });
+    await results(hz.el);
+    button(hz.el, 'Garder en favori').click();
+    await until(() => hz.settings.get().favorites.length === 1);
+    expect(hz.settings.get().favorites[0]).toMatchObject({ kind: 'trip', from: { type: 'area', areaId: 'sncb:8813003' }, to: { type: 'area', areaId: 'sncb:8892007' }, propose: 'never' });
+    expect(hz.settings.get().favorites[0]).not.toHaveProperty('label');
+    button(hz.el, 'Garder en favori').click();
+    await until(() => textOf(hz.el.querySelector('.below-results .msg')) === 'Déjà dans tes favoris.');
+
+    const here = open({ settings: defaults(), params: 'de=ici&vers=sncb:8892007' });
+    await results(here.el);
+    button(here.el, 'Garder en favori').click();
+    await until(() => here.settings.get().favorites.length === 1);
+    expect(here.settings.get().favorites[0]).toMatchObject({ kind: 'place', label: 'Gand-Saint-Pierre', src: 'stop', areaId: 'sncb:8892007', address: 'Près de Gand-Saint-Pierre' });
+  });
+
+  it('« Garder en favori » vers un lieu déjà gardé : « Déjà dans tes favoris. » ; 32 favoris : la limite', async () => {
+    const hz = open({ settings: preset11(), now: SCENARIO.s1.now, here: SCENARIO.s1, params: 'de=ici&vers=fav-bureau' });
+    await results(hz.el);
+    expect(hz.arr.value).toBe('Bureau');
+    button(hz.el, 'Garder en favori').click();
+    await until(() => textOf(hz.el.querySelector('.below-results .msg')) === 'Déjà dans tes favoris.');
+    const full = defaults({ favorites: Array.from({ length: 32 }, (_, i) => ({ kind: 'stop' as const, id: `s${i}`, areaId: `stib:${i}`, op: 'stib' as const, name: { fr: `A${i}`, nl: `A${i}` }, lat: 50, lon: 4, propose: 'never' as const })) });
+    const hz2 = open({ settings: full, params: 'de=sncb:8813003&vers=sncb:8892007' });
+    await results(hz2.el);
+    button(hz2.el, 'Garder en favori').click();
+    await until(() => textOf(hz2.el.querySelector('.below-results .msg')) !== '');
+    expect(textOf(hz2.el.querySelector('.below-results .msg'))).toBe('32 favoris au plus : supprimes-en un.');
+    expect(hz2.el.querySelector('.below-results .msg')!.classList.contains('err')).toBe(true);
+    expect(hz2.settings.get().favorites).toHaveLength(32);
   });
 
   it('adresses récentes : 5 au plus, la plus récente d’abord, sans doublon (S4)', () => {
@@ -220,8 +231,8 @@ describe('aucun trajet complet : une issue (M5, § 6.3)', () => {
   });
 
   it('déjà sur place : « Tu es déjà … »', async () => {
-    const s = preset();
-    const hz = open({ settings: s, here: { lat: 50.8441, lon: 4.3474 }, now: SCENARIO.s1.now, params: 'de=ici&vers=bureau' });
+    const s = preset11();
+    const hz = open({ settings: s, here: { lat: 50.8441, lon: 4.3474 }, now: SCENARIO.s1.now, params: 'de=ici&vers=fav-bureau' });
     await results(hz.el);
     expect(textOf(hz.el.querySelector('.live'))).toBe('Tu es déjà au bureau.');
   });
@@ -258,7 +269,7 @@ describe('données du réseau affichées en texte, jamais en HTML (revue n° 4)'
       transfers: 1,
       rt: true,
       alerts: [],
-      label: 'simple',
+      label: 'short',
     };
     const hz = open({ params: 'de=sncb:8813003&vers=sncb:8892007', core: (c) => ({ ...c, route: async () => ({ journeys: [crafted] }) }) });
     await results(hz.el);

@@ -2,8 +2,9 @@
  * Fichiers du calcul et choix des lignes (design-routing.md § 4.1 à § 4.4).
  *
  * Vague 1 : lines/index.json, tiles/ et linetiles/ autour du départ (O) et de l'arrivée (D).
- * Vague 2 : lignes L_O et L_D (zones urbaines à 1,5 × maxWalkMin, de la plus proche à la plus lointaine, 60 lignes
- *           au plus par côté) ; trains/ des jours utiles (fait par l'appelant, en parallèle).
+ * Vague 2 : lignes L_O et L_D (zones urbaines de la recherche élargie, 15 min à pied, de la plus proche à la plus
+ *           lointaine, 60 lignes au plus par côté) ; trains/ des jours utiles (fait par l'appelant, en parallèle).
+ * Rayons (PRD-1.2 § 1.2) : arrêts urbains jusqu'à 15 min à pied, gares jusqu'à 25 min, quel que soit le réglage.
  * Vague 3 : lignes du milieu (10 au plus) choisies par une estimation : lignes qui relient une zone en aval de L_O
  *           (ou en amont de L_D) à une gare d'où part un train direct vers le côté D (ou qui arrive du côté O),
  *           durées réelles des trains directs du fichier trains/.
@@ -15,7 +16,7 @@ import { tileKeysAround } from '../areas';
 import { QuaiError } from '../errors';
 import { distanceM, walkMinutes } from '../util';
 import { patternFlags } from './network';
-import { P, walkReachM } from './params';
+import { P, walkReachM, type WalkRadii } from './params';
 
 export interface RoutingSource {
   meta: Meta;
@@ -103,10 +104,10 @@ export interface Wave1 {
 }
 
 /** Vague 1 : index des lignes, tuiles et tuiles de lignes autour de O et de D (en parallèle). */
-export async function wave1(src: RoutingSource, O: Point, D: Point, maxWalk: number, withLines: boolean): Promise<Wave1> {
+export async function wave1(src: RoutingSource, O: Point, D: Point, R: WalkRadii, withLines: boolean): Promise<Wave1> {
   const tile = src.meta.tile;
-  const rLong = walkReachM(2 * maxWalk);
-  const r15 = walkReachM(Math.floor(P.longWalkFactor * maxWalk));
+  const rLong = walkReachM(Math.max(R.station, R.urban));
+  const r15 = walkReachM(R.urban);
   const tO = tileKeysAround(O.lat, O.lon, rLong, tile);
   const tD = tileKeysAround(D.lat, D.lon, rLong, tile);
   const lO = withLines ? tileKeysAround(O.lat, O.lon, r15, tile) : [];
@@ -187,7 +188,8 @@ export interface MiddleInput {
   index: LineIndex;
   O: Point;
   D: Point;
-  maxWalk: number;
+  /** Rayons de marche (PRD-1.2 § 1.2). */
+  radii: WalkRadii;
   nearO: readonly NearZone[];
   nearD: readonly NearZone[];
   LO: readonly number[];
@@ -208,7 +210,7 @@ export function middleLines(m: MiddleInput): number[] {
   const K = m.K ?? P.middleK;
   if (K <= 0) return [];
   const uu = m.urbanUrbanMax ?? P.urbanUrbanMax;
-  const r15 = walkReachM(Math.floor(P.longWalkFactor * m.maxWalk));
+  const r15 = walkReachM(m.radii.urban);
   const accessW = new Map<string, number>();
   for (const { a, d } of m.nearO) if (d <= r15 || a.op === 'sncb' || a.id === m.O.areaId) accessW.set(a.id, a.id === m.O.areaId ? 0 : walkMinutes(d));
   const egressW = new Map<string, number>();
@@ -299,8 +301,8 @@ export function middleLines(m: MiddleInput): number[] {
     stations.forEach((s, i) => {
       const wO = walkMinutes(distanceM(m.O, s));
       const wD = walkMinutes(distanceM(m.D, s));
-      const a = Math.min(wO <= 2 * m.maxWalk ? wO : Infinity, nearL(s, gO));
-      const b = Math.min(wD <= 2 * m.maxWalk ? wD : Infinity, nearL(s, gD));
+      const a = Math.min(wO <= m.radii.station ? wO : Infinity, nearL(s, gO));
+      const b = Math.min(wD <= m.radii.station ? wD : Infinity, nearL(s, gD));
       if (a < Infinity) toStation.set(i, a);
       if (b < Infinity) fromStation.set(i, b);
     });

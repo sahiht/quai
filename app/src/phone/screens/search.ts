@@ -1,35 +1,24 @@
 /**
  * Rechercher un trajet (T2) : « Départ » et « Arrivée » en champs uniques (adresse, gare, arrêt, lieu, récent),
- * trajets classés, étiquetés et expliqués par le cœur (route, PRD § 4), une carte par trajet avec son bouton
- * « Lunettes » (le trajet s'affiche dans les lunettes et devient le trajet suivi), « Garder en favori » (S3),
- * « Enregistrer comme lieu » (M4.6), issue proposée quand il n'y a pas de trajet complet (M5).
+ * trajets classés, étiquetés et expliqués par le cœur (route, PRD-1.2 § 1), une carte par trajet avec sa phrase et
+ * son bouton « Lunettes » (le trajet s'affiche dans les lunettes et devient le trajet suivi), « Garder en favori »
+ * (un lieu depuis « Ma position », sinon un trajet fixe, PRD-1.2 § 2.2), issue proposée quand il n'y a pas de trajet
+ * complet (M5).
  */
-import type { Endpoint, FavoriteTrip, Journey, Leg, Mode, Place, PlanResult, Settings } from '../../core/api';
+import type { Endpoint, Favorite, FavoriteTrip, Journey, Leg, Mode, PlanResult, Settings } from '../../core/api';
+import { placeOf, placesOf } from '../../core/favorites';
 import { LIMITS, newId } from '../../settings';
-import { displayName, hhmm, mainMode } from '../../core/util';
+import { displayName, distanceM, hhmm, mainMode } from '../../core/util';
 import type { AreaSummary, Op } from '../../../../shared/types';
 import type { AreaRef } from '../../glasses/types';
 import { vehicleOf } from '../../glasses/format';
-import { normalizeForSearch } from '../../../../shared/names';
 import { header, type PhoneCtx } from '../app';
 import { h, ICON, svgNode } from '../dom';
-import { placeField, privacyNote, type FieldChoice } from '../field';
+import { placeField, privacyNote, withRecent, type FieldChoice } from '../field';
 import { glassesButton, showTrip } from '../glasses-link';
-import {
-  cardPhrase,
-  emptyState,
-  labelText,
-  placeSavedText,
-  sameEndpoint,
-  shortAddress,
-  summaryText,
-  T,
-  timesText,
-  towardsText,
-  tripsCount,
-  typo,
-} from '../text';
-import { messageHub, nameShortcuts, nextId } from '../ui';
+import { cardPhrase, emptyState, labelText, limitText, sameEndpoint, shortAddress, summaryText, T, timesText, towardsText, tripsCount, typo } from '../text';
+import { messageHub } from '../ui';
+import { makePlace, type Spot } from './places';
 
 /** Extrémité choisie dans un champ, avec le texte qu'il affiche. */
 export type End =
@@ -58,27 +47,56 @@ export function endOf(c: FieldChoice): End {
   return { kind: 'area', area: areaOf(c.item), label: c.label };
 }
 
-/** Adresses récentes (S4) : la plus récente d'abord, 5 au plus, sans doublon. */
-export function withRecent(s: Settings, a: { label: string; lat: number; lon: number; approx?: boolean }, at: number): Settings {
-  const r = { label: a.label, lat: a.lat, lon: a.lon, at, ...(a.approx ? { approx: true } : {}) };
-  return { ...s, recent: [r, ...s.recent.filter((x) => x.label.toLowerCase() !== a.label.toLowerCase())].slice(0, LIMITS.recent) };
-}
+/** Adresses récentes (S4) : partagées avec Quai Web, dans field.ts. */
+export { withRecent };
 
 /**
- * Nom d'un trajet gardé en favori (S3, « nom = la destination ») : l'adresse courte (« Vers Veldstraat 1 »). Un lieu
- * ou une gare n'en ont pas besoin : le cœur prend le nom du lieu, ou celui de la gare dans la langue réglée.
+ * Nom affiché d'un trajet fixe gardé en favori (S3, « nom = la destination ») : l'adresse courte (« Vers Veldstraat
+ * 1 »). Un lieu ou une gare n'en ont pas besoin : le cœur prend le nom du lieu, ou celui de la gare dans la langue
+ * réglée.
  */
 export function favoriteLabelFor(to: End): string | undefined {
   return to.kind === 'address' ? shortAddress(to.label).slice(0, LIMITS.label) : undefined;
 }
 
-/** Lieu enregistré depuis une adresse (M4.6) ; un lieu de même nom est mis à jour (même identifiant). */
-export function placeFromAddress(s: Settings, name: string, a: { label: string; lat: number; lon: number; approx?: boolean }): { settings: Settings; place: Place } | null {
-  const same = s.places.find((p) => normalizeForSearch(p.label) === normalizeForSearch(name));
-  if (!same && s.places.length >= LIMITS.places) return null;
-  const place: Place = { id: same?.id ?? newId('lieu', s.places.map((p) => p.id)), label: name.slice(0, LIMITS.label), lat: a.lat, lon: a.lon, address: a.label, src: 'address' };
-  if (a.approx) place.approx = true;
-  return { place, settings: { ...s, places: same ? s.places.map((p) => (p.id === same.id ? place : p)) : [...s.places, place] } };
+/** Même endroit qu'un lieu déjà gardé : même adresse, même arrêt, ou à moins de 30 m. */
+const SAME_PLACE_M = 30;
+
+/** Endroit d'un lieu gardé depuis une recherche (adresse normalisée, ou arrêt « Près de Gand-Saint-Pierre »). */
+function spotOfEnd(e: End): Spot | null {
+  if (e.kind === 'address') return e.approx ? { lat: e.lat, lon: e.lon, src: 'address', address: e.label, approx: true } : { lat: e.lat, lon: e.lon, src: 'address', address: e.label };
+  if (e.kind === 'area') return { lat: e.area.lat, lon: e.area.lon, src: 'stop', address: `Près de ${e.label}`.slice(0, LIMITS.address), areaId: e.area.areaId };
+  return null;
+}
+
+/**
+ * « Garder en favori » (PRD-1.2 § 2.2, CA-2.4) : depuis « Ma position », un lieu (nom : l'adresse courte ou l'arrêt,
+ * « Veldstraat 1 ») ; sinon un trajet fixe (nom affiché : l'adresse courte d'une adresse d'arrivée). Rend les réglages
+ * avec le nouveau favori, 'exists' s'il y est déjà, 'full' à la limite des 32 favoris, null si rien n'est à garder.
+ */
+export function keepFavorite(s: Settings, from: End, to: End, now = Date.now()): { settings: Settings; fav: Favorite } | 'exists' | 'full' | null {
+  const ids = s.favorites.map((f) => f.id);
+  let fav: Favorite;
+  if (from.kind === 'here') {
+    if (to.kind === 'place') return 'exists';
+    const spot = spotOfEnd(to);
+    if (!spot) return null;
+    const same = placesOf(s).some(
+      (p) => (spot.areaId && p.areaId === spot.areaId) || (spot.src === 'address' && p.address?.toLowerCase() === spot.address?.toLowerCase()) || distanceM(p, spot) < SAME_PLACE_M,
+    );
+    if (same) return 'exists';
+    fav = makePlace(newId('lieu', ids, now), to.kind === 'address' ? shortAddress(to.label) : to.label, spot, 'never');
+  } else {
+    const fromE = toEndpoint(from);
+    const toE = toEndpoint(to);
+    if (s.favorites.some((f) => f.kind === 'trip' && sameEndpoint(f.from, fromE) && sameEndpoint(f.to, toE))) return 'exists';
+    const trip: FavoriteTrip = { kind: 'trip', id: newId('fav', ids, now), from: fromE, to: toE, propose: 'never' };
+    const label = favoriteLabelFor(to);
+    if (label) trip.label = label;
+    fav = trip;
+  }
+  if (s.favorites.length >= LIMITS.favorites) return 'full';
+  return { fav, settings: { ...s, favorites: [...s.favorites, fav] } };
 }
 
 const rides = (j: Journey): Leg[] => j.legs.filter((l) => l.kind === 'ride');
@@ -125,7 +143,6 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
   const status = h('p', { class: 'live', role: 'status', 'aria-live': 'polite' });
   const resultsBox = h('div', { class: 'results-box' });
   const below = h('div', { class: 'below-results' });
-  const saveLinkBox = h('div', { class: 'save-link' });
 
   const remember = (e: End): void => {
     if (e.kind !== 'address') return;
@@ -149,7 +166,6 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
       from = endOf(c);
       remember(from);
       if (from.kind === 'here') void hereLabel();
-      paintSaveLink();
       void run();
     },
   });
@@ -168,7 +184,6 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
     onPick: (c) => {
       to = endOf(c);
       remember(to);
-      paintSaveLink();
       void run();
     },
   });
@@ -180,7 +195,6 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
     busy = false;
     result = null;
     failure = '';
-    paintSaveLink();
     paint();
   }
   arrField.input.setAttribute('data-autofocus', '');
@@ -209,7 +223,6 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
     depField.show(from?.label ?? '');
     arrField.show(to?.label ?? '');
     if (!from) depField.search('');
-    paintSaveLink();
     void run();
   });
 
@@ -232,96 +245,22 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
     void run();
   });
 
-  /* --- « Enregistrer comme lieu » (M4.6) : nom, raccourcis, « Enregistrer le lieu » --- */
-  const saveTarget = (): 'to' | 'from' | null => (to?.kind === 'address' ? 'to' : from?.kind === 'address' ? 'from' : null);
-  const panelId = nextId('lieu');
-  const nameInput = h('input', { id: `${panelId}-nom`, class: 'input', type: 'text', maxlength: LIMITS.label, autocomplete: 'off', placeholder: 'Maison, Bureau…' });
-  const saveBtn = h('button', { type: 'button', class: 'btn btn-primary btn-block', disabled: true }, T.savePlace);
-  const panel = h(
-    'div',
-    { class: 'save-panel box pad', id: panelId },
-    h('div', { class: 'field' }, h('label', { for: `${panelId}-nom` }, 'Nom du lieu'), nameInput, nameShortcuts(nameInput)),
-    saveBtn,
-  );
-  nameInput.addEventListener('input', () => (saveBtn.disabled = !nameInput.value.trim()));
-  let panelTrigger: { button: HTMLButtonElement; message: HTMLElement } | null = null;
-  const closePanel = (): void => {
-    panel.remove();
-    panelTrigger?.button.setAttribute('aria-expanded', 'false');
-  };
-  const openPanel = (t: { button: HTMLButtonElement; message: HTMLElement }): void => {
-    if (panelTrigger === t && panel.isConnected) return closePanel();
-    closePanel();
-    panelTrigger = t;
-    t.button.setAttribute('aria-expanded', 'true');
-    t.message.before(panel);
-    hub.say(t.message, '');
-    nameInput.focus();
-  };
-  saveBtn.addEventListener('click', async () => {
-    const which = saveTarget();
-    const end = which === 'to' ? to : which === 'from' ? from : null;
-    const name = nameInput.value.trim();
-    if (!end || end.kind !== 'address' || !name || !panelTrigger) return;
-    const trigger = panelTrigger;
-    const done = placeFromAddress(ctx.settings.get(), name, end);
-    if (!done) {
-      hub.say(trigger.message, typo(`${LIMITS.places} lieux au plus : supprimes-en un dans Mes lieux.`), true);
-      return;
-    }
-    await ctx.settings.set(done.settings);
-    const placeEnd: End = { kind: 'place', placeId: done.place.id, label: done.place.label };
-    if (which === 'to') {
-      to = placeEnd;
-      arrField.show(placeEnd.label);
-    } else {
-      from = placeEnd;
-      depField.show(placeEnd.label);
-    }
-    nameInput.value = '';
-    saveBtn.disabled = true;
-    closePanel();
-    paintSaveLink();
-    paintBelow();
-    // Le message reste à l'écran même si son bouton disparaît (adresse désormais enregistrée).
-    hub.say(trigger.message, typo(placeSavedText(done.place.label)));
-  });
-
-  const linkTrigger = { button: h('button', { type: 'button', class: 'btn-link', 'aria-expanded': 'false', 'aria-controls': panelId }, T.saveAsPlace), message: hub.slot() };
-  linkTrigger.button.addEventListener('click', () => openPanel(linkTrigger));
-  const bottomTrigger = { button: h('button', { type: 'button', class: 'btn btn-secondary btn-block', 'aria-expanded': 'false', 'aria-controls': panelId }, T.saveAddressAsPlace), message: hub.slot() };
-  bottomTrigger.button.addEventListener('click', () => openPanel(bottomTrigger));
-
-  function paintSaveLink(): void {
-    const show = !!saveTarget();
-    if (!show && panelTrigger === linkTrigger) closePanel();
-    const open = show && panelTrigger === linkTrigger && panel.isConnected;
-    saveLinkBox.replaceChildren(...(show ? [linkTrigger.button] : []), ...(open ? [panel] : []), linkTrigger.message);
-  }
-
-  /* --- « Garder en favori » (S3) --- */
+  /* --- « Garder en favori » : un lieu depuis « Ma position », sinon un trajet fixe --- */
   const keepBtn = h('button', { type: 'button', class: 'btn btn-secondary btn-block' }, T.keepFavorite);
   const keepMsg = hub.slot();
   keepBtn.addEventListener('click', async () => {
     if (!from || !to) return;
-    const fromE = toEndpoint(from);
-    const toE = toEndpoint(to);
-    const s = ctx.settings.get();
-    if (s.favorites.some((f) => f.kind === 'trip' && sameEndpoint(f.from, fromE) && sameEndpoint(f.to, toE))) return hub.say(keepMsg, T.favExists);
-    if (s.favorites.length >= LIMITS.favorites) return hub.say(keepMsg, typo(`${LIMITS.favorites} favoris au plus : supprimes-en un dans Mes favoris.`), true);
-    const fav: FavoriteTrip = { kind: 'trip', id: newId('fav', s.favorites.map((f) => f.id)), from: fromE, to: toE, propose: 'never' };
-    const label = favoriteLabelFor(to);
-    if (label) fav.label = label;
-    await ctx.settings.update((x) => ({ ...x, favorites: [...x.favorites, fav] }));
+    const done = keepFavorite(ctx.settings.get(), from, to, ctx.clock.now());
+    if (done === 'exists') return hub.say(keepMsg, T.favExists);
+    if (done === 'full') return hub.say(keepMsg, typo(limitText(LIMITS.favorites)), true);
+    if (!done) return;
+    await ctx.settings.update((x) => ({ ...x, favorites: [...x.favorites.filter((f) => f.id !== done.fav.id), done.fav] }));
     hub.say(keepMsg, T.favAdded);
   });
 
   function paintBelow(): void {
     const any = !!result?.journeys.length;
-    const show = any && !!saveTarget();
-    if (!show && panelTrigger === bottomTrigger) closePanel();
-    const open = show && panelTrigger === bottomTrigger && panel.isConnected;
-    below.replaceChildren(...(any ? [keepBtn] : []), keepMsg, ...(show ? [bottomTrigger.button] : []), ...(open ? [panel] : []), bottomTrigger.message);
+    below.replaceChildren(...(any ? [keepBtn] : []), keepMsg);
   }
 
   /* --- Cartes --- */
@@ -340,7 +279,7 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
   function card(j: Journey, i: number, r: PlanResult): HTMLElement {
     const now = ctx.clock.now();
     const label = labelText(j);
-    const phrase = cardPhrase(j, r);
+    const phrase = cardPhrase(j, r, ctx.settings.get().maxWalkMin);
     const radio = h(
       'div',
       { role: 'radio', class: 'card', 'aria-checked': i === selected ? 'true' : 'false', tabindex: i === selected ? '0' : '-1' },
@@ -409,7 +348,6 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
               const op = st.areaId.split(':')[0] as Op;
               to = { kind: 'area', area: { areaId: st.areaId, op, name: st.name, lat: st.lat, lon: st.lon, modes: ['train'] }, label: displayName(st.name, lang()) };
               arrField.show(to.label);
-              paintSaveLink();
               void run();
             },
           }, empty.button),
@@ -448,7 +386,7 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
     paint();
   }
 
-  // Liens directs : #/recherche?q=Gand (saisie), ?de=ici&vers=sncb:8892007 (recherche lancée ; lieux et arrêts).
+  // Liens directs : #/recherche?q=Gand (saisie), ?de=ici&vers=sncb:8892007 (recherche lancée ; lieux favoris et arrêts).
   void (async () => {
     const q = ctx.params.get('q');
     const vers = ctx.params.get('vers');
@@ -460,7 +398,7 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
       const c = await ctx.core();
       const resolve = async (id: string): Promise<End> => {
         if (id === 'ici') return { kind: 'here', label: 'Ma position' };
-        const place = ctx.settings.get().places.find((p) => p.id === id);
+        const place = placeOf(ctx.settings.get(), id);
         if (place) return { kind: 'place', placeId: place.id, label: place.label };
         const b = await c.board(id, { limit: 1 });
         return { kind: 'area', area: areaOf(b.area), label: displayName(b.area.n, lang()) };
@@ -469,7 +407,6 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
       if (de) from = await resolve(de);
       depField.show(from?.label ?? '');
       arrField.show(to.label);
-      paintSaveLink();
       await hereLabel();
       await run();
     } catch (e) {
@@ -478,7 +415,6 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
     }
   })();
 
-  paintSaveLink();
   return h(
     'div',
     { class: 'screen search' },
@@ -497,7 +433,6 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
       depField.status,
       arrField.list,
       arrField.status,
-      saveLinkBox,
       privacyNote(),
     ),
     resultsBox,

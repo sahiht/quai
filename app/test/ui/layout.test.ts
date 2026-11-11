@@ -138,7 +138,7 @@ describe('1.1 : largeurs du PRD (§ 6.0), écrans sans curseur, deux lignes rés
 
   it('sans curseur : ▶ seulement sur la ligne marquée, défilement borné à la fin de la liste', () => {
     const items: Item[] = Array.from({ length: 9 }, (_, i) => ({ a: `0${i}:00`, b: `Étape ${i}` }));
-    const v = view({ layout: 'steps', screen: 'steps', items, scroll: true, mark: 2, top: { text: 'Le plus simple : direct' }, note: '▼ 3 étapes de plus' });
+    const v = view({ layout: 'steps', screen: 'steps', items, scroll: true, mark: 2, top: { text: 'Le plus court : direct' }, note: '▼ 3 étapes de plus' });
     const cap = geometry(v).capacity;
     expect(cap).toBe(6);
     expect(maxTop(items, cap)).toBe(3);
