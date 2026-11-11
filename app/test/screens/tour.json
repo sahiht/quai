@@ -1,6 +1,122 @@
 {
-  "url": "http://localhost:5173/",
-  "real": false,
-  "screens": [],
-  "failures": []
+  "version": "1.1.0",
+  "how": "tests/e2e : npm run sim -- --tour (vrai cœur, données des fixtures)",
+  "screens": [
+    {
+      "file": "glasses-arrival.png",
+      "what": "Aide à l’arrivée 3 min avant Gand-Saint-Pierre"
+    },
+    {
+      "file": "glasses-board-planned.png",
+      "what": "Départs De Lijn en partie en horaire prévu (~)"
+    },
+    {
+      "file": "glasses-board-train.png",
+      "what": "Départs des trains à Bruxelles-Nord (S1 supprimé)"
+    },
+    {
+      "file": "glasses-board.png",
+      "what": "Départs d’un arrêt favori (★), ouverts seuls à moins de 300 m"
+    },
+    {
+      "file": "glasses-favorites.png",
+      "what": "Autres favoris à 12:10 près de la gare du Nord, avec leur réponse"
+    },
+    {
+      "file": "glasses-first-run.png",
+      "what": "Premier lancement : bienvenue, réglages sur le téléphone"
+    },
+    {
+      "file": "glasses-home-near.png",
+      "what": "Accueil sans favori : « Près de Bruxelles-Nord », « Ajouter un favori »"
+    },
+    {
+      "file": "glasses-home-stale.png",
+      "what": "Accueil quand la mise à jour de nuit est en panne"
+    },
+    {
+      "file": "glasses-home.png",
+      "what": "Accueil, 07:31 à la maison : les deux favoris en tête (scène base)"
+    },
+    {
+      "file": "glasses-journeys.png",
+      "what": "Autre trajet (▼) : page 2 « Le suivant », non suivi (remplace la liste des propositions de la 1.0)"
+    },
+    {
+      "file": "glasses-nearby-empty.png",
+      "what": "Autour de moi sans arrêt dans le rayon"
+    },
+    {
+      "file": "glasses-nearby.png",
+      "what": "Autour de moi à 12:10 près de la gare du Nord"
+    },
+    {
+      "file": "glasses-places.png",
+      "what": "Aller à… : lieux et adresses récentes, avec l’heure d’arrivée"
+    },
+    {
+      "file": "glasses-steps-alert.png",
+      "what": "Étapes du trajet suivi à 07:36 : marche en cours, voie modifiée en tête"
+    },
+    {
+      "file": "glasses-steps.png",
+      "what": "Trajet proposé Maison vers Bureau, page 1, trajet suivi (alerte de voie en tête)"
+    },
+    {
+      "file": "glasses-train-detail.png",
+      "what": "Détail du train suivi (toucher sur les étapes)"
+    },
+    {
+      "file": "glasses-train.png",
+      "what": "Dans le train à 08:05, ouvert seul au départ de l’IC suivi"
+    },
+    {
+      "file": "glasses-trip.png",
+      "what": "Vers Gand-Saint-Pierre, favori de gare à gare : ses étapes (remplace l’écran Trains A ▶ B de la 1.0)"
+    },
+    {
+      "file": "phone-alerts.png",
+      "what": "Alertes"
+    },
+    {
+      "file": "phone-data-stale.png",
+      "what": "Données quand la mise à jour de nuit est en panne"
+    },
+    {
+      "file": "phone-data.png",
+      "what": "Données, avec « Version de Quai » et « Adresses »"
+    },
+    {
+      "file": "phone-display.png",
+      "what": "Affichage, avec « Ordre des favoris »"
+    },
+    {
+      "file": "phone-favorite-edit.png",
+      "what": "Modifier un arrêt favori"
+    },
+    {
+      "file": "phone-favorites.png",
+      "what": "Mes favoris"
+    },
+    {
+      "file": "phone-home.png",
+      "what": "Accueil du téléphone : « Où vas-tu ? » et « Mes favoris »"
+    },
+    {
+      "file": "phone-onboarding.png",
+      "what": "Premier lancement, étape « Bienvenue »"
+    },
+    {
+      "file": "phone-places.png",
+      "what": "Mes lieux (lieux de la 1.0 : « Adresse à vérifier »)"
+    },
+    {
+      "file": "phone-search-results.png",
+      "what": "Trajets Bruxelles-Central vers Gand-Saint-Pierre"
+    },
+    {
+      "file": "phone-search.png",
+      "what": "Recherche « Gand » dans le champ unique"
+    }
+  ]
 }

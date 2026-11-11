@@ -59,6 +59,11 @@ const NEXT_W = 182;
 const MENU_W = 192;
 /** Étapes (S6) : heure 70 px, texte 342 px, état 108 px utiles (« dans 30 min » = 108 px). */
 const STATE_W = 110;
+/**
+ * Colonne des heures (étapes, « Dans le train ») : 70 px utiles, pour l'heure prévue la plus large (« ~08:44 » =
+ * 69 px) ; le texte des étapes reste à 80 px de la marge (11 px d'écart au moins).
+ */
+const TIME_W = 72;
 /** Écart entre colonnes des menus et des étapes (largeurs utiles du PRD § 6.0). */
 const TIGHT = 10;
 /** Titre : 476 px utiles avant l'heure. */
@@ -68,8 +73,8 @@ export const LAYOUTS: Record<Layout, LayoutDef> = {
   nearby: { a: { x: X_TEXT, level: 4 }, b: { x: right(NEXT_W) - GAP - 64, w: 64, level: 3 }, c: { x: right(NEXT_W), w: NEXT_W, level: 4 } },
   board: { a: { x: X_TEXT, w: 52, level: 4 }, b: { x: X_TEXT + 52 + GAP, level: 3 }, c: { x: right(96), w: 96, level: 4 } },
   boardTrain: { a: { x: X_TEXT, w: 40, level: 4 }, b: { x: X_TEXT + 40 + GAP, level: 3 }, c: { x: right(160), w: 160, level: 4 } },
-  steps: { a: { x: X_TEXT, w: 70, level: 4 }, b: { x: X_TEXT + 70 + TIGHT, level: 3 }, c: { x: right(STATE_W), w: STATE_W, level: 4 }, gap: TIGHT },
-  train: { a: { x: X_TEXT, level: 4 }, b: { x: right(96) - GAP - 70, w: 70, level: 4 }, c: { x: right(96), w: 96, level: 3 } },
+  steps: { a: { x: X_TEXT, w: TIME_W, level: 4 }, b: { x: X_TEXT + 70 + TIGHT, level: 3 }, c: { x: right(STATE_W), w: STATE_W, level: 4 }, gap: TIGHT },
+  train: { a: { x: X_TEXT, level: 4 }, b: { x: right(96) - GAP - TIME_W, w: TIME_W, level: 4 }, c: { x: right(96), w: 96, level: 3 } },
   arrival: { a: { x: X_TEXT, w: 96, level: 4 }, b: { x: X_TEXT + 96 + GAP, level: 3 }, c: { x: right(96), w: 96, level: 4 } },
   message: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(96), w: 96, level: 3 } },
 };
@@ -80,7 +85,7 @@ export const WIDTHS = {
   title: TITLE_W - GEO.SAFETY,
   menuLeft: right(MENU_W) - TIGHT - X_TEXT - GEO.SAFETY,
   menuRight: MENU_W - GEO.SAFETY,
-  stepsTime: 70 - GEO.SAFETY,
+  stepsTime: TIME_W - GEO.SAFETY,
   stepsText: right(STATE_W) - TIGHT - (X_TEXT + 70 + TIGHT) - GEO.SAFETY,
   stepsState: STATE_W - GEO.SAFETY,
 };

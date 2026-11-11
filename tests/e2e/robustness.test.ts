@@ -203,14 +203,28 @@ describe('cœur : relais en panne ou réponses malformées', () => {
     expect(h.sources.sncb.error).toBe('Relais injoignable');
   });
 
-  it('relais muet (délai > 8 s) : le tableau arrive quand même, en horaire prévu', async () => {
+  it('relais muet : départs en horaire prévu après 1,5 s (CA-M8.5), puis la panne est dite au délai du cœur (8 s)', async () => {
     relayProxy.rules = [{ match: /^\/api\/stib$/, fault: () => ({ delayMs: 15_000 }) }];
+    const c = core();
+    await c.init();
     const t0 = Date.now();
-    const b = await core().board('stib:6357F', { limit: 3 });
+    const b = await c.board('stib:6357F', { limit: 3 });
     const ms = Date.now() - t0;
-    expect(ms).toBeLessThan(12_000);
-    expect(b.rtErrors).toEqual(['stib']);
+    // 1.1 (M8.4) : le temps réel qui tarde n'est pas attendu au-delà de 1,5 s ; ce n'est pas encore une panne
+    expect(ms).toBeGreaterThanOrEqual(1_400);
+    expect(ms).toBeLessThan(2_500);
     expect(b.departures.length).toBe(3);
+    expect(b.departures.every((d) => !d.rt)).toBe(true);
+    expect(b.anyPlanned).toBe(true);
+    expect(b.rtErrors).toEqual([]);
+    // la requête au relais échoue au délai du cœur (8 s) : l'écran suivant dit la panne, sans attendre
+    await new Promise((r) => setTimeout(r, 8_000 - ms + 500));
+    expect(c.status().rt).toBe('down');
+    const t1 = Date.now();
+    const again = await c.board('stib:6357F', { limit: 3 });
+    expect(Date.now() - t1).toBeLessThan(1_000);
+    expect(again.rtErrors).toEqual(['stib']);
+    expect(again.departures.length).toBe(3);
   }, 30_000);
 
   it('JSON invalide, forme inattendue, valeurs absurdes : pas d’exception', async () => {
@@ -260,15 +274,30 @@ describe('cœur : données statiques malformées ou absentes', () => {
     dataProxy.rules = [];
   });
 
-  it('meta.json illisible, absent ou serveur arrêté : init() échoue avec « Données indisponibles »', async () => {
-    for (const fault of [{ status: 200, body: '{"v":1,' }, { status: 404, body: '{}' }, { status: 200, body: '{"v":2}' }, { status: 503, body: '' }] as const) {
+  it('meta.json illisible ou absent : « Données indisponibles » ; serveur en erreur ou arrêté : « Horaires injoignables » (M8.6)', async () => {
+    // le serveur répond sans le fichier (ou avec un fichier illisible) : vérifier la publication de cette nuit
+    for (const fault of [{ status: 200, body: '{"v":1,' }, { status: 404, body: '{}' }, { status: 200, body: '{"v":2}' }] as const) {
       dataProxy.rules = [{ match: /meta\.json$/, fault: () => fault }];
       await expectQuaiError(core().init(), 'dataUnavailable');
     }
+    // 1.1 : erreur serveur (après un nouvel essai), réseau coupé ou serveur arrêté : injoignable, nouvel essai
+    for (const fault of [{ status: 503, body: '' }, { status: 500, body: 'boom' }, { destroy: true }] as const) {
+      dataProxy.rules = [{ match: /meta\.json$/, fault: () => fault }];
+      await expectQuaiError(core().init(), 'dataUnreachable');
+    }
+    dataProxy.rules = [];
     const down = createCore({ dataBase: 'http://127.0.0.1:9', relayBase: relayProxy.url, now: () => NOW, storage: memoryKV(), fetch });
-    await expectQuaiError(down.init(), 'dataUnavailable');
-    await expectQuaiError(down.board('stib:6357F'), 'dataUnavailable');
+    await expectQuaiError(down.init(), 'dataUnreachable');
+    await expectQuaiError(down.board('stib:6357F'), 'dataUnreachable');
     expect(await down.suggest(null, PRESET)).toBeNull();
+  });
+
+  it('fichier de zone en erreur serveur après init() : « Horaires injoignables », pas « vérifie la publication »', async () => {
+    dataProxy.rules = [{ match: /areas\/stib\/6357F\.json$/, fault: () => ({ status: 503, body: '' }) }];
+    const c = core();
+    await c.init();
+    await expectQuaiError(c.board('stib:6357F'), 'dataUnreachable');
+    dataProxy.rules = [];
   });
 
   it('meta.json injoignable mais copie enregistrée : le cœur repart sur la copie', async () => {
@@ -277,7 +306,9 @@ describe('cœur : données statiques malformées ou absentes', () => {
     const first = core(NOW, kv);
     await first.init();
     await first.board('stib:6357F', { limit: 2 });
-    await new Promise((r) => setTimeout(r, 200)); // écritures KV en arrière-plan
+    // 1.1 (S7) : écritures KV groupées, une rafale FLUSH_DELAY_MS (2 s) après le premier fichier à garder
+    await new Promise((r) => setTimeout(r, 2_600));
+    expect([...kv.map.keys()].some((k) => k.startsWith('quai.core.v2.p.'))).toBe(true);
     dataProxy.rules = [{ match: /./, fault: () => ({ status: 503, body: '' }) }];
     const second = core(NOW, kv);
     const meta = await second.init();
@@ -333,10 +364,17 @@ describe('cœur : entrées de l’appli', () => {
     relayProxy.rules = [];
   });
 
-  it('position absente : plan() lève « Position inconnue », suggest(null) reste calme', async () => {
+  it('position absente : route() rend empty « noPosition » (contrat 1.1), plan() aucun trajet, suggest(null) reste calme', async () => {
     const c = core(Date.parse('2026-11-10T07:31:00+01:00'));
-    await expectQuaiError(c.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, NOW, PRESET), 'hereMissing');
-    await expectQuaiError(c.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, NOW, PRESET, { lat: Number.NaN, lon: 4 }), 'hereMissing');
+    const bureau = { type: 'place', placeId: 'bureau' } as const;
+    // 1.1 (api.ts, route) : plus d'exception « Position inconnue » ; l'interface affiche « sans position »
+    for (const here of [undefined, null, { lat: Number.NaN, lon: 4 }, { lat: 50.4655, lon: Number.POSITIVE_INFINITY }]) {
+      expect(await c.route({ type: 'here' }, bureau, NOW, PRESET, here), JSON.stringify(here)).toEqual({ journeys: [], empty: 'noPosition' });
+      expect(await c.route(bureau, { type: 'here' }, NOW, PRESET, here)).toEqual({ journeys: [], empty: 'noPosition' });
+    }
+    expect(await c.plan({ type: 'here' }, bureau, NOW, PRESET)).toEqual([]);
+    const fav = PRESET.favorites.find((f) => f.id === 'fav-bureau')!;
+    expect(await c.answer(fav, null, PRESET)).toMatchObject({ favoriteId: 'fav-bureau', kind: 'trip', state: 'noPosition' });
     expect(await c.suggest(null, PRESET)).toBeNull(); // fav-bureau part de « ici » : ignoré sans position
   });
 

@@ -1,7 +1,8 @@
 /**
  * Pile de test complète, lancée avec les vraies commandes des paquets sur des ports éphémères :
  *   pipeline : npm run build-data (zips de fixtures/pipeline/gtfs) puis npm run serve-data
- *   relay    : npm run mock-bmc (faux portail BMC, clé imposée) puis npm run dev (relais local)
+ *   relay    : npm run mock-bmc (faux portail BMC, clé imposée) et npm run mock-geocode (faux service d'adresses
+ *              des trois Régions, 1.1), puis npm run dev (relais local, QUAI_GEO_BASE = faux service d'adresses)
  * Chaque processus est lancé dans son propre groupe (arrêt propre de npm, sh et node).
  */
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -131,20 +132,48 @@ export const startDataServer = (dir: string) =>
 export const startMockBmc = (key = TEST_KEY) =>
   startServer('mock-bmc', 'npm', ['run', 'mock-bmc', '--', '--port', '0'], { cwd: RELAY, env: { MOCK_BMC_KEY: key }, ready: /prêt : (http:\/\/localhost:\d+)/ });
 
-export const startRelay = (env: { BMC_BASE: string; DATA_BASE?: string; BMC_KEY?: string; QUAI_NOW?: string; SNCB_RT_URL?: string }) =>
+/** Faux service d'adresses (1.1) : imite les services des trois Régions (fixtures/relay/mock-geocode.ts). */
+export const startMockGeocode = () =>
+  startServer('mock-geocode', 'npm', ['run', 'mock-geocode', '--', '--port', '0'], { cwd: RELAY, ready: /\[faux adresses\] prêt : (http:\/\/localhost:\d+)/ });
+
+/**
+ * Relais local. Sans QUAI_GEO_BASE, `npm run dev` vise http://localhost:8790 : les adresses sont alors en panne
+ * (personne n'écoute), ce qui convient aux suites qui ne s'en servent pas.
+ */
+export const startRelay = (env: { BMC_BASE: string; DATA_BASE?: string; BMC_KEY?: string; QUAI_NOW?: string; SNCB_RT_URL?: string; QUAI_GEO_BASE?: string }) =>
   startServer('relay', 'npm', ['run', 'dev', '--', '--port', '0'], {
     cwd: RELAY,
     env: { BMC_KEY: TEST_KEY, QUAI_NOW: '2026-11-10T12:10:00+01:00', ...env },
     ready: /Relais Quai \(dev\) : (http:\/\/localhost:\d+)/,
   });
 
+/** Scènes du faux service d'adresses : base, down (HTTP 503), slow (réponse après 3 s), garbage (HTML en 200). */
+export type GeoScene = 'base' | 'down' | 'slow' | 'garbage';
+
+/** Requête reçue par le faux service d'adresses (GET /__journal). */
+export interface GeoJournalEntry {
+  at: string;
+  source: 'vla' | 'bru' | 'wal' | null;
+  method: string;
+  path: string;
+  params: Record<string, string>;
+  headers: Record<string, string>;
+}
+
 export interface Stack {
   dataDir: string;
   data: Proc;
   bmc: Proc;
+  /** Faux service d'adresses (le relais y est branché par QUAI_GEO_BASE). */
+  geo: Proc;
   relay: Proc;
   /** Change la scène du faux portail et vide le cache du relais. */
   scene(s: 'base' | 'noRT'): Promise<void>;
+  /** Change la scène du faux service d'adresses (`sources` : seulement ces services) et vide le cache du relais. */
+  geoScene(s: GeoScene, sources?: ('vla' | 'bru' | 'wal')[]): Promise<void>;
+  /** Requêtes reçues par le faux service d'adresses depuis le dernier geoJournalReset(). */
+  geoJournal(): Promise<GeoJournalEntry[]>;
+  geoJournalReset(): Promise<void>;
   stop(): Promise<void>;
   logs(): string;
 }
@@ -152,8 +181,8 @@ export interface Stack {
 export async function startStack(opts: { dataDir?: string; relayNow?: string } = {}): Promise<Stack> {
   const owned = !opts.dataDir;
   const dataDir = opts.dataDir ?? (await buildFixtureData()).dir;
-  const [data, bmc] = await Promise.all([startDataServer(dataDir), startMockBmc()]);
-  const relay = await startRelay({ BMC_BASE: bmc.url, DATA_BASE: data.url, ...(opts.relayNow ? { QUAI_NOW: opts.relayNow } : {}) });
+  const [data, bmc, geo] = await Promise.all([startDataServer(dataDir), startMockBmc(), startMockGeocode()]);
+  const relay = await startRelay({ BMC_BASE: bmc.url, DATA_BASE: data.url, QUAI_GEO_BASE: geo.url, ...(opts.relayNow ? { QUAI_NOW: opts.relayNow } : {}) });
   const post = async (url: string) => {
     const r = await fetch(url, { method: 'POST' });
     if (!r.ok) throw new Error(`POST ${url} : HTTP ${r.status}`);
@@ -162,16 +191,29 @@ export async function startStack(opts: { dataDir?: string; relayNow?: string } =
     dataDir,
     data,
     bmc,
+    geo,
     relay,
     async scene(s) {
       await post(`${bmc.url}/__scene/${s}`);
       await post(`${relay.url}/__cache/clear`);
     },
+    async geoScene(s, sources) {
+      await post(`${geo.url}/__scene/${s}${sources?.length ? `?sources=${sources.join(',')}` : ''}`);
+      await post(`${relay.url}/__cache/clear`);
+    },
+    async geoJournal() {
+      const r = await fetch(`${geo.url}/__journal`);
+      if (!r.ok) throw new Error(`GET ${geo.url}/__journal : HTTP ${r.status}`);
+      return ((await r.json()) as { requests: GeoJournalEntry[] }).requests;
+    },
+    async geoJournalReset() {
+      await post(`${geo.url}/__journal/reset`);
+    },
     async stop() {
-      await Promise.all([relay.stop(), bmc.stop(), data.stop()]);
+      await Promise.all([relay.stop(), bmc.stop(), geo.stop(), data.stop()]);
       if (owned) rmSync(dataDir, { recursive: true, force: true });
     },
-    logs: () => [data, bmc, relay].map((p) => `--- ${p.name}\n${p.out.join('')}`).join('\n'),
+    logs: () => [data, bmc, geo, relay].map((p) => `--- ${p.name}\n${p.out.join('')}`).join('\n'),
   };
 }
 

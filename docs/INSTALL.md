@@ -103,6 +103,8 @@ Limites :
 
 ## Mettre à jour Quai
 
+Guide pas à pas avec images, pour passer à une nouvelle version publiée (par exemple la 1.1.0) : [MISE-A-JOUR.md](MISE-A-JOUR.md). Ci-dessous, la marche à suivre pour fabriquer toi-même une nouvelle version.
+
 Chaque mise à jour a besoin d'un nouveau numéro de version : Even Hub refuse un numéro déjà déposé. Tout se fait sur le site GitHub, depuis le téléphone.
 
 1. Ajoute les notes de la version : dossier `app/store/changelog`, « Add file », « Create new file ». Nom : le nouveau numéro suivi de `.txt`, par exemple `1.0.1.txt`. Écris 1 à 3 lignes courtes sur ce qui change pour toi, puis « Commit changes ».

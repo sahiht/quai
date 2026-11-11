@@ -92,7 +92,8 @@ describe('téléchargement depuis le faux portail BMC', () => {
     for (const f of listFiles(out)) {
       const a = readFileSync(join(out, f), 'utf8');
       const b = readFileSync(join(reference, f), 'utf8');
-      if (f === 'meta.json' || f === 'LICENSE-DATA.txt') {
+      // 1.1 : lines/index.json porte aussi la date de génération (contrôle de cohérence avec meta.json)
+      if (f === 'meta.json' || f === 'LICENSE-DATA.txt' || f === 'lines/index.json') {
         const strip = (t: string) => t.replace(/"generatedAt":"[^"]+"/, '').replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/g, '');
         expect(strip(a), f).toBe(strip(b));
       } else expect(a, f).toBe(b);
@@ -189,7 +190,8 @@ describe('téléchargement depuis le faux portail BMC', () => {
     expect(meta.feeds.delijn.ok).toBe(false);
     expect(meta.feeds.delijn.error).toMatch(/HTTP 401, clé refusée .* pas de repli \(flux gardé du 20\/10 trop ancien \(plus de 7 jours\)\)$/);
     expect(readFileSync(`${out}-site/index.html`, 'utf8')).toContain(`horaires du ${today.slice(8, 10)}/${today.slice(5, 7)}, le portail n’a pas répondu cette nuit`);
-    expect(logs).toMatch(/SNCB\s+OK\s+14 zones, 11 voyages, .*GTFS gardé du /);
+    // réseau de test 1.1 (gare de Waterloo, S1 1960 à 1967, retours du soir) : 15 zones, 21 voyages
+    expect(logs).toMatch(/SNCB\s+OK\s+15 zones, 21 voyages, .*GTFS gardé du /);
     const report = validateData(out);
     expect(report.errors).toEqual([]);
     expect(report.warnings.filter((w) => /repris du GTFS gardé/.test(w)).length).toBe(3);

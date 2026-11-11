@@ -308,6 +308,27 @@ export function raptor(net: Net, q: RaptorQuery): Cand[] {
       round--;
     }
     if (accessStop < 0 || rides.length !== k) return null;
+    // Montée du premier véhicule : RAPTOR monte au premier arrêt du motif où le voyage est attrapable. Quand ce voyage
+    // part bien après l'heure demandée (au-delà de la plage des départs), une zone d'accès plus loin sur le même
+    // voyage permet souvent de partir plus tard avec moins de marche (Bureau → Maison à midi : IC de 17:06 pris à
+    // Bruxelles-Midi après 20 min de marche, alors qu'il passe à 17:12 à Bruxelles-Central, à 12 min). Même voyage,
+    // même descente : on garde le départ le plus tard, puis la marche la plus courte, comme le parcours de la plage.
+    {
+      const f0 = rides[0];
+      const rf = netx.routes[f0.route];
+      let leave = rf.dep[f0.trip * rf.n + f0.bpos] - accessWalk;
+      for (let pos = f0.bpos + 1; pos < f0.apos; pos++) {
+        const w = rf.board[pos] ? qx.access.get(rf.stops[pos]) : undefined;
+        if (w === undefined) continue;
+        const d = rf.dep[f0.trip * rf.n + pos] - w;
+        if (d > leave || (d === leave && w < accessWalk)) {
+          rides[0] = { ...rides[0], bpos: pos };
+          accessStop = rf.stops[pos];
+          accessWalk = w;
+          leave = d;
+        }
+      }
+    }
     const egressWalk = qx.egress.get(s) ?? 0;
     const waits: number[] = [];
     for (let i = 1; i < rides.length; i++) {

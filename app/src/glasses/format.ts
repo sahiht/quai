@@ -111,8 +111,10 @@ export function delaySuffix(delayMin: number | undefined): string {
 
 /** Colonne horaire d'un train sur un tableau : « 12:22  voie 9 », « ~12:30  voie 12 », « 18:04 +4  voie 11 », « 12:34  SUPPRIMÉ ». */
 export function trainCell(d: Departure, markPlanned: boolean): string {
+  // Une suppression est une information du temps réel (gardée 15 min pendant une panne, M8.5) : jamais de « ~ »,
+  // qui coupait la colonne (« ~12:34  SUPPRI… »).
+  if (d.cancelled) return `${hhmm(d.sched)}  SUPPRIMÉ`;
   const time = `${plannedMark(d.rt, markPlanned)}${hhmm(d.sched)}`;
-  if (d.cancelled) return `${time}  SUPPRIMÉ`;
   const plat = platformText(d.platform, d.newPlatform);
   return `${time}${delaySuffix(d.delayMin)}${plat ? '  ' + plat : ''}`;
 }

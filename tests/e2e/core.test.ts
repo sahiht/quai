@@ -16,6 +16,7 @@ const MAISON = { lat: 50.4655, lon: 4.859 };
 const S2_POS = { lat: 50.86, lon: 4.359 };
 const CENTRAL = { lat: 50.8454, lon: 4.3571 };
 const EM_DASH = '\u2014';
+const EN_DASH = '\u2013';
 const T = (hm: string, day = '2026-11-10') => Date.parse(`${day}T${hm}:00+01:00`);
 
 let stack: Stack;
@@ -27,12 +28,19 @@ const depText = (d: Departure, now: number) => `${lineLabel(d.mode, d.line)} ${d
 const rides = (j: Journey) => j.legs.filter((l): l is Leg & { kind: 'ride' } => l.kind === 'ride');
 const walks = (j: Journey) => j.legs.filter((l) => l.kind === 'walk');
 
-/** Aucun texte visible avec un tiret cadratin ; textes d'alerte et de suggestion ≤ 48 caractères. */
+/**
+ * Aucun texte visible avec un tiret cadratin ou demi-cadratin ; textes d'alerte et de suggestion ≤ 48 caractères ;
+ * 1.1 (DECISIONS § 6) : espace insécable (U+00A0) devant « : ; ! ? » et entre un nombre et son unité, jamais une
+ * espace ordinaire.
+ */
 function checkTexts(...texts: (string | undefined)[]): void {
   for (const t of texts) {
     if (t === undefined) continue;
     expect(t.includes(EM_DASH), `tiret cadratin dans « ${t} »`).toBe(false);
+    expect(t.includes(EN_DASH), `tiret demi-cadratin dans « ${t} »`).toBe(false);
     expect(t.length, `« ${t} » dépasse 48 caractères`).toBeLessThanOrEqual(48);
+    expect(t, `espace ordinaire devant une ponctuation haute dans « ${t} »`).not.toMatch(/ [:;!?]/);
+    expect(t, `espace ordinaire entre un nombre et son unité dans « ${t} »`).not.toMatch(/\d (min|h|km|m)\b/);
   }
 }
 
@@ -78,11 +86,11 @@ for (const scene of ['base', 'noRT'] as const) {
         expect(s!.autoOpen).toBe(false);
         if (rt) {
           // l'IC a +2 min et part voie 6 (départ estimé 07:44, partir à 07:35)
-          expect(s!.title).toBe('Pour le bureau : IC 07:42 +2, voie 6');
-          expect(s!.subtitle).toBe('partir à 07:35, 7 min à pied');
+          expect(s!.title).toBe('Pour le bureau\u00a0: IC 07:42 +2, voie 6');
+          expect(s!.subtitle).toBe('partir à 07:35, 7\u00a0min à pied');
         } else {
-          expect(s!.title).toBe('Pour le bureau : IC 07:42, voie 4');
-          expect(s!.subtitle).toBe('partir à 07:33, 7 min à pied');
+          expect(s!.title).toBe('Pour le bureau\u00a0: IC 07:42, voie 4');
+          expect(s!.subtitle).toBe('partir à 07:33, 7\u00a0min à pied');
         }
         checkTexts(s!.title, s!.subtitle);
       });
@@ -126,7 +134,7 @@ for (const scene of ['base', 'noRT'] as const) {
           expect(hhmm(ic.arr)).toBe('08:48');
           expect(hhmm(j.arr)).toBe('09:00');
           expect(hhmm(j.leaveAt)).toBe('07:35');
-          expect(j.alerts[0]?.text).toBe('! Voie modifiée : l’IC part de la voie 6');
+          expect(j.alerts[0]?.text).toBe('! Voie modifiée\u00a0: l’IC part de la voie 6');
         } else {
           expect([hhmm(ic.dep), ic.newPlatform, ic.delayMin, ic.rt]).toEqual(['07:42', undefined, 0, false]);
           expect(hhmm(ic.arr)).toBe('08:46');
@@ -145,7 +153,7 @@ for (const scene of ['base', 'noRT'] as const) {
         expect(r.id).toBe(j.id); // identifiant stable
         const ic = rides(r)[0];
         if (rt) {
-          expect(r.alerts[0]?.text).toBe('! Voie modifiée : l’IC part de la voie 6');
+          expect(r.alerts[0]?.text).toBe('! Voie modifiée\u00a0: l’IC part de la voie 6');
           expect(r.alerts.map((a) => a.kind)).toContain('leave'); // 07:37 ≥ partir à 07:35
           expect(hhmm(ic.dep)).toBe('07:44');
         } else {
@@ -414,7 +422,7 @@ describe('horaires périmés (dernière publication le 2026-11-01)', () => {
     expect(meta.serviceDates).toEqual(['2026-11-01', '2026-11-02']);
     const f = dataFreshness(meta, now);
     expect(f.ok).toBe(false);
-    expect(f.message).toBe('Horaires périmés : mise à jour arrêtée le 02/11');
+    expect(f.message).toBe('Horaires périmés\u00a0: mise à jour arrêtée le 02/11');
     checkTexts(f.message);
     // âge compté depuis meta.generatedAt, l'heure réelle où les données de test ont été préparées
     // (pas forcément avant 12:10 le 10/11 : on ne compare donc pas à zéro)
@@ -434,7 +442,7 @@ describe('horaires périmés (dernière publication le 2026-11-01)', () => {
     const meta = { v: 1, generatedAt: '2026-11-09T01:15:00Z', timezone: 'Europe/Brussels', serviceDates: ['2026-11-10', '2026-11-11'], tile: { lat: 0.02, lon: 0.03 }, feeds: {} } as never;
     const f = dataFreshness(meta, T('12:00', '2026-11-08'));
     expect(f.ok).toBe(false);
-    expect(f.message).toBe('Horaires du 10/11 : vérifie la date du téléphone');
+    expect(f.message).toBe('Horaires du 10/11\u00a0: vérifie la date du téléphone');
     // avant 04:00, la date de la veille couvre encore la nuit
     expect(dataFreshness(meta, T('03:30', '2026-11-12')).ok).toBe(true);
     expect(dataFreshness(meta, T('04:30', '2026-11-12')).ok).toBe(false);

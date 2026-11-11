@@ -109,4 +109,11 @@ Ensuite : contrôle qualité de bout en bout (`tests/e2e/**`, simulateur), puis 
 - Téléphone : réponse courte d'un trajet favori « partir à 07:33 » (pas de compte à rebours) ; enregistrer un lieu
   sous un nom existant met ce lieu à jour (favoris gardés) ; carte « Adresses » « Disponible, sauf en Wallonie »
   quand une seule Région est en panne ; le téléphone n'écrit jamais seenVersion. Validé.
+- M6.3 : la fin anticipée d'un trajet en cours (position encore à moins de 300 m du départ) n'est appliquée que 3 min
+  après le départ du premier véhicule, pour ne pas arrêter un suivi lancé depuis le quai. Validé.
+- Ordre des favoris, règle 5 (« rien dans les 3 heures ») : elle se lit sur les dernières réponses connues ; à la
+  toute première ouverture de la journée, un favori lointain (« Vers la maison, partir à 16:12 » le matin) peut donc
+  rester en 2e place jusqu'à l'ouverture suivante. Limite connue, gardée pour la 1.1.
+- Brussels (Paradigm) : chemin `api/v1` de la spécification Geoloc (février 2026), structure de réponse relevée en
+  direct le 11/11/2026 ; `api/v2` ne répond pas.
 

@@ -11,7 +11,7 @@
     "validate-data": "tsx validate-data.ts",
     "test": "vitest run",
     "test:data": "vitest run data download",
-    "test:core": "vitest run core robustness",
+    "test:core": "vitest run core robustness routing geocode",
     "sim": "tsx sim/run-sim.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

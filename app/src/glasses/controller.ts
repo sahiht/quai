@@ -125,6 +125,12 @@ const MOVE_M = 30;
 const RUN_AFTER_MS = 5 * 60_000;
 /** Fin anticipée : encore à moins de 300 m du départ après le départ du premier véhicule (M6.3). */
 const NOT_LEFT_M = 300;
+/**
+ * … mais seulement 3 min après ce départ : un train ou un tram met près d'une minute à quitter les 300 m de la gare,
+ * et la position du téléphone arrive avec retard (gares couvertes). Sans ce délai, un trajet suivi depuis le quai prenait
+ * fin juste après le départ (plus de « Dans le train » ni d'aide à l'arrivée).
+ */
+const NOT_LEFT_AFTER_MS = 3 * 60_000;
 /** Trajet suivi rafraîchi (temps réel) seulement quand son départ approche. */
 const TRIP_REFRESH_AHEAD_MS = 2 * 3_600_000;
 /** Réponses des favoris calculées 2 par 2, dans l'ordre affiché. */
@@ -170,7 +176,8 @@ export function tripPhase(t: Pick<FollowedTrip, 'leaveAt0' | 'origin'>, j: Journ
   const ride = j.legs.find(isRide);
   const start = ride ? Math.min(t.leaveAt0, j.leaveAt) : j.dep;
   if (now >= j.arr + RUN_AFTER_MS) return 'ended';
-  if (ride && now >= ride.dep && here && t.origin && here.at >= ride.dep && distanceM(here, t.origin) < NOT_LEFT_M) return 'ended';
+  const late = ride ? ride.dep + NOT_LEFT_AFTER_MS : Infinity;
+  if (ride && now >= late && here && t.origin && here.at >= late && distanceM(here, t.origin) < NOT_LEFT_M) return 'ended';
   return now >= start ? 'running' : 'before';
 }
 
@@ -372,6 +379,16 @@ export class GlassesController implements GlassesApi {
 
   get error(): string | null {
     return this.initError;
+  }
+
+  /**
+   * Écran d'erreur du lancement encore affiché (« Horaires injoignables… »). Le téléphone appelle aussi ensureInit() :
+   * s'il réussit le premier, initError est effacé mais les lunettes restent sur l'erreur ; le nouvel essai (30 s,
+   * toucher) doit alors quand même terminer le démarrage.
+   */
+  private atLaunchError(): boolean {
+    const r = current(this.nav).route;
+    return this.nav.stack.length === 1 && r.screen === 'message' && r.kind === 'error';
   }
 
   private async boot(): Promise<void> {
@@ -600,7 +617,7 @@ export class GlassesController implements GlassesApi {
         await this.saveTrip();
         return;
       case 'retry':
-        if (this.initError) {
+        if (this.initError || this.atLaunchError()) {
           this.nav = initNav({ screen: 'message', kind: 'loading', title: 'Quai', lines: ['Chargement…'] });
           await this.render();
           await this.boot();
@@ -1028,6 +1045,9 @@ export class GlassesController implements GlassesApi {
     // ▼ sur la dernière proposition (DECISIONS § 7) : rien de plus, on le dit (la ligne du bas reste « ▲ trajet précédent »).
     if (i >= list.length && list.length > 1) this.showToast('Pas d’autre trajet pour l’instant');
     if (i < 0 || i >= list.length) return;
+    // Un message de la page affichée (« Pas d’autre trajet pour l’instant », « Trajet suivi : … ») ne suit pas sur une
+    // autre page : la ligne d'aide redevient celle de la nouvelle page.
+    this.clearToast();
     const next: StepsRoute = { ...r, journeys: list, index: i };
     delete next.journey;
     this.nav = replaceAt(this.nav, next, dir === 'down' ? 0 : 999);
@@ -1037,6 +1057,11 @@ export class GlassesController implements GlassesApi {
   }
 
   /* ------------------------------ Départs : favori annulable ------------------------------ */
+
+  private clearToast(): void {
+    this.toast = null;
+    clearTimeout(this.toastTimer);
+  }
 
   private showToast(text: string, ms = TOAST_MS): void {
     this.toast = { text, until: this.d.clock.now() + ms, route: routeKey(current(this.nav).route) };
@@ -1337,7 +1362,7 @@ export class GlassesController implements GlassesApi {
   /** Rafraîchissement périodique de l'écran courant (temps réel) et du trajet suivi. */
   async refreshCurrent(force = false): Promise<void> {
     if (this.paused || this.stopped || !this.ready) return;
-    if (this.initError) {
+    if (this.initError || this.atLaunchError()) {
       await this.boot();
       return;
     }
