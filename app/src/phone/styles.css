@@ -149,9 +149,8 @@ input.switch:checked::after { left: 21px; }
 .card .r1 { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .card .time { font-size: 20px; line-height: 26px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
 .card .dur { font-size: 14px; line-height: 20px; color: var(--muted); text-align: right; }
-.card .chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.chip { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border-radius: 8px; background: #eef1ee; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--text); }
-.chip.walk { font-weight: 500; color: var(--body); }
+/* 1.2.1 : ligne « moyens » (« bus W + S1, à pied 4 + 5 min ») */
+.card .means { font-size: 15px; line-height: 20px; font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
 .card .det { font-size: 13px; line-height: 18px; color: var(--muted); }
 .foot { margin: 0; font-size: 12px; line-height: 17px; color: var(--muted); text-align: center; }
 
@@ -159,7 +158,15 @@ input.switch:checked::after { left: 21px; }
 .screen { display: flex; flex-direction: column; gap: 16px; }
 .form-body { display: flex; flex-direction: column; gap: 14px; }
 /* 1.2 : formulaires d'un favori (lieu, arrêt, trajet fixe), mêmes espacements que les écrans de la 1.1 */
-.place-form, .stop-form, .trip-form { display: flex; flex-direction: column; gap: 16px; }
+.place-form, .stop-form, .trip-form, .place-choice { display: flex; flex-direction: column; gap: 16px; }
+/* 1.2.1 : « Nouveau favori », deux choix de même taille en haut (comme « Lunettes | Réglages » de Quai Web) */
+.kinds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px; background: var(--seg); border-radius: 12px; }
+.kind { min-height: 56px; padding: 6px 8px; border: 0; border-radius: 9px; background: transparent; color: var(--body); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-align: center; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.kind .k1 { font-size: 15px; line-height: 20px; font-weight: 500; }
+.kind .k2 { font-size: 13px; line-height: 17px; color: var(--muted); }
+.kind[aria-selected="true"] { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(22, 26, 23, 0.12); }
+.kind[aria-selected="true"] .k1 { font-weight: 600; }
+.kind:focus-visible { outline-offset: 1px; }
 
 /* 1.1 : champ unique (adresse, gare, arrêt, lieu) */
 .fields { display: flex; flex-direction: column; gap: 6px; }
@@ -189,7 +196,6 @@ input.switch:checked::after { left: 21px; }
 .result .tagrow { display: flex; align-items: center; min-height: 44px; padding-right: 128px; margin: -6px 0 -4px; }
 .tag { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink); font-size: 13px; font-weight: 600; }
 .card .why { font-size: 14px; line-height: 20px; color: var(--body); }
-.card .sep { color: #8a938c; }
 .btn-glasses { border: 1px solid var(--btn-border); background: var(--card); color: var(--accent); min-height: 44px; padding: 0 12px; font-size: 14px; }
 .btn-glasses:hover:not([disabled]) { background: var(--accent-soft); }
 .result .btn-glasses { position: absolute; top: 10px; right: 10px; }
@@ -224,9 +230,12 @@ input.switch:checked::after { left: 21px; }
 .fav-row .msg { grid-column: 1 / -1; }
 .empty-row { padding: 14px 16px; }
 .more-link { align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 15px; font-weight: 500; text-decoration: none; }
-.news { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 12px 12px 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); }
+/* 1.2.1 : une ligne par nouveauté, la première un ton plus fort, « OK » dessous à droite */
+.news { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); }
+.news-lines { display: flex; flex-direction: column; gap: 4px; }
 .news p { margin: 0; font-size: 15px; line-height: 21px; }
-.news .btn { min-height: 44px; flex-shrink: 0; }
+.news p:first-child { font-weight: 600; }
+.news .btn { min-height: 44px; min-width: 88px; align-self: flex-end; }
 
 /* 1.1 : favoris (ordre), lieux (confirmation de position) */
 .order-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 60px; padding: 8px 10px 8px 14px; }

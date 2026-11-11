@@ -87,7 +87,9 @@ function sampleAnswers(): Map<string, FavoriteAnswer> {
 
 /**
  * Aperçu « Affichage » (T5) : l'accueil des lunettes avec ses favoris, selon les réglages (« À l’ouverture de Quai »,
- * « Ordre des favoris », rayon, aides, signe ~). Exemple : 07:31 à la maison, à Namur.
+ * « Ordre des favoris », rayon, aides, signe ~). Exemple : 07:31 à la maison, à Namur. 1.2.1 (PRD-1.2.1 § 4) : les 3
+ * favoris d'exemple sous « Favoris », une ligne chacun, dans l'ordre réglé ; l'accueil n'en montre pas plus que sa
+ * place ne le permet.
  */
 export function homePreview(settings: Settings): GlassesView {
   const s: Settings = { ...settings, favorites: SAMPLE_FAVORITES };
@@ -97,5 +99,5 @@ export function homePreview(settings: Settings): GlassesView {
   const order = settings.display.favOrder === 'mine' ? SAMPLE_FAVORITES.map((f) => f.id) : smart;
   const entries: FavoriteEntry[] = order.map((id) => ({ fav: SAMPLE_FAVORITES.find((f) => f.id === id)!, answer: answers.get(id) }));
   const nearbyCount = settings.display.radiusM <= 300 ? 2 : settings.display.radiusM <= 500 ? 3 : 4;
-  return homeView({ favorites: entries.slice(0, 2), order, others: entries.length - 2, noFavorites: settings.display.opening === 'home', nearbyCount }, { now: HOME_NOW, settings: s });
+  return homeView({ favorites: entries, order, noFavorites: settings.display.opening === 'home', nearbyCount }, { now: HOME_NOW, settings: s });
 }

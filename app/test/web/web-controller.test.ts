@@ -1,11 +1,12 @@
 /**
  * Quai Web : même contrôleur et mêmes écrans que les lunettes, avec les différences du web :
- * pas de sortie (message), gestes sans anti-rebond matériel, textes qui renvoient à l'onglet Réglages,
+ * pas de sortie (1.2.1 : sans message, PRD-1.2.1 § 4.5), gestes sans anti-rebond matériel, textes qui renvoient à
+ * l'onglet Réglages,
  * « Autre adresse » qui ouvre la recherche, « Aucun lieu enregistré » qui ouvre « Nouveau favori », position changée
  * tout de suite (endroit choisi).
  */
 import { describe, expect, it, vi } from 'vitest';
-import { GlassesController, WEB_EXIT_HINT } from '../../src/glasses/controller';
+import { GlassesController } from '../../src/glasses/controller';
 import type { HubSignal } from '../../src/glasses/gestures';
 import { firstRunView, favoritesView, placesView } from '../../src/glasses/views';
 import { createClock } from '../../src/platform/clock';
@@ -14,7 +15,6 @@ import type { Fix, GlassesPort, LocationPort, Platform } from '../../src/platfor
 import { SettingsStore } from '../../src/settings';
 import { APP_VERSION } from '../../src/version';
 import { dataFreshness } from '../../src/dev/fake-core';
-import { textWidth } from '../../src/glasses/font';
 import { defaults, fakeCore, preset11, SCENARIO } from '../ui/helpers';
 
 function movableLocation(fix: Fix | null): LocationPort & { set(f: Fix | null): void } {
@@ -62,14 +62,17 @@ async function setup(opts: { web?: boolean; onboarded?: boolean; here?: Fix | nu
 }
 
 describe('contrôleur en mode web', () => {
-  it('double toucher sur l’accueil : pas de sortie, un message court', async () => {
+  it('double toucher sur l’accueil : pas de sortie, et plus de message en pied (PRD-1.2.1 § 4.5)', async () => {
     const { c, exits, last, settle } = await setup();
-    expect(last().screen).toBe('home');
+    const home = last();
+    expect(home.screen).toBe('home');
     c.onSignal({ kind: 'gesture', gesture: 'double' });
     await settle();
     expect(exits).toEqual([]);
-    expect(last().lines.at(-1)).toBe(WEB_EXIT_HINT);
-    expect(textWidth(WEB_EXIT_HINT)).toBeLessThan(544);
+    // l'accueil reste tel quel : ni « Sur le web, ferme simplement l’onglet », ni autre ligne de pied
+    expect(last()).toEqual(home);
+    expect(last().lines.at(-1)).toBe('Aller à…');
+    expect(last().lines.join('\n')).not.toMatch(/ferme simplement/);
     c.stop();
   });
 

@@ -24,7 +24,7 @@ const GAND: Endpoint = { type: 'area', areaId: 'sncb:8892007', op: 'sncb', name:
 const late = { u: [[2, 'Bwategl1', 480, null, 0]] as [number, string, number, null, 0][] };
 const RECALCULE = 'marche 2 | 07:44 W Waterloo Eglise → Bruxelles Midi 08:29 | marche 2 | 08:35 M2 Gare du Midi → Rogier 08:49 | marche 3';
 const lineCalls = (env: TestEnv) => env.server.count((u) => u.includes('/lines/') || u.includes('/trains/'));
-/** Le bus W de 07:36 puis le métro (« Moins de marche » sous le S1 de 07:55, 19 min à pied). */
+/** Le bus W de 07:36 puis le métro (1.2.1 : la proposition 1 ; le S1 de 07:55 et ses 19 min à pied : « Plus tôt »). */
 async function busW(env: TestEnv): Promise<Journey> {
   const j = (await env.core.route(WATERLOO, ROGIER, at('2026-11-10T07:31'), env.preset)).journeys.find((x) => x.legs.some((l) => l.tripId === 'W-0724'));
   if (!j) throw new Error('bus W');
@@ -97,12 +97,13 @@ describe('plan mémorisé d’un trajet favori (temps réel seul pendant 5 min)'
     const s: Settings = { ...env.preset, favorites: [...env.preset.favorites, fav] };
     const a1 = await env.core.answer(fav, WPOS, s);
     const keys = (a: typeof a1) => a.plan?.journeys.map((j) => [j.id, j.label, j.reason]);
-    expect(a1.plan?.journeys.map((j) => j.label)).toEqual(['short', 'lesswalk', 'next']);
+    // 1.2.1 : le bus W puis le métro d'abord (le moins de marche), le S1 et ses 19 min à pied « Plus tôt »
+    expect(a1.plan?.journeys.map((j) => j.label)).toEqual(['short', 'earlier', 'next']);
     env.clock.set('2026-11-10T07:32');
     const a2 = await env.core.answer(fav, WPOS, s);
     expect(keys(a2)).toEqual(keys(a1));
-    // « Moins de marche » (bus W de 07:36) : 8 min de retard, le métro de 08:29 est manqué
-    const j = a2.plan!.journeys[1];
+    // la proposition 1 (bus W de 07:36) : 8 min de retard, le métro de 08:29 est manqué
+    const j = a2.plan!.journeys[0];
     expect(legsOf(j)).toContain('07:36 W');
     await otherComputations(env, s);
     env.server.relay.rt.tec.trips['W-0724'] = late;

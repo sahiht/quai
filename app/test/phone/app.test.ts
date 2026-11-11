@@ -18,7 +18,7 @@ function mountAt(hash: string, settings = defaults()) {
   const root = document.createElement('div');
   document.body.appendChild(root);
   const { go: _go, params: _params, ...deps } = hz.ctx;
-  mountPhone({ ...deps, root, news: { visible: () => false, dismiss: () => {} } });
+  mountPhone({ ...deps, root, news: { visible: () => false, dismiss: () => {}, lines: [] } });
   return root;
 }
 
@@ -43,14 +43,19 @@ describe('ancres de la 1.1 (« Mes lieux ») et de la 1.2', () => {
     expect(history.length).toBe(before);
   });
 
-  it('#/favoris/nouveau, #/favoris/trajet, #/bienvenue/favoris', async () => {
+  it('#/favoris/nouveau, #/favoris/trajet (choix « Un trajet de A à B », PRD-1.2.1 § 7.1), #/bienvenue/favoris', async () => {
     let root = mountAt('#/favoris/nouveau');
     await until(() => textOf(root.querySelector('h1')) !== '');
     expect(textOf(root.querySelector('h1'))).toBe('Nouveau favori');
+    expect(textOf(root.querySelector('[role="tab"][aria-selected="true"] .k1'))).toBe('Un endroit');
+    // le curseur va dans le champ du choix montré
+    expect(document.activeElement?.id).toBe('nf-lieu');
     document.body.replaceChildren();
     root = mountAt('#/favoris/trajet');
     await until(() => textOf(root.querySelector('h1')) !== '');
-    expect(textOf(root.querySelector('h1'))).toBe('Trajet fixe');
+    expect(textOf(root.querySelector('h1'))).toBe('Nouveau favori');
+    expect(textOf(root.querySelector('[role="tab"][aria-selected="true"] .k1'))).toBe('Un trajet de A à B');
+    expect(document.activeElement?.id).toBe('fav-de');
     document.body.replaceChildren();
     root = mountAt('#/bienvenue/favoris');
     await until(() => textOf(root.querySelector('h1')) !== '');

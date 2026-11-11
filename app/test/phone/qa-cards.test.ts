@@ -1,13 +1,15 @@
 /**
- * Contrôle qualité 1.2 (simulateur et Chrome, réseau de test) : phrase d'une carte « Sans changement » ou « Moins de
- * changements » qui arrive un peu AVANT « Le plus court ». Cas réel du réseau de test : S3 (Bruxelles-Central) à
- * 17:00 vers le boulevard du Centenaire 1, marche maximale 10 : « Le plus court » 17:12 → 17:50 (2 changements),
- * « Moins de changements » 17:12 → 17:47 avec 15 min à pied (marche longue : elle ne peut pas être « Le plus court »
- * et ne gagne que 3 min, donc pas « Plus tôt »). La carte disait « même heure d’arrivée », ce qui est faux.
+ * Contrôle qualité 1.2 (simulateur et Chrome, réseau de test), repris pour la 1.2.1 (paliers de marche, PRD-1.2.1
+ * § 1.1 et § 7.2) : phrase d'une carte « Sans changement » ou « Moins de changements » qui arrive un peu AVANT la
+ * proposition 1. Cas réel du réseau de test : S3 (Bruxelles-Central) à 17:00 vers le boulevard du Centenaire 1, marche
+ * maximale 10 : « Le plus court » 17:12 → 17:50 (2 changements, marches de 2 et 1 min), « Moins de changements » 17:12
+ * → 17:47 avec 15 min à pied (palier 1 : elle n'est pas la proposition 1 et ne gagne que 3 min, donc pas « Plus tôt »).
+ * La carte disait « même heure d’arrivée », ce qui est faux ; en 1.2.1, la « marche longue » devient « un palier plus
+ * haut que la proposition 1 ».
  */
 import { describe, expect, it } from 'vitest';
 import type { Journey, JourneyLabel, Leg, Mode, PlanResult } from '../../src/core/api';
-import { cardPhrase, typo } from '../../src/phone/text';
+import { cardPhrase, typo, walkTier } from '../../src/phone/text';
 import { at, NB } from './helpers';
 
 const walk = (dep: number, min: number): Leg => ({ kind: 'walk', from: { name: { fr: 'A', nl: 'A' }, lat: 0, lon: 0 }, to: { name: { fr: 'B', nl: 'B' }, lat: 0, lon: 0 }, dep, arr: dep + min * 60_000, schedDep: dep, schedArr: dep + min * 60_000, walkMin: min });
@@ -31,22 +33,26 @@ function trip(label: JourneyLabel, start: number, steps: (number | [number, numb
   return { id: `${label}-${start}`, legs, dep: legs[0].dep, arr: t, leaveAt: legs[0].dep, transfers: Math.max(0, rides - 1), rt: false, alerts: [], label };
 }
 
-describe('carte qui arrive un peu avant « Le plus court » (CA-1.2 : moins de 5 min, ou avec une marche longue)', () => {
+describe('carte qui arrive un peu avant la proposition 1 (moins de 5 min, ou d’un palier de marche plus haut)', () => {
   const short = trip('short', at(17, 12), [2, [at(17, 14), at(17, 30)], [at(17, 31), at(17, 40)], [at(17, 41), at(17, 49)], 1]);
 
   it('« Moins de changements » 3 min plus tôt avec 15 min à pied : ni « même heure d’arrivée », ni « en partant »', () => {
     const fewer = trip('fewer', at(17, 12), [2, [at(17, 14), at(17, 25)], [at(17, 26), at(17, 32)], 15]);
     const r: PlanResult = { journeys: [short, fewer] };
+    expect([walkTier(fewer, 10), walkTier(short, 10)]).toEqual([1, 0]);
     expect(typo(cardPhrase(fewer, r, 10))).toBe(`Moins de changements, arrive 3${NB}min plus tôt, mais avec 15${NB}min à pied.`);
-    // marche maximale 15 : 15 min n'est plus une marche longue (seuil 20)
+    // marche maximale 15 : 15 min tient dans la marche maximale (palier 0, comme la proposition 1)
+    expect(walkTier(fewer, 15)).toBe(0);
     expect(cardPhrase(fewer, r, 15)).toBe('Moins de changements, arrive 3 min plus tôt.');
-    // la carte « Le plus court » le dit aussi : une autre carte arrive plus tôt, avec une marche longue
-    expect(cardPhrase(short, r, 10)).toBe('Le plus court sans marche longue.');
+    // la carte de la proposition 1 le dit aussi : le plus rapide arrive 3 min avant elle, en marchant plus
+    expect(cardPhrase(short, r, 10)).toBe('Arrive 3 min après le plus rapide, avec moins de marche.');
   });
 
-  it('sans marche longue, elle part plus tôt : la carte donne l’heure de départ, comme « Plus tôt »', () => {
+  it('même palier, elle part plus tôt : la carte donne l’heure de départ, comme « Plus tôt » ; la proposition 1 aussi', () => {
     const sooner = trip('fewer', at(17, 2), [2, [at(17, 4), at(17, 30)], [at(17, 31), at(17, 44)], 3]);
-    expect(cardPhrase(sooner, { journeys: [short, sooner] }, 10)).toBe('Moins de changements, arrive 3 min plus tôt, en partant à 17:02.');
+    const r: PlanResult = { journeys: [short, sooner] };
+    expect(cardPhrase(sooner, r, 10)).toBe('Moins de changements, arrive 3 min plus tôt, en partant à 17:02.');
+    expect(cardPhrase(short, r, 10)).toBe('Le plus court sans partir plus tôt.');
   });
 
   it('« Sans changement » : même règle', () => {

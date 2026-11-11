@@ -1,13 +1,16 @@
 /**
- * Textes du téléphone (PRD § 6.2 et § 6.3) : typographie française, phrases des cartes de trajets,
- * réponses courtes des favoris, sous-titres des lieux. Fonctions pures, sans DOM.
+ * Textes du téléphone (PRD § 6.2 et § 6.3) : typographie française, cartes de trajets (titre, ligne « moyens »,
+ * phrase ; PRD-1.2.1 § 7.2), jour férié (§ 5), réponses courtes des favoris, sous-titres des lieux. Fonctions pures,
+ * sans DOM.
  */
 import type { Endpoint, Favorite, FavoriteAnswer, Journey, NameLang, Place, PlanResult, Propose, Settings } from '../core/api';
 import { LABEL_TEXT } from '../core/api';
 import { favoriteTitle, placeOf } from '../core/favorites';
+import { displayLabel, HOLIDAY_TEXT, holidayName, longestWalk, meansText, walksMore } from '../core/means';
 import { NB, shortAddress } from '../core/text';
 import { areaLabel, displayName, hhmm } from '../core/util';
 import { atTitle, durationText, journeyStart, spanText, stopAnswerLine, transfersText, tripAnswerLine, walkMinOf } from '../glasses/format';
+import { compareVersions } from '../version';
 import { normalizeForSearch } from '../../../shared/names';
 
 /** Espace insécable (U+00A0) du cœur ; adresse courte « Veldstraat 1 » (titres « Vers … »). */
@@ -67,7 +70,13 @@ export const T = {
   addFav: 'Ajouter un favori',
   newFav: 'Nouveau favori',
   favField: 'Adresse, gare ou arrêt',
-  fixedTripLink: 'Un trajet fixe, d’un endroit à un autre',
+  /** « Nouveau favori » : les deux choix du haut (PRD-1.2.1 § 7.1) et leur nom pour les lecteurs d'écran. */
+  kindLegend: 'Type de favori',
+  kindPlace: 'Un endroit',
+  kindPlaceSub: 'adresse, gare ou arrêt',
+  /** « A à B » insécable : jamais un « B » seul sur sa ligne (téléphone étroit). */
+  kindTrip: `Un trajet de A${NB}à${NB}B`,
+  kindTripSub: 'départ et arrivée fixes',
   fixedTrip: 'Trajet fixe',
   allLines: 'Toutes les lignes',
   name: 'Nom',
@@ -82,11 +91,26 @@ export const T = {
   done: 'Terminé',
   favsLead: 'Tes lieux, tes arrêts et tes trajets. En tête dans les lunettes selon l’heure et le lieu (réglage Affichage).',
   maxWalk: 'Marche maximale',
-  maxWalkSub: 'Au-delà de 5 min de plus, seulement pour arriver au moins 10 min plus tôt',
+  /** PRD-1.2.1 § 7.3 : paliers de marche, plus de marche seulement si les trajets qui restent dans la limite sont bien plus lents. */
+  maxWalkSub: 'D’abord les trajets dans cette limite ; au-delà, s’il n’y a pas mieux',
   rtDown: 'Temps réel indisponible, horaires prévus',
   offline: 'Pas de réseau : réessaie dans un instant.',
-  news: 'Nouveau : le trajet le plus court d’abord, et tes lieux sont dans tes favoris.',
 } as const;
+
+/** Version où les lieux sont devenus des favoris : qui vient d'avant lit une ligne de plus dans la bannière. */
+const PLACES_AS_FAVORITES = '1.2.0';
+
+/**
+ * Bannière « Nouveau » de l'accueil du téléphone (PRD-1.2.1 § 6) : les nouveautés du message « Quai 1.2.1 » des
+ * lunettes, dans le même ordre, dites depuis le téléphone (le ▼ et l'accueil sont ceux des lunettes) ; depuis une
+ * version antérieure à la 1.2.0, « Tes lieux sont maintenant dans tes favoris. » en plus. `seen` : la version vue avant
+ * la mise à jour.
+ */
+export function newsLines(seen: string): string[] {
+  const lines = ['Nouveau : le moins de marche d’abord.', 'Dans les lunettes, sur un trajet, ▼ : la suite, puis les autres trajets.', 'Accueil des lunettes plus simple : tes favoris en tête.'];
+  if (seen && compareVersions(seen, PLACES_AS_FAVORITES) < 0) lines.push('Tes lieux sont maintenant dans tes favoris.');
+  return lines;
+}
 
 /** Suppression d'un lieu utilisé par un trajet fixe (PRD-1.2 § 2.2). */
 export const removeUsedPlaceText = (name: string): string => `Supprimer « ${name} » ? Les trajets fixes qui l’utilisent seront aussi supprimés.`;
@@ -192,8 +216,6 @@ export function sameEndpoint(a: Endpoint, b: Endpoint): boolean {
 
 /* ------------------------------ Trajets ------------------------------ */
 
-const rides = (j: Journey) => j.legs.filter((l) => l.kind === 'ride');
-
 /**
  * Heures d'une carte, comme le titre de l'écran des étapes (PRD L3) : départ à pied s'il y a une marche au début,
  * sinon départ estimé du premier véhicule ; arrivée finale.
@@ -217,67 +239,117 @@ export function timesText(j: Journey, now: number): string {
 export function summaryText(j: Journey): string {
   const { start, end } = journeyTimes(j);
   const dur = durationText((end - start) / 60_000);
-  if (!j.legs.some((l) => l.kind === 'ride')) return `${dur} à pied`;
+  if (!j.legs.some((l) => l.kind === 'ride')) return `${dur} à pied`;
   const walk = walkMinutesOf(j);
-  return [dur, transfersText(j.transfers), walk ? `${walk} min à pied` : ''].filter(Boolean).join(', ');
+  return [dur, transfersText(j.transfers), walk ? `${walk} min à pied` : ''].filter(Boolean).join(', ');
 }
 
-const minutes = (ms: number): string => {
-  const n = Math.max(0, Math.round(ms / 60_000));
-  return n < 60 ? `${n} min` : durationText(n);
-};
+/** « 13 min », « 1 h 05 » (un nombre de minutes). */
+const span = (n: number): string => (n < 60 ? `${n} min` : durationText(n));
+const minutes = (ms: number): string => span(Math.max(0, Math.round(ms / 60_000)));
 
 /** Minute affichée d'un instant (les cartes comparent des heures « HH:MM »). */
 const minuteOf = (t: number): number => Math.floor(t / 60_000);
 
-/** Étiquette d'une carte (« Le plus court ») ; rien si le cœur n'en a pas donné. */
-export const labelText = (j: Journey): string => (j.label ? LABEL_TEXT[j.label] : '');
+/**
+ * Titre d'une carte (PRD-1.2.1 § 7.2) : le nom affiché de la proposition (`displayLabel` : la première s'appelle
+ * « Moins de marche » quand une proposition « Plus tôt » marche plus qu'elle, sinon « Le plus court » ; jamais deux
+ * « Moins de marche ») ; rien si le cœur n'a pas donné d'étiquette.
+ */
+export const cardTitle = (j: Journey, result: PlanResult): string => (j.label ? displayLabel(j, result.journeys) : '');
 
-/** Marche longue (PRD-1.2 § 1.2) : une marche d'au moins la marche maximale plus 5 min. */
-export const longWalkFrom = (maxWalkMin: number): number => maxWalkMin + 5;
-/** La plus longue marche d'un trajet en véhicule, en minutes (0 sans véhicule). */
-export function longestWalk(j: Journey): number {
-  if (!rides(j).length) return 0;
-  return Math.max(0, ...j.legs.filter((l) => l.kind === 'walk').map((l) => walkMinOf(l)));
-}
-export const hasLongWalk = (j: Journey, maxWalkMin: number): boolean => longestWalk(j) >= longWalkFrom(maxWalkMin);
+/** Marches d'au moins 1 min, dans l'ordre du trajet. */
+const walksOf = (j: Journey): number[] =>
+  j.legs
+    .filter((l) => l.kind === 'walk')
+    .map((l) => Math.round(walkMinOf(l)))
+    .filter((m) => m >= 1);
 
 /**
- * Phrase d'une carte (PRD-1.2 § 1.3). `maxWalkMin` : la marche maximale réglée (marche longue à partir de + 5 min).
+ * Ligne « moyens » d'une carte (PRD-1.2.1 § 2.3 et § 7.2) : comment on voyage (`meansText`), puis les marches dans
+ * l'ordre : « bus W + S1, à pied 4 + 5 min » ; plus de 3 marches : « bus 36 + IC + métro 2, 12 min à pied » ; sans
+ * marche : « IC + IC ». Trajet à pied : rien, la carte le dit déjà (« 22 min à pied », « À pied, sans transport »).
+ */
+export function meansLine(j: Journey): string {
+  if (!j.legs.some((l) => l.kind === 'ride')) return '';
+  const w = walksOf(j);
+  if (!w.length) return meansText(j);
+  return `${meansText(j)}, ${w.length > 3 ? `${w.reduce((s, m) => s + m, 0)} min à pied` : `à pied ${w.join(' + ')} min`}`;
+}
+
+/** Largeur d'un palier de marche, en minutes (PRD-1.2.1 § 1.1). */
+export const WALK_TIER_MIN = 5;
+
+/**
+ * Palier de marche d'un trajet (PRD-1.2.1 § 1.1) : 0 si sa plus longue marche L tient dans la marche maximale M,
+ * sinon ceil((L − M) / 5). Avec M = 5 : jusqu'à 5 min palier 0, de 6 à 10 palier 1, de 11 à 15 palier 2.
+ */
+export function walkTier(j: Pick<Journey, 'legs'>, maxWalkMin: number): number {
+  const l = longestWalk(j);
+  return l <= maxWalkMin ? 0 : Math.ceil((l - maxWalkMin) / WALK_TIER_MIN);
+}
+
+/**
+ * Phrase d'une carte (PRD-1.2.1 § 7.2, alignée sur les raisons du § 2.2) : pourquoi le trajet passe devant ou
+ * derrière la proposition 1. Elle ne lit que les étiquettes, les heures et les marches, jamais `reason` (écrite par le
+ * cœur pour une ligne des lunettes). `maxWalkMin` : la marche maximale réglée (paliers de marche, § 1.1).
+ *  - Proposition 1 : « Arrive le plus tôt. » ; si un trajet arrive avant elle en marchant plus (son nom affiché est
+ *    alors « Moins de marche », ou ce trajet est d'un palier plus haut) : « Arrive 13 min après le plus rapide, avec
+ *    moins de marche. » ; s'il arrive avant en partant plus tôt : « Le plus court sans partir plus tôt. »
+ *  - Plus tôt : « Plus tôt de 13 min, mais 19 min à pied. » (sa plus longue marche, s'il marche plus que la
+ *    proposition 1 : walksMore, comme displayLabel), sinon « Plus tôt de 13 min, en partant à 19:20. »
+ *  - Moins de marche : « Arrive 25 min plus tard, avec moins de marche. »
+ *  - Sans changement, Moins de changements : règles de la 1.2, la « marche longue » devenant un palier plus haut que
+ *    la proposition 1 (« Aucun changement, arrive 3 min plus tôt, mais avec 15 min à pied. ») ; à la même heure
+ *    d'arrivée aussi, la marche passe avant le départ plus tôt (« Aucun changement, même heure d’arrivée, mais avec
+ *    19 min à pied. »).
+ *  - À pied, Le suivant, Plus tard : phrases de la 1.1.
  */
 export function cardPhrase(j: Journey, result: PlanResult, maxWalkMin: number): string {
-  const short = result.journeys.find((x) => x.label === 'short') ?? result.journeys[0];
-  const others = result.journeys.filter((x) => x !== j);
-  const later = (x: Journey): number => minuteOf(x.arr) - minuteOf((short ?? x).arr);
+  const all = result.journeys;
+  const first = all.find((x) => x.label === 'short') ?? all[0] ?? j;
+  const tier = (x: Journey): number => walkTier(x, maxWalkMin);
+  const start = (x: Journey): number => journeyTimes(x).start;
+  /** Minutes d'arrivée après la proposition 1 (négatif : avant elle). */
+  const later = (x: Journey): number => minuteOf(x.arr) - minuteOf(first.arr);
   const changes = (prefix: string): string => {
     const d = later(j);
-    if (d > 0) return `${prefix}, mais arrive ${minutes(d * 60_000)} plus tard.`;
-    // Arrive un peu avant « Le plus court » (moins de 5 min, ou avec une marche longue) : jamais « même heure d’arrivée ».
-    // Comme la carte « Plus tôt » : la marche longue, sinon l'heure de départ plus tôt, disent pourquoi elle n'est pas en tête.
+    if (d > 0) return `${prefix}, mais arrive ${span(d)} plus tard.`;
+    // Arrive un peu avant la proposition 1 (moins de 5 min, ou en marchant plus), ou en même temps : comme la carte
+    // « Plus tôt », sa marche (palier plus haut), sinon son départ plus tôt, disent pourquoi elle n'est pas en tête ;
+    // jamais « même heure d’arrivée » si elle arrive avant.
+    const walk = tier(j) > tier(first) ? `mais avec ${longestWalk(j)} min à pied` : '';
     if (d < 0) {
-      const n = minutes(-d * 60_000);
-      if (hasLongWalk(j, maxWalkMin)) return `${prefix}, arrive ${n} plus tôt, mais avec ${longestWalk(j)} min à pied.`;
-      const start = journeyTimes(j).start;
-      return minuteOf(start) < minuteOf(journeyTimes(short ?? j).start) ? `${prefix}, arrive ${n} plus tôt, en partant à ${hhmm(start)}.` : `${prefix}, arrive ${n} plus tôt.`;
+      const n = span(-d);
+      if (walk) return `${prefix}, arrive ${n} plus tôt, ${walk}.`;
+      return minuteOf(start(j)) < minuteOf(start(first)) ? `${prefix}, arrive ${n} plus tôt, en partant à ${hhmm(start(j))}.` : `${prefix}, arrive ${n} plus tôt.`;
     }
-    const earlier = minuteOf(journeyTimes(short ?? j).start) - minuteOf(journeyTimes(j).start);
-    return earlier > 0 ? `${prefix}, en partant ${minutes(earlier * 60_000)} plus tôt.` : `${prefix}, même heure d’arrivée.`;
+    if (walk) return `${prefix}, même heure d’arrivée, ${walk}.`;
+    const sooner = minuteOf(start(first)) - minuteOf(start(j));
+    return sooner > 0 ? `${prefix}, en partant ${span(sooner)} plus tôt.` : `${prefix}, même heure d’arrivée.`;
   };
   switch (j.label) {
     case 'short': {
-      const sooner = others.filter((x) => minuteOf(x.arr) < minuteOf(j.arr));
+      const sooner = all.filter((x) => x !== j && minuteOf(x.arr) < minuteOf(j.arr));
       if (!sooner.length) return 'Arrive le plus tôt.';
-      return sooner.some((x) => hasLongWalk(x, maxWalkMin)) ? 'Le plus court sans marche longue.' : 'Le plus court sans partir plus tôt.';
+      // « le plus rapide » : le trajet qui arrive le plus tôt (« Plus tôt », ou un autre qui arrive un peu avant).
+      const fastest = sooner.reduce((a, b) => (b.arr < a.arr ? b : a));
+      const lessWalk = `Arrive ${span(minuteOf(j.arr) - minuteOf(fastest.arr))} après le plus rapide, avec moins de marche.`;
+      if (displayLabel(j, all) === LABEL_TEXT.lesswalk || tier(fastest) > tier(j)) return lessWalk;
+      if (minuteOf(start(fastest)) < minuteOf(start(j))) return 'Le plus court sans partir plus tôt.';
+      // même palier, même départ : seule sa marche plus longue l'explique ; sinon rien d'exact à dire
+      return walksMore(fastest, j) ? lessWalk : '';
     }
     case 'earlier': {
-      const n = minutes((minuteOf((short ?? j).arr) - minuteOf(j.arr)) * 60_000);
-      return hasLongWalk(j, maxWalkMin) ? `Arrive ${n} plus tôt, mais avec ${longestWalk(j)} min à pied.` : `Arrive ${n} plus tôt, en partant à ${hhmm(journeyTimes(j).start)}.`;
+      // « marche plus » : la règle de displayLabel (walksMore), pour que ce nom et cette phrase disent la même chose.
+      const tail = walksMore(j, first) ? `mais ${longestWalk(j)} min à pied` : `en partant à ${hhmm(start(j))}`;
+      const gain = -later(j);
+      return gain > 0 ? `Plus tôt de ${span(gain)}, ${tail}.` : `Même heure d’arrivée, ${tail}.`;
     }
     case 'lesswalk': {
-      const w = walkMinutesOf(short ?? j) - walkMinutesOf(j);
       const d = later(j);
-      if (d > 0) return `${w} min de marche en moins, mais arrive ${minutes(d * 60_000)} plus tard.`;
-      return d === 0 ? `${w} min de marche en moins, même heure d’arrivée.` : `${w} min de marche en moins, arrivée ${minutes(-d * 60_000)} plus tôt.`;
+      if (d > 0) return `Arrive ${span(d)} plus tard, avec moins de marche.`;
+      return d === 0 ? 'Même heure d’arrivée, avec moins de marche.' : `Arrive ${span(-d)} plus tôt, avec moins de marche.`;
     }
     case 'none':
       return changes('Aucun changement');
@@ -292,6 +364,14 @@ export function cardPhrase(j: Journey, result: PlanResult, maxWalkMin: number): 
     default:
       return '';
   }
+}
+
+/**
+ * Ligne « Jour férié : horaires du dimanche » au-dessus des résultats d'une recherche (PRD-1.2.1 § 5 et § 7.4) : un
+ * trajet proposé part un jour férié national belge (heure de Bruxelles) ; rien les autres jours, ni sans trajet.
+ */
+export function holidayLine(result: Pick<PlanResult, 'journeys'> | null | undefined): string {
+  return result?.journeys.some((j) => holidayName(journeyTimes(j).start)) ? HOLIDAY_TEXT : '';
 }
 
 /* ------------------------------ Réponses courtes des favoris (S8) ------------------------------ */

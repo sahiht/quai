@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FavoriteAnswer, Settings } from '../../src/core/api';
 import { NEWS_SINCE, newsState } from '../../src/phone/app';
+import { newsLines as glassesNewsLines } from '../../src/glasses/views';
 import { APP_VERSION } from '../../src/version';
 import { ANSWER_MAX_AGE_MS, homeScreen, resetAnswers, reusable } from '../../src/phone/screens/home';
 import { catchable } from '../../src/glasses/format';
@@ -172,25 +173,43 @@ describe('réponses courtes (S8, mêmes règles que les lunettes)', () => {
 });
 
 describe('bannière après la mise à jour (T1) et état des données (M8)', () => {
-  it('une fois après une mise à jour depuis la 1.0 ou la 1.1, jusqu’à « OK » ; jamais après une nouvelle installation', () => {
-    expect(NEWS_SINCE).toBe('1.2.0');
-    expect(APP_VERSION).toBe('1.2.0');
-    expect(newsState('1.0.0').visible()).toBe(true);
-    expect(newsState('1.1.0').visible()).toBe(true);
-    expect(newsState('').visible()).toBe(false);
-    expect(newsState('1.2.0').visible()).toBe(false);
-    // mise à jour 1.2.0 → 1.2.1 : la bannière des nouveautés de la 1.2 ne revient pas
-    expect(newsState('1.2.0').visible()).toBe(false);
+  it('« Quai 1.2.1 » : une fois après une mise à jour depuis la 1.0, la 1.1 ou la 1.2.0, jusqu’à « OK » ; jamais après une nouvelle installation', () => {
+    expect(NEWS_SINCE).toBe('1.2.1');
+    expect(APP_VERSION).toBe('1.2.1');
+    for (const seen of ['1.0.0', '1.1.0', '1.2.0']) expect(newsState(seen).visible(), seen).toBe(true);
+    for (const seen of ['', '1.2.1', '1.3.0']) expect(newsState(seen).visible(), seen || 'installation neuve').toBe(false);
+    // une appli plus ancienne que ces nouveautés ne les annonce pas
+    expect(newsState('1.1.0', NEWS_SINCE, '1.2.0').visible()).toBe(false);
     const hz = harness({ settings: defaults() });
     hz.ctx.news = newsState('1.1.0');
     const el = mount(homeScreen(hz.ctx));
-    expect(textOf(el.querySelector('.news p'))).toBe('Nouveau : le trajet le plus court d’abord, et tes lieux sont dans tes favoris.');
+    // les nouveautés du message « Quai 1.2.1 » des lunettes, dites depuis le téléphone ; depuis la 1.1, les lieux en plus
+    expect([...el.querySelectorAll('.news p')].map((p) => textOf(p))).toEqual([
+      'Nouveau : le moins de marche d’abord.',
+      'Dans les lunettes, sur un trajet, ▼ : la suite, puis les autres trajets.',
+      'Accueil des lunettes plus simple : tes favoris en tête.',
+      'Tes lieux sont maintenant dans tes favoris.',
+    ]);
+    expect(el.querySelector('.news p')!.textContent).toContain('Nouveau\u00a0:');
     button(el, 'OK').click();
     expect(el.querySelector('.news')).toBeNull();
     expect(hz.ctx.news.visible()).toBe(false);
     expect(mount(homeScreen(hz.ctx)).querySelector('.news')).toBeNull();
-    // le téléphone n'écrit pas la version vue (les lunettes s'en servent pour « Quai 1.2 »)
+    // le téléphone n'écrit pas la version vue (les lunettes s'en servent pour « Quai 1.2.1 »)
     expect(hz.settings.get().seenVersion).toBe('');
+  });
+
+  it('mêmes nouveautés que les lunettes, dans le même ordre : 3 lignes depuis la 1.2.0, 4 depuis la 1.0 ou la 1.1', () => {
+    const plain = (l: string) => l.replace(/\u00a0/g, ' ');
+    for (const seen of ['1.0.0', '1.1.0', '1.2.0']) {
+      const phone = newsState(seen).lines;
+      const glasses = glassesNewsLines(seen).map(plain);
+      expect(phone, seen).toHaveLength(glasses.length);
+      expect(phone[0], seen).toBe(glasses[0]);
+      expect(phone.at(-1), seen).toBe(glasses.at(-1)!.replace('Accueil plus simple', 'Accueil des lunettes plus simple'));
+    }
+    expect(newsState('1.2.0').lines).toHaveLength(3);
+    for (const l of newsState('1.0.0').lines) expect(l).not.toMatch(/[—–]/);
   });
 
   it('« Données » : « Temps réel indisponible, horaires prévus » pendant une panne, sinon « Tout est à jour »', async () => {

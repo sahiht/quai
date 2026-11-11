@@ -71,12 +71,13 @@ describe('correspondance rendue impossible par un retard (§ 4.9, point 2)', () 
   const ROGIER = addr('Rue du Progrès 20, 1210 Saint-Josse-ten-Noode', 50.8582, 4.36);
   const late = { u: [[2, 'Bwategl1', 480, null, 0]] as [number, string, number, null, 0][] };
   const RECALCULE = 'marche 2 | 07:44 W Waterloo Eglise → Bruxelles Midi 08:29 | marche 2 | 08:35 M2 Gare du Midi → Rogier 08:49 | marche 3';
-  /** Le bus W de 07:36 puis le métro (« Moins de marche » sous le S1 de 07:55, 19 min à pied). */
+  /** Le bus W de 07:36 puis le métro (1.2.1 : la proposition 1 ; le S1 de 07:55 et ses 19 min à pied : « Plus tôt »). */
   const busW = (js: Journey[]) => js.find((j) => j.legs.some((l) => l.tripId === 'W-0724'));
 
   it('route() : S1 de 07:55 supprimé, bus W en retard de 8 min qui manque le métro de 08:29 : recalculé, en tête', async () => {
     const probe = makeEnv({ now: '2026-11-10T07:31', scene: 'noRT' });
-    const s1 = (await probe.core.route(WATERLOO, ROGIER, at('2026-11-10T07:31'), probe.preset)).journeys[0].legs.find((l) => l.kind === 'ride');
+    const proposals = (await probe.core.route(WATERLOO, ROGIER, at('2026-11-10T07:31'), probe.preset)).journeys;
+    const s1 = proposals.find((j) => j.label === 'earlier')?.legs.find((l) => l.kind === 'ride');
     expect(s1).toMatchObject({ cat: 'S1' });
     const env = makeEnv({ now: '2026-11-10T07:31' });
     env.server.relay.rt.sncb.trips[s1?.tripId ?? ''] = { cancelled: true, u: [] };
@@ -94,7 +95,7 @@ describe('correspondance rendue impossible par un retard (§ 4.9, point 2)', () 
     const r = await env.core.route(WATERLOO, ROGIER, at('2026-11-10T07:31'), env.preset);
     const j0 = busW(r.journeys);
     if (!j0) throw new Error('bus W');
-    expect(j0.label).toBe('lesswalk');
+    expect(j0.label).toBe('short');
     expect(legsOf(j0)).toContain('08:29 M2');
     env.server.relay.rt.tec.trips['W-0724'] = late;
     env.clock.set('2026-11-10T07:40');

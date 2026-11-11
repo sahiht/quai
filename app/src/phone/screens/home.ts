@@ -152,11 +152,12 @@ export function homeScreen(ctx: PhoneCtx): HTMLElement {
   const fresh = ctx.freshness();
   const n = s.favorites.length;
   const dataRow = listRow({ icon: icon('data'), title: 'Données', sub: dataSubtitle(ctx), onClick: () => ctx.go('#/donnees') });
+  // Bannière « Nouveau » (PRD-1.2.1 § 6) : une ligne par nouveauté, « OK » dessous.
   const banner = ctx.news?.visible()
     ? h(
         'div',
         { class: 'news', role: 'status' },
-        h('p', null, typo(T.news)),
+        h('div', { class: 'news-lines' }, ctx.news.lines.map((l) => h('p', null, typo(l)))),
         h('button', {
           type: 'button',
           class: 'btn btn-secondary',

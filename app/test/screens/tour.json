@@ -1,5 +1,5 @@
 {
-  "version": "1.2.0",
+  "version": "1.2.1",
   "how": "tests/e2e : npm run sim -- --tour (vrai cœur, données des fixtures)",
   "screens": [
     {
@@ -20,7 +20,7 @@
     },
     {
       "file": "glasses-favorites.png",
-      "what": "Autres favoris à 12:10 près de la gare du Nord : lieux, trajet fixe et gare, avec leur réponse"
+      "what": "Mes favoris (« Favoris » sur l’accueil) à 12:10 près de la gare du Nord : arrêts et lieux avec leur réponse"
     },
     {
       "file": "glasses-first-run.png",
@@ -28,7 +28,7 @@
     },
     {
       "file": "glasses-home-near.png",
-      "what": "Accueil sans favori : « Près de Bruxelles-Nord », « Ajouter un favori »"
+      "what": "Accueil sans favori (nouvelle installation) : « Près de Bruxelles-Nord », « Ajouter un favori », aide des gestes les 7 premiers jours"
     },
     {
       "file": "glasses-home-stale.png",
@@ -36,11 +36,11 @@
     },
     {
       "file": "glasses-home.png",
-      "what": "Accueil, 07:31 à la maison : le lieu « Vers le bureau » et la gare de Namur en tête"
+      "what": "Accueil 1.2.1, 07:31 à la maison (Namur) : « Favoris   6 », dessous en retrait le bureau, la gare de Namur et la gare du Nord, puis « Autour de moi » et « Aller à… »"
     },
     {
       "file": "glasses-journeys.png",
-      "what": "Autre trajet (▼) : page 2 « Le suivant », non suivi (remplace la liste des propositions de la 1.0)"
+      "what": "Autres trajets (▼ au bout des étapes) : par entrée, le nom et les heures, puis les moyens et les marches"
     },
     {
       "file": "glasses-nearby-empty.png",
@@ -60,7 +60,7 @@
     },
     {
       "file": "glasses-steps.png",
-      "what": "Trajet proposé Maison vers Bureau, page 1 « Le plus court », trajet suivi (alerte de voie en tête)"
+      "what": "Trajet proposé Maison vers Bureau, « Le plus court », trajet suivi (alerte de voie en tête), « ▼ suite du trajet »"
     },
     {
       "file": "glasses-train-detail.png",
@@ -72,7 +72,7 @@
     },
     {
       "file": "glasses-trip.png",
-      "what": "Vers Gand-Saint-Pierre, trajet fixe de gare à gare : « Le plus court : direct », puis « ▼ Le suivant »"
+      "what": "Vers Gand-Saint-Pierre, trajet fixe de gare à gare : « Le plus court : direct », « Fin du trajet. ▼ 2 autres trajets »"
     },
     {
       "file": "phone-alerts.png",
@@ -84,15 +84,15 @@
     },
     {
       "file": "phone-data.png",
-      "what": "Données, avec « Version de Quai » et « Adresses »"
+      "what": "Données, avec « Version de Quai 1.2.1 » et « Adresses »"
     },
     {
       "file": "phone-display.png",
-      "what": "Affichage, avec « Ordre des favoris »"
+      "what": "Affichage : « À l’ouverture de Quai », « Ordre des favoris » et l’aperçu de l’accueil des lunettes 1.2.1 (« Favoris » et 3 favoris en retrait)"
     },
     {
       "file": "phone-favorite-edit.png",
-      "what": "Modifier un arrêt favori"
+      "what": "Modifier un arrêt favori (en modification, pas de choix « Un endroit » ou « Un trajet de A à B »)"
     },
     {
       "file": "phone-favorites.png",
@@ -108,11 +108,11 @@
     },
     {
       "file": "phone-places.png",
-      "what": "Un lieu de « Mes favoris » : nom, adresse et accès, créneau (remplace « Mes lieux » de la 1.1)"
+      "what": "Un lieu de « Mes favoris » : nom, adresse et accès, créneau"
     },
     {
       "file": "phone-search-results.png",
-      "what": "Trajets Bruxelles-Central vers Gand-Saint-Pierre"
+      "what": "Trajets Bruxelles-Central vers Gand-Saint-Pierre : nom affiché, ligne des moyens, phrase"
     },
     {
       "file": "phone-search.png",

@@ -42,15 +42,88 @@ describe('sous-titres des lieux', () => {
   });
 });
 
-describe('« Nouveau favori » (PRD-1.2 § 2.2)', () => {
-  it('textes : titre, champ « Adresse, gare ou arrêt » avec en tête « Ma position actuelle », lien du trajet fixe, mention', async () => {
-    const hz = harness({ settings: defaults({ recent: [{ label: 'Veldstraat 1, 9000 Gent', lat: 51.0537, lon: 3.7225, at: 1 }] }) });
+describe('« Nouveau favori » (PRD-1.2 § 2.2, PRD-1.2.1 § 7.1)', () => {
+  const tabs = (el: HTMLElement) => [...el.querySelectorAll<HTMLButtonElement>('[role="tablist"] [role="tab"]')];
+  const panelOf = (el: HTMLElement, tab: HTMLElement) => el.querySelector<HTMLElement>(`#${tab.getAttribute('aria-controls')}`)!;
+
+  it('CA-121.6 : en haut, deux choix de même taille et de même style, « Un endroit » choisi d’office ; le lien du bas a disparu', () => {
+    const hz = harness({ settings: defaults() });
     const el = mount(newFavoriteScreen(hz.ctx));
     expect(textOf(el.querySelector('h1'))).toBe('Nouveau favori');
     expect(textOf(el.querySelector('.back'))).toBe('Mes favoris');
+    // juste sous l'en-tête, avant tout formulaire
+    expect(el.querySelector('header')!.nextElementSibling!.getAttribute('role')).toBe('tablist');
+    const list = el.querySelector('[role="tablist"]')!;
+    expect(list.getAttribute('aria-label')).toBe('Type de favori');
+    const [placeTab, tripTab] = tabs(el);
+    expect([placeTab, tripTab].map((t) => [textOf(t.querySelector('.k1')), textOf(t.querySelector('.k2'))])).toEqual([
+      ['Un endroit', 'adresse, gare ou arrêt'],
+      ['Un trajet de A à B', 'départ et arrivée fixes'],
+    ]);
+    // « A à B » insécable : jamais un « B » seul sur sa ligne
+    expect(tripTab.querySelector('.k1')!.textContent).toBe('Un trajet de A\u00a0à\u00a0B');
+    // même taille, même style : mêmes éléments, mêmes classes, colonnes égales de la grille (mesuré dans Chrome)
+    expect([placeTab.tagName, placeTab.className, placeTab.children.length]).toEqual([tripTab.tagName, tripTab.className, tripTab.children.length]);
+    expect(list.className).toBe('kinds');
+    // accessibles : nom (titre) et description (sous-titre), état, un seul dans l'ordre de tabulation
+    expect(placeTab.getAttribute('aria-labelledby')).toBe(placeTab.querySelector('.k1')!.id);
+    expect(placeTab.getAttribute('aria-describedby')).toBe(placeTab.querySelector('.k2')!.id);
+    expect([placeTab, tripTab].map((t) => [t.getAttribute('aria-selected'), t.tabIndex])).toEqual([
+      ['true', 0],
+      ['false', -1],
+    ]);
+    expect(panelOf(el, placeTab).hidden).toBe(false);
+    expect(panelOf(el, tripTab).hidden).toBe(true);
+    expect(panelOf(el, placeTab).getAttribute('aria-labelledby')).toBe(placeTab.querySelector('.k1')!.id);
+    // « Un endroit » : le formulaire actuel ; le lien « Un trajet fixe » n'existe plus
+    expect(panelOf(el, placeTab).querySelector('#nf-lieu')).not.toBeNull();
+    expect(el.textContent).not.toContain('Un trajet fixe');
+    expect([...el.querySelectorAll('button')].map((b) => textOf(b))).not.toContain('Un trajet fixe, d’un endroit à un autre');
+    expect(el.querySelector('.btn-link')).toBeNull();
+  });
+
+  it('« Un trajet de A à B » : le formulaire du trajet fixe (Départ, Arrivée, nom, créneau) ; clavier ; rien de perdu en changeant', async () => {
+    const hz = harness({ settings: defaults() });
+    const el = mount(newFavoriteScreen(hz.ctx));
+    const [placeTab, tripTab] = tabs(el);
+    const input = el.querySelector<HTMLInputElement>('#nf-lieu')!;
+    type(input, 'rue de fer');
+    tripTab.click();
+    expect([placeTab, tripTab].map((t) => t.getAttribute('aria-selected'))).toEqual(['false', 'true']);
+    expect([placeTab.tabIndex, tripTab.tabIndex]).toEqual([-1, 0]);
+    const panel = panelOf(el, tripTab);
+    expect(panel.hidden).toBe(false);
+    expect(panelOf(el, placeTab).hidden).toBe(true);
+    expect(['fav-de', 'fav-vers', 'fav-nom'].map((id) => textOf(panel.querySelector(`label[for="${id}"]`)))).toEqual(['Départ', 'Arrivée', 'Nom affiché (« Vers le bureau »), facultatif']);
+    expect(textOf(panel.querySelector('legend'))).toBe('Le proposer à l’ouverture');
+    expect(button(panel, 'Enregistrer').disabled).toBe(true);
+    // flèches gauche et droite, Début et Fin : le choix suit le curseur
+    tripTab.focus();
+    tripTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    expect(document.activeElement).toBe(placeTab);
+    expect(placeTab.getAttribute('aria-selected')).toBe('true');
+    placeTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(document.activeElement).toBe(tripTab);
+    expect(tripTab.getAttribute('aria-selected')).toBe('true');
+    tripTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(document.activeElement).toBe(placeTab);
+    expect(placeTab.getAttribute('aria-selected')).toBe('true');
+    placeTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect(document.activeElement).toBe(placeTab);
+    // ce qui était tapé est toujours là
+    expect(input.value).toBe('rue de fer');
+    await settle();
+    expect(hz.settings.get().favorites).toEqual([]);
+  });
+
+  it('textes de « Un endroit » : champ « Adresse, gare ou arrêt » avec en tête « Ma position actuelle », mention', async () => {
+    const hz = harness({ settings: defaults({ recent: [{ label: 'Veldstraat 1, 9000 Gent', lat: 51.0537, lon: 3.7225, at: 1 }] }) });
+    const el = mount(newFavoriteScreen(hz.ctx));
     const input = el.querySelector<HTMLInputElement>('#nf-lieu')!;
     expect(textOf(el.querySelector('label[for="nf-lieu"]'))).toBe('Adresse, gare ou arrêt');
+    // le curseur va dans ce champ à l'ouverture, pas dans le « Départ » caché du trajet
     expect(input.hasAttribute('data-autofocus')).toBe(true);
+    expect(el.querySelectorAll('[data-autofocus]')).toHaveLength(1);
     input.focus();
     input.dispatchEvent(new Event('focus'));
     await until(() => options(el.querySelector('#nf-lieu-liste')!).length > 0);
@@ -59,8 +132,24 @@ describe('« Nouveau favori » (PRD-1.2 § 2.2)', () => {
       ['Veldstraat 1, 9000 Gent', 'récent'],
     ]);
     expect(textOf(el.querySelector('.privacy'))).toContain('Seul le texte tapé leur est envoyé');
-    button(el, 'Un trajet fixe, d’un endroit à un autre').click();
-    expect(hz.went).toEqual(['#/favoris/trajet']);
+  });
+
+  it('trajet de A à B enregistré depuis « Nouveau favori » : retour à « Mes favoris »', async () => {
+    const s = defaults({ favorites: [place('lieu-m', 'Maison'), place('lieu-b', 'Bureau', { lat: 50.8505, lon: 4.3545, address: 'Rue Neuve 1, 1000 Bruxelles' })] });
+    const hz = harness({ settings: s });
+    const el = mount(newFavoriteScreen(hz.ctx));
+    tabs(el)[1].click();
+    for (const [id, label] of [['fav-de', 'Maison'], ['fav-vers', 'Bureau']] as const) {
+      const input = el.querySelector<HTMLInputElement>(`#${id}`)!;
+      input.focus();
+      input.dispatchEvent(new Event('focus'));
+      await settle();
+      [...el.querySelectorAll<HTMLButtonElement>(`#${id}-liste [role="option"]`)].find((b) => textOf(b.querySelector('.s1')) === label)!.click();
+    }
+    button(el.querySelector('.trip-form')!, 'Enregistrer').click();
+    await until(() => hz.went.length > 0);
+    expect(hz.went).toEqual(['#/favoris']);
+    expect(hz.settings.get().favorites[2]).toMatchObject({ kind: 'trip', from: { type: 'place', placeId: 'lieu-m' }, to: { type: 'place', placeId: 'lieu-b' }, propose: 'never' });
   });
 
   it('CA-2.3 : « rue neuve 1 bruxelles », raccourci « Bureau », « Le matin » d’office, « Enregistrer » : 3 touchers et 1 saisie', async () => {

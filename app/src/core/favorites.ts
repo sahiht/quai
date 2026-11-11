@@ -24,7 +24,6 @@ import type {
   FavoriteStop,
   FavoriteTrip,
   Journey,
-  JourneyLabel,
   LatLon,
   Leg,
   LineFilter,
@@ -32,7 +31,7 @@ import type {
   Settings,
 } from './api';
 import { QuaiError } from './errors';
-import { reasonText } from './routing/reason';
+import { reasonsOf } from './routing/reason';
 import { slotOf, tripLabel } from './suggest';
 import { placeTitle, shortAddress, vers } from './text';
 import { displayName, distanceM, placeOf, placesOf, walkMinutes } from './util';
@@ -218,13 +217,6 @@ export const REPLAN_MS = 5 * 60_000;
 export const REPLAN_MOVE_M = 100;
 const PLANS_MAX = 50;
 
-/** Proposition de référence d'une raison : pour « Le suivant », la précédente de même structure. */
-function refFor(label: JourneyLabel | undefined, list: readonly Journey[], i: number): Journey | undefined {
-  if (label !== 'next') return undefined;
-  for (let k = i - 1; k >= 0; k--) if (list[k].label === 'next' || list[k].label === 'short') return list[k];
-  return list[0];
-}
-
 const herePoint = (here: LatLon): Leg['from'] => ({ name: HERE_NAMES, lat: here.lat, lon: here.lon });
 
 /**
@@ -261,8 +253,9 @@ export function withAccessWalk(plan: PlanResult, here: LatLon, settings: Setting
     }
     journeys.push({ ...j, legs, dep: legs[0].dep, leaveAt: leave });
   }
-  journeys.forEach((j, i) => {
-    if (j.label) j.reason = reasonText(j.label, j, refFor(j.label, journeys, i));
+  // raisons recalculées ensemble : le nom de la proposition 1 et les écarts de « Plus tôt » dépendent des autres
+  reasonsOf(journeys).forEach((reason, i) => {
+    if (reason !== undefined) journeys[i].reason = reason;
   });
   const out: PlanResult = { ...plan, journeys };
   if (!journeys.length && !out.empty) out.empty = 'noTrip';

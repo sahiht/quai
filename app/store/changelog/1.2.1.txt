@@ -1,0 +1,3 @@
+Le moins de marche d’abord : le trajet le plus rapide parmi ceux qui marchent le moins, plus de marche seulement s’il n’y a pas mieux.
+Sur un trajet, ▼ montre la suite des étapes, puis la liste des autres trajets, avec leurs moyens (« bus W + S1 ») et la raison de leur place.
+Accueil plus simple, avec tes favoris du moment en aperçu, et jours fériés signalés. Nouveau favori : un endroit ou un trajet de A à B, au choix.

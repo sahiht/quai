@@ -114,36 +114,46 @@ for (const scene of ['base', 'noRT'] as const) {
         for (const n of list) if (n.next) expect(n.next.rt).toBe(rt && n.next.tripId !== 'N5-0730'); // N5-0730 hors flux TEC
       });
 
-      it('Aller à… Bureau, 1re proposition : marche 7, IC 07:42, Bruxelles-Central, marche 12', async () => {
+      it('Aller à… Bureau, 1re proposition (1.2.1) : marche 7, IC 07:42 jusqu’à Bruxelles-Nord, T3, marche 9', async () => {
         const js = await coreAt(now).plan({ type: 'here' }, { type: 'place', placeId: 'fav-bureau' }, now, PRESET, MAISON);
         expect(js.length).toBeGreaterThanOrEqual(1);
         expect(js.length).toBeLessThanOrEqual(3);
+        // l'IC de 08:42 circule les deux jours (DAILY) : jamais deux fois le même trajet, jamais celui du lendemain
         distinctJourneys(js, now);
-        // l'IC de 08:42 circule les deux jours (DAILY) : une seule proposition « 08:33 »
-        expect(js.filter((j) => hhmm(j.dep) === '08:33').length).toBeLessThanOrEqual(1);
-        for (let i = 1; i < js.length; i++) expect(js[i].arr).toBeGreaterThanOrEqual(js[i - 1].arr); // triés par arrivée
+        expect(js.every((j) => new Date(j.dep).toISOString().startsWith('2026-11-10'))).toBe(true);
+        // ordre d'affichage du PRD-1.2.1 § 1.4 (la proposition 1, puis Plus tôt, Moins de marche, Sans changement ou
+        // Moins de changements, À pied, Le suivant, Plus tard)
+        const ORDER = ['short', 'earlier', 'lesswalk', 'none', 'none', 'walk', 'next', 'later'];
+        const rank = (l: Journey['label']) => (l === 'fewer' ? 3 : ORDER.indexOf(l ?? ''));
+        for (let i = 1; i < js.length; i++) expect(rank(js[i].label)).toBeGreaterThanOrEqual(rank(js[i - 1].label));
         const j = js[0];
-        expect(j.legs.map((l) => l.kind)).toEqual(['walk', 'ride', 'walk']);
-        const [w1, ic, w2] = j.legs;
-        expect(w1.walkMin).toBe(7);
-        expect(w2.walkMin).toBe(12);
-        expect([ic.cat, ic.from.areaId, ic.to.areaId, displayName(ic.head!, 'fr')]).toEqual(['IC', 'sncb:8863008', 'sncb:8813003', 'Bruxelles-Midi']);
+        // 1.2.1 (le moins de marche d'abord) : même IC, même arrivée que le direct, mais le T3 depuis Bruxelles-Nord garde
+        // chaque marche sous les 10 min réglées ; le direct et ses 12 min à pied arrivent à la même heure (noRT,
+        // « Sans changement ») ou 2 min plus tard (base, plus proposé)
+        expect(j.label).toBe('short');
+        expect(j.legs.map((l) => l.kind)).toEqual(['walk', 'ride', 'walk', 'ride', 'walk']);
+        const [w1, ic, w2, tram, w3] = j.legs;
+        expect([w1.walkMin, w2.walkMin, w3.walkMin]).toEqual([7, 2, 9]);
+        expect([ic.cat, ic.from.areaId, ic.to.areaId, displayName(ic.head!, 'fr')]).toEqual(['IC', 'sncb:8863008', 'sncb:8812005', 'Bruxelles-Midi']);
+        expect([tram.op, tram.line, hhmm(tram.dep), tram.to.name.fr]).toEqual(['stib', '3', '08:44', 'Bourse']);
         expect(hhmm(ic.schedDep)).toBe('07:42');
         expect(ic.platform).toBe('4');
-        expect(hhmm(ic.schedArr)).toBe('08:46');
+        expect(hhmm(ic.schedArr)).toBe('08:40');
+        expect(hhmm(j.arr)).toBe('08:58');
         if (rt) {
           expect([hhmm(ic.dep), ic.newPlatform, ic.delayMin, ic.rt]).toEqual(['07:44', '6', 2, true]);
-          expect(hhmm(ic.arr)).toBe('08:48');
-          expect(hhmm(j.arr)).toBe('09:00');
+          expect(hhmm(ic.arr)).toBe('08:42');
           expect(hhmm(j.leaveAt)).toBe('07:35');
           expect(j.alerts[0]?.text).toBe('! Voie modifiée\u00a0: l’IC part de la voie 6');
+          expect(js.map((x) => x.label)).toEqual(['short', 'next', 'later']);
         } else {
           expect([hhmm(ic.dep), ic.newPlatform, ic.delayMin, ic.rt]).toEqual(['07:42', undefined, 0, false]);
-          expect(hhmm(ic.arr)).toBe('08:46');
-          expect(hhmm(j.arr)).toBe('08:58');
+          expect(hhmm(ic.arr)).toBe('08:40');
           expect(hhmm(j.leaveAt)).toBe('07:33');
           expect(j.alerts.filter((a) => a.kind === 'platform')).toEqual([]);
           expect(j.rt).toBe(false);
+          expect(js.map((x) => x.label)).toEqual(['short', 'none', 'next']);
+          expect(js[1].legs.map((l) => (l.kind === 'walk' ? `marche ${l.walkMin}` : `${l.cat} ${l.to.areaId}`))).toEqual(['marche 7', 'IC sncb:8813003', 'marche 12']);
         }
         for (const x of js) checkTexts(...x.alerts.map((a) => a.text));
       });

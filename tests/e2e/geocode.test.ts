@@ -152,15 +152,18 @@ describe('de l’adresse au trajet : résultat choisi → route() sur les donné
     expect(r.journeys[0].legs.at(-1)?.to.name.fr).toBe('Veldstraat 1, 9000 Gent');
   });
 
-  it('scénario 4 (CA-1.5) : adresses tapées « chaussée de bruxelles 1 waterloo » → « rue du progrès 20 » : le S1 d’abord, puis bus W et M2', async () => {
+  it('scénario 4 (CA-1.5) : adresses tapées « chaussée de bruxelles 1 waterloo » → « rue du progrès 20 » : bus W et M2 d’abord, puis le S1 « Plus tôt »', async () => {
     const c = core(T('07:31'));
     const [from] = (await c.geocode('chaussée de bruxelles 1 waterloo', 'fr', null)).results;
     const [to] = (await c.geocode('rue du progrès 20', 'fr', null)).results;
     expect([from.label, to.label]).toEqual(['Chaussée de Bruxelles 1, 1410 Waterloo', 'Rue du Progrès 20, 1210 Saint-Josse-ten-Noode']);
     const r = await c.route(asEndpoint(from), asEndpoint(to), T('07:31'), PRESET, null);
-    expect(r.journeys.map((j) => j.label)).toEqual(['short', 'lesswalk', 'next']);
-    expect(legsOf(r.journeys[0])).toBe('marche 19 | 07:55 S1 Waterloo → Bruxelles-Nord 08:25 | marche 5');
-    expect(legsOf(r.journeys[1])).toBe('marche 2 | 07:36 W Waterloo Eglise → Bruxelles Midi 08:21 | marche 2 | 08:29 M2 Gare du Midi → Rogier 08:43 | marche 3');
+    // 1.2.1 (le moins de marche d'abord, PRD-1.2.1 § 1.2) : le bus W et le métro (marches de 3 min au plus, palier 0)
+    // arrivent 16 min après le S1 et ses 19 min à pied (palier 2), sous le garde-fou de 30 min : ils passent d'abord, le
+    // S1 devient « Plus tôt »
+    expect(r.journeys.map((j) => j.label)).toEqual(['short', 'earlier', 'next']);
+    expect(legsOf(r.journeys[0])).toBe('marche 2 | 07:36 W Waterloo Eglise → Bruxelles Midi 08:21 | marche 2 | 08:29 M2 Gare du Midi → Rogier 08:43 | marche 3');
+    expect(legsOf(r.journeys[1])).toBe('marche 19 | 07:55 S1 Waterloo → Bruxelles-Nord 08:25 | marche 5');
   });
 
   it('CA-M5.2 et CA-M5.3 : « boulevard du centenaire 1 » depuis S2 et depuis « avenue winston churchill 100 »', async () => {

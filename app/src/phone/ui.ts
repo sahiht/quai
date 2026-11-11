@@ -2,7 +2,7 @@
 import { paintContainers } from '../platform/browser';
 import { layoutPage, geometry } from '../glasses/layout';
 import { effectiveFrame, initNav } from '../glasses/nav';
-import type { ContainerSpec, GlassesView } from '../glasses/types';
+import type { ContainerSpec, GlassesView, Item } from '../glasses/types';
 import { fitScreen, h, ICON, type Child } from './dom';
 
 let uid = 0;
@@ -72,6 +72,69 @@ export function segmented<T extends string | number>(opts: { legend: string; hid
     box.appendChild(label);
   }
   return h('fieldset', null, h('legend', { class: opts.hiddenLegend ? 'sr-only' : 'legend-sm', style: opts.hiddenLegend ? '' : 'font-size:15px;line-height:20px;font-weight:500;color:#161A17;margin:0 0 8px' }, opts.legend), box);
+}
+
+/** Un choix d'un contrôle segmenté à panneaux : titre, sous-titre, panneau montré quand il est choisi. */
+export interface SegmentTab<T extends string> {
+  value: T;
+  label: string;
+  sub?: string;
+  panel: HTMLElement;
+}
+
+/**
+ * Contrôle segmenté qui montre un panneau à la fois (PRD-1.2.1 § 7.1, « Nouveau favori ») : des onglets de même
+ * taille et de même style, comme « Lunettes | Réglages » de Quai Web (rôles tablist, tab et tabpanel, aria-selected,
+ * aria-controls). Un seul onglet dans l'ordre de tabulation ; flèches gauche et droite, Début et Fin. Le titre nomme
+ * l'onglet, le sous-titre le décrit. Les panneaux restent dans la page, cachés : changer de choix ne perd rien.
+ */
+export function segmentedTabs<T extends string>(opts: { label: string; options: SegmentTab<T>[]; value: T; onChange?: (v: T) => void }): {
+  el: HTMLElement;
+  panels: HTMLElement[];
+  value(): T;
+  select(v: T, focus?: boolean): void;
+} {
+  const id = nextId('seg');
+  let current = opts.value;
+  const tabs = opts.options.map((o, i) =>
+    h(
+      'button',
+      { type: 'button', role: 'tab', class: 'kind', id: `${id}-tab-${i}`, 'aria-controls': `${id}-panel-${i}`, 'aria-labelledby': `${id}-t-${i}`, 'aria-describedby': o.sub ? `${id}-s-${i}` : undefined, 'data-value': o.value },
+      h('span', { class: 'k1', id: `${id}-t-${i}` }, o.label),
+      o.sub ? h('span', { class: 'k2', id: `${id}-s-${i}` }, o.sub) : null,
+    ),
+  );
+  // Panneau nommé par le titre de son onglet (« Un endroit »), sans le sous-titre.
+  const panels = opts.options.map((o, i) => h('div', { class: 'kind-panel', role: 'tabpanel', id: `${id}-panel-${i}`, 'aria-labelledby': `${id}-t-${i}` }, o.panel));
+  const apply = (): void =>
+    opts.options.forEach((o, i) => {
+      const on = o.value === current;
+      tabs[i].setAttribute('aria-selected', on ? 'true' : 'false');
+      tabs[i].tabIndex = on ? 0 : -1;
+      panels[i].hidden = !on;
+    });
+  const select = (v: T, focus = false): void => {
+    const i = opts.options.findIndex((o) => o.value === v);
+    if (i < 0) return;
+    if (focus) tabs[i].focus();
+    if (v === current) return;
+    current = v;
+    apply();
+    opts.onChange?.(v);
+  };
+  tabs.forEach((t, i) => t.addEventListener('click', () => select(opts.options[i].value)));
+  const list = h('div', { class: 'kinds', role: 'tablist', 'aria-label': opts.label }, tabs);
+  list.addEventListener('keydown', (e) => {
+    const at = tabs.indexOf(e.target as HTMLButtonElement);
+    const i = at >= 0 ? at : opts.options.findIndex((o) => o.value === current);
+    const n = opts.options.length;
+    const to = e.key === 'ArrowRight' ? (i + 1) % n : e.key === 'ArrowLeft' ? (i - 1 + n) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1;
+    if (to < 0) return;
+    e.preventDefault();
+    select(opts.options[to].value, true);
+  });
+  apply();
+  return { el: list, panels, value: () => current, select };
 }
 
 /** Groupe de boutons radio. */
@@ -213,9 +276,17 @@ export function setPreviewPainter(p: PreviewPainter | null): void {
   previewPainter = p;
 }
 
+/**
+ * Texte d'un élément des lunettes pour les lecteurs d'écran : colonnes a et b, réponse alignée à droite d'un favori de
+ * l'accueil (1.2.1 : « Bureau dans 4 min → 09:00 »), colonne c.
+ */
+export function previewItemText(i: Item): string {
+  return [i.a, i.b, i.bRight ? `${i.bRight}${i.bRightTail ?? ''}` : '', i.c].filter(Boolean).join(' ');
+}
+
 /** Aperçu fidèle des lunettes : même mise en page que l'appareil, réduite. */
 export function glassesPreview(title: string, view: GlassesView): HTMLElement {
-  const box = h('div', { class: 'preview', role: 'img', 'aria-label': `${title} : ${[view.title, ...view.items.map((i) => [i.a, i.b, i.c].filter(Boolean).join(' '))].join(', ')}` });
+  const box = h('div', { class: 'preview', role: 'img', 'aria-label': `${title} : ${[view.title, ...view.items.map(previewItemText)].join(', ')}` });
   const nav = initNav({ screen: 'home' });
   const g = geometry(view);
   const frame = effectiveFrame(nav.stack[0], view, g.capacity);

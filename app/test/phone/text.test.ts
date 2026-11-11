@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Journey, JourneyLabel, Leg, PlanResult } from '../../src/core/api';
-import { emptyState, labelText, summaryText, T, timesText, typo } from '../../src/phone/text';
+import { cardTitle, emptyState, summaryText, T, timesText, typo } from '../../src/phone/text';
 import { at, defaults, preset } from './helpers';
 
 const NB = ' ';
@@ -36,16 +36,23 @@ describe('cartes (T2)', () => {
 
   it('heures comme le titre des étapes, durée, changements, marche', () => {
     expect(timesText(short, at(7, 31))).toBe('07:33 → 08:56');
-    expect(summaryText(short)).toBe(`1${NB}h${NB}23, direct, 17 min à pied`);
+    expect(summaryText(short)).toBe(`1${NB}h${NB}23, direct, 17${NB}min à${NB}pied`);
     const onFoot = journey('walk', [walk(at(8, 50), 22)]);
-    expect(summaryText(onFoot)).toBe(`22${NB}min à pied`);
+    expect(summaryText(onFoot)).toBe(`22${NB}min à${NB}pied`);
   });
 
-  it('étiquettes de la 1.2 : « Le plus court » remplace « Le plus simple » et « Le plus rapide » (PRD-1.2 § 1.4)', () => {
-    expect(labelText(short)).toBe('Le plus court');
-    expect(labelText({ ...short, label: 'earlier' })).toBe('Plus tôt');
-    expect(labelText({ ...short, label: 'lesswalk' })).toBe('Moins de marche');
-    expect(labelText({ ...short, label: undefined })).toBe('');
+  it('titre d’une carte : le nom affiché (PRD-1.2.1 § 2.1, § 7.2) ; « Moins de marche » face à un « Plus tôt » qui marche plus', () => {
+    const alone = { journeys: [short] };
+    expect(cardTitle(short, alone)).toBe('Le plus court');
+    expect(cardTitle({ ...short, label: 'lesswalk' }, alone)).toBe('Moins de marche');
+    expect(cardTitle({ ...short, label: undefined }, alone)).toBe('');
+    // « Plus tôt » avec 19 min à pied (la proposition 1 marche au plus 10 min) : la proposition 1 s'appelle « Moins de marche »
+    const earlier = journey('earlier', [walk(at(7, 20), 19), ride(at(7, 39), at(8, 30)), walk(at(8, 30), 3)]);
+    const both = { journeys: [short, earlier] };
+    expect([cardTitle(short, both), cardTitle(earlier, both)]).toEqual(['Moins de marche', 'Plus tôt']);
+    // « Plus tôt » qui ne marche pas plus : « Le plus court »
+    const early = journey('earlier', [walk(at(6, 20), 5), ride(at(6, 25), at(8, 30))]);
+    expect(cardTitle(short, { journeys: [short, early] })).toBe('Le plus court');
   });
 });
 
@@ -72,7 +79,7 @@ describe('sources', () => {
   it('jamais de tiret cadratin ni demi-cadratin dans les textes du téléphone et de Quai Web', () => {
     const APP = fileURLToPath(new URL('../../', import.meta.url));
     const walkDir = (dir: string): string[] => readdirSync(join(APP, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkDir(`${dir}/${e.name}`) : [`${dir}/${e.name}`]));
-    for (const f of [...walkDir('src/phone'), ...walkDir('src/web'), 'src/version.ts', 'store/changelog/1.1.0.txt', 'store/changelog/1.2.0.txt', 'store/description.txt', 'store/privacy.md']) {
+    for (const f of [...walkDir('src/phone'), ...walkDir('src/web'), 'src/version.ts', 'store/changelog/1.1.0.txt', 'store/changelog/1.2.0.txt', 'store/changelog/1.2.1.txt', 'store/description.txt', 'store/privacy.md']) {
       expect(readFileSync(join(APP, f), 'utf8'), f).not.toMatch(/[—–]/);
     }
   });
@@ -100,8 +107,14 @@ describe('notes de version 1.2.0 (PRD-1.2 § 6)', () => {
     ]);
     // la 1.1.1, jamais publiée, n'a pas de notes
     expect(readdirSync(join(APP, 'store/changelog'))).not.toContain('1.1.1.txt');
-    for (const f of ['app.json', 'package.json']) expect(JSON.parse(readFileSync(join(APP, f), 'utf8')).version, f).toBe('1.2.0');
+  });
+});
+
+describe('version 1.2.1 (PRD-1.2.1 § 8)', () => {
+  it('app.json, package.json et package-lock.json en 1.2.1', () => {
+    const APP = fileURLToPath(new URL('../../', import.meta.url));
+    for (const f of ['app.json', 'package.json']) expect(JSON.parse(readFileSync(join(APP, f), 'utf8')).version, f).toBe('1.2.1');
     const lock = JSON.parse(readFileSync(join(APP, 'package-lock.json'), 'utf8'));
-    expect([lock.version, lock.packages[''].version]).toEqual(['1.2.0', '1.2.0']);
+    expect([lock.version, lock.packages[''].version]).toEqual(['1.2.1', '1.2.1']);
   });
 });

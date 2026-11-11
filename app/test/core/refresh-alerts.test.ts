@@ -32,12 +32,13 @@ describe('refresh : scénario 1 (voie modifiée en chemin)', () => {
     const j1 = await env.core.refresh(j0, env.preset);
     expect(j1.id).toBe(j0.id);
     expect(plainAlert(j1.alerts[0])).toEqual({ kind: 'platform', text: '! Voie modifiée : l’IC part de la voie 6', at: env.clock.t });
-    // la marche déjà commencée garde son heure ; le reste suit le retard de 2 min
+    // la marche déjà commencée garde son heure ; le reste suit le retard de 2 min (1.2.1 : la proposition 1 descend à
+    // Bruxelles-Nord pour le T3 de 08:44, encore attrapable, et arrive toujours à 08:58)
     expect(hhmm(j1.legs[0].dep)).toBe('07:33');
     expect(hhmm(j1.dep)).toBe('07:33');
     expect(hhmm(j1.legs[1].dep)).toBe('07:44');
-    expect(hhmm(j1.legs[1].arr)).toBe('08:48');
-    expect(hhmm(j1.arr)).toBe('09:00');
+    expect(hhmm(j1.legs[1].arr)).toBe('08:42');
+    expect(hhmm(j1.arr)).toBe('08:58');
     expect(hhmm(j1.leaveAt)).toBe('07:35');
     expect(j1.legs[1]).toMatchObject({ rt: true, delayMin: 2, newPlatform: '6', platform: '4' });
     // départ conseillé dépassé et train pas encore parti : « Partir maintenant », après l'alerte de voie
@@ -82,7 +83,11 @@ describe('alertes', () => {
   it('retard ≥ delayMin : « ! IC 07:42 : +7 min » ; en dessous : rien', async () => {
     const env = makeEnv({ now: '2026-11-10T07:20' });
     env.server.relay.rt.sncb.trips[IC_0742] = { u: [[1, '8863008_4', 420, null, 0]] };
-    const j = await morning(env);
+    // 1.2.1 : la proposition 1 (IC puis T3) perd sa correspondance et porte aussi « ! Correspondance recalculée » ;
+    // l'alerte de retard se lit sur l'IC direct, proposé « Sans changement » (il arrive 1 min avant)
+    const js = await env.core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, env.clock.t, env.preset, MAISON);
+    expect(js[0].alerts.map((a) => nb(a.text))).toEqual(['! Correspondance recalculée', '! IC 07:42 : +7 min']);
+    const j = js.find((x) => x.label === 'none')!;
     expect(j.alerts.map((a) => nb(a.text))).toEqual(['! IC 07:42 : +7 min']);
     const lenient: Settings = { ...env.preset, alerts: { ...env.preset.alerts, delayMin: 10 } };
     expect((await env.core.refresh(j, lenient)).alerts).toEqual([]);

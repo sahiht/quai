@@ -1,6 +1,6 @@
 /**
- * route() : trajets porte à porte, « Le plus court » d'abord (PRD-1.2 § 1 ; PRD 1.1 § 4, M3, M5, M8 ;
- * design-routing.md § 4).
+ * route() : trajets porte à porte, le moins de marche d'abord (PRD-1.2.1 § 1 ; PRD-1.2 § 1 ; PRD 1.1 § 4, M3, M5,
+ * M8 ; design-routing.md § 4).
  *
  * 1. Extrémités : « Ma position » (sinon empty 'noPosition'), lieu, zone (0 min de marche), adresse (M5a).
  *    Arrivée à 300 m au plus : empty 'here' ; à maxWalkMin à pied ou moins : la marche seule.
@@ -8,14 +8,14 @@
  *    utiles ; lignes du milieu. Recherche toujours élargie (PRD-1.2 § 1.2) : arrêts jusqu'à 15 min à pied, gares
  *    jusqu'à 25 min (ou la marche maximale plus 5 min) ; aucun arrêt : empty 'noStopFrom' / 'noStopTo', accessMin 15.
  * 3. Réseau (network.ts) et RAPTOR par rondes sur la plage de départs de l'heure demandée (raptor.ts), passes
- *    d'accès et de sortie : large (15 et 25 min), préférence tolérée (sans marche longue : la marche maximale plus
- *    4 min), préférence (la marche maximale), courte (5 min). Attente en
+ *    d'accès et de sortie : large (15 et 25 min), une par palier de marche (PRD-1.2.1 § 1.1 : la marche maximale,
+ *    puis 5 min de plus par palier, jusqu'aux rayons de la recherche élargie), courte (5 min). Attente en
  *    correspondance de 60 min au plus ; jamais un véhicule plus lent que d'y aller à pied (jusqu'à 60 min de marche).
  *    Nuit : plage de 12 h, puis trains du lendemain, puis à partir de 04:00 du jour suivant.
  *    Premier véhicule en retard mais attrapable (PRD § 4.2, § 4.5) : la plage commence 30 min avant l'heure demandée,
  *    sur le même réseau ; un trajet parti à l'heure prévue n'est gardé que si le temps réel le rend attrapable.
  * 4. « Le suivant » : départs suivants de la même structure (mêmes lignes et sens, mêmes montées et descentes ;
- *    train : mêmes gares et même catégorie), jusqu'à 2 h après « Le plus court ».
+ *    train : mêmes gares et même catégorie), jusqu'à 2 h après la proposition 1.
  * 5. Classement sur les horaires prévus (rank.ts), temps réel sur les propositions, 3 réserves et les trajets au
  *    premier véhicule déjà parti à l'heure prévue (un appel par opérateur pour tous) ; véhicule supprimé : trajet
  *    retiré ; correspondance devenue impossible : reste du trajet recalculé (repair.ts) ; seuls les trajets encore
@@ -37,7 +37,7 @@ import { accessMap, linePart, Net, trainPart, trainTripOf, type RRoute } from '.
 import { maxWalkOf, P, walkRadii, walkReachM } from './params';
 import { earliestTrip, raptor, type Cand, type RideRef } from './raptor';
 import { itemOf, rank, type RankItem } from './rank';
-import { reasonText } from './reason';
+import { reasonsOf } from './reason';
 import { recalcAlert, rememberNet, repairLegs, type NetRecipe } from './repair';
 import { loadLines, middleLines, pickLines, soft, wave1, type RoutingSource } from './select';
 
@@ -197,9 +197,14 @@ export function nextOfStructure(net: Net, c: Cand, count: number, until: number)
   return out;
 }
 
-/** Trajets étiquetés, dans l'ordre d'affichage, avec leur raison. */
-function labeled(ranked: { item: Item; label: Journey['label']; ref?: Item }[]): Journey[] {
-  return ranked.map(({ item, label, ref }) => ({ ...item.j, label, reason: reasonText(label ?? 'short', item.j, ref?.j) }));
+/**
+ * Trajets étiquetés, dans l'ordre d'affichage, avec leur raison (PRD-1.2.1 § 2.2 : celle de la proposition 1 dépend
+ * des autres propositions, celles de « Plus tôt » et de « Moins de marche » de la proposition 1).
+ */
+function labeled(ranked: { item: Item; label: Journey['label'] }[]): Journey[] {
+  const js = ranked.map(({ item, label }) => ({ ...item.j, label: label ?? 'short' }));
+  const reasons = reasonsOf(js);
+  return js.map((j, i) => ({ ...j, reason: reasons[i] }));
 }
 
 /**
@@ -304,11 +309,16 @@ export async function computeRoute(
     if (!O.areaId && !w1.nearO.length && !accessMap(net, O, R.urban, R.station).size) return { journeys: [], empty: 'noStopFrom', accessMin };
     if (!D.areaId && !w1.nearD.length && !accessMap(net, D, R.urban, R.station).size) return { journeys: [], empty: 'noStopTo', accessMin };
     const afterMin = (after - base0) / MIN;
-    // passes d'accès et de sortie (PRD-1.2 § 1.2) : large, préférence, courte ; plus la préférence tolérée (toute
-    // marche qui n'est pas longue) : un trajet sans marche longue que la passe large cache derrière un trajet avec
-    // marche longue (parti plus tard, arrivé plus tôt) reste candidat
+    // passes d'accès et de sortie : large (PRD-1.2 § 1.2), puis une par palier de marche (PRD-1.2.1 § 1.1 : la marche
+    // maximale, puis 5 min de plus par palier) et la passe courte : un trajet qu'une passe plus large cache derrière
+    // un trajet de palier plus haut (parti plus tard, arrivé plus tôt) reste candidat (§ 1.3)
     const passes: [number, number][] = [[R.urban, R.station]];
-    for (const m of [R.long - 1, R.pref, R.short]) if (m < Math.min(R.urban, passes[passes.length - 1][0])) passes.push([m, m]);
+    const limits: number[] = [R.short];
+    for (let m = R.pref; m < Math.max(R.urban, R.station); m += P.walkStepMin) limits.push(m);
+    for (const m of [...new Set(limits)].sort((a, b) => b - a)) {
+      const p: [number, number] = [Math.min(R.urban, m), Math.min(R.station, m)];
+      if (!passes.some(([u, s]) => u === p[0] && s === p[1])) passes.push(p);
+    }
     const run = (n: Net, from: number, windowMin: number): Cand[] => {
       const out: Cand[] = [];
       passes.forEach(([lu, ls], pass) => {
@@ -368,7 +378,7 @@ export async function computeRoute(
     };
     for (const c of cands) addCand(c);
     if (directWalk <= P.walkOnlyMaxMin) journeys.push(walkJourney());
-    // « Le suivant » : départs suivants de la structure du plus court
+    // « Le suivant » : départs suivants de la structure de la proposition 1
     const first0 = rank(
       [...byKey.values()].map((x) => itemOf(x.j)),
       after / MIN,

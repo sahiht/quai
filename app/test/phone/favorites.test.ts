@@ -49,12 +49,16 @@ describe('« Mes favoris » : une seule liste (PRD-1.2 § 2.2)', () => {
     expect(stopLinesText(stop([{ line: 'IC', head: 'a' }], 'sncb'))).toBe('Train IC');
   });
 
-  it('bas de l’écran : « Marche maximale » et son sous-titre, « Adresses récentes », « Effacer les adresses récentes »', async () => {
+  it('bas de l’écran : « Marche maximale » et son sous-titre (PRD-1.2.1 § 7.3), « Adresses récentes », « Effacer les adresses récentes »', async () => {
     const hz = harness({ settings: defaults({ recent: [{ label: 'Veldstraat 1, 9000 Gent', lat: 51.0537, lon: 3.7225, at: 1 }] }) });
     const el = mount(favoritesScreen(hz.ctx));
     expect(textOf(el.querySelector('.stepper-row .c1'))).toBe('Marche maximale');
-    expect(textOf(el.querySelector('.stepper-row .c2'))).toBe('Au-delà de 5 min de plus, seulement pour arriver au moins 10 min plus tôt');
-    expect(el.querySelector('.stepper-row .c2')!.textContent).toContain('5 min');
+    // nouvelle règle (paliers de marche, PRD-1.2.1 § 1) : plus de « 5 min de plus » ni de « 10 min plus tôt » ; court
+    const sub = el.querySelector('.stepper-row .c2')!.textContent!;
+    expect(plain(sub)).toBe('D’abord les trajets dans cette limite ; au-delà, s’il n’y a pas mieux');
+    expect(sub).toContain('limite\u00a0; au-delà'); // espace insécable devant « ; »
+    expect(sub).not.toMatch(/\d|[—–]/);
+    expect(sub.length).toBeLessThanOrEqual(75);
     el.querySelector<HTMLButtonElement>('[aria-label="Augmenter la marche maximale"]')!.click();
     await until(() => hz.settings.get().maxWalkMin === 11);
     expect(textOf(el.querySelector('#recents'))).toBe('Adresses récentes');
@@ -122,10 +126,15 @@ describe('arrêt et trajet fixe (1.1)', () => {
 
   it('trajet fixe : « Départ » sans « Ma position », lieux d’abord ; nom affiché ; « Enregistrer »', async () => {
     const hz = harness({ settings: preset11() });
+    // #/favoris/trajet (lien de la 1.2, retiré) : « Nouveau favori », choix « Un trajet de A à B » (PRD-1.2.1 § 7.1)
     const el = mount(fixedTripScreen(hz.ctx));
-    expect(textOf(el.querySelector('h1'))).toBe('Trajet fixe');
-    expect(textOf(el.querySelector('.back'))).toBe('Nouveau favori');
+    expect(textOf(el.querySelector('h1'))).toBe('Nouveau favori');
+    expect(textOf(el.querySelector('.back'))).toBe('Mes favoris');
+    expect(textOf(el.querySelector('[role="tab"][aria-selected="true"] .k1'))).toBe('Un trajet de A à B');
+    expect(el.querySelector('.trip-form')!.closest('[role="tabpanel"]')!.hasAttribute('hidden')).toBe(false);
     const dep = el.querySelector<HTMLInputElement>('#fav-de')!;
+    expect(dep.hasAttribute('data-autofocus')).toBe(true);
+    expect(el.querySelector('#nf-lieu')!.hasAttribute('data-autofocus')).toBe(false);
     const arr = el.querySelector<HTMLInputElement>('#fav-vers')!;
     expect(dep.value).toBe('');
     expect(textOf(el.querySelector('label[for="fav-nom"]'))).toBe('Nom affiché (« Vers le bureau »), facultatif');
@@ -164,9 +173,21 @@ describe('arrêt et trajet fixe (1.1)', () => {
     expect(hz.settings.get().favorites).toHaveLength(7);
   });
 
-  it('ancien lien « #/favoris/nouveau?type=trajet » : le trajet fixe', () => {
+  it('ancien lien « #/favoris/nouveau?type=trajet » : « Nouveau favori », choix « Un trajet de A à B »', () => {
     const el = mount(newFavoriteScreen(harness({ settings: defaults(), params: 'type=trajet' }).ctx));
-    expect(textOf(el.querySelector('h1'))).toBe('Trajet fixe');
+    expect(textOf(el.querySelector('h1'))).toBe('Nouveau favori');
+    expect(textOf(el.querySelector('[role="tab"][aria-selected="true"] .k1'))).toBe('Un trajet de A à B');
+    expect(el.querySelector('#fav-de')!.closest('[role="tabpanel"]')!.hasAttribute('hidden')).toBe(false);
+    expect(el.querySelector('#nf-lieu')!.closest('[role="tabpanel"]')!.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('modification d’un arrêt ou d’un trajet fixe : pas de choix en haut, son formulaire directement (PRD-1.2.1 § 7.1)', () => {
+    const hz = harness({ settings: preset11() });
+    for (const id of ['fav-gand', 'fav-gdn', 'fav-bureau']) {
+      const el = mount(favoriteEditScreen(hz.ctx, id));
+      expect(el.querySelector('[role="tablist"]'), id).toBeNull();
+      expect(plain(el.textContent), id).not.toContain('Un trajet de A à B');
+    }
   });
 
   it('trajet fixe existant : les champs montrent ses extrémités ; suppression confirmée dans la page (S6)', async () => {

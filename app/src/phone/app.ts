@@ -9,7 +9,7 @@ import type { Freshness } from '../glasses/controller';
 import type { Clock } from '../platform/clock';
 import type { LocationPort } from '../platform/types';
 import type { SettingsStore } from '../settings';
-import { compareVersions } from '../version';
+import { APP_VERSION, compareVersions } from '../version';
 import { h, ICON, svgNode } from './dom';
 import { alertsScreen } from './screens/alerts';
 import { dataScreen } from './screens/data';
@@ -19,6 +19,7 @@ import { favoritesScreen } from './screens/favorites';
 import { homeScreen } from './screens/home';
 import { onboardingScreen, yourFavoritesScreen } from './screens/onboarding';
 import { searchScreen } from './screens/search';
+import { newsLines } from './text';
 
 export interface PhoneCtx {
   settings: SettingsStore;
@@ -43,10 +44,10 @@ export interface PhoneCtx {
   params: URLSearchParams;
   /**
    * Bannière de l'accueil après la mise à jour (T1), une fois : visible si les réglages lus au lancement venaient
-   * d'une version antérieure (seenVersion non vide et inférieure à la version courante), jusqu'à « OK ».
-   * Le téléphone n'écrit pas seenVersion pour elle : les lunettes s'en servent pour leur message « Quai 1.2 ».
+   * d'une version antérieure à NEWS_SINCE (seenVersion non vide), jusqu'à « OK ». Le téléphone n'écrit pas
+   * seenVersion pour elle : les lunettes s'en servent pour leur message « Quai 1.2.1 ».
    */
-  news?: { visible(): boolean; dismiss(): void };
+  news?: NewsState;
 }
 
 export type Screen = (ctx: PhoneCtx, sub: string[]) => HTMLElement | Promise<HTMLElement>;
@@ -61,7 +62,7 @@ const SCREENS: Record<string, { screen: Screen; grey?: boolean; title: string }>
   recherche: { screen: searchScreen, grey: true, title: 'Rechercher un trajet' },
 };
 
-/** « Mes favoris », « Nouveau favori », « Trajet fixe », ou la modification d'un favori. */
+/** « Mes favoris », « Nouveau favori » (#/favoris/trajet : choix « Un trajet de A à B »), ou la modification d'un favori. */
 function favoritesRoute(c: PhoneCtx, s: string[]): HTMLElement {
   if (s[0] === 'nouveau') return newFavoriteScreen(c);
   if (s[0] === 'trajet') return fixedTripScreen(c);
@@ -88,27 +89,35 @@ export function parseHash(hash: string): { name: string; sub: string[]; params: 
   return { name: parts[0] ?? '', sub: parts.slice(1), params: new URLSearchParams(query) };
 }
 
-/** Version qui a apporté les nouveautés de la bannière (le plus court d'abord, lieux dans les favoris) : la 1.2. */
-export const NEWS_SINCE = '1.2.0';
+/** Version qui a apporté les nouveautés de la bannière (le moins de marche d'abord, PRD-1.2.1 § 6) : la 1.2.1. */
+export const NEWS_SINCE = '1.2.1';
+
+/** Bannière « Nouveau » de l'accueil : visible ou non, « OK », et ses lignes (newsLines). */
+export interface NewsState {
+  visible(): boolean;
+  dismiss(): void;
+  lines: string[];
+}
 
 /**
- * Bannière « Nouveau » : une fois, au passage d'une version antérieure (1.0, 1.1) à la 1.2.x (réglages vus avant
- * 1.2.0 au lancement), jusqu'à « OK ». Une mise à jour 1.2.0 → 1.2.1 ne la remontre pas (comme le message « Quai 1.2 »
- * des lunettes) ; jamais après une installation neuve.
+ * Bannière « Nouveau » : une fois, au passage d'une version antérieure (1.0, 1.1, 1.2.0) à la 1.2.1 ou plus (réglages
+ * vus avant 1.2.1 au lancement), jusqu'à « OK », comme le message « Quai 1.2.1 » des lunettes ; la ligne des lieux en
+ * plus depuis la 1.0 ou la 1.1 ; jamais après une installation neuve. `app` : la version de l'appli.
  */
-export function newsState(seenAtStart: string, since = NEWS_SINCE): { visible(): boolean; dismiss(): void } {
-  let shown = !!seenAtStart && compareVersions(seenAtStart, since) < 0;
+export function newsState(seenAtStart: string, since = NEWS_SINCE, app = APP_VERSION): NewsState {
+  let shown = !!seenAtStart && compareVersions(seenAtStart, since) < 0 && compareVersions(app, since) >= 0;
   return {
     visible: () => shown,
     dismiss: () => {
       shown = false;
     },
+    lines: newsLines(seenAtStart),
   };
 }
 
 export function mountPhone(deps: PhoneDeps): { refresh(): void } {
   let seq = 0;
-  // Lu avant que les lunettes n'écrivent la version courante (message « Quai 1.2 »).
+  // Lu avant que les lunettes n'écrivent la version courante (message « Quai 1.2.1 »).
   const news = deps.news ?? newsState(deps.settings.get().seenVersion);
   const render = async (): Promise<void> => {
     const my = ++seq;

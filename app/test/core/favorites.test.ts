@@ -139,19 +139,23 @@ describe('réponses des favoris (M1.5)', () => {
     expect(a).toMatchObject({ kind: 'trip', state: 'ok' });
     const j = a.plan!.journeys[0];
     expect(j.label).toBe('short');
-    expect(j.reason).toBe('Le plus court : direct, à pied 7 + 12 min');
+    // 1.2.1 (le moins de marche d'abord) : même IC et même arrivée, mais le T3 depuis Bruxelles-Nord garde chaque
+    // marche sous les 10 min réglées ; l'IC direct puis 12 min à pied suit, « Sans changement »
+    expect(j.reason).toBe('Le plus court : 1 changement, à pied 7 + 2 + 9 min');
     expect(hhmm(j.leaveAt)).toBe('07:33');
     expect(hhmm(j.arr)).toBe('08:58');
     const ride = j.legs.find((l) => l.kind === 'ride')!;
     expect(ride).toMatchObject({ cat: 'IC', platform: '4' });
     expect(hhmm(ride.dep)).toBe('07:42');
+    expect(a.plan!.journeys[1]).toMatchObject({ label: 'none', reason: 'Sans changement : à pied 7 + 12 min' });
   });
 
   it('CA-M1.2 S1 base : +2 min et voie 6 dans la réponse', async () => {
     const { last } = await answers('2026-11-10T07:31', POS.s1, 'base');
     const ride = last.get('fav-bureau')!.plan!.journeys[0].legs.find((l) => l.kind === 'ride')!;
     expect(ride).toMatchObject({ delayMin: 2, newPlatform: '6', rt: true });
-    expect(hhmm(last.get('fav-bureau')!.plan!.journeys[0].arr)).toBe('09:00');
+    // 1.2.1 : l'IC (+2) arrive à Bruxelles-Nord à 08:42, le T3 de 08:44 reste attrapable : arrivée 08:58
+    expect(hhmm(last.get('fav-bureau')!.plan!.journeys[0].arr)).toBe('08:58');
   });
 
   it('gare de départ à distance de marche : la marche jusqu’à la gare est comprise', async () => {

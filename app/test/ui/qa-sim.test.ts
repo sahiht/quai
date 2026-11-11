@@ -1,6 +1,7 @@
 /**
  * Corrections issues du contrôle qualité dans le simulateur (1.1) : heures prévues jamais coupées dans les colonnes
- * d'heure (« ~08:44 »), message d'une page des étapes non reporté sur une autre page.
+ * d'heure (« ~08:44 »), message d'une page des étapes non reporté sur une autre page (1.2.1 : étapes, « Autres
+ * trajets », proposition ouverte depuis la liste).
  */
 import { describe, expect, it } from 'vitest';
 import { textWidth } from '../../src/glasses/font';
@@ -111,36 +112,43 @@ describe('départs des trains pendant une panne du temps réel', () => {
   });
 });
 
-describe('étapes : un message ne passe pas d’une page à l’autre', () => {
-  it('« Pas d’autre trajet pour l’instant » (▼ sur la dernière page) disparaît avec ▲', async () => {
-    const t = await setupController({ scenario: 's1' });
+describe('étapes : un message ne passe pas d’une page à l’autre (1.2.1 : étapes, « Autres trajets », autre trajet)', () => {
+  it('« Pas d’autre trajet pour l’instant » : dans la ligne du bas d’un trajet sans autre proposition ; ▼ au bout n’ouvre rien', async () => {
+    // S3 : le bureau est à 12 min à pied, une seule proposition
+    const t = await setupController({ scenario: 's3' });
     await t.until((s) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l)));
-    await t.gesture('tap');
-    await t.until((s) => s.screen === 'steps' && s.page === 1);
-    const pages = t.last().pages ?? 1;
-    expect(pages).toBeGreaterThan(1);
-    for (let i = 1; i < pages; i++) await t.gesture('down');
-    expect(t.last().page).toBe(pages);
+    expect(t.last().lines[2]).toMatch(/^Bureau {3}maintenant → /);
+    // du premier favori (Gand-Saint-Pierre), le suivant : le bureau
+    await t.gesture('down', 'tap');
+    const st = await t.until((s) => s.screen === 'steps' && s.page === 1);
+    expect(st.pages).toBe(1);
+    expect(st.lines.slice(-2).map(nb)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', nb(HINTS.stepsWalk)]);
     await t.gesture('down');
-    expect(nb(t.last().lines.at(-1)!)).toBe('Pas d’autre trajet pour l’instant');
-    await t.gesture('up');
-    const s = await t.until((x) => x.page === pages - 1);
-    expect(s.page).toBe(pages - 1);
-    expect(s.lines).not.toContain('Pas d’autre trajet pour l’instant');
-    expect(nb(s.lines.at(-1)!)).toMatch(/^▲▼ autre trajet {3}toucher : /);
+    expect(t.last()).toEqual(st);
+    expect(t.screens().some((s) => s.screen === 'others')).toBe(false);
+    t.c.stop();
   });
 
-  it('« Trajet suivi : … » reste sur sa page : ▲ montre l’aide de la page précédente', async () => {
+  it('« Trajet suivi : … » reste sur sa page : la liste et le premier trajet gardent leur aide', async () => {
     const t = await setupController({ scenario: 's1' });
     await t.until((s) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l)));
     await t.gesture('tap');
     await t.until((s) => s.screen === 'steps' && s.page === 1);
-    await t.gesture('down', 'tap');
+    // ▼ jusqu'au bout des étapes, puis « Autres trajets », puis la 1re entrée
+    for (let i = 0; i < 4 && t.last().screen === 'steps'; i++) await t.gesture('down');
+    expect(t.last().screen).toBe('others');
+    await t.gesture('tap');
+    await t.until((s) => s.screen === 'steps' && s.page === 2);
+    await t.gesture('tap');
     expect(nb(t.last().lines.at(-1)!)).toMatch(/^Trajet suivi : /);
     expect(t.last().followed).toBe(true);
-    await t.gesture('up');
-    const s = await t.until((x) => x.page === 1);
+    await t.gesture('double');
+    expect(t.last().screen).toBe('others');
+    expect(nb(t.last().lines.at(-1)!)).toBe(nb(HINTS.others));
+    await t.gesture('double');
+    const s = await t.until((x) => x.screen === 'steps' && x.page === 1);
     expect(s.followed).toBe(false);
     expect(nb(s.lines.at(-1)!)).toBe(nb(HINTS.stepsOther));
+    t.c.stop();
   });
 });

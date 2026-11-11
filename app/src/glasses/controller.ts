@@ -14,6 +14,7 @@ import type {
   Favorite,
   FavoriteAnswer,
   FavoritePlace,
+  FavoriteRank,
   FavoriteStop,
   FavoriteTrip,
   GlassesApi,
@@ -40,8 +41,8 @@ import { APP_VERSION, compareVersions } from '../version';
 import { HINTS, NB, atTitle, catchable, lowerFirst, runningNext, shownMessage, towards, tripShort } from './format';
 import { DEBOUNCE, GestureFilter, type HubSignal } from './gestures';
 import { geometry, layoutPage, shapeKey } from './layout';
-import { current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replaceAt, reset, type Gesture, type NavFrame, type NavState } from './nav';
-import type { AreaRef, GlassesView, Intent, PageSpec, Route, StepsRoute } from './types';
+import { current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replaceAt, reset, setSelection, type Gesture, type NavFrame, type NavState } from './nav';
+import type { AreaRef, GlassesView, Intent, Item, OthersRoute, PageSpec, Route, StepsRoute } from './types';
 import {
   alreadyThereView,
   arrivalView,
@@ -50,6 +51,7 @@ import {
   favoriteStopRoute,
   favoritesView,
   firstRunView,
+  HOME_FAVORITES,
   homeView,
   loadingView,
   messageView,
@@ -59,6 +61,8 @@ import {
   noLocationView,
   notConfiguredView,
   nearbyView,
+  othersTitle,
+  othersView,
   placeSummary,
   placesView,
   recentKey,
@@ -109,14 +113,19 @@ export const WEB_DEBOUNCE: typeof DEBOUNCE = {
   scrollAfterRenderMs: 0,
 };
 
-/** Double toucher sur l'accueil de Quai Web : rien à fermer. */
-export const WEB_EXIT_HINT = 'Sur le web, ferme simplement l’onglet';
-
 /** Trajet suivi et en cours (DECISIONS Q7) : clé du stockage de l'appli, écrite par les lunettes. */
 export const TRIP_KEY = 'quai.trip';
 
-/** Message de nouveautés : montré une fois à qui avait vu une version antérieure (1.0 ou 1.1). */
-export const NEWS_SINCE = '1.2.0';
+/** Message de nouveautés « Quai 1.2.1 » : montré une fois à qui avait vu une version antérieure (PRD-1.2.1 § 6). */
+export const NEWS_SINCE = '1.2.1';
+
+/**
+ * Date du premier lancement (PRD-1.2.1 § 4.6), en ms : clé du stockage de l'appli sur le téléphone, hors du schéma des
+ * réglages (comme quai.trip). Écrite une fois par les lunettes ; 0 pour qui utilisait déjà Quai avant la 1.2.1.
+ */
+export const FIRST_USE_KEY = 'quai.firstUse';
+/** Aide des gestes de l'accueil : les 7 premiers jours d'utilisation (§ 4.6). */
+export const HOME_HELP_MS = 7 * 86_400_000;
 
 const REFRESH_MS = 30_000;
 const LOCATION_MS = 30_000;
@@ -276,8 +285,13 @@ export function routeKey(r: Route): string {
       return `board:${r.areaId}:${JSON.stringify(r.filter ?? [])}`;
     case 'favorites':
       return `favorites:${(r.exclude ?? []).join(',')}`;
-    case 'steps':
-      return `steps:${r.key ?? routeJourneys(r)?.[0]?.id ?? ''}`;
+    case 'steps': {
+      // 1.2.1 : une proposition ouverte depuis « Autres trajets » a sa propre clé (temps réel, messages).
+      const i = r.index ?? 0;
+      return `steps:${r.key ?? routeJourneys(r)?.[0]?.id ?? ''}${i > 0 ? `:${i}` : ''}`;
+    }
+    case 'others':
+      return `others:${r.key ?? r.journeys[0]?.id ?? ''}`;
     case 'train':
       return `train:${r.journey.id}:${r.leg}`;
     case 'arrival':
@@ -289,7 +303,7 @@ export function routeKey(r: Route): string {
   }
 }
 
-const LIVE: ReadonlySet<Route['screen']> = new Set(['home', 'nearby', 'board', 'favorites', 'steps', 'train', 'arrival']);
+const LIVE: ReadonlySet<Route['screen']> = new Set(['home', 'nearby', 'board', 'favorites', 'steps', 'others', 'train', 'arrival']);
 const USES_POSITION: ReadonlySet<string> = new Set(['nearby', 'places']);
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e)) || 'Erreur inconnue';
@@ -335,6 +349,14 @@ export class GlassesController implements GlassesApi {
   private answering = new Map<string, Promise<void>>();
   /** Ordre de l'accueil et de la liste, figés pendant l'affichage (M1.4). */
   private homeOrder: string[] | null = null;
+  /** 1.2.1 : favoris de la règle 5 à l'entrée dans l'accueil (tu y es, rien dans les 3 heures), jamais montrés dessus. */
+  private homeLast = new Set<string>();
+  /** 1.2.1 : éléments de l'accueil à son dernier affichage (le curseur garde son élément quand la liste change). */
+  private homeItems: Item[] | null = null;
+  /** 1.2.1 : premier affichage de l'accueil depuis qu'on y est revenu (keepHomeCursor). */
+  private homeEntry = false;
+  /** 1.2.1 : date du premier lancement (aide des gestes de l'accueil, § 4.6) ; null tant qu'elle n'est pas lue. */
+  private firstUse: number | null = null;
   private listOrder: string[] | null = null;
   private favSig = '';
   /** « Autour de moi » léger (M8.7). */
@@ -435,6 +457,8 @@ export class GlassesController implements GlassesApi {
     }
     this.here = await this.d.platform.location.current(5000);
     await this.loadTrip();
+    // Avant openingNav : la version vue (vide = nouvelle installation) n'est pas encore écrite.
+    await this.loadFirstUse();
     this.checkTrip();
     let resumed = false;
     if (this.pendingRestore) {
@@ -456,9 +480,9 @@ export class GlassesController implements GlassesApi {
   }
 
   /**
-   * Écran d'ouverture : bienvenue (premier lancement), message « Quai 1.2 » (une fois après la mise à jour depuis la
-   * 1.0 ou la 1.1, jamais après une installation neuve), trajet en cours repris (M6.5), sinon l'accueil (et le
-   * favori ouvert d'office selon les réglages).
+   * Écran d'ouverture : bienvenue (premier lancement), message « Quai 1.2.1 » (une fois après la mise à jour depuis une
+   * version antérieure, jamais après une installation neuve ; ligne des lieux en plus depuis la 1.0 ou la 1.1), trajet
+   * en cours repris (M6.5), sinon l'accueil (et le favori ouvert d'office selon les réglages).
    */
   private async openingNav(): Promise<{ nav: NavState; resumed: boolean }> {
     const s = this.settings();
@@ -467,17 +491,45 @@ export class GlassesController implements GlassesApi {
     if (!s.onboarded) return { nav: initNav({ screen: 'message', kind: 'firstRun', title: 'Quai', lines: [] }), resumed: false };
     if (seen && compareVersions(seen, NEWS_SINCE) < 0 && compareVersions(APP_VERSION, NEWS_SINCE) >= 0) {
       void this.markSeen();
-      return { nav: initNav({ screen: 'message', kind: 'news', title: NEWS_TITLE, lines: newsLines() }), resumed: false };
+      return { nav: initNav({ screen: 'message', kind: 'news', title: NEWS_TITLE, lines: newsLines(seen) }), resumed: false };
     }
     const run = this.resumeNav(initNav({ screen: 'home' }), true);
     if (run) return { nav: run, resumed: true };
     return { nav: this.homeNav(), resumed: false };
   }
 
-  /** Écrit la version vue (« Quai 1.2 » affiché une seule fois ; nouvelle installation : sans rien afficher). */
+  /** Écrit la version vue (« Quai 1.2.1 » affiché une seule fois ; nouvelle installation : sans rien afficher). */
   private async markSeen(): Promise<void> {
     if (this.settings().seenVersion === APP_VERSION) return;
     await this.d.settings.update((x) => ({ ...x, seenVersion: APP_VERSION }));
+  }
+
+  /**
+   * Date du premier lancement (PRD-1.2.1 § 4.6), lue une fois. Absente : nouvelle installation (version vue vide),
+   * maintenant ; mise à jour d'une version antérieure, 0 (Quai déjà utilisé : pas d'aide des gestes sur l'accueil).
+   */
+  private async loadFirstUse(): Promise<void> {
+    if (this.firstUse !== null) return;
+    const kv = this.d.platform.kv;
+    let raw: string | null = null;
+    try {
+      raw = await kv.get(FIRST_USE_KEY);
+    } catch (e) {
+      console.warn('[Quai] date du premier lancement illisible', errText(e));
+    }
+    const n = raw ? Number(raw) : NaN;
+    if (Number.isFinite(n) && n >= 0) {
+      this.firstUse = n;
+      return;
+    }
+    const first = this.settings().seenVersion ? 0 : this.d.clock.now();
+    this.firstUse = first;
+    void kv.set(FIRST_USE_KEY, String(first)).catch((e: unknown) => console.warn('[Quai] date du premier lancement non enregistrée', errText(e)));
+  }
+
+  /** Aide des gestes sur l'accueil : les 7 premiers jours d'utilisation (§ 4.6) ; date inconnue : oui. */
+  private homeHelp(): boolean {
+    return this.firstUse === null || this.d.clock.now() - this.firstUse < HOME_HELP_MS;
   }
 
   /** Accueil, avec le favori ouvert d'office : « à moins de 300 m » (M1.7) ou « Toujours ouvrir le favori en tête ». */
@@ -594,11 +646,8 @@ export class GlassesController implements GlassesApi {
         void this.onRouteChanged();
         return;
       case 'exit':
-        // Quai Web : il n'y a rien à fermer, la page reste ouverte.
-        if (this.d.web) {
-          this.showToast(WEB_EXIT_HINT);
-          return;
-        }
+        // Quai Web : il n'y a rien à fermer, la page reste ouverte ; 1.2.1 : sans message (PRD-1.2.1 § 4.5).
+        if (this.d.web) return;
         // Boîte de confirmation système ; le nettoyage se fait sur SYSTEM_EXIT_EVENT.
         void this.d.platform.glasses.exit(1);
         return;
@@ -606,7 +655,7 @@ export class GlassesController implements GlassesApi {
         void this.runIntent(effect.intent);
         return;
       case 'edge':
-        this.turnPage(effect.dir);
+        this.stepsEdge(effect.dir);
         return;
       default:
         return;
@@ -677,26 +726,50 @@ export class GlassesController implements GlassesApi {
 
   /* ------------------------------ Favoris : réponses et ordre ------------------------------ */
 
-  /** Ordre intelligent du cœur (M1.4), complété par l'ordre du téléphone si le cœur en oublie. */
-  private computeOrder(): string[] {
+  /**
+   * Ordre intelligent du cœur (M1.4), complété par l'ordre du téléphone si le cœur en oublie, et favoris de la règle 5
+   * (tu y es, rien dans les 3 heures : jamais sur l'accueil, PRD-1.2.1 § 4.2).
+   */
+  private computeRanking(): { order: string[]; last: Set<string> } {
     const s = this.settings();
-    let ids: string[] = [];
+    let ranks: FavoriteRank[] = [];
     try {
-      ids = this.d.core.orderFavorites(this.hereLL(), s, this.answers).map((r) => r.favoriteId);
+      ranks = this.d.core.orderFavorites(this.hereLL(), s, this.answers);
     } catch (e) {
       console.warn('[Quai] ordre des favoris', errText(e));
     }
     const known = new Set(s.favorites.map((f) => f.id));
-    const out = [...new Set(ids)].filter((id) => known.has(id));
-    for (const f of s.favorites) if (!out.includes(f.id)) out.push(f.id);
-    return out;
+    const order = [...new Set(ranks.map((r) => r.favoriteId))].filter((id) => known.has(id));
+    for (const f of s.favorites) if (!order.includes(f.id)) order.push(f.id);
+    return { order, last: new Set(ranks.filter((r) => r.rule === 5).map((r) => r.favoriteId)) };
   }
 
-  /** Favoris en tête de l'accueil (2 au plus), sauf « Accueil sans favoris ». */
+  private computeOrder(): string[] {
+    return this.computeRanking().order;
+  }
+
+  /** Entrée dans l'accueil : ordre et règle 5 figés pendant l'affichage. */
+  private freezeHome(): void {
+    const r = this.computeRanking();
+    this.homeOrder = r.order;
+    this.homeLast = r.last;
+  }
+
+  /**
+   * Favoris montrés sur l'accueil (PRD-1.2.1 § 4.2) : les 3 premiers de l'ordre réglé, jamais un favori de la règle 5
+   * (il reste dans la liste ouverte par « Favoris ») ; aucun avec « Accueil sans favoris ».
+   */
   private homeShown(): string[] {
     const s = this.settings();
     if (s.display.opening === 'home') return [];
-    return this.validOrder(this.homeOrder ?? this.computeOrder()).slice(0, 2);
+    // Tant que l'accueil n'a pas été touché, la règle 5 suit les réponses qui arrivent (au lancement, un favori « rien
+    // dans les 3 heures » n'est connu qu'avec sa réponse) ; l'ordre, lui, reste figé (M1.4).
+    const f = current(this.nav);
+    if (this.homeOrder && f.route.screen === 'home' && f.fresh) this.homeLast = this.computeRanking().last;
+    const { order, last } = this.homeOrder ? { order: this.homeOrder, last: this.homeLast } : this.computeRanking();
+    return this.validOrder(order)
+      .filter((id) => !last.has(id))
+      .slice(0, HOME_FAVORITES);
   }
 
   private validOrder(order: string[]): string[] {
@@ -811,8 +884,8 @@ export class GlassesController implements GlassesApi {
     const data: HomeData = {
       favorites: shown.map((id) => this.entry(id)).filter((e): e is FavoriteEntry => !!e),
       order,
-      others: order.length - shown.length,
       noFavorites: s.display.opening === 'home',
+      gestureHelp: this.homeHelp(),
       ...this.freshLines(),
     };
     const here = this.hereLL();
@@ -951,8 +1024,8 @@ export class GlassesController implements GlassesApi {
 
   /**
    * Suivi automatique de la 1.0, pour le trajet suivi seulement (M2.5) : « Dans le train » au départ du véhicule
-   * (l'écran revient au trajet suivi si l'on regardait une autre proposition), retour aux étapes à la descente,
-   * aide à l'arrivée 3 min avant une arrivée en gare.
+   * (l'écran revient au trajet suivi si l'on regardait une autre proposition, 1.2.1 : ou « Autres trajets »), retour
+   * aux étapes à la descente, aide à l'arrivée 3 min avant une arrivée en gare.
    */
   private track(): void {
     const t = this.trip;
@@ -961,16 +1034,21 @@ export class GlassesController implements GlassesApi {
     const f = current(this.nav);
     const r = f.route;
     const now = this.d.clock.now();
-    if (r.screen === 'steps' && (r.key ?? '') === t.key) {
+    const inSession = (x: Route): boolean => (x.screen === 'steps' || x.screen === 'others') && (x.key ?? '') === t.key;
+    if (inSession(r)) {
       const i = rideInProgress(j, now);
       const arrival = arrivalDue(j, now) && !this.autoDone.has(`arrival:${j.id}`);
       const train = i >= 0 && !this.autoDone.has(`train:${j.id}:${i}`);
       if (!train && !arrival) return;
       let nav = this.nav;
-      if ((r.index ?? 0) !== t.index || routeJourneys(r)?.[r.index ?? 0]?.id !== j.id) {
-        const list = (routeJourneys(r) ?? []).map((x) => (x.id === j.id ? j : x));
+      // « Autres trajets » et une proposition ouverte depuis elle : retour aux étapes d'où la liste a été ouverte.
+      for (let x = current(nav).route; nav.stack.length > 1 && inSession(x) && (x.screen === 'others' || (x.screen === 'steps' && !!x.fromList)); x = current(nav).route) nav = pop(nav);
+      const base = current(nav).route;
+      if (base.screen !== 'steps') return;
+      if ((base.index ?? 0) !== t.index || routeJourneys(base)?.[base.index ?? 0]?.id !== j.id) {
+        const list = (routeJourneys(base) ?? []).map((x) => (x.id === j.id ? j : x));
         const idx = list.findIndex((x) => x.id === j.id);
-        nav = replaceAt(nav, { ...r, journeys: idx >= 0 ? list : [j], index: Math.max(0, idx) }, 0, true);
+        nav = replaceAt(nav, { ...base, journeys: idx >= 0 ? list : [j], index: Math.max(0, idx) }, 0, true);
       }
       if (train) {
         this.autoDone.add(`train:${j.id}:${i}`);
@@ -1080,25 +1158,32 @@ export class GlassesController implements GlassesApi {
     await this.onRouteChanged();
   }
 
-  /** ▼ au bout des étapes : proposition suivante ; ▲ en haut : la précédente (affichée par sa fin). */
-  private turnPage(dir: 'up' | 'down'): void {
+  /**
+   * ▼ au bout des étapes (PRD-1.2.1 § 3.1 à 3.4) : la page « Autres trajets », jamais un autre trajet directement ;
+   * au bout d'une proposition ouverte depuis la liste, retour à la liste. ▲ en haut, ou ▼ sans autre proposition :
+   * rien (la ligne du bas dit « Fin du trajet. Pas d'autre trajet pour l'instant »).
+   */
+  private stepsEdge(dir: 'up' | 'down'): void {
     const r = current(this.nav).route;
-    if (r.screen !== 'steps') return;
+    if (r.screen !== 'steps' || dir !== 'down') return;
     const list = routeJourneys(r);
     if (!list?.length) return;
-    const i = Math.min(r.index ?? 0, list.length - 1) + (dir === 'down' ? 1 : -1);
-    // ▼ sur la dernière proposition (DECISIONS § 7) : rien de plus, on le dit (la ligne du bas reste « ▲ trajet précédent »).
-    if (i >= list.length && list.length > 1) this.showToast('Pas d’autre trajet pour l’instant');
-    if (i < 0 || i >= list.length) return;
-    // Un message de la page affichée (« Pas d’autre trajet pour l’instant », « Trajet suivi : … ») ne suit pas sur une
-    // autre page : la ligne d'aide redevient celle de la nouvelle page.
+    const below = this.nav.stack[this.nav.stack.length - 2]?.route;
+    // Un message de la page (« Trajet suivi : … ») ne suit pas sur la page suivante.
     this.clearToast();
-    const next: StepsRoute = { ...r, journeys: list, index: i };
-    delete next.journey;
-    this.nav = replaceAt(this.nav, next, dir === 'down' ? 0 : 999);
-    void this.render();
-    // La proposition affichée se met à jour en direct (retards, voies).
-    if (!this.journeysById.has(list[i].id)) void this.load(next, true);
+    if (r.fromList && below?.screen === 'others') {
+      this.nav = pop(this.nav);
+      void this.onRouteChanged();
+      return;
+    }
+    if (list.length < 2) return;
+    const others: OthersRoute = { screen: 'others', title: this.stepsTitle(r), journeys: list, index: Math.min(Math.max(0, r.index ?? 0), list.length - 1) };
+    if (r.key) others.key = r.key;
+    if (r.from) others.from = r.from;
+    if (r.to) others.to = r.to;
+    if (r.favoriteId) others.favoriteId = r.favoriteId;
+    this.nav = push(this.nav, others);
+    void this.onRouteChanged();
   }
 
   /* ------------------------------ Départs : favori annulable ------------------------------ */
@@ -1317,7 +1402,7 @@ export class GlassesController implements GlassesApi {
     if (sig !== this.favSig) {
       this.favSig = sig;
       // Favoris ajoutés, retirés ou réordonnés sur le téléphone : l'ordre affiché suit.
-      if (r.screen === 'home') this.homeOrder = this.computeOrder();
+      if (r.screen === 'home') this.freezeHome();
       if (r.screen === 'favorites') this.listOrder = this.computeListOrder(r);
     }
     if (r.screen === 'message' && r.kind === 'firstRun' && s.onboarded && this.ready) {
@@ -1476,6 +1561,8 @@ export class GlassesController implements GlassesApi {
         return this.fetchPlaces(r);
       case 'steps':
         return this.fetchSteps(r);
+      case 'others':
+        return this.fetchOthers(r);
       case 'train':
       case 'arrival': {
         const j = await core.refresh(this.journeyOf(r.journey), s);
@@ -1568,6 +1655,21 @@ export class GlassesController implements GlassesApi {
     return { ok: true };
   }
 
+  /** « Autres trajets » : les heures des entrées en direct (retards, suppressions), chaque proposition rafraîchie. */
+  private async fetchOthers(r: OthersRoute): Promise<unknown> {
+    const s = this.settings();
+    for (const [k, j] of r.journeys.entries()) {
+      if (k === r.index) continue;
+      const fresh = await this.d.core.refresh(this.journeyOf(j), s);
+      this.journeysById.set(fresh.id, fresh);
+      if (this.trip?.journey.id === fresh.id) {
+        this.trip = { ...this.trip, journey: fresh };
+        this.saveFollowed();
+      }
+    }
+    return { ok: true };
+  }
+
   /** Propositions calculées : elles s'inscrivent dans la route (même si l'on regarde ailleurs) ; la 1re est suivie. */
   private attachJourneys(r: StepsRoute, journeys: Journey[]): void {
     const key = r.key;
@@ -1627,13 +1729,41 @@ export class GlassesController implements GlassesApi {
     this.entered = r;
     if (this.undo && this.undo.key !== routeKey(r)) this.undo = null;
     if (r.screen === 'home') {
-      this.homeOrder = this.computeOrder();
+      this.homeEntry = true;
+      this.freezeHome();
       this.checkTrip();
       if (this.ready) void this.refreshHome(false);
     } else if (r.screen === 'favorites') {
       this.listOrder = this.computeListOrder(r);
       if (this.ready) void this.refreshList(false);
     }
+  }
+
+  /**
+   * 1.2.1 : curseur de l'accueil quand ses lignes changent. En 1.2.0, les favoris commençaient à la 1re ligne et le
+   * rang suffisait ; depuis que « Favoris » occupe la 1re ligne, le rang seul faisait tomber le curseur sur « Favoris »
+   * (un toucher ouvrait la liste au lieu du trajet) quand « En cours » paraissait au-dessus.
+   *  - Retour à l'accueil (`entering`) avec un trajet commencé entre-temps : le curseur sur « En cours », comme en 1.2.0
+   *    (un toucher reprend le trajet) et comme à l'ouverture.
+   *  - Sinon (accueil affiché : « En cours » qui paraît au départ ou disparaît à la fin, favoris recalculés), le
+   *    curseur garde son élément (même action) ; élément disparu : le rang, comme avant.
+   * Cadre neuf (ouverture) : la règle d'ouverture (initialSel).
+   */
+  private keepHomeCursor(items: Item[], entering: boolean): void {
+    const prev = this.homeItems;
+    this.homeItems = items;
+    const f = current(this.nav);
+    if (!prev || f.route.screen !== 'home' || f.fresh || !prev.length || !items.length) return;
+    const resume = items.findIndex((it) => it.action?.kind === 'resume');
+    if (entering && resume >= 0 && !prev.some((it) => it.action?.kind === 'resume')) {
+      this.nav = setSelection(this.nav, resume, f.top);
+      return;
+    }
+    const id = (it: Item | undefined): string => (it?.action ? JSON.stringify(it.action) : '');
+    const was = id(prev[Math.min(Math.max(0, f.sel), prev.length - 1)]);
+    if (!was || id(items[f.sel]) === was) return;
+    const at = items.findIndex((it) => id(it) === was);
+    if (at >= 0) this.nav = setSelection(this.nav, at, f.top);
   }
 
   /** Vue de l'écran courant ; lance le chargement si besoin. */
@@ -1649,7 +1779,7 @@ export class GlassesController implements GlassesApi {
         case 'notConfigured':
           return notConfiguredView(ctx);
         case 'news':
-          return newsView(ctx);
+          return newsView(ctx, r.lines);
         case 'error':
           return errorView(r.title, r.lines.join(' '), ctx, { root: this.nav.stack.length === 1 });
         case 'loading':
@@ -1658,12 +1788,21 @@ export class GlassesController implements GlassesApi {
           return messageView(r.title, r.lines, ctx, { hints: HINTS.message });
       }
     }
-    if (r.screen === 'home') return homeView(this.homeData(), ctx);
+    if (r.screen === 'home') {
+      const v = homeView(this.homeData(), ctx);
+      this.keepHomeCursor(v.items, this.homeEntry);
+      this.homeEntry = false;
+      return v;
+    }
     if (r.screen === 'favorites') {
       const entries = (this.listOrder ?? this.computeListOrder(r)).map((id) => this.entry(id)).filter((e): e is FavoriteEntry => !!e);
       return favoritesView({ entries, title: r.exclude?.length ? 'Autres favoris' : 'Mes favoris' }, ctx);
     }
     if (r.screen === 'steps' && routeJourneys(r)) return this.stepsViewOf(r, f, ctx);
+    if (r.screen === 'others') {
+      if (!this.cache.has(routeKey(r))) void this.load(r, true);
+      return othersView(r, r.journeys.map((j) => this.journeyOf(j)), ctx);
+    }
     const key = routeKey(r);
     const hit = this.cache.get(key);
     if (!hit) void this.load(r);
@@ -1716,7 +1855,7 @@ export class GlassesController implements GlassesApi {
     if (!this.cache.has(routeKey(r))) void this.load(r, true);
     const t = this.trip;
     const followed = t && t.key === (r.key ?? '') ? t.journey.id : t && journeys.some((j) => j.id === t.journey.id) ? t.journey.id : undefined;
-    return stepsPage(r, { journeys, index, followedId: followed, leaveAt0: followed ? t?.leaveAt0 : undefined, top: f.top, fresh: f.fresh }, ctx);
+    return stepsPage(r, { journeys, index, followedId: followed, leaveAt0: followed ? t?.leaveAt0 : undefined, top: f.top, fresh: f.fresh, fromList: !!r.fromList }, ctx);
   }
 
   /* ------------------------------ Rendu ------------------------------ */
@@ -1746,10 +1885,10 @@ export class GlassesController implements GlassesApi {
 
   private async renderOnce(force: boolean): Promise<void> {
     const view = this.buildView();
-    const g = geometry(view);
-    const frame = effectiveFrame(current(this.nav), view, g.capacity);
     const now = this.d.clock.now();
     const toast = this.toast && this.toast.until > now && this.toast.route === routeKey(current(this.nav).route) ? this.toast.text : undefined;
+    const g = geometry(view, !!toast);
+    const frame = effectiveFrame(current(this.nav), view, g.capacity);
     const page = layoutPage(view, frame, { toast });
     this.view = view;
     this.capacity = g.capacity;
@@ -1966,6 +2105,8 @@ function titleFor(r: Route, ctx: ViewCtx): string {
       return r.name ? displayName(r.name, ctx.settings.lang) : 'Départs';
     case 'steps':
       return r.title || towards(r.label);
+    case 'others':
+      return othersTitle(r.title);
     default:
       return 'Quai';
   }

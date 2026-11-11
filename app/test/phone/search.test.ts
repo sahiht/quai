@@ -10,8 +10,10 @@ import { LIMITS } from '../../src/settings';
 import { GEO_DELAY_MS } from '../../src/phone/field';
 import { searchScreen, withRecent } from '../../src/phone/screens/search';
 import { header } from '../../src/phone/app';
+import { holidayLine } from '../../src/phone/text';
 import type { Journey } from '../../src/core/api';
 import { button, defaults, harness, mount, NB, options, preset11, SCENARIO, settle, sleep, textOf, type, until } from './helpers';
+import { onDay, trip } from './trips';
 
 afterEach(() => document.body.replaceChildren());
 
@@ -256,8 +258,53 @@ describe('liens directs et champs', () => {
   });
 });
 
+describe('jour férié (PRD-1.2.1 § 5, § 7.4, CA-121.7)', () => {
+  const nov11 = onDay('2026-11-11');
+  const nov12 = onDay('2026-11-12');
+  const madou = (t: (h: number, m: number) => number) => trip('short', t(13, 39), [8, [t(13, 47), t(14, 30), 'bus W'], 1, [t(14, 33), t(14, 45), 'métro 2'], 2]);
+
+  it('holidayLine : « Jour férié : horaires du dimanche » si un trajet proposé part un jour férié ; rien sinon', () => {
+    expect(holidayLine({ journeys: [madou(nov11)] })).toBe(`Jour férié${NB}: horaires du dimanche`);
+    expect(holidayLine({ journeys: [madou(nov12)] })).toBe('');
+    expect(holidayLine({ journeys: [] })).toBe('');
+    expect(holidayLine(null)).toBe('');
+    // le jour des trajets, pas celui de la recherche : le 11/11 à 23:30, des trajets le 12/11 au matin, rien
+    const dawn12 = trip('short', nov12(5, 30), [[nov12(5, 30), nov12(6, 10), 'IC']]);
+    expect(holidayLine({ journeys: [dawn12] })).toBe('');
+    // le 10/11 au soir, des trajets le 11/11 au matin : la ligne
+    expect(holidayLine({ journeys: [trip('short', nov11(5, 30), [[nov11(5, 30), nov11(6, 10), 'IC']])] })).toBe(`Jour férié${NB}: horaires du dimanche`);
+  });
+
+  /** Recherche au jour `t`, résultats construits sur ce jour. */
+  async function searchOn(t: (h: number, m: number) => number) {
+    const r = { journeys: [madou(t)] };
+    const hz = open({ now: t(13, 30), params: 'de=sncb:8863008&vers=sncb:8813003', core: (c) => ({ ...c, route: async () => r }) });
+    await results(hz.el);
+    return hz.el;
+  }
+
+  it('11/11/2026 : la ligne sous l’heure de la recherche, au-dessus des résultats ; 12/11 : rien', async () => {
+    const el = await searchOn(nov11);
+    const line = el.querySelector('.res-title .holiday')!;
+    expect(textOf(line)).toBe('Jour férié : horaires du dimanche');
+    expect(line.textContent).toContain(`férié${NB}:`);
+    expect(line.compareDocumentPosition(el.querySelector('.results')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(textOf(line.previousElementSibling)).toBe('dès 13:30');
+    document.body.replaceChildren();
+    const el12 = await searchOn(nov12);
+    expect(el12.querySelector('.holiday')).toBeNull();
+    expect(el12.textContent).not.toContain('Jour férié');
+  });
+
+  it('sans trajet, ou pendant la recherche : pas de ligne', async () => {
+    const hz = open({ now: nov11(13, 30), params: 'de=sncb:8863008&vers=sncb:8813003', core: (c) => ({ ...c, route: async () => ({ journeys: [], empty: 'noTrip' as const }) }) });
+    await results(hz.el);
+    expect(hz.el.querySelector('.holiday')).toBeNull();
+  });
+});
+
 describe('données du réseau affichées en texte, jamais en HTML (revue n° 4)', () => {
-  it('noms de lignes et catégories de trains publiés : du texte dans les pastilles', async () => {
+  it('noms de lignes et catégories de trains publiés : du texte dans la ligne « moyens »', async () => {
     const t0 = SCENARIO.s3.now + 10 * 60_000;
     const leg = (dep: number, arr: number, extra: object) => ({ kind: 'ride' as const, from: { name: { fr: 'A', nl: 'A' }, lat: 0, lon: 0 }, to: { name: { fr: 'B', nl: 'B' }, lat: 0, lon: 0 }, dep, arr, schedDep: dep, schedArr: arr, rt: true, ...extra });
     const crafted: Journey = {
@@ -273,12 +320,13 @@ describe('données du réseau affichées en texte, jamais en HTML (revue n° 4)'
     };
     const hz = open({ params: 'de=sncb:8813003&vers=sncb:8892007', core: (c) => ({ ...c, route: async () => ({ journeys: [crafted] }) }) });
     await results(hz.el);
-    const chips = hz.el.querySelector('.chips')!;
-    expect(chips.querySelector('img')).toBeNull();
-    expect(chips.querySelector('b')).toBeNull();
-    expect(chips.textContent).toContain('Tram <img src=x onerror="globalThis.__quaiXss=1">');
-    expect(chips.textContent).toContain('<b>IC</b>');
-    expect(chips.querySelectorAll('svg')).toHaveLength(2);
+    const card = hz.el.querySelector('.result .card')!;
+    const means = card.querySelector('.means')!;
+    expect(card.querySelector('img')).toBeNull();
+    expect(card.querySelector('b')).toBeNull();
+    expect(means.childNodes).toHaveLength(1);
+    expect(means.firstChild!.nodeType).toBe(Node.TEXT_NODE);
+    expect(means.textContent).toBe('tram <img src=x onerror="globalThis.__quaiXss=1"> + <b>IC</b>');
     expect((globalThis as { __quaiXss?: number }).__quaiXss).toBeUndefined();
   });
 

@@ -1,11 +1,12 @@
 /**
- * Ajout et modification d'un favori (PRD-1.2 § 2.2).
- *  - « Nouveau favori » : un seul champ « Adresse, gare ou arrêt », avec en tête « Ma position actuelle ». Une adresse
+ * Ajout et modification d'un favori (PRD-1.2 § 2.2, PRD-1.2.1 § 7.1).
+ *  - « Nouveau favori » : en haut, deux choix de même taille, « Un endroit » (choisi d'office) et « Un trajet de A à
+ *    B ». « Un endroit » : un seul champ « Adresse, gare ou arrêt », avec en tête « Ma position actuelle ». Une adresse
  *    ou la position donne un lieu ; une gare ou un arrêt, au choix « Ses prochains départs » (un arrêt) ou « Le trajet
- *    pour y aller » (un lieu « Près de {arrêt} ») ; lien « Un trajet fixe, d’un endroit à un autre ».
+ *    pour y aller » (un lieu « Près de {arrêt} »). « Un trajet de A à B » : le formulaire du trajet fixe.
  *  - Arrêt : lignes et directions, créneau (1.1). Trajet fixe : « Départ » (jamais « Ma position »), « Arrivée », nom
  *    affiché, créneau (1.1). Lieu : voir places.ts.
- *  - Suppression confirmée dans la page.
+ *  - Modification : pas de choix, le formulaire du favori ; suppression confirmée dans la page.
  */
 import type { Endpoint, Favorite, FavoriteStop, FavoriteTrip, LineFilter, Mode, NameLang, Propose, SearchItem } from '../../core/api';
 import { OP_NAME, displayName, mainMode } from '../../core/util';
@@ -16,7 +17,7 @@ import { header, type PhoneCtx } from '../app';
 import { debounce, h, liveRegion } from '../dom';
 import { placeField, privacyNote, type FieldChoice } from '../field';
 import { endpointText, limitText, PROPOSE_LABEL, sameEndpoint, shortAddress, T, typo } from '../text';
-import { confirmInPage, radios } from '../ui';
+import { confirmInPage, radios, segmentedTabs } from '../ui';
 import { favoritesScreen } from './favorites';
 import { hereSpot, placeForm, spotOf, type Spot } from './places';
 
@@ -239,17 +240,16 @@ function tripForm(ctx: PhoneCtx, existing?: FavoriteTrip): HTMLElement {
   );
 }
 
-/** Écran « Trajet fixe » (lien « Un trajet fixe, d’un endroit à un autre »). */
-export function fixedTripScreen(ctx: PhoneCtx): HTMLElement {
-  return h('div', { class: 'screen' }, header(ctx, T.fixedTrip, undefined, { label: T.newFav, hash: '#/favoris/nouveau' }), tripForm(ctx));
-}
-
 /* ------------------------------ Nouveau favori ------------------------------ */
 
-/** Écran « Nouveau favori » (PRD-1.2 § 2.2). */
-export function newFavoriteScreen(ctx: PhoneCtx): HTMLElement {
-  // Ancien lien de la 1.1 (#/favoris/nouveau?type=trajet) : le trajet fixe.
-  if (ctx.params.get('type') === 'trajet') return fixedTripScreen(ctx);
+/** Les deux choix de « Nouveau favori » (PRD-1.2.1 § 7.1) : un endroit (lieu ou arrêt), ou un trajet fixe. */
+export type NewFavoriteKind = 'place' | 'trip';
+
+/**
+ * « Un endroit » (PRD-1.2 § 2.2) : champ unique « Adresse, gare ou arrêt » avec en tête « Ma position actuelle », puis
+ * le formulaire de l'endroit choisi (lieu, ou pour une gare : « Ses prochains départs » ou « Le trajet pour y aller »).
+ */
+function placeChoice(ctx: PhoneCtx): HTMLElement {
   const live = liveRegion();
   const form = h('div', { class: 'form-body' });
   let current: FieldChoice | null = null;
@@ -311,16 +311,33 @@ export function newFavoriteScreen(ctx: PhoneCtx): HTMLElement {
     choice.querySelector<HTMLInputElement>('input:checked')?.focus({ preventScroll: true });
   }
 
-  return h(
-    'div',
-    { class: 'screen' },
-    header(ctx, T.newFav, undefined, BACK),
-    field.el,
-    privacyNote(),
-    h('button', { type: 'button', class: 'btn-link', onclick: () => ctx.go('#/favoris/trajet') }, T.fixedTripLink),
-    live.el,
-    form,
-  );
+  return h('div', { class: 'place-choice' }, field.el, privacyNote(), live.el, form);
+}
+
+/**
+ * Écran « Nouveau favori » (PRD-1.2.1 § 7.1) : en haut, « Un endroit » (sous-titre « adresse, gare ou arrêt »,
+ * choisi d'office) et « Un trajet de A à B » (« départ et arrivée fixes »), de même taille ; chacun montre son
+ * formulaire. `initial` : le choix montré à l'ouverture.
+ */
+export function newFavoriteScreen(ctx: PhoneCtx, initial?: NewFavoriteKind): HTMLElement {
+  // Ancien lien de la 1.1 (#/favoris/nouveau?type=trajet) : le trajet de A à B.
+  const first: NewFavoriteKind = initial ?? (ctx.params.get('type') === 'trajet' ? 'trip' : 'place');
+  const kinds = segmentedTabs<NewFavoriteKind>({
+    label: T.kindLegend,
+    value: first,
+    options: [
+      { value: 'place', label: T.kindPlace, sub: T.kindPlaceSub, panel: placeChoice(ctx) },
+      { value: 'trip', label: T.kindTrip, sub: T.kindTripSub, panel: tripForm(ctx) },
+    ],
+  });
+  // Curseur à l'ouverture : le premier champ du choix montré (le routeur prend le premier champ data-autofocus).
+  for (const p of kinds.panels) if (p.hidden) p.querySelectorAll('[data-autofocus]').forEach((e) => e.removeAttribute('data-autofocus'));
+  return h('div', { class: 'screen' }, header(ctx, T.newFav, undefined, BACK), kinds.el, ...kinds.panels);
+}
+
+/** Ancre « #/favoris/trajet » (lien du trajet fixe de la 1.2, retiré) : « Nouveau favori », choix « Un trajet de A à B ». */
+export function fixedTripScreen(ctx: PhoneCtx): HTMLElement {
+  return newFavoriteScreen(ctx, 'trip');
 }
 
 /* ------------------------------ Modification ------------------------------ */

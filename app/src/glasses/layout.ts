@@ -66,10 +66,25 @@ const STATE_W = 110;
 const TIME_W = 72;
 /** Écart entre colonnes des menus et des étapes (largeurs utiles du PRD § 6.0). */
 const TIGHT = 10;
+/**
+ * 1.2.1 : colonne de droite de l'accueil et de « Autres trajets », 210 px utiles : départ puis arrivée d'un autre jour
+ * (« demain 06:20 → 06:46 » = 201 px, « le 13/11 06:20 → 06:46 » = 199 px).
+ */
+const WIDE_W = 212;
+/** 1.2.1 : retrait des favoris sous « Favoris » sur l'accueil (PRD-1.2.1 § 4.1). */
+export const HOME_INDENT = 20;
 /** Titre : 476 px utiles avant l'heure. */
 const TITLE_W = X_END - GEO.CLOCK_W - TIGHT - X_TEXT;
+/**
+ * Gabarits. Accueil (1.2.1, § 4.4) : « Favoris », « Autour de moi », « Aller à… », « En cours » (colonne a) et leurs
+ * nombres (colonne c : « 4 », « 9 arrêts ») au plus clair ; chaque favori en retrait, nom et réponse dans la colonne b
+ * (la réponse alignée à droite par des espaces, mesurés au pixel), au niveau 2. « Autres trajets » : nom et heures au
+ * plus clair, 2e ligne (colonne b) un ton plus pâle.
+ */
 export const LAYOUTS: Record<Layout, LayoutDef> = {
   menu: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(MENU_W), w: MENU_W, align: 'right', level: 3 }, gap: TIGHT },
+  home: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT + HOME_INDENT, level: 2 }, c: { x: right(WIDE_W), w: WIDE_W, align: 'right', level: 4 }, gap: TIGHT },
+  others: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 2 }, c: { x: right(WIDE_W), w: WIDE_W, align: 'right', level: 4 }, gap: TIGHT },
   nearby: { a: { x: X_TEXT, level: 4 }, b: { x: right(NEXT_W) - GAP - 64, w: 64, level: 3 }, c: { x: right(NEXT_W), w: NEXT_W, level: 4 } },
   board: { a: { x: X_TEXT, w: 52, level: 4 }, b: { x: X_TEXT + 52 + GAP, level: 3 }, c: { x: right(96), w: 96, level: 4 } },
   boardTrain: { a: { x: X_TEXT, w: 40, level: 4 }, b: { x: X_TEXT + 40 + GAP, level: 3 }, c: { x: right(160), w: 160, level: 4 } },
@@ -88,6 +103,12 @@ export const WIDTHS = {
   stepsTime: TIME_W - GEO.SAFETY,
   stepsText: right(STATE_W) - TIGHT - (X_TEXT + 70 + TIGHT) - GEO.SAFETY,
   stepsState: STATE_W - GEO.SAFETY,
+  /** 1.2.1 : accueil et « Autres trajets » : texte de gauche (colonne a) à côté de la colonne de droite. */
+  wideLeft: right(WIDE_W) - TIGHT - X_TEXT - GEO.SAFETY,
+  /** 1.2.1 : ligne d'un favori en retrait sur l'accueil (colonne b : nom, puis réponse alignée à droite). */
+  homeRow: X_END - (X_TEXT + HOME_INDENT) - GEO.SAFETY,
+  /** 1.2.1 : colonne de droite de l'accueil et de « Autres trajets ». */
+  wideRight: WIDE_W - GEO.SAFETY,
 };
 
 export interface Frame {
@@ -95,8 +116,8 @@ export interface Frame {
   top: number;
 }
 
-/** Nombre de lignes d'un élément (1 ou 2). */
-export const itemLines = (it: Item): number => (it.two || it.a2 || it.b2 ? 2 : 1);
+/** Nombre de lignes d'un élément (1 ou 2), plus sa ligne vide au-dessus (1.2.1). */
+export const itemLines = (it: Item): number => (it.gap ? 1 : 0) + (it.two || it.a2 || it.b2 ? 2 : 1);
 
 /** Premier élément visible le plus bas possible (écrans sans curseur : la fin de la liste tient à l'écran). */
 export function maxTop(items: Item[], capacity: number): number {
@@ -119,16 +140,26 @@ export interface Geometry {
   footLines: number;
   capacity: number;
   hasTop: boolean;
+  /** Ligne de note dans le pied (au-dessus de l'aide). */
+  noteLine: boolean;
+  /** Ligne d'aide (ou de message temporaire) dans le pied. */
+  hintLine: boolean;
 }
 
-/** Géométrie verticale d'une vue : titre, ligne du haut éventuelle, lignes, pied (note + aides). */
-export function geometry(v: Pick<GlassesView, 'top' | 'note' | 'reserveNote'>): Geometry {
+/**
+ * Géométrie verticale d'une vue : titre, ligne du haut éventuelle, lignes, pied (note + aides). `toast` : un message
+ * temporaire est affiché (il prend la ligne d'aide, même sur un pied compact).
+ */
+export function geometry(v: Pick<GlassesView, 'top' | 'note' | 'reserveNote'> & Partial<Pick<GlassesView, 'hints' | 'compactFoot'>>, toast = false): Geometry {
   const hasTop = !!v.top?.text;
   const rowsY = GEO.TITLE_Y + LINE_H + (hasTop ? LINE_H : 0) + 3;
-  const footLines = (v.reserveNote || v.note ? 1 : 0) + 1;
+  const noteLine = !!(v.reserveNote || v.note);
+  // 1.2.1 (accueil) : sous la note du jour férié, pas de ligne d'aide vide ; la note est la dernière ligne de l'écran.
+  const hintLine = !(v.compactFoot && noteLine && !v.hints && !toast);
+  const footLines = (noteLine ? 1 : 0) + (hintLine ? 1 : 0);
   const footY = SCREEN_H - GEO.BOTTOM_MARGIN - footLines * LINE_H;
   const capacity = Math.max(1, Math.floor((footY - rowsY) / LINE_H));
-  return { rowsY, footY, footLines, capacity, hasTop };
+  return { rowsY, footY, footLines, capacity, hasTop, noteLine, hintLine };
 }
 
 /** Garde l'élément sélectionné visible ; renvoie le premier élément visible. */
@@ -211,6 +242,18 @@ export function withTail(text: string, tail: string | undefined, maxPx: number):
   return head ? head + end : truncate(tail.replace(/^[,\s]+/, ''), maxPx);
 }
 
+/**
+ * Un texte à gauche et un texte à droite dans un même conteneur de `width` px (1.2.1, favoris de l'accueil) : la droite
+ * entière (déjà coupée à sa largeur), la gauche coupée pour laisser `gap` px, puis des espaces mesurés au pixel pour que
+ * la droite finisse au bord (± 2 px, comme padLeftTo).
+ */
+export function spread(left: string, right: string, width: number, gap: number): { text: string; left: string; right: string } {
+  const r = right ? truncate(right, width) : '';
+  const l = left ? truncate(left, Math.max(0, width - (r ? textWidth(r) + gap : 0))) : '';
+  if (!r) return { text: l, left: l, right: '' };
+  return { text: l + padLeftTo(r, width - textWidth(l)), left: l, right: r };
+}
+
 /** Colonne c avec une fin facultative : ajoutée seulement si le tout tient dans `maxPx`. */
 export function withOptionalTail(text: string, tail: string | undefined, maxPx: number): string {
   if (!tail || !text) return text ? truncate(text, maxPx) : '';
@@ -230,7 +273,7 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   const items: Item[] = message
     ? wrapLines(v.items.map((i) => i.a), X_END - X_TEXT - GEO.SAFETY).map((a): Item => ({ a }))
     : v.items;
-  const g = geometry(v);
+  const g = geometry(v, !!opts.toast);
   const scroll = !!v.scroll && !message;
   const sel = scroll ? (v.mark ?? -1) : items.length ? Math.min(Math.max(0, frame.sel), items.length - 1) : 0;
   const top = message ? 0 : scroll ? clampTop(items, frame.top, g.capacity) : ensureVisible(items, sel, frame.top, g.capacity);
@@ -245,18 +288,33 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
 
   for (let i = from; i < to; i++) {
     const it = items[i];
+    if (it.gap) {
+      // 1.2.1 : ligne vide au-dessus de l'élément (journalisée vide : elle se voit à l'écran).
+      colA.push('');
+      colB.push('');
+      colC.push('');
+      cursor.push('');
+      lines.push('');
+    }
     const b = it.b ?? '';
     const c = it.c ?? '';
     const bAny = b || it.bTail ? `${b}${it.bTail ?? ''}` : '';
     const a = truncate(it.a, room(def, 'a', { b: bAny, c }));
-    const bt = bAny ? withTail(b, it.bTail, room(def, 'b', { c })) : '';
+    let bt = bAny ? withTail(b, it.bTail, room(def, 'b', { c })) : '';
+    let bLog = bt;
+    if (it.bRight) {
+      // 1.2.1 (accueil) : nom puis réponse alignée à droite, dans le même conteneur (même luminosité).
+      const row = spread(b, withOptionalTail(it.bRight, it.bRightTail, Math.min(def.c.w ?? 0, X_END - def.c.x) - GEO.SAFETY), X_END - def.b.x - GEO.SAFETY, def.gap ?? GAP);
+      bt = row.text;
+      bLog = [row.left, row.right].filter(Boolean).join(COL_SEP);
+    }
     const ctext = c ? withOptionalTail(c, it.cTail, room(def, 'c', {})) : '';
     colA.push(a);
     colB.push(bt);
     colC.push(ctext && def.c.align === 'right' ? padLeftTo(ctext, Math.min(def.c.w ?? 0, X_END - def.c.x) - GEO.SAFETY) : ctext);
     cursor.push(!message && i === sel ? CURSOR : '');
-    lines.push([a, bt, ctext].filter(Boolean).join(COL_SEP));
-    if (itemLines(it) === 2) {
+    lines.push([a, bLog, ctext].filter(Boolean).join(COL_SEP));
+    if (it.two || it.a2 || it.b2) {
       const a2 = it.a2 ? truncate(it.a2, X_END - def.a.x - GEO.SAFETY) : '';
       const b2 = it.b2 ? truncate(it.b2, X_END - def.b.x - GEO.SAFETY) : '';
       colA.push(a2);
@@ -270,11 +328,11 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
 
   const foot: string[] = [];
   const noteText = v.note ? truncate(v.note, X_END - X_TEXT - GEO.SAFETY) : '';
-  if (g.footLines === 2) foot.push(noteText);
+  if (g.noteLine) foot.push(noteText);
   const hintText = opts.toast ? truncate(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? truncate(v.hints, X_END - X_TEXT - GEO.SAFETY) : '';
-  foot.push(hintText);
+  if (g.hintLine) foot.push(hintText);
   if (noteText) lines.push(noteText);
-  if (hintText) lines.push(hintText);
+  if (hintText && g.hintLine) lines.push(hintText);
 
   const titleW = TITLE_W;
   const title = truncate(v.title, titleW - GEO.SAFETY) || 'Quai';

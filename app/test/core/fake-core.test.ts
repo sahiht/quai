@@ -1,13 +1,16 @@
 /**
- * Faux cœur (1.2 ; app/src/dev/fake-core.ts, ?fake=1) : ses réponses doivent rester alignées sur les scénarios de
- * fixtures/README.md et les critères du PRD, puisque les équipes lunettes et téléphone développent dessus.
+ * Faux cœur (1.2.1 ; app/src/dev/fake-core.ts, ?fake=1) : ses réponses doivent rester alignées sur les scénarios de
+ * fixtures/README.md et les critères du PRD (1.2.1 : classement, noms et raisons du vrai cœur), puisque les équipes
+ * lunettes et téléphone développent dessus.
  */
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Endpoint, FavoriteAnswer, Journey, PlanResult } from '../../src/core/api';
+import { displayLabel } from '../../src/core/means';
 import { createFakeCore, type FakeFlags } from '../../src/dev/fake-core';
 import { gtfsTime, hhmm } from '../../src/core/util';
 import { validateSettings } from '../../src/settings';
+import { makeEnv } from './support/env';
 import { readJson, REPO_DIR } from './support/network';
 
 const at = (h: number, m: number) => gtfsTime('2026-11-10', h * 60 + m);
@@ -15,6 +18,8 @@ const PRESET = validateSettings(readJson(join(REPO_DIR, 'fixtures', 'app', 'pres
 const POS = { s1: { lat: 50.4655, lon: 4.859 }, s2: { lat: 50.86, lon: 4.359 }, s3: { lat: 50.8454, lon: 4.3571 }, bureau: { lat: 50.8441, lon: 4.3474 } };
 const here: Endpoint = { type: 'here' };
 const addr = (label: string, lat: number, lon: number): Endpoint => ({ type: 'address', label, lat, lon });
+const WATERLOO = addr('Chaussée de Bruxelles 1, 1410 Waterloo', 50.7175, 4.399);
+const ROGIER = addr('Rue du Progrès 20, 1210 Saint-Josse-ten-Noode', 50.8582, 4.36);
 const fake = (now: number, flags: FakeFlags = {}) => createFakeCore({ dataBase: 'https://x.test/data', relayBase: 'https://r.test', now: () => now, storage: { get: async () => null, set: async () => {} } }, flags);
 const labels = (r: PlanResult) => r.journeys.map((j) => j.label);
 const times = (j: Journey) => `${hhmm(j.dep)}→${hhmm(j.arr)}`;
@@ -36,16 +41,24 @@ describe('faux cœur 1.2 : favoris', () => {
     expect(b.order.slice(-2)).toContain('fav-bureau');
   });
 
-  it('réponses : bureau (le plus court, suivant, suivant), gare à gare hors de portée, sans position', async () => {
+  it('réponses : bureau (IC puis tram, le direct « Sans changement »), gare à gare hors de portée, sans position', async () => {
     const s1 = (await order(at(7, 31), POS.s1)).last.get('fav-bureau')!;
     // 1.2 : fav-bureau est un lieu ; sa réponse est celle du trajet « Ma position → lieu » (CA-1.3)
     expect(PRESET.favorites[0].kind).toBe('place');
     expect(s1.kind).toBe('trip');
-    expect(labels(s1.plan!)).toEqual(['short', 'next', 'next']);
-    expect(s1.plan!.journeys.map(times)).toEqual(['07:35→09:00', '08:33→09:58', '09:33→10:58']);
+    // 1.2.1 (le moins de marche d'abord) : l'IC (+2) jusqu'à Bruxelles-Nord puis le T4 garde chaque marche sous les
+    // 10 min réglées ; l'IC direct puis 12 min à pied (palier 1) arrive 1 min plus tôt : « Sans changement » ; ensuite,
+    // « Plus tard » suit la même règle : l'IC suivant puis le tram (palier 0), pas l'IC suivant direct (palier 1)
+    expect(labels(s1.plan!)).toEqual(['short', 'none', 'later']);
+    expect(s1.plan!.journeys.map(times)).toEqual(['07:35→09:01', '07:35→09:00', '08:33→10:02']);
+    expect(s1.plan!.journeys[2].legs.filter((l) => l.kind === 'ride').map((l) => l.cat ?? l.mode)).toEqual(['IC', 'tram']);
     expect(s1.plan!.journeys[0].legs.find((l) => l.kind === 'ride')).toMatchObject({ newPlatform: '6', delayMin: 2 });
     const noRt = await fake(at(7, 31), { noRt: true }).answer(PRESET.favorites[0], POS.s1, PRESET);
-    expect(noRt.plan!.journeys[0].reason).toBe('Le plus court : direct, à pied 7 + 12 min');
+    expect(noRt.plan!.journeys.map((j) => j.reason)).toEqual([
+      'Le plus court\u00a0: 1 changement, à pied 7 + 2 + 9\u00a0min',
+      'Sans changement\u00a0: à pied 7 + 12\u00a0min',
+      'Le suivant\u00a0: même trajet, 1\u00a0h plus tard',
+    ]);
     expect(times(noRt.plan!.journeys[0])).toBe('07:33→08:58');
     const gand = (await order(at(12, 10), POS.s2)).last.get('fav-gand')!;
     expect(gand.fromStation).toBe(true);
@@ -83,13 +96,33 @@ describe('faux cœur 1.2 : trajets', () => {
     expect(c.journeys[0].legs.find((l) => l.mode === 'tram')?.stops?.length).toBe(2);
   });
 
-  it('CA-1.5 Waterloo → Rogier (cas H) : marche et train le plus court, bus W puis métro en « Moins de marche »', async () => {
-    const r = await fake(at(7, 31)).route(addr('Chaussée de Bruxelles 1, 1410 Waterloo', 50.7175, 4.399), addr('Rue du Progrès 20, 1210 Saint-Josse-ten-Noode', 50.8582, 4.36), at(7, 31), PRESET);
-    expect(labels(r)).toEqual(['short', 'lesswalk', 'next']);
-    expect(r.journeys.map(times)).toEqual(['07:34→08:30', '07:32→08:46', '08:04→09:00']);
-    expect(r.journeys[0].legs[0]).toMatchObject({ kind: 'walk', walkMin: 19 });
-    expect(r.journeys[1].legs.filter((l) => l.kind === 'ride').map((l) => l.line)).toEqual(['W', '2']);
-    expect(r.journeys.slice(0, 2).map((j) => j.reason)).toEqual(['Le plus court\u00a0: direct, à pied 19 + 5\u00a0min', 'Moins de marche\u00a0: 1 changement, à pied 2 + 2 + 3\u00a0min']);
+  it('CA-1.5 Waterloo → Rogier (cas H, 1.2.1) : bus W puis métro d’abord (« Moins de marche »), 19 min à pied et le S1 « Plus tôt »', async () => {
+    const r = await fake(at(7, 31)).route(WATERLOO, ROGIER, at(7, 31), PRESET);
+    expect(labels(r)).toEqual(['short', 'earlier', 'next']);
+    expect(r.journeys.map(times)).toEqual(['07:32→08:46', '07:34→08:30', '07:52→09:04']);
+    expect(r.journeys[0].legs.filter((l) => l.kind === 'ride').map((l) => l.line)).toEqual(['W', '2']);
+    expect(r.journeys[1].legs[0]).toMatchObject({ kind: 'walk', walkMin: 19 });
+    expect(r.journeys.map((j) => j.reason)).toEqual([
+      'Moins de marche\u00a0: 1 changement, à pied 2 + 2 + 3\u00a0min',
+      'Plus tôt de 16\u00a0min, mais 19\u00a0min à pied',
+      'Le suivant\u00a0: même trajet, 20\u00a0min plus tard',
+    ]);
+    expect(r.journeys.map((j) => displayLabel(j, r.journeys))).toEqual(['Moins de marche', 'Plus tôt', 'Le suivant']);
+  });
+
+  it('CA-121.3 : mêmes étiquettes, heures et raisons que le vrai cœur (Waterloo, Rue Neuve 1, noRT)', async () => {
+    const real = makeEnv({ now: '2026-11-10T07:31', scene: 'noRT' });
+    const cases: [Endpoint, Endpoint, { lat: number; lon: number } | undefined][] = [
+      [WATERLOO, ROGIER, undefined],
+      [here, addr('Rue Neuve 1, 1000 Bruxelles', 50.8505, 4.3545), POS.s1],
+    ];
+    for (const [from, to, pos] of cases) {
+      const a = await fake(at(7, 31), { noRt: true }).route(from, to, at(7, 31), PRESET, pos);
+      const b = await real.core.route(from, to, at(7, 31), real.preset, pos);
+      const view = (x: PlanResult) => x.journeys.map((j) => `${j.label} ${times(j)} ${j.reason}`);
+      expect(view(a)).toEqual(view(b));
+      for (const j of a.journeys) expect(j.reason!.length).toBeLessThanOrEqual(60);
+    }
   });
 
   it('états vides : à pied, tu y es, sans position, aucun arrêt, pas de trajet complet', async () => {

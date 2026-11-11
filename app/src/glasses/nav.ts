@@ -155,7 +155,7 @@ export function serializeNav(s: NavState): string {
 }
 
 /** Écrans connus (un instantané de la 1.0 peut contenir un écran retiré en 1.1 : « journeys », « trip », Q6). */
-const SCREENS: ReadonlySet<string> = new Set(['home', 'nearby', 'board', 'favorites', 'places', 'steps', 'train', 'arrival', 'message']);
+const SCREENS: ReadonlySet<string> = new Set(['home', 'nearby', 'board', 'favorites', 'places', 'steps', 'others', 'train', 'arrival', 'message']);
 
 /** Lecture défensive d'un instantané ; null s'il est invalide. Les écrans inconnus sont retirés de la pile. */
 export function parseNav(x: unknown): NavState | null {

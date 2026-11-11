@@ -4,6 +4,7 @@
  * « imminent »), titres des trajets par vers() du cœur, comme sur le téléphone.
  */
 import type { Departure, FavoriteAnswer, Journey, Leg, NameLang, Settings } from '../core/api';
+import { meansText } from '../core/means';
 import { NB as CORE_NB, dayWord as coreDayWord, timeText, vers } from '../core/text';
 import { OP_NAME, displayName, hhmm, lineLabel, mainMode, minutesUntil } from '../core/util';
 import type { AreaSummary, Mode, Names, Op } from '../../../shared/types';
@@ -22,12 +23,14 @@ export const HINTS = {
   boardFav: `▲▼ départs   toucher${NB}: ★ retirer   double${NB}: retour`,
   favorites: `▲▼ choisir   toucher${NB}: ouvrir   double${NB}: retour`,
   places: `▲▼ choisir   toucher${NB}: trajet   double${NB}: retour`,
-  /** Étapes du trajet suivi. */
-  steps: `▲▼ autre trajet   toucher${NB}: détail   double${NB}: retour`,
+  /** Étapes du trajet suivi (1.2.1 : ▲▼ font défiler les étapes, jamais un autre trajet). */
+  steps: `▲▼ étapes   toucher${NB}: détail   double${NB}: retour`,
   /** Étapes d'une autre proposition. */
-  stepsOther: `▲▼ autre trajet   toucher${NB}: suivre ce trajet   double${NB}: retour`,
+  stepsOther: `▲▼ étapes   toucher${NB}: suivre ce trajet   double${NB}: retour`,
   /** Trajet entièrement à pied. */
-  stepsWalk: `▲▼ autre trajet   double${NB}: retour`,
+  stepsWalk: `▲▼ étapes   double${NB}: retour`,
+  /** 1.2.1 : « Autres trajets ». */
+  others: `▲▼ choisir   toucher${NB}: voir   double${NB}: retour`,
   train: `▲▼ arrêts   double${NB}: retour`,
   arrival: `toucher${NB}: ★ garder ce trajet   double${NB}: retour`,
   message: `double toucher${NB}: retour`,
@@ -38,7 +41,7 @@ export const HINTS = {
   firstRun: `toucher${NB}: continuer   double${NB}: quitter`,
   /** Quai Web : rien à quitter, l'onglet se ferme dans le navigateur. */
   firstRunWeb: `toucher${NB}: continuer`,
-  /** Message « Quai 1.2 ». */
+  /** Message « Quai 1.2.1 ». */
   news: `toucher${NB}: continuer`,
   quit: `double toucher${NB}: quitter`,
 } as const;
@@ -48,6 +51,9 @@ export const NOTE_PLANNED = '~ horaire prévu, sans temps réel';
 export const NOTE_RT_DOWN = `Temps réel indisponible${NB}: horaires prévus ~`;
 /** Téléphone hors ligne. */
 export const NOTE_OFFLINE = `Pas de réseau${NB}: horaires prévus ~`;
+/** 1.2.1 : mêmes états sur l'accueil, sans « ~ » (l'accueil n'en affiche plus, PRD-1.2.1 § 4.5). */
+export const HOME_RT_DOWN = `Temps réel indisponible${NB}: horaires prévus`;
+export const HOME_OFFLINE = `Pas de réseau${NB}: horaires prévus`;
 /** Marque du dernier passage annoncé d'une ligne (STIB « Dernier passage »), en fin de colonne. */
 export const LAST_MARK = ', dernier';
 
@@ -382,6 +388,86 @@ export function stopAnswerLine(a: FavoriteAnswer | undefined, now: number, setti
   const out: FavoriteLine = { right: nextText(d1, now, mp), second: textWidth(second) > FULL_PX ? truncate(second, FULL_PX) : second, planned };
   if (d1.last && !d1.cancelled) out.tail = LAST_MARK;
   return out;
+}
+
+/* ------------------------------ Accueil 1.2.1 : une ligne par favori ------------------------------ */
+
+/** Colonne de droite de l'accueil 1.2.1 (WIDTHS.wideRight). */
+export const HOME_RIGHT_PX = 210;
+
+/**
+ * Départ conseillé puis arrivée (accueil 1.2.1, PRD-1.2.1 § 4.3), jamais de « ~ » : « maintenant → 21:34 »,
+ * « dans 4 min → 21:34 » (1 à 15 min), « 22:10 → 23:05 », « demain 06:20 → 06:46 ». `clock` : l'heure même tout
+ * près (départ d'un train qu'on rejoint par ses propres moyens).
+ */
+export function leaveArrive(leave: number, arr: number, now: number, clock = false): string {
+  const day = dayWord(leave, now);
+  const m = minutesUntil(leave, now);
+  const start = day ? `${day} ${hhmm(leave)}` : clock ? hhmm(leave) : m < 1 ? 'maintenant' : m <= 15 ? `dans ${minText(m)}` : hhmm(leave);
+  return `${start} → ${hhmm(arr)}`;
+}
+
+/**
+ * Réponse d'un lieu ou d'un trajet favori sur une ligne (accueil 1.2.1, § 4.3) : départ conseillé et arrivée ; le
+ * détail (véhicule, voie, changements) est sur la page du trajet. États : « … » (en calcul), « tu y es », « sans
+ * position », « aucun trajet ».
+ */
+export function tripHomeText(a: FavoriteAnswer | undefined, now: number): string {
+  if (!a) return '…';
+  if (a.state === 'here') return 'tu y es';
+  if (a.state === 'noPosition') return 'sans position';
+  const j = a.plan?.journeys[0];
+  if (a.state !== 'ok' || !j) return 'aucun trajet';
+  const r = firstRide(j);
+  if (!r) {
+    // À pied : on part quand on veut.
+    const leave = Math.max(j.dep, now);
+    return leaveArrive(leave, leave + (j.arr - j.dep), now);
+  }
+  if (!catchable(j, now)) return '…';
+  // Gare de départ hors de portée à pied : l'heure du train.
+  if (a.fromStation) return leaveArrive(r.dep, j.arr, now, true);
+  return leaveArrive(j.leaveAt, j.arr, now);
+}
+
+/**
+ * Prochain départ d'un arrêt favori sur l'accueil (1.2.1, § 4.3), sans « ~ » : « IC 21:08 voie 2 » (forme courte
+ * « v.2 » si la colonne est trop étroite), « T3 2 min », « IC demain 06:20 » ; « , dernier » ajouté s'il tient.
+ */
+export function stopHomeText(a: FavoriteAnswer | undefined, now: number): { text: string; tail?: string } {
+  if (!a) return { text: '…' };
+  if (a.state === 'missing') return { text: 'introuvable' };
+  const d = upcoming(a.board?.departures ?? [], now)[0];
+  if (!d) return { text: 'aucun départ' };
+  let text = nextText(d, now, false);
+  if (d.mode === 'train' && !d.cancelled && !dayWord(d.sched, now)) {
+    const plat = platformText(d.platform, d.newPlatform);
+    const long = `${d.line} ${hhmm(d.sched)}${delaySuffix(d.delayMin)}${plat ? ' ' + plat : ''}`;
+    if (textWidth(long) <= HOME_RIGHT_PX) text = long;
+  }
+  return d.last && !d.cancelled ? { text, tail: LAST_MARK } : { text };
+}
+
+/** Durées des marches d'au moins 1 min, dans l'ordre du trajet. */
+function walksOf(j: Pick<Journey, 'legs'>): number[] {
+  return j.legs.filter((l) => l.kind === 'walk').map((l) => Math.round(l.walkMin ?? (l.arr - l.dep) / 60_000)).filter((m) => m >= 1);
+}
+
+/** Marches d'une proposition : « à pied 5 + 4 + 2 min » ; plus de 3 marches : « 23 min à pied » ; aucune : ''. */
+export function walksPhrase(j: Pick<Journey, 'legs'>): string {
+  const walks = walksOf(j);
+  if (!walks.length) return '';
+  return walks.length > 3 ? `${minText(walks.reduce((s, m) => s + m, 0))} à pied` : `à pied ${walks.join(' + ')}${NB}min`;
+}
+
+/**
+ * « Comment » d'une proposition (« Autres trajets », 1.2.1 § 3.3) : « bus W + S1, à pied 3 + 5 min » (moyens du cœur,
+ * puis les marches) ; plus de 3 marches : « 23 min à pied » ; trajet à pied : « à pied, 25 min ».
+ */
+export function meansLine(j: Pick<Journey, 'legs' | 'dep' | 'arr'>): string {
+  if (!j.legs.some((l) => l.kind === 'ride')) return `à pied, ${minText(Math.max(1, Math.round((j.arr - j.dep) / 60_000)))}`;
+  const walks = walksPhrase(j);
+  return walks ? `${meansText(j)}, ${walks}` : meansText(j);
 }
 
 /**

@@ -12,6 +12,8 @@ export type ScreenId =
   | 'favorites'
   | 'places'
   | 'steps'
+  /** 1.2.1 : « Autres trajets », les autres propositions d'un trajet (PRD-1.2.1 § 3.3). */
+  | 'others'
   | 'train'
   | 'arrival'
   | 'message';
@@ -48,6 +50,30 @@ export interface StepsRoute {
    * (un trajet déjà en cours reste suivi) ; 'phone' : demande explicite du téléphone.
    */
   follow?: 'open' | 'phone';
+  /**
+   * 1.2.1 : proposition ouverte depuis « Autres trajets » (au-dessus de la liste dans la pile) : double toucher et ▼ au
+   * bout des étapes reviennent à la liste.
+   */
+  fromList?: boolean;
+}
+
+/**
+ * 1.2.1 : « Autres trajets » (PRD-1.2.1 § 3.3), ouverte par ▼ au bout des étapes : les propositions de la session
+ * sauf celle des étapes du dessous (`index`). Toucher une entrée empile ses étapes (StepsRoute.fromList).
+ */
+export interface OthersRoute {
+  screen: 'others';
+  /** Session d'étapes (StepsRoute.key) : trajet suivi, cache. */
+  key?: string;
+  /** « Vers le bureau » (titre des étapes). */
+  title: string;
+  /** Toutes les propositions de la session, dans l'ordre du cœur. */
+  journeys: Journey[];
+  /** Proposition des étapes d'où la liste a été ouverte (absente de la liste). */
+  index: number;
+  from?: Endpoint;
+  to?: Endpoint;
+  favoriteId?: string;
 }
 
 export type Route =
@@ -58,11 +84,12 @@ export type Route =
   | { screen: 'favorites'; exclude?: string[] }
   | { screen: 'places' }
   | StepsRoute
+  | OthersRoute
   | { screen: 'train'; journey: Journey; leg: number; label?: string; auto?: boolean; trip?: { from: AreaRef; to: AreaRef } }
   | { screen: 'arrival'; journey: Journey; leg: number; trip?: { from: AreaRef; to: AreaRef } }
   | { screen: 'message'; kind: MessageKind; title: string; lines: string[] };
 
-/** news : message « Quai 1.2 » (une fois, après la mise à jour depuis la 1.0 ou la 1.1). */
+/** news : message « Quai 1.2.1 » (une fois, après la mise à jour depuis une version antérieure ; lignes dans la route). */
 export type MessageKind = 'loading' | 'error' | 'empty' | 'firstRun' | 'notConfigured' | 'info' | 'news';
 
 /** Ce que fait un toucher sur un élément. */
@@ -93,16 +120,31 @@ export interface Item {
   b2?: string;
   /** Deux lignes même si la seconde est vide (favori en calcul : la liste ne saute pas quand la réponse arrive). */
   two?: boolean;
+  /**
+   * 1.2.1 : une ligne vide au-dessus de l'élément (accueil : entre les favoris et « Autour de moi »). Elle compte dans
+   * la hauteur de l'élément mais ne se sélectionne pas : les indices des éléments ne changent pas.
+   */
+  gap?: boolean;
   /** Fin de la colonne b jamais coupée (ex. « , dernier ») : la colonne b est raccourcie avant elle. */
   bTail?: string;
   /** Fin de la colonne c ajoutée seulement si elle tient en entier (la colonne c n'est jamais coupée pour elle). */
   cTail?: string;
+  /**
+   * 1.2.1 (accueil) : texte aligné à droite dans le conteneur de la colonne b, avec la luminosité de b (réponse d'un
+   * favori en retrait, « maintenant → 21:34 ») ; `b` est coupé avant lui. `bRightTail` : fin ajoutée si elle tient.
+   */
+  bRight?: string;
+  bRightTail?: string;
   action?: Intent;
 }
 
 /** Gabarits de colonnes (largeurs fixes : pas de reconstruction de page lors des rafraîchissements). */
 export type Layout =
   | 'menu'
+  /** 1.2.1 : accueil, favoris en retrait sous « Favoris » (PRD-1.2.1 § 4). */
+  | 'home'
+  /** 1.2.1 : « Autres trajets » (PRD-1.2.1 § 3.3). */
+  | 'others'
   | 'nearby'
   | 'board'
   | 'boardTrain'
@@ -127,6 +169,11 @@ export interface GlassesView {
   reserveNote?: boolean;
   /** Aides de gestes (vide si désactivées). */
   hints: string;
+  /**
+   * 1.2.1 (accueil) : sous une note (jour férié), la ligne d'aide n'est pas réservée quand l'aide est vide ; la note
+   * devient la dernière ligne de l'écran et la liste garde une ligne de plus.
+   */
+  compactFoot?: boolean;
   /** Élément sélectionné au premier affichage (ex. « prochain » arrêt dans le train). */
   initialSel?: number;
   /** Premier élément visible au premier affichage. */
@@ -135,7 +182,7 @@ export interface GlassesView {
   tap?: Intent;
   /**
    * Sans curseur (départs, étapes) : ▲▼ font défiler ; arrivé au bout, le contrôleur reçoit un effet « edge »
-   * (étapes : autre proposition).
+   * (étapes, 1.2.1 : ▼ ouvre « Autres trajets », jamais un autre trajet directement).
    */
   scroll?: boolean;
   /** Écran sans curseur : ligne marquée « ▶ » (étape en cours ou prochaine du trajet suivi). */

@@ -1,6 +1,7 @@
 /**
- * Réglages du calcul de trajets (PRD 1.1 § 4.4, PRD-1.2 § 1, design-routing.md § 4 et § 4.8). Constantes du cœur, en
- * minutes et en mètres sauf mention. Les seuils sont validés sur les vraies données (Q5, DECISIONS.md).
+ * Réglages du calcul de trajets (PRD 1.1 § 4.4, PRD-1.2 § 1, PRD-1.2.1 § 1, design-routing.md § 4 et § 4.8).
+ * Constantes du cœur, en minutes et en mètres sauf mention. Les seuils sont validés sur les vraies données (Q5,
+ * DECISIONS.md).
  */
 import type { Mode } from '../../../../shared/types';
 import type { Settings } from '../api';
@@ -46,20 +47,22 @@ export const P = {
   /** Arrivée à moins de cette distance du départ : « Tu es déjà … » (PlanResult.empty 'here'). */
   hereM: 300,
 
-  /* ---------- classement (PRD-1.2 § 1) ---------- */
+  /* ---------- classement (PRD-1.2 § 1, PRD-1.2.1 § 1) ---------- */
   /** « À 5 min près » : un trajet en devance un autre s'il arrive au moins 5 min plus tôt ; égalités de durée et de
-   *  marche ; une marche longue commence 5 min au-delà de la marche maximale. */
+   *  marche ; « Plus tôt » fait gagner au moins 5 min. */
   tieMin: 5,
   /** La nuit (aucun départ dans l'heure), un trajet n'en devance un autre que s'il ne part pas plus de 30 min avant. */
   nightAheadMin: 30,
-  /** Un trajet avec une marche longue n'est « Le plus court » que s'il arrive au moins 10 min avant le plus court
-   *  des trajets sans marche longue (sinon « Plus tôt » s'il fait gagner au moins 5 min). */
-  longWalkGainMin: 10,
+  /** Paliers de marche (1.2.1 § 1.1) : palier 0 jusqu'à la marche maximale, puis un palier par tranche de 5 min. */
+  walkStepMin: 5,
+  /** Garde-fou contre les détours (1.2.1 § 1.2) : la proposition 1 d'un palier arrive au plus 30 min après le trajet
+   *  qui arrive le plus tôt, sinon le palier suivant. */
+  detourGuardMin: 30,
   /** « Moins de marche », « Sans changement », « Moins de changements » : arrivée au plus 20 min après. */
   optionLateMin: 20,
   /** « Plus tard » : jamais un trajet devancé de plus de 30 min par un trajet parti au plus 30 min avant. */
   laterGuardMin: 30,
-  /** « À pied » : marche seule de 30 min au plus, arrivée au plus 5 min après « Le plus court ». */
+  /** « À pied » : marche seule de 30 min au plus, arrivée au plus 5 min après la proposition 1. */
   walkOnlyMaxMin: 30,
   walkOnlyLateMin: 5,
   /** Fenêtre des propositions la nuit (après le premier départ possible). */
@@ -86,18 +89,17 @@ export const maxWalkOf = (s: Pick<Settings, 'maxWalkMin'>) => Math.min(30, Math.
 
 /** Rayons de marche en minutes (PRD-1.2 § 1.2), quel que soit le réglage. */
 export interface WalkRadii {
-  /** Préférence : la marche maximale réglée. */
+  /** Préférence : la marche maximale réglée (palier 0, PRD-1.2.1 § 1.1). */
   pref: number;
-  /** Recherche élargie : arrêts urbains jusqu'à 15 min, gares jusqu'à 25 min (ou la marche maximale plus 5 min). */
+  /** Recherche élargie : arrêts urbains jusqu'à 15 min, gares jusqu'à 25 min (au moins la marche maximale plus
+   *  5 min, le palier 1). */
   urban: number;
   station: number;
   /** Passe courte : 5 min. */
   short: number;
-  /** Marche longue : à partir de la marche maximale plus 5 min. */
-  long: number;
 }
 
 export function walkRadii(maxWalk: number): WalkRadii {
-  const long = maxWalk + P.tieMin;
-  return { pref: maxWalk, urban: Math.max(P.wideUrbanMin, long), station: Math.max(P.wideStationMin, long), short: P.shortWalkMin, long };
+  const tier1 = maxWalk + P.walkStepMin;
+  return { pref: maxWalk, urban: Math.max(P.wideUrbanMin, tier1), station: Math.max(P.wideStationMin, tier1), short: P.shortWalkMin };
 }

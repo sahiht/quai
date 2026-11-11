@@ -1,9 +1,10 @@
 /**
  * Rechercher un trajet (T2) : « Départ » et « Arrivée » en champs uniques (adresse, gare, arrêt, lieu, récent),
- * trajets classés, étiquetés et expliqués par le cœur (route, PRD-1.2 § 1), une carte par trajet avec sa phrase et
- * son bouton « Lunettes » (le trajet s'affiche dans les lunettes et devient le trajet suivi), « Garder en favori »
- * (un lieu depuis « Ma position », sinon un trajet fixe, PRD-1.2 § 2.2), issue proposée quand il n'y a pas de trajet
- * complet (M5).
+ * trajets classés et étiquetés par le cœur (route, PRD-1.2.1 § 1), une carte par trajet (PRD-1.2.1 § 7.2 : nom
+ * affiché, ligne « moyens », phrase qui dit pourquoi il passe devant ou derrière) avec son bouton « Lunettes » (le
+ * trajet s'affiche dans les lunettes et devient le trajet suivi), « Jour férié : horaires du dimanche » au-dessus des
+ * résultats (§ 5), « Garder en favori » (un lieu depuis « Ma position », sinon un trajet fixe, PRD-1.2 § 2.2), issue
+ * proposée quand il n'y a pas de trajet complet (M5).
  */
 import type { Endpoint, Favorite, FavoriteTrip, Journey, Leg, Mode, PlanResult, Settings } from '../../core/api';
 import { placeOf, placesOf } from '../../core/favorites';
@@ -13,10 +14,10 @@ import type { AreaSummary, Op } from '../../../../shared/types';
 import type { AreaRef } from '../../glasses/types';
 import { vehicleOf } from '../../glasses/format';
 import { header, type PhoneCtx } from '../app';
-import { h, ICON, svgNode } from '../dom';
+import { h, ICON } from '../dom';
 import { placeField, privacyNote, withRecent, type FieldChoice } from '../field';
 import { glassesButton, showTrip } from '../glasses-link';
-import { cardPhrase, emptyState, labelText, limitText, sameEndpoint, shortAddress, summaryText, T, timesText, towardsText, tripsCount, typo } from '../text';
+import { cardPhrase, cardTitle, emptyState, holidayLine, limitText, meansLine, sameEndpoint, shortAddress, summaryText, T, timesText, towardsText, tripsCount, typo } from '../text';
 import { messageHub } from '../ui';
 import { makePlace, type Spot } from './places';
 
@@ -26,8 +27,6 @@ export type End =
   | { kind: 'place'; placeId: string; label: string }
   | { kind: 'area'; area: AreaRef & { modes: Mode[] }; label: string }
   | { kind: 'address'; label: string; lat: number; lon: number; approx?: boolean };
-
-const MODE_TITLE: Record<Mode, string> = { train: 'Train', metro: 'Métro', tram: 'Tram', bus: 'Bus' };
 
 export function toEndpoint(e: End): Endpoint {
   if (e.kind === 'here') return { type: 'here' };
@@ -111,21 +110,6 @@ export function rideDetail(j: Journey, lang: 'fr' | 'nl' | 'local'): string {
   const status = first.cancelled ? 'supprimé' : delay > 0 ? `retard de ${delay} min annoncé` : first.rt ? 'à l’heure' : 'horaire prévu, sans temps réel';
   if (first.mode === 'train' && p) return `Voie ${p} à ${where}, ${status}`;
   return `${vehicleOf(first)} à ${where}, ${status}${first.last && !first.cancelled ? ', dernier passage' : ''}`;
-}
-
-/** Pastilles d'un trajet (« IC › 1 min › Tram 1 ») : noms des lignes en nœuds texte (données publiées, jamais du HTML). */
-function chips(j: Journey): HTMLElement {
-  const list = j.legs.map((l) =>
-    l.kind === 'walk'
-      ? h('span', { class: 'chip walk' }, svgNode(ICON.walk), h('span', null, typo(`${l.walkMin ?? Math.max(1, Math.round((l.arr - l.dep) / 60_000))} min`)))
-      : h(
-          'span',
-          { class: 'chip' },
-          svgNode(l.mode === 'train' ? ICON.trainSmall : l.mode === 'bus' ? ICON.busSmall : ICON.tramSmall),
-          h('span', null, l.mode && l.mode !== 'train' ? `${MODE_TITLE[l.mode]} ${l.line ?? ''}` : vehicleOf(l)),
-        ),
-  );
-  return h('span', { class: 'chips' }, list.flatMap((c, k) => (k ? [h('span', { class: 'sep', 'aria-hidden': 'true' }, '›'), c] : [c])));
 }
 
 export function searchScreen(ctx: PhoneCtx): HTMLElement {
@@ -276,16 +260,21 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
     });
   }
 
+  /**
+   * Carte d'un trajet (PRD-1.2.1 § 7.2) : nom affiché, heures et durée, ligne « moyens » (« bus W + S1, à pied 4 + 5
+   * min » ; noms des lignes en nœuds texte, données publiées, jamais du HTML), départ du premier véhicule, phrase.
+   */
   function card(j: Journey, i: number, r: PlanResult): HTMLElement {
     const now = ctx.clock.now();
-    const label = labelText(j);
+    const label = cardTitle(j, r);
+    const means = meansLine(j);
     const phrase = cardPhrase(j, r, ctx.settings.get().maxWalkMin);
     const radio = h(
       'div',
       { role: 'radio', class: 'card', 'aria-checked': i === selected ? 'true' : 'false', tabindex: i === selected ? '0' : '-1' },
       h('span', { class: 'tagrow' }, label ? h('span', { class: 'tag' }, label) : null),
       h('span', { class: 'r1' }, h('span', { class: 'time' }, timesText(j, now)), h('span', { class: 'dur' }, typo(summaryText(j)))),
-      chips(j),
+      means ? h('span', { class: 'means' }, typo(means)) : null,
       h('span', { class: 'det' }, typo(rideDetail(j, lang()))),
       phrase ? h('span', { class: 'why' }, typo(phrase)) : null,
     );
@@ -306,11 +295,19 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
     }
     const fromName = from.kind === 'here' ? from.label.replace(/^Ma position, /, '') : from.label;
     const t = after ?? ctx.clock.now();
+    // Jour férié (§ 5) : sous l'heure de la recherche, au-dessus des résultats, quand un trajet proposé part ce jour-là.
+    const holiday = busy || failure ? '' : holidayLine(result);
     resultsBox.append(
       h(
         'div',
         { class: 'res-head' },
-        h('div', { class: 'res-title' }, h('h2', null, `${fromName} → ${to.label}`), h('span', { class: 'small muted' }, after ? `départs dès ${hhmm(t)}` : `dès ${hhmm(t)}`)),
+        h(
+          'div',
+          { class: 'res-title' },
+          h('h2', null, `${fromName} → ${to.label}`),
+          h('span', { class: 'small muted' }, after ? `départs dès ${hhmm(t)}` : `dès ${hhmm(t)}`),
+          holiday ? h('span', { class: 'small muted holiday' }, holiday) : null,
+        ),
         h('button', { type: 'button', class: 'btn-link', onclick: () => { timeBox.hidden = !timeBox.hidden; if (!timeBox.hidden) timeInput.focus(); } }, 'Changer l’heure'),
       ),
       timeBox,
