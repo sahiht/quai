@@ -174,8 +174,9 @@ export interface Alert {
 /**
  * Étiquette d'une proposition (PRD § 4.3) : simple « Le plus simple », fast « Le plus rapide », earlier « Plus tôt »,
  * fewer « Moins de changements », none « Sans changement », walk « À pied », next « Le suivant », later « Plus tard ».
+ * 1.1.1 (docs/v1.1/moins-de-marche.md) : lesswalk « Moins de marche ».
  */
-export type JourneyLabel = 'simple' | 'fast' | 'earlier' | 'fewer' | 'none' | 'walk' | 'next' | 'later';
+export type JourneyLabel = 'simple' | 'fast' | 'earlier' | 'fewer' | 'none' | 'walk' | 'next' | 'later' | 'lesswalk';
 export const LABEL_TEXT: Record<JourneyLabel, string> = {
   simple: 'Le plus simple',
   fast: 'Le plus rapide',
@@ -185,6 +186,7 @@ export const LABEL_TEXT: Record<JourneyLabel, string> = {
   walk: 'À pied',
   next: 'Le suivant',
   later: 'Plus tard',
+  lesswalk: 'Moins de marche',
 };
 
 export interface Journey {
