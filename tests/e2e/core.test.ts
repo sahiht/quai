@@ -8,10 +8,12 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createCore, dataFreshness } from '../../app/src/core/index';
 import type { Core, Departure, Journey, Leg, Settings } from '../../app/src/core/api';
+import { migrateSettings } from '../../app/src/settings';
 import { areaLabel, displayName, hhmm, lineLabel, minutesUntil } from '../../app/src/core/util';
 import { buildFixtureData, memoryKV, ROOT, startDataServer, startStack, type Proc, type Stack } from './lib/stack';
 
-const PRESET = JSON.parse(readFileSync(join(ROOT, 'fixtures', 'app', 'preset.json'), 'utf8')) as Settings;
+/** Réglages de la 1.0 (preset.json) lus par la 1.2 : migrés en v3, le lieu « Bureau » fusionné avec « Vers le bureau ». */
+const PRESET: Settings = migrateSettings(JSON.parse(readFileSync(join(ROOT, 'fixtures', 'app', 'preset.json'), 'utf8')));
 const MAISON = { lat: 50.4655, lon: 4.859 };
 const S2_POS = { lat: 50.86, lon: 4.359 };
 const CENTRAL = { lat: 50.8454, lon: 4.3571 };
@@ -113,7 +115,7 @@ for (const scene of ['base', 'noRT'] as const) {
       });
 
       it('Aller à… Bureau, 1re proposition : marche 7, IC 07:42, Bruxelles-Central, marche 12', async () => {
-        const js = await coreAt(now).plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, now, PRESET, MAISON);
+        const js = await coreAt(now).plan({ type: 'here' }, { type: 'place', placeId: 'fav-bureau' }, now, PRESET, MAISON);
         expect(js.length).toBeGreaterThanOrEqual(1);
         expect(js.length).toBeLessThanOrEqual(3);
         distinctJourneys(js, now);
@@ -147,7 +149,7 @@ for (const scene of ['base', 'noRT'] as const) {
       });
 
       it('étapes : rafraîchissement à 07:37, alerte de voie en tête (base) ; aucun « ~ » perdu (noRT)', async () => {
-        const [j] = await coreAt(now).plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, now, PRESET, MAISON);
+        const [j] = await coreAt(now).plan({ type: 'here' }, { type: 'place', placeId: 'fav-bureau' }, now, PRESET, MAISON);
         const later = T('07:37');
         const r = await coreAt(later).refresh(j, PRESET);
         expect(r.id).toBe(j.id); // identifiant stable
@@ -391,7 +393,7 @@ describe('fonctions transversales', () => {
   it('jamais un véhicule plus lent que la marche : Bruxelles-Central → Bureau (12 min à pied)', async () => {
     const now = T('13:55');
     const from = { type: 'area', areaId: 'sncb:8813003', op: 'sncb', name: { fr: 'Bruxelles-Central', nl: 'Brussel-Centraal' }, lat: CENTRAL.lat, lon: CENTRAL.lon } as const;
-    const js = await coreAt(now).plan(from, { type: 'place', placeId: 'bureau' }, now, PRESET);
+    const js = await coreAt(now).plan(from, { type: 'place', placeId: 'fav-bureau' }, now, PRESET);
     expect(js.length).toBeGreaterThanOrEqual(1);
     const walkArr = now + 12 * 60_000;
     for (const j of js) expect(j.arr, `proposition ${hhmm(j.dep)} → ${hhmm(j.arr)}`).toBeLessThanOrEqual(walkArr);
@@ -434,7 +436,7 @@ describe('horaires périmés (dernière publication le 2026-11-01)', () => {
     expect(near.length).toBe(4);
     expect(near.every((n) => n.next === undefined)).toBe(true);
     expect(await core.trains('sncb:8813003', 'sncb:8892007', now, 3)).toEqual([]);
-    expect(await core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, now, PRESET, MAISON)).toEqual([]);
+    expect(await core.plan({ type: 'here' }, { type: 'place', placeId: 'fav-bureau' }, now, PRESET, MAISON)).toEqual([]);
     expect(await core.suggest(S2_POS, PRESET)).toBeNull();
   });
 

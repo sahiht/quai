@@ -11,10 +11,12 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { createCore } from '../../app/src/core/index';
 import type { Core, Endpoint, GeocodeAnswer, GeocodeResult, Journey, Settings } from '../../app/src/core/api';
 import { hhmm, lineLabel } from '../../app/src/core/util';
+import { migrateSettings } from '../../app/src/settings';
 import { startFaultyProxy, type FaultyProxy } from './lib/faulty';
 import { memoryKV, ROOT, startStack, TEST_KEY, type Stack } from './lib/stack';
 
-const PRESET = JSON.parse(readFileSync(join(ROOT, 'fixtures', 'app', 'preset-1.1.json'), 'utf8')) as Settings;
+/** Réglages v3 (1.2) : le préréglage 1.1 migré, comme l'appli le lit. */
+const PRESET: Settings = migrateSettings(JSON.parse(readFileSync(join(ROOT, 'fixtures', 'app', 'preset-1.1.json'), 'utf8')));
 const T = (hm: string, day = '2026-11-10') => Date.parse(`${day}T${hm}:00+01:00`);
 const S2 = { lat: 50.86, lon: 4.359 };
 const S3 = { lat: 50.8454, lon: 4.3571 };
@@ -150,15 +152,15 @@ describe('de l’adresse au trajet : résultat choisi → route() sur les donné
     expect(r.journeys[0].legs.at(-1)?.to.name.fr).toBe('Veldstraat 1, 9000 Gent');
   });
 
-  it('scénario 4 : adresses tapées « chaussée de bruxelles 1 waterloo » → « rue du progrès 20 » : bus W puis M2, puis le S1', async () => {
+  it('scénario 4 (CA-1.5) : adresses tapées « chaussée de bruxelles 1 waterloo » → « rue du progrès 20 » : le S1 d’abord, puis bus W et M2', async () => {
     const c = core(T('07:31'));
     const [from] = (await c.geocode('chaussée de bruxelles 1 waterloo', 'fr', null)).results;
     const [to] = (await c.geocode('rue du progrès 20', 'fr', null)).results;
     expect([from.label, to.label]).toEqual(['Chaussée de Bruxelles 1, 1410 Waterloo', 'Rue du Progrès 20, 1210 Saint-Josse-ten-Noode']);
     const r = await c.route(asEndpoint(from), asEndpoint(to), T('07:31'), PRESET, null);
-    expect(r.journeys.map((j) => j.label)).toEqual(['simple', 'fast', 'next']);
-    expect(legsOf(r.journeys[0])).toBe('marche 2 | 07:36 W Waterloo Eglise → Bruxelles Midi 08:21 | marche 2 | 08:29 M2 Gare du Midi → Rogier 08:43 | marche 3');
-    expect(legsOf(r.journeys[1])).toBe('marche 19 | 07:55 S1 Waterloo → Bruxelles-Nord 08:25 | marche 5');
+    expect(r.journeys.map((j) => j.label)).toEqual(['short', 'lesswalk', 'next']);
+    expect(legsOf(r.journeys[0])).toBe('marche 19 | 07:55 S1 Waterloo → Bruxelles-Nord 08:25 | marche 5');
+    expect(legsOf(r.journeys[1])).toBe('marche 2 | 07:36 W Waterloo Eglise → Bruxelles Midi 08:21 | marche 2 | 08:29 M2 Gare du Midi → Rogier 08:43 | marche 3');
   });
 
   it('CA-M5.2 et CA-M5.3 : « boulevard du centenaire 1 » depuis S2 et depuis « avenue winston churchill 100 »', async () => {
@@ -171,11 +173,11 @@ describe('de l’adresse au trajet : résultat choisi → route() sur les donné
     expect(legsOf(u.journeys[0])).toBe('marche 2 | 08:09 T3 Churchill → Rogier 08:30 | 08:35 M6 Rogier → Roi Baudouin 08:49 | marche 1');
   });
 
-  it('CA-M5.6 : « rue du bois 1 bastogne » : aucun arrêt à moins de 20 min (noStopTo)', async () => {
+  it('CA-M5.6 : « rue du bois 1 bastogne » : aucun arrêt à moins de 15 min (noStopTo, PRD-1.2 § 1.4)', async () => {
     const c = core(T('13:55'));
     const [bastogne] = (await c.geocode('rue du bois 1 bastogne', 'fr', S3)).results;
     expect(bastogne.label).toBe('Rue du Bois 1, 6600 Bastogne');
-    expect(await c.route({ type: 'here' }, asEndpoint(bastogne), T('13:55'), PRESET, S3)).toEqual({ journeys: [], empty: 'noStopTo', accessMin: 20 });
+    expect(await c.route({ type: 'here' }, asEndpoint(bastogne), T('13:55'), PRESET, S3)).toEqual({ journeys: [], empty: 'noStopTo', accessMin: 15 });
   });
 });
 

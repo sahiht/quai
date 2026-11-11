@@ -158,6 +158,8 @@ input.switch:checked::after { left: 21px; }
 /* 1.1 : écrans */
 .screen { display: flex; flex-direction: column; gap: 16px; }
 .form-body { display: flex; flex-direction: column; gap: 14px; }
+/* 1.2 : formulaires d'un favori (lieu, arrêt, trajet fixe), mêmes espacements que les écrans de la 1.1 */
+.place-form, .stop-form, .trip-form { display: flex; flex-direction: column; gap: 16px; }
 
 /* 1.1 : champ unique (adresse, gare, arrêt, lieu) */
 .fields { display: flex; flex-direction: column; gap: 6px; }

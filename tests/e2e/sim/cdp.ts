@@ -2,6 +2,7 @@
  * Pilote minimal de Chrome sans affichage (protocole DevTools, sans dépendance : WebSocket de Node 22) pour les
  * contrôles de l'interface du téléphone : page de l'appli construite (même code que dans l'appli Even, lunettes
  * dessinées dans l'émulateur de la page), console (QUAI_SCREEN), clics, saisie, captures 390 × 844 en densité 2.
+ * Sert aussi pour Quai Web (gestes par sa barre de boutons, position refusée par permission du navigateur).
  * Le stockage local de la page reste d'un chargement à l'autre (réouverture de Quai).
  *
  * Binaire : google-chrome (variable CHROME_BIN pour un autre emplacement).
@@ -281,6 +282,11 @@ export class Page {
     await this.eval(`(() => { const s = document.createElement('style'); s.dataset.qa = '1'; s.textContent = ${JSON.stringify(css)}; document.head.appendChild(s); return true; })()`);
   }
 
+  /** Permission du navigateur pour toutes les origines (Quai Web : position refusée par l'utilisateur). */
+  async permission(name: string, setting: 'granted' | 'denied' | 'prompt'): Promise<void> {
+    await this.chrome.send('Browser.setPermission', { permission: { name }, setting });
+  }
+
   /** Téléphone hors ligne (navigator.onLine faux, requêtes refusées) ou de nouveau en ligne. */
   async offline(on: boolean): Promise<void> {
     await this.send('Network.enable');
@@ -328,8 +334,8 @@ export class Page {
    * (le filtre des gestes ignore deux glissements de même sens à moins de 350 ms). Jamais de double toucher sur
    * l'écran racine : la page de développement demanderait « Quitter Quai ? » dans une boîte du navigateur.
    */
-  async gesture(g: 'up' | 'down' | 'tap' | 'double'): Promise<void> {
-    await this.click(`.g-emu button[data-g="${g}"]`);
+  async gesture(g: 'up' | 'down' | 'tap' | 'double', bar = '.g-emu'): Promise<void> {
+    await this.click(`${bar} button[data-g="${g}"]`);
     await sleep(450);
   }
 

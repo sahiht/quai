@@ -11,10 +11,12 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createCore, QuaiError, MESSAGES } from '../../app/src/core/index';
 import type { Core, Settings } from '../../app/src/core/api';
+import { migrateSettings } from '../../app/src/settings';
 import { startFaultyProxy, type FaultyProxy, type Rule } from './lib/faulty';
 import { memoryKV, ROOT, startRelay, startStack, TEST_KEY, type Proc, type Stack } from './lib/stack';
 
-const PRESET = JSON.parse(readFileSync(join(ROOT, 'fixtures', 'app', 'preset.json'), 'utf8')) as Settings;
+/** Réglages de la 1.0 (preset.json) lus par la 1.2 : migrés en v3, le lieu « Bureau » fusionné avec « Vers le bureau ». */
+const PRESET: Settings = migrateSettings(JSON.parse(readFileSync(join(ROOT, 'fixtures', 'app', 'preset.json'), 'utf8')));
 const NOW = Date.parse('2026-11-10T12:10:00+01:00');
 const IC1258 = '88____:007::8814001:8821006:5:1258:20261231';
 const FRENCH = /[a-zàâçéèêëîïôûùüÿœ]/i;
@@ -366,7 +368,7 @@ describe('cœur : entrées de l’appli', () => {
 
   it('position absente : route() rend empty « noPosition » (contrat 1.1), plan() aucun trajet, suggest(null) reste calme', async () => {
     const c = core(Date.parse('2026-11-10T07:31:00+01:00'));
-    const bureau = { type: 'place', placeId: 'bureau' } as const;
+    const bureau = { type: 'place', placeId: 'fav-bureau' } as const;
     // 1.1 (api.ts, route) : plus d'exception « Position inconnue » ; l'interface affiche « sans position »
     for (const here of [undefined, null, { lat: Number.NaN, lon: 4 }, { lat: 50.4655, lon: Number.POSITIVE_INFINITY }]) {
       expect(await c.route({ type: 'here' }, bureau, NOW, PRESET, here), JSON.stringify(here)).toEqual({ journeys: [], empty: 'noPosition' });
@@ -379,11 +381,11 @@ describe('cœur : entrées de l’appli', () => {
   });
 
   it('lieu inconnu : « Lieu introuvable dans tes réglages »', async () => {
-    await expectQuaiError(core().plan({ type: 'place', placeId: 'nulle-part' }, { type: 'place', placeId: 'bureau' }, NOW, PRESET), 'placeUnknown');
+    await expectQuaiError(core().plan({ type: 'place', placeId: 'nulle-part' }, { type: 'place', placeId: 'fav-bureau' }, NOW, PRESET), 'placeUnknown');
   });
 
   it('réglages minimaux ou incohérents : pas d’exception', async () => {
-    const odd = { ...PRESET, maxWalkMin: -5, favorites: [], places: [], display: { ...PRESET.display, depsPerStop: 0 } } as Settings;
+    const odd = { ...PRESET, maxWalkMin: -5, favorites: [], display: { ...PRESET.display, depsPerStop: 0 } } as Settings;
     const c = core();
     expect(await c.suggest({ lat: 50.86, lon: 4.359 }, odd)).toBeNull();
     const b = await c.board('stib:6357F', { limit: 0 });

@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "how": "tests/e2e : npm run sim -- --tour (vrai cœur, données des fixtures)",
   "screens": [
     {
@@ -20,7 +20,7 @@
     },
     {
       "file": "glasses-favorites.png",
-      "what": "Autres favoris à 12:10 près de la gare du Nord, avec leur réponse"
+      "what": "Autres favoris à 12:10 près de la gare du Nord : lieux, trajet fixe et gare, avec leur réponse"
     },
     {
       "file": "glasses-first-run.png",
@@ -36,7 +36,7 @@
     },
     {
       "file": "glasses-home.png",
-      "what": "Accueil, 07:31 à la maison : les deux favoris en tête (scène base)"
+      "what": "Accueil, 07:31 à la maison : le lieu « Vers le bureau » et la gare de Namur en tête"
     },
     {
       "file": "glasses-journeys.png",
@@ -52,7 +52,7 @@
     },
     {
       "file": "glasses-places.png",
-      "what": "Aller à… : lieux et adresses récentes, avec l’heure d’arrivée"
+      "what": "Aller à… : les lieux, puis les adresses récentes, avec l’heure d’arrivée"
     },
     {
       "file": "glasses-steps-alert.png",
@@ -60,7 +60,7 @@
     },
     {
       "file": "glasses-steps.png",
-      "what": "Trajet proposé Maison vers Bureau, page 1, trajet suivi (alerte de voie en tête)"
+      "what": "Trajet proposé Maison vers Bureau, page 1 « Le plus court », trajet suivi (alerte de voie en tête)"
     },
     {
       "file": "glasses-train-detail.png",
@@ -72,7 +72,7 @@
     },
     {
       "file": "glasses-trip.png",
-      "what": "Vers Gand-Saint-Pierre, favori de gare à gare : ses étapes (remplace l’écran Trains A ▶ B de la 1.0)"
+      "what": "Vers Gand-Saint-Pierre, trajet fixe de gare à gare : « Le plus court : direct », puis « ▼ Le suivant »"
     },
     {
       "file": "phone-alerts.png",
@@ -96,11 +96,11 @@
     },
     {
       "file": "phone-favorites.png",
-      "what": "Mes favoris"
+      "what": "Mes favoris : lieux, arrêts et trajets fixes dans une seule liste"
     },
     {
       "file": "phone-home.png",
-      "what": "Accueil du téléphone : « Où vas-tu ? » et « Mes favoris »"
+      "what": "Accueil du téléphone : « Où vas-tu ? » et « Mes favoris », lieux compris"
     },
     {
       "file": "phone-onboarding.png",
@@ -108,7 +108,7 @@
     },
     {
       "file": "phone-places.png",
-      "what": "Mes lieux (lieux de la 1.0 : « Adresse à vérifier »)"
+      "what": "Un lieu de « Mes favoris » : nom, adresse et accès, créneau (remplace « Mes lieux » de la 1.1)"
     },
     {
       "file": "phone-search-results.png",

@@ -13,7 +13,8 @@
     "test:data": "vitest run data download",
     "test:core": "vitest run core robustness routing geocode",
     "sim": "tsx sim/run-sim.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:real": "vitest run real-data"
   },
   "devDependencies": {
     "@types/node": "22.20.5",

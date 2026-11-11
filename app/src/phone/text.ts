@@ -252,6 +252,14 @@ export function cardPhrase(j: Journey, result: PlanResult, maxWalkMin: number): 
   const changes = (prefix: string): string => {
     const d = later(j);
     if (d > 0) return `${prefix}, mais arrive ${minutes(d * 60_000)} plus tard.`;
+    // Arrive un peu avant « Le plus court » (moins de 5 min, ou avec une marche longue) : jamais « même heure d’arrivée ».
+    // Comme la carte « Plus tôt » : la marche longue, sinon l'heure de départ plus tôt, disent pourquoi elle n'est pas en tête.
+    if (d < 0) {
+      const n = minutes(-d * 60_000);
+      if (hasLongWalk(j, maxWalkMin)) return `${prefix}, arrive ${n} plus tôt, mais avec ${longestWalk(j)} min à pied.`;
+      const start = journeyTimes(j).start;
+      return minuteOf(start) < minuteOf(journeyTimes(short ?? j).start) ? `${prefix}, arrive ${n} plus tôt, en partant à ${hhmm(start)}.` : `${prefix}, arrive ${n} plus tôt.`;
+    }
     const earlier = minuteOf(journeyTimes(short ?? j).start) - minuteOf(journeyTimes(j).start);
     return earlier > 0 ? `${prefix}, en partant ${minutes(earlier * 60_000)} plus tôt.` : `${prefix}, même heure d’arrivée.`;
   };

@@ -2,8 +2,10 @@
  * Intégration 1.1 entre équipes : le calcul de trajets (équipe routage, développé sur les fixtures du cœur produites par
  * app/test/core/support/gen-fixtures.ts) sur les fichiers que produit vraiment le pipeline (zips de
  * fixtures/pipeline/gtfs, npm run build-data), servis par serve-data, avec le vrai relais (npm run dev) branché sur le
- * faux portail BMC. Vrai cœur (createCore), réglages fixtures/app/preset-1.1.json.
- * Oracle : fixtures/README.md (« Extension 1.1 »), PRD § 5 (CA-M1 à CA-M8), docs/v1.1/DECISIONS.md § 7.
+ * faux portail BMC. Vrai cœur (createCore), réglages fixtures/app/preset-1.1.json migrés en v3 par app/src/settings.ts,
+ * comme l'appli les lit (1.2 : lieux fondus dans les favoris).
+ * Oracle : fixtures/README.md (« Extension 1.1 »), PRD 1.1 § 5 (CA-M1 à CA-M8), docs/v1.2/PRD-1.2.md § 1 et § 5
+ * (« Le plus court » d'abord, CA-1.2 à CA-1.6, CA-2.1, CA-2.2), docs/v1.1/DECISIONS.md § 7 et § 8.
  */
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -12,13 +14,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AreaFile, TileFile, TrainsDay } from '../../shared/types';
 import { createCore } from '../../app/src/core/index';
 import { LABEL_TEXT, type Core, type Departure, type Endpoint, type Favorite, type FavoriteAnswer, type Journey, type Leg, type PlanResult, type Settings } from '../../app/src/core/api';
+import { favoriteTitle } from '../../app/src/core/favorites';
 import { hhmm, lineLabel, minutesUntil } from '../../app/src/core/util';
+import { migrateSettings } from '../../app/src/settings';
 import { textWidth } from '../../app/src/glasses/font';
 import { buildFeeds, feedZip, loadNetwork } from '../../fixtures/pipeline/make-gtfs';
 import { validateData } from './validate-data';
 import { buildFixtureData, GTFS, memoryKV, ROOT, startDataServer, startStack, type Proc, type Stack } from './lib/stack';
 
-const PRESET = JSON.parse(readFileSync(join(ROOT, 'fixtures', 'app', 'preset-1.1.json'), 'utf8')) as Settings;
+const readPreset = (name: string) => JSON.parse(readFileSync(join(ROOT, 'fixtures', 'app', name), 'utf8')) as Record<string, unknown>;
+/** Réglages v3 (1.2) : le préréglage 1.1 migré, comme l'appli le lit au premier lancement après la mise à jour. */
+const PRESET: Settings = migrateSettings(readPreset('preset-1.1.json'));
 const APP_FIXTURES = join(ROOT, 'app', 'test', 'fixtures', 'core', 'data');
 const T = (hm: string, day = '2026-11-10') => Date.parse(`${day}T${hm}:00+01:00`);
 const S1 = { lat: 50.4655, lon: 4.859 };
@@ -26,8 +32,9 @@ const S2 = { lat: 50.86, lon: 4.359 };
 const S3 = { lat: 50.8454, lon: 4.3571 };
 const BUREAU = { lat: 50.8441, lon: 4.3474 };
 const here: Endpoint = { type: 'here' };
-const bureau: Endpoint = { type: 'place', placeId: 'bureau' };
-const maison: Endpoint = { type: 'place', placeId: 'maison' };
+// 1.2 : un lieu est un favori lieu ; le lieu « Bureau » a fusionné avec « Vers le bureau » (CA-2.1)
+const bureau: Endpoint = { type: 'place', placeId: 'fav-bureau' };
+const maison: Endpoint = { type: 'place', placeId: 'fav-maison' };
 const addr = (label: string, lat: number, lon: number): Endpoint => ({ type: 'address', label, lat, lon });
 const RUE_NEUVE = addr('Rue Neuve 1, 1000 Bruxelles', 50.8505, 4.3545);
 const CENTENAIRE = addr('Boulevard du Centenaire 1, 1020 Bruxelles', 50.8915, 4.334);
@@ -58,13 +65,27 @@ function typography(t: string | undefined): void {
   expect(t, `espace ordinaire avant une unité dans « ${t} »`).not.toMatch(/\d (min|h)\b/);
 }
 
+/** Marche longue (PRD-1.2 § 1.2) : au moins la marche maximale plus 5 min. */
+const longWalk = (j: Journey, maxWalk = PRESET.maxWalkMin) => j.legs.some((l) => l.kind === 'walk' && (l.walkMin ?? 0) >= maxWalk + 5);
+
 /**
  * Invariants de toute réponse (CA-M3.1) : 3 propositions au plus, sans doublon, aucun véhicule supprimé ; étiquette et
  * raison « {étiquette} : … » sur une ligne des lunettes (542 px mesurés avec la police des lunettes) ; étapes dans
  * l'ordre du temps, de la position de départ à l'arrivée.
+ * 1.2 (CA-1.2) : « Le plus court » en tête ; aucune autre proposition n'arrive 5 min ou plus avant lui, sauf « Plus
+ * tôt » ; s'il a une marche longue, il arrive au moins 10 min avant toute proposition sans marche longue.
  */
-function check(r: PlanResult): PlanResult {
+function check(r: PlanResult, maxWalk = PRESET.maxWalkMin): PlanResult {
   expect(r.journeys.length).toBeLessThanOrEqual(3);
+  if (r.journeys.length) {
+    const short = r.journeys[0];
+    expect(short.label).toBe('short');
+    expect(r.journeys.filter((j) => j.label === 'short')).toHaveLength(1);
+    for (const j of r.journeys.slice(1)) {
+      if (j.label !== 'earlier') expect(j.arr, `${j.label} arrive 5 min ou plus avant « Le plus court »`).toBeGreaterThan(short.arr - 5 * 60_000);
+      if (longWalk(short, maxWalk) && !longWalk(j, maxWalk)) expect(short.arr, `marche longue en tête sans 10 min d’avance sur ${j.label}`).toBeLessThanOrEqual(j.arr - 10 * 60_000);
+    }
+  }
   expect(new Set(r.journeys.map((j) => j.id)).size).toBe(r.journeys.length);
   for (const j of r.journeys) {
     expect(j.legs.some((l) => l.kind === 'ride' && l.cancelled)).toBe(false);
@@ -180,13 +201,13 @@ describe('données : le pipeline produit ce que le routage attend (gen-fixtures.
 /* ------------------------------ route() sur les données du pipeline ------------------------------ */
 
 describe('route() : CA-M2, CA-M3, CA-M5 sur les données du pipeline', () => {
-  it('CA-M2.2, scène noRT : Maison → Bureau à 07:31, deux propositions (DECISIONS § 7)', async () => {
+  it('CA-M2.2, CA-1.3, scène noRT : Maison → Bureau à 07:31, « Le plus court » puis « Le suivant » (DECISIONS § 7)', async () => {
     await stack.scene('noRT');
     const r = await route(T('07:31'), here, bureau, S1);
-    expect(labels(r)).toEqual(['simple', 'next']);
+    expect(labels(r)).toEqual(['short', 'next']);
     expect(r.journeys.map(times)).toEqual(['07:33 → 08:58', '08:33 → 09:58']);
     expect(legsOf(r.journeys[0])).toBe('marche 7 | 07:42 IC Namur → Bruxelles-Central 08:46 | marche 12');
-    expect(r.journeys.map((j) => j.reason)).toEqual([fr('Le plus simple : direct, à pied 7 + 12 min'), fr('Le suivant : même trajet, 1 h plus tard')]);
+    expect(r.journeys.map((j) => j.reason)).toEqual([fr('Le plus court : direct, à pied 7 + 12 min'), fr('Le suivant : même trajet, 1 h plus tard')]);
     const [ic1, ic2] = r.journeys.map((j) => rides(j)[0]);
     expect([ic1.cat, ic1.head?.fr, ic1.platform, ic1.rt, ic1.from.areaId, ic1.to.areaId]).toEqual(['IC', 'Bruxelles-Midi', '4', false, 'sncb:8863008', 'sncb:8813003']);
     expect([hhmm(ic2.dep), ic2.platform]).toEqual(['08:42', '5']);
@@ -198,7 +219,7 @@ describe('route() : CA-M2, CA-M3, CA-M5 sur les données du pipeline', () => {
   it('CA-M2.1, scène base : 07:35 → 09:00, IC +2 voie 6, alerte de voie en tête', async () => {
     await stack.scene('base');
     const r = await route(T('07:31'), here, bureau, S1);
-    expect(labels(r)).toEqual(['simple', 'next']);
+    expect(labels(r)).toEqual(['short', 'next']);
     expect(r.journeys.map(times)).toEqual(['07:35 → 09:00', '08:33 → 09:58']);
     const ic = rides(r.journeys[0])[0];
     expect([hhmm(ic.schedDep), hhmm(ic.dep), ic.newPlatform, ic.delayMin, ic.rt, hhmm(ic.arr)]).toEqual(['07:42', '07:44', '6', 2, true, '08:48']);
@@ -206,59 +227,60 @@ describe('route() : CA-M2, CA-M3, CA-M5 sur les données du pipeline', () => {
     expect(hhmm(r.journeys[0].leaveAt)).toBe('07:35');
   });
 
-  it('CA-M3.4, CA-M5.1 : Maison → Rue Neuve 1 (noRT) : simple 08:56, rapide par Bruxelles-Nord et le T3 08:51, suivant', async () => {
+  it('CA-1.4, CA-M5.1 : Maison → Rue Neuve 1 (noRT) : le plus court par Bruxelles-Nord et le T3 (08:51), puis le direct « Sans changement »', async () => {
     await stack.scene('noRT');
     const r = await route(T('07:31'), here, RUE_NEUVE, S1);
     expect(r.empty).toBeUndefined();
-    expect(labels(r)).toEqual(['simple', 'fast', 'next']);
-    expect(r.journeys.map(times)).toEqual(['07:33 → 08:56', '07:33 → 08:51', '08:33 → 09:56']);
-    expect(legsOf(r.journeys[0])).toBe('marche 7 | 07:42 IC Namur → Bruxelles-Central 08:46 | marche 10');
-    expect(legsOf(r.journeys[1])).toBe('marche 7 | 07:42 IC Namur → Bruxelles-Nord 08:40 | marche 2 | 08:44 T3 Gare du Nord → De Brouckere 08:48 | marche 3');
+    expect(labels(r)).toEqual(['short', 'none', 'next']);
+    expect(r.journeys.map(times)).toEqual(['07:33 → 08:51', '07:33 → 08:56', '08:33 → 09:55']);
+    expect(legsOf(r.journeys[0])).toBe('marche 7 | 07:42 IC Namur → Bruxelles-Nord 08:40 | marche 2 | 08:44 T3 Gare du Nord → De Brouckere 08:48 | marche 3');
+    expect(legsOf(r.journeys[1])).toBe('marche 7 | 07:42 IC Namur → Bruxelles-Central 08:46 | marche 10');
+    expect(legsOf(r.journeys[2])).toBe('marche 7 | 08:42 IC Namur → Bruxelles-Nord 09:40 | marche 2 | 09:48 T3 Gare du Nord → De Brouckere 09:52 | marche 3');
     expect(r.journeys.map((j) => j.reason)).toEqual([
-      fr('Le plus simple : direct, à pied 7 + 10 min'),
-      fr('Le plus rapide : 5 min plus tôt, 1 changement'),
+      fr('Le plus court : 1 changement, à pied 7 + 2 + 3 min'),
+      fr('Sans changement : à pied 7 + 10 min'),
       fr('Le suivant : même trajet, 1 h plus tard'),
     ]);
     // C1 : le tram du fichier de ligne donne ses arrêts et l'arrêt physique pour le temps réel (pointid STIB)
-    const t3 = rides(r.journeys[1])[1];
+    const t3 = rides(r.journeys[0])[1];
     expect([t3.op, t3.line, t3.fromStop, t3.toStop, t3.head?.fr]).toEqual(['stib', '3', '6357', '6361', 'Churchill']);
     expect(t3.stops?.map((s) => s.name.fr)).toEqual(['Gare du Nord', 'Rogier', 'De Brouckere']);
   });
 
-  it('CA-M3.4, scène base : l’IC a 2 min de retard, le classement reste le même sur les heures estimées (PRD § 4.5)', async () => {
+  it('CA-1.4, scène base : l’IC a 2 min de retard, le classement reste le même sur les heures estimées (PRD § 4.5)', async () => {
     await stack.scene('base');
     const r = await route(T('07:31'), here, RUE_NEUVE, S1);
-    expect(labels(r)).toEqual(['simple', 'fast', 'next']);
-    expect(r.journeys.map(times)).toEqual(['07:35 → 08:58', '07:35 → 08:51', '08:33 → 09:56']);
+    expect(labels(r)).toEqual(['short', 'none', 'next']);
+    expect(r.journeys.map(times)).toEqual(['07:35 → 08:51', '07:35 → 08:58', '08:33 → 09:55']);
     // correspondance tenue de justesse : Bruxelles-Nord 08:42, 2 min à pied, T3 08:44
-    expect(legsOf(r.journeys[1])).toBe('marche 7 | 07:44 IC Namur → Bruxelles-Nord 08:42 | marche 2 | 08:44 T3 Gare du Nord → De Brouckere 08:48 | marche 3');
-    expect(r.journeys[1].reason).toBe(fr('Le plus rapide : 7 min plus tôt, 1 changement'));
+    expect(legsOf(r.journeys[0])).toBe('marche 7 | 07:44 IC Namur → Bruxelles-Nord 08:42 | marche 2 | 08:44 T3 Gare du Nord → De Brouckere 08:48 | marche 3');
+    expect(r.journeys[0].reason).toBe(fr('Le plus court : 1 changement, à pied 7 + 2 + 3 min'));
   });
 
-  it('CA-M3.5, CA-M5.5 : scénario 4 de Waterloo (cas H) : bus W puis M2 d’abord, marche et S1 « Le plus rapide »', async () => {
+  it('CA-1.5, CA-M5.5 : scénario 4 de Waterloo (cas H) : 19 min à pied et le S1 d’abord (16 min plus tôt), bus W et M2 « Moins de marche »', async () => {
     await stack.scene('noRT');
     const r = await route(T('07:31'), WATERLOO, PROGRES);
-    expect(labels(r)).toEqual(['simple', 'fast', 'next']);
-    expect(r.journeys.map(times)).toEqual(['07:32 → 08:46', '07:34 → 08:30', '07:52 → 09:04']);
-    expect(legsOf(r.journeys[0])).toBe('marche 2 | 07:36 W Waterloo Eglise → Bruxelles Midi 08:21 | marche 2 | 08:29 M2 Gare du Midi → Rogier 08:43 | marche 3');
-    expect(legsOf(r.journeys[1])).toBe('marche 19 | 07:55 S1 Waterloo → Bruxelles-Nord 08:25 | marche 5');
+    expect(labels(r)).toEqual(['short', 'lesswalk', 'next']);
+    expect(r.journeys.map(times)).toEqual(['07:34 → 08:30', '07:32 → 08:46', '08:04 → 09:00']);
+    expect(legsOf(r.journeys[0])).toBe('marche 19 | 07:55 S1 Waterloo → Bruxelles-Nord 08:25 | marche 5');
+    expect(legsOf(r.journeys[1])).toBe('marche 2 | 07:36 W Waterloo Eglise → Bruxelles Midi 08:21 | marche 2 | 08:29 M2 Gare du Midi → Rogier 08:43 | marche 3');
     expect(r.journeys.map((j) => j.reason)).toEqual([
-      fr('Le plus simple : 1 changement, à pied 2 + 2 + 3 min'),
-      fr('Le plus rapide : 16 min plus tôt, direct'),
-      fr('Le suivant : même trajet, 20 min plus tard'),
+      fr('Le plus court : direct, à pied 19 + 5 min'),
+      fr('Moins de marche : 1 changement, à pied 2 + 2 + 3 min'),
+      fr('Le suivant : même trajet, 30 min plus tard'),
     ]);
-    const [w, m2] = rides(r.journeys[0]);
+    const [w, m2] = rides(r.journeys[1]);
     // ligne W du TEC : trip_id normalisé pour /api/rt, noms remis en casse par le pipeline (S5)
     expect([w.op, w.line, w.tripId, w.head?.fr, w.from.name.fr]).toEqual(['tec', 'W', 'W-0724', 'Bruxelles Midi', 'Waterloo Eglise']);
     expect([m2.op, m2.line, m2.mode, m2.from.areaId, m2.to.areaId]).toEqual(['stib', '2', 'metro', 'stib:6364', 'stib:6359']);
-    expect(rides(r.journeys[1])[0]).toMatchObject({ cat: 'S1', platform: '1', from: { areaId: 'sncb:8814266' }, to: { areaId: 'sncb:8812005' } });
+    expect(rides(r.journeys[0])[0]).toMatchObject({ cat: 'S1', platform: '1', from: { areaId: 'sncb:8814266' }, to: { areaId: 'sncb:8812005' } });
   });
 
   it('CA-M5.2 : S2 vers le boulevard du Centenaire : 6 min à pied, M6 12:25 à Rogier, Roi Baudouin 12:39 (zone sans départ)', async () => {
     await stack.scene('noRT');
     const r = await route(T('12:10'), here, CENTENAIRE, S2);
     expect(legsOf(r.journeys[0])).toBe('marche 6 | 12:25 M6 Rogier → Roi Baudouin 12:39 | marche 1');
-    expect(r.journeys[0].reason).toBe(fr('Le plus simple : direct, à pied 6 + 1 min'));
+    expect(r.journeys[0].reason).toBe(fr('Le plus court : direct, à pied 6 + 1 min'));
     expect(hhmm(r.journeys[0].arr)).toBe('12:40');
     const m6 = rides(r.journeys[0])[0];
     expect([m6.fromStop, m6.toStop, m6.to.areaId, m6.rt]).toEqual(['8042', '8302', 'stib:8302', false]);
@@ -269,7 +291,7 @@ describe('route() : CA-M2, CA-M3, CA-M5 sur les données du pipeline', () => {
     const r = await route(T('08:00'), UCCLE, CENTENAIRE);
     expect(legsOf(r.journeys[0])).toBe('marche 2 | 08:09 T3 Churchill → Rogier 08:30 | 08:35 M6 Rogier → Roi Baudouin 08:49 | marche 1');
     // Rogier est une seule zone : correspondance sans marche (le PRD écrivait « à confirmer » 2 + 1 + 1)
-    expect(r.journeys[0].reason).toBe(fr('Le plus simple : 1 changement, à pied 2 + 1 min'));
+    expect(r.journeys[0].reason).toBe(fr('Le plus court : 1 changement, à pied 2 + 1 min'));
     expect(hhmm(r.journeys[0].arr)).toBe('08:50');
   });
 
@@ -279,7 +301,7 @@ describe('route() : CA-M2, CA-M3, CA-M5 sur les données du pipeline', () => {
     const j = r.journeys[0];
     expect(legsOf(j)).toBe('14:10 IC Bruxelles-Central → Gand-Saint-Pierre 14:39 | marche 1 | 14:44 T1 Gand-Saint-Pierre → Korenmarkt, Gand 14:54 | marche 3');
     expect(hhmm(j.arr)).toBe('14:57');
-    expect(j.reason).toBe(fr('Le plus simple : 1 changement, à pied 1 + 3 min'));
+    expect(j.reason).toBe(fr('Le plus court : 1 changement, à pied 1 + 3 min'));
     const tram = rides(j)[1];
     // temps réel De Lijn par le relais (700011438 à l'heure à Gand-Saint-Pierre)
     expect(tram).toMatchObject({ op: 'delijn', line: '1', mode: 'tram', head: { fr: 'Korenmarkt' }, fromStop: '200553', toStop: '200101', tripId: '700011438', rt: true, delayMin: 0 });
@@ -288,15 +310,16 @@ describe('route() : CA-M2, CA-M3, CA-M5 sur les données du pipeline', () => {
     expect(legsOf(k.journeys[0])).toBe('14:10 IC Bruxelles-Central → Gand-Saint-Pierre 14:39 | marche 1 | 14:44 T1 Gand-Saint-Pierre → Korenmarkt, Gand 14:54');
   });
 
-  it('CA-M5.6 : Bastogne, aucun arrêt à 20 min : noStopTo (arrivée) et noStopFrom (départ)', async () => {
-    expect(await coreAt(T('13:55')).route(here, BASTOGNE, T('13:55'), PRESET, S3)).toEqual({ journeys: [], empty: 'noStopTo', accessMin: 20 });
-    expect(await coreAt(T('13:55')).route(BASTOGNE, here, T('13:55'), PRESET, S3)).toEqual({ journeys: [], empty: 'noStopFrom', accessMin: 20 });
+  it('CA-M5.6 : Bastogne, aucun arrêt dans la recherche élargie : noStopTo et noStopFrom, 15 min (PRD-1.2 § 1.4), 25 avec 20 min de marche', async () => {
+    expect(await coreAt(T('13:55')).route(here, BASTOGNE, T('13:55'), PRESET, S3)).toEqual({ journeys: [], empty: 'noStopTo', accessMin: 15 });
+    expect(await coreAt(T('13:55')).route(BASTOGNE, here, T('13:55'), PRESET, S3)).toEqual({ journeys: [], empty: 'noStopFrom', accessMin: 15 });
+    expect(await coreAt(T('13:55')).route(here, BASTOGNE, T('13:55'), { ...PRESET, maxWalkMin: 20 }, S3)).toEqual({ journeys: [], empty: 'noStopTo', accessMin: 25 });
   });
 
   it('CA-M8.1 (fixtures) : à 23:50, une proposition pour le lendemain, jour férié (IC 08:42 DAILY, IC 09:42 HOLI)', async () => {
     await stack.scene('noRT');
     const r = await route(T('23:50'), here, bureau, S1);
-    expect(labels(r)).toEqual(['simple', 'next']);
+    expect(labels(r)).toEqual(['short', 'next']);
     expect(r.journeys.map((j) => `${new Date(j.dep).toISOString().slice(0, 10)} ${times(j)}`)).toEqual(['2026-11-11 08:33 → 09:58', '2026-11-11 09:33 → 10:58']);
     expect(rides(r.journeys[1])[0].tripId).toBe('88____:007::8863008:8814001:10:1052:20261231');
   });
@@ -304,11 +327,11 @@ describe('route() : CA-M2, CA-M3, CA-M5 sur les données du pipeline', () => {
   it('CA-M3.3, CA-M2.5 : Bruxelles-Central → Gand-Saint-Pierre (base) : simple 14:10, puis 14:22 (+3 min) et 14:40', async () => {
     await stack.scene('base');
     const fav = PRESET.favorites.find((f) => f.id === 'fav-gand');
-    if (fav?.kind !== 'trip') throw new Error('preset-1.1.json : fav-gand');
+    if (fav?.kind !== 'trip') throw new Error('preset-1.1.json migré : fav-gand');
     const r = await route(T('13:55'), fav.from, fav.to, S3);
-    expect(labels(r)).toEqual(['simple', 'next', 'next']);
+    expect(labels(r)).toEqual(['short', 'next', 'next']);
     expect(r.journeys.map(times)).toEqual(['14:10 → 14:39', '14:25 → 14:56', '14:40 → 15:09']);
-    expect(r.journeys.map((j) => j.reason)).toEqual([fr('Le plus simple : direct'), fr('Le suivant : même trajet, 12 min plus tard'), fr('Le suivant : même trajet, 18 min plus tard')]);
+    expect(r.journeys.map((j) => j.reason)).toEqual([fr('Le plus court : direct'), fr('Le suivant : même trajet, 12 min plus tard'), fr('Le suivant : même trajet, 18 min plus tard')]);
     expect(rides(r.journeys[1])[0]).toMatchObject({ delayMin: 3, platform: '6', rt: true });
   });
 
@@ -319,11 +342,11 @@ describe('route() : CA-M2, CA-M3, CA-M5 sur les données du pipeline', () => {
     for (const hm of ['07:31', '12:00', '15:00', '16:30', '16:55']) {
       const r = await route(T(hm), here, maison, BUREAU);
       expect(r.journeys.map((j) => `${j.label} ${legsOf(j)}`), hm).toEqual([
-        'simple marche 12 | 17:12 IC Bruxelles-Central → Namur 18:16 | marche 7',
+        'short marche 12 | 17:12 IC Bruxelles-Central → Namur 18:16 | marche 7',
         'next marche 12 | 18:12 IC Bruxelles-Central → Namur 19:16 | marche 7',
       ]);
       expect(hhmm(r.journeys[0].leaveAt), hm).toBe('16:58');
-      expect(r.journeys[0].reason, hm).toBe(fr('Le plus simple : direct, à pied 12 + 7 min'));
+      expect(r.journeys[0].reason, hm).toBe(fr('Le plus court : direct, à pied 12 + 7 min'));
     }
     // depuis la gare, aussi le 11/11 (férié) : IC 17:12 et 18:12, arrivées 18:16 et 19:16
     for (const day of ['2026-11-10', '2026-11-11']) {
@@ -336,7 +359,7 @@ describe('route() : CA-M2, CA-M3, CA-M5 sur les données du pipeline', () => {
     const r = await route(T('07:31'), here, bureau, { lat: 50.848, lon: 4.352 });
     expect(r.journeys).toHaveLength(1);
     expect(r.journeys[0].legs.map((l) => l.kind)).toEqual(['walk']);
-    expect(r.journeys[0]).toMatchObject({ label: 'simple', transfers: 0, reason: fr('Le plus simple : à pied, 9 min') });
+    expect(r.journeys[0]).toMatchObject({ label: 'short', transfers: 0, reason: fr('Le plus court : à pied, 9 min') });
     expect(await coreAt(T('07:31')).route(here, bureau, T('07:31'), PRESET, { lat: 50.846, lon: 4.35 })).toEqual({ journeys: [], empty: 'here' });
     expect(await coreAt(T('07:31')).route(here, bureau, T('07:31'), PRESET, null)).toEqual({ journeys: [], empty: 'noPosition' });
   });
@@ -405,7 +428,42 @@ async function answers(c: Core, pos: { lat: number; lon: number } | null, settin
 const order = (c: Core, pos: { lat: number; lon: number } | null, last?: Map<string, FavoriteAnswer>, settings = PRESET) =>
   c.orderFavorites(pos, settings, last).map((x) => x.favoriteId);
 
-describe('favoris (preset-1.1.json) : réponses et ordre intelligent sur les données du pipeline', () => {
+describe('favoris (preset-1.1.json migré en v3) : réponses et ordre intelligent sur les données du pipeline', () => {
+  it('CA-2.1, CA-2.2 : préréglages 1.0 et 1.1 migrés (6 favoris, lieux fusionnés), mêmes réponses ; « Aller à… » : Bureau 08:58, Maison ici', async () => {
+    await stack.scene('noRT');
+    const v10 = migrateSettings(readPreset('preset.json'));
+    for (const s of [PRESET, v10]) {
+      expect(s.v).toBe(3);
+      expect('places' in s).toBe(false);
+      expect(migrateSettings(s)).toEqual(s); // seconde lecture identique
+    }
+    expect(PRESET.favorites.map((f) => `${f.kind}:${f.id}`)).toEqual(['place:fav-bureau', 'stop:fav-gdn', 'trip:fav-gand', 'stop:fav-namur', 'stop:fav-dl-nord', 'place:fav-maison']);
+    // 1.0 : pas de « Vers la maison » ; « Maison » devient un lieu « Jamais » en fin de liste
+    expect(v10.favorites.map((f) => `${f.kind}:${f.id}`)).toEqual(['place:fav-bureau', 'stop:fav-gdn', 'trip:fav-gand', 'stop:fav-namur', 'stop:fav-dl-nord', 'place:maison']);
+    const b = PRESET.favorites[0] as Extract<Favorite, { kind: 'place' }>;
+    expect(b).toMatchObject({ kind: 'place', label: 'Bureau', propose: 'morning', address: 'Bruxelles', lat: 50.8441, lon: 4.3474 });
+    expect(b.src).toBeUndefined(); // lieu de la 1.0 à adresse libre : « Adresse à vérifier »
+    expect(favoriteTitle(b, PRESET)).toBe('Vers le bureau');
+    expect(PRESET.favorites[5]).toMatchObject({ kind: 'place', label: 'Maison', propose: 'evening' });
+    expect(PRESET.favorites[1]).toMatchObject({ kind: 'stop', propose: 'near', filter: [{ line: '3', head: 'churchill' }, { line: '3', head: 'esplanade' }, { line: '4', head: 'stalle p' }] });
+    const c = coreAt(T('07:31'));
+    const seen: string[] = [];
+    for (const s of [PRESET, v10]) {
+      const a = await answers(c, S1, s);
+      expect(order(c, S1, a, s).slice(0, 2)).toEqual(['fav-bureau', 'fav-namur']);
+      // « Aller à… » : les lieux dans l'ordre, avec l'arrivée de la proposition 1, ou « ici »
+      const goTo = s.favorites.filter((f) => f.kind === 'place').map((f) => {
+        const x = a.get(f.id)!;
+        return `${(f as Extract<Favorite, { kind: 'place' }>).label} ${x.state === 'here' ? 'ici' : `arrivée ${hhmm(x.plan!.journeys[0].arr)}`}`;
+      });
+      expect(goTo).toEqual(['Bureau arrivée 08:58', 'Maison ici']);
+      seen.push(JSON.stringify(a.get('fav-bureau')!.plan!.journeys.map(times)));
+    }
+    expect(seen[0]).toBe(seen[1]);
+    // les lieux migrés servent d'extrémités (Endpoint « place » = favori lieu, réglages v3 sans `places`)
+    expect((await coreAt(T('07:31')).route({ type: 'place', placeId: 'maison' }, { type: 'place', placeId: 'fav-bureau' }, T('07:31'), v10)).journeys[0]?.label).toBe('short');
+  });
+
   it('CA-M1.1, S1 noRT : fav-bureau puis fav-namur en tête, « tu y es » pour fav-maison en fin de liste', async () => {
     await stack.scene('noRT');
     const c = coreAt(T('07:31'));
@@ -416,7 +474,7 @@ describe('favoris (preset-1.1.json) : réponses et ordre intelligent sur les don
     expect(b.state).toBe('ok');
     const j = b.plan!.journeys[0];
     // « partir dans 2 min » / « IC à ~07:42, voie 4, direct, arrivée 08:58 »
-    expect([j.label, minutesUntil(j.leaveAt, T('07:31')), j.transfers, hhmm(j.arr)]).toEqual(['simple', 2, 0, '08:58']);
+    expect([j.label, minutesUntil(j.leaveAt, T('07:31')), j.transfers, hhmm(j.arr)]).toEqual(['short', 2, 0, '08:58']);
     expect([hhmm(rides(j)[0].dep), rides(j)[0].platform, rides(j)[0].rt]).toEqual(['07:42', '4', false]);
     // « Namur, train » / « IC ~07:42 v.4 » / « vers Bruxelles-Midi, puis ~08:42 »
     const n = a.get('fav-namur')!.board!.departures;
@@ -459,7 +517,7 @@ describe('favoris (preset-1.1.json) : réponses et ordre intelligent sur les don
     const g = a.get('fav-gand')!;
     expect(g.fromStation).toBeUndefined();
     const j = g.plan!.journeys[0];
-    expect([minutesUntil(j.leaveAt, T('13:55')), hhmm(rides(j)[0].dep), rides(j)[0].platform, j.transfers, hhmm(j.arr), j.reason]).toEqual([13, '14:10', '4', 0, '14:39', fr('Le plus simple : direct')]);
+    expect([minutesUntil(j.leaveAt, T('13:55')), hhmm(rides(j)[0].dep), rides(j)[0].platform, j.transfers, hhmm(j.arr), j.reason]).toEqual([13, '14:10', '4', 0, '14:39', fr('Le plus court : direct')]);
   });
 
   it('CA-M1.5 : au Bureau à 07:31, « Vers le bureau » répond « tu y es » et passe en fin de liste (règle 5)', async () => {
