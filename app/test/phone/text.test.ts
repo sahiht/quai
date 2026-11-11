@@ -42,12 +42,14 @@ describe('cartes (T2)', () => {
   });
 
   it('phrase de chaque étiquette', () => {
-    const fast = journey('fast', [walk(at(7, 33), 7), ride(at(7, 42), at(8, 40)), walk(at(8, 40), 2), ride(at(8, 44), at(8, 49), '3'), walk(at(8, 49), 2)], 1);
+    // marche 7 + 3 + 3 = 13 contre 17 : 4 min de moins seulement (moins-de-marche.md § 1, il n'en tient pas lieu)
+    const fast = journey('fast', [walk(at(7, 33), 7), ride(at(7, 42), at(8, 40)), walk(at(8, 40), 3), ride(at(8, 44), at(8, 48), '3'), walk(at(8, 48), 3)], 1);
     const earlier = journey('earlier', [ride(at(4, 59), at(6, 30))], 1);
     const none = journey('none', [ride(at(9, 0), at(10, 5))]);
     const fewer = journey('fewer', [ride(at(9, 0), at(10, 5))], 1);
     const onFoot = journey('walk', [walk(at(8, 50), 22)]);
-    const next = journey('next', [ride(at(8, 42), at(9, 46))]);
+    // « Le suivant » : même trajet une heure plus tard, mêmes marches
+    const next = journey('next', [walk(at(8, 33), 7), ride(at(8, 42), at(9, 46)), walk(at(9, 46), 10)]);
     const later = journey('later', [ride(at(9, 12), at(10, 20))], 1);
     const r: PlanResult = { journeys: [simple, fast, next] };
     expect(cardPhrase(simple, r)).toBe('Le moins de changements et de marche.');
@@ -88,7 +90,7 @@ describe('sources', () => {
   it('jamais de tiret cadratin ni demi-cadratin dans les textes du téléphone et de Quai Web', () => {
     const APP = fileURLToPath(new URL('../../', import.meta.url));
     const walkDir = (dir: string): string[] => readdirSync(join(APP, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkDir(`${dir}/${e.name}`) : [`${dir}/${e.name}`]));
-    for (const f of [...walkDir('src/phone'), ...walkDir('src/web'), 'src/version.ts', 'store/changelog/1.1.0.txt', 'store/description.txt', 'store/privacy.md']) {
+    for (const f of [...walkDir('src/phone'), ...walkDir('src/web'), 'src/version.ts', 'store/changelog/1.1.0.txt', 'store/changelog/1.1.1.txt', 'store/description.txt', 'store/privacy.md']) {
       expect(readFileSync(join(APP, f), 'utf8'), f).not.toMatch(/[—–]/);
     }
   });
@@ -101,5 +103,20 @@ describe('sources', () => {
     expect([...notes].length).toBeLessThanOrEqual(500);
     expect(lines[0]).toMatch(/^Tes favoris donnent la réponse dès l’ouverture/);
     expect(lines[2]).toBe('Sur le téléphone, un seul champ pour une adresse, une gare ou un arrêt : vas-y, ou enregistre l’adresse comme lieu.');
+  });
+});
+
+describe('notes de version 1.1.1 (moins-de-marche.md)', () => {
+  it('2 lignes courtes, 500 caractères au plus : « Moins de marche », trajets plus directs, accès d’un lieu', () => {
+    const APP = fileURLToPath(new URL('../../', import.meta.url));
+    const notes = readFileSync(join(APP, 'store/changelog/1.1.1.txt'), 'utf8').trim();
+    const lines = notes.split('\n');
+    expect(lines).toHaveLength(2);
+    expect([...notes].length).toBeLessThanOrEqual(500);
+    expect(notes).toContain('« Moins de marche »');
+    expect(notes).toContain('Waterloo vers Madou');
+    expect(lines[1]).toMatch(/^L’accès d’un lieu/);
+    expect(JSON.parse(readFileSync(join(APP, 'app.json'), 'utf8')).version).toBe('1.1.1');
+    expect(JSON.parse(readFileSync(join(APP, 'package.json'), 'utf8')).version).toBe('1.1.1');
   });
 });

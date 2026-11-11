@@ -4,7 +4,7 @@
  * Lieux de la 1.0 à adresse libre : « Adresse à vérifier » et « Vérifier l’adresse » (M4.8).
  * Après un nouveau lieu : « Ajouter le trajet vers {nom} à tes favoris ? » (S3). Adresses récentes (S4).
  */
-import type { FavoriteTrip, NearbyItem, Place, Propose } from '../../core/api';
+import type { AreaSummary, FavoriteTrip, Mode, NameLang, NearbyItem, Place, Propose } from '../../core/api';
 import { displayName, mainMode, modeWord } from '../../core/util';
 import { LIMITS, newId } from '../../settings';
 import { header, type PhoneCtx } from '../app';
@@ -13,15 +13,35 @@ import { placeField, privacyNote } from '../field';
 import { addTripQuestion, defaultSlot, legacyQuery, needsCheck, placeSubtitle, PROPOSE_LABEL, removePlaceText, T, typo } from '../text';
 import { confirmInPage, listRow, messageHub, nameShortcuts, radios, stepper } from '../ui';
 
-/** « Namur à 7 min à pied, bus TEC à 2 min » : accès depuis un lieu (1.0). */
-export function accessText(list: NearbyItem[], lang: 'fr' | 'nl' | 'local'): string {
-  const station = list.find((n) => mainMode(n.area.modes) === 'train');
-  const other = list.find((n) => mainMode(n.area.modes) !== 'train');
-  const parts: string[] = [];
-  if (station) parts.push(`${displayName(station.area.n, lang)} à ${station.walkMin} min à pied`);
-  if (other) parts.push(`${modeWord(mainMode(other.area.modes), other.area.op)} à ${other.walkMin} min`);
-  if (!parts.length) return 'Aucun arrêt à moins de 800 m';
-  return station ? parts.join(', ') : `${parts[0]} à pied`;
+const MODE_ORDER: Mode[] = ['train', 'metro', 'tram', 'bus'];
+
+/** « Gare de Namur », « gare d’Ottignies » (élision devant une voyelle). */
+const stationName = (name: string, capital: boolean): string => `${capital ? 'Gare' : 'gare'} ${/^[aeiouyàâäéèêëîïôöûüœ]/i.test(name) ? `d’${name}` : `de ${name}`}`;
+
+/** « Métro Madou », « Bus TEC Namur Omalius », « Tram De Lijn Korenmarkt », « Gare de Namur » (mots de l'appli). */
+function stopName(a: AreaSummary, lang: NameLang, capital: boolean): string {
+  const name = displayName(a.n, lang);
+  const mode = mainMode(a.modes);
+  if (mode === 'train') return stationName(name, capital);
+  const word = modeWord(mode, a.op);
+  return `${capital ? word.charAt(0).toUpperCase() + word.slice(1) : word} ${name}`;
+}
+
+/**
+ * Accès d'un lieu (moins-de-marche.md § 6) : l'arrêt le plus proche d'abord, nommé (« Métro Madou à 2 min à pied »,
+ * « Gare de Namur à 7 min à pied ») ; le plus proche : le moins de minutes, puis train, métro, tram, bus, puis la
+ * distance. Ensuite la gare, seulement si elle est utile : desservie par des IC, à la marche maximale ou moins et
+ * pas déjà citée (« ; gare de Namur à 8 min »). Rien à 800 m : « Aucun arrêt à moins de 800 m ».
+ */
+export function accessText(list: NearbyItem[], lang: NameLang, maxWalkMin = 10): string {
+  if (!list.length) return 'Aucun arrêt à moins de 800 m';
+  const rank = (n: NearbyItem): number => MODE_ORDER.indexOf(mainMode(n.area.modes));
+  const nearest = [...list].sort((a, b) => a.walkMin - b.walkMin || rank(a) - rank(b) || a.distanceM - b.distanceM)[0];
+  const text = `${stopName(nearest.area, lang, true)} à ${nearest.walkMin} min à pied`;
+  const station = list
+    .filter((n) => n !== nearest && n.area.id !== nearest.area.id && mainMode(n.area.modes) === 'train' && n.area.lines.includes('IC') && n.walkMin <= maxWalkMin)
+    .sort((a, b) => a.walkMin - b.walkMin || a.distanceM - b.distanceM)[0];
+  return station ? `${text} ; ${stopName(station.area, lang, false)} à ${station.walkMin} min` : text;
 }
 
 const placeIcon = (label: string) => (/maison|domicile|chez/i.test(label) ? icon('home') : /bureau|travail|boulot/i.test(label) ? icon('work') : icon('pin'));
@@ -32,7 +52,8 @@ function fillAccess(ctx: PhoneCtx, el: Element, at: { lat: number; lon: number }
     .core()
     .then((core) => core.nearby(at.lat, at.lon, 800, { light: true }))
     .then((items) => {
-      el.textContent = typo(accessText(items, ctx.settings.get().lang));
+      const st = ctx.settings.get();
+      el.textContent = typo(accessText(items, st.lang, st.maxWalkMin));
     })
     .catch(() => {
       el.textContent = '';

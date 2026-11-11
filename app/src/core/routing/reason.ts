@@ -8,6 +8,8 @@
  *   pied ». Une raison tient sur une ligne des lunettes (542 px) : au plus 55 caractères avec trois marches de deux
  *   chiffres (« Le plus simple : 2 changements, à pied 12 + 14 + 13 min », 474 px) ; au-delà de REASON_MAX
  *   caractères (cas extrême), forme « {total} min à pied », puis coupure avec « … ».
+ * - « Moins de marche » (moins-de-marche.md § 3) : mêmes règles que « Le plus simple » (« Moins de marche : 1
+ *   changement, à pied 7 + 2 + 4 min » ; le plus long, trois marches de deux chiffres, 497 px).
  * - « Le suivant » : écart entre les départs prévus du premier véhicule du trajet et de `ref` (la proposition
  *   précédente de même structure), comme dans l'horaire : « 15 min plus tard », « 1 h plus tard ».
  * - « Le plus rapide » : écart des arrivées avec `ref` (« Le plus simple »).
@@ -73,7 +75,8 @@ export function reasonText(label: JourneyLabel, j: Trip, ref?: Trip): string {
   const walkTotal = walks.reduce((s, m) => s + m, 0) || Math.max(1, minutes(j.arr - j.dep));
   const ch = changesText(j.transfers);
   switch (label) {
-    case 'simple': {
+    case 'simple':
+    case 'lesswalk': {
       if (!rides) return cap(`${head}à pied, ${walkTotal}${NB}min`);
       if (!walks.length) return cap(`${head}${ch}`);
       const listed = `${head}${ch}, ${walksText(walks)}`;

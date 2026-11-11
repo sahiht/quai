@@ -4,11 +4,16 @@
  * (CA-M1.x, CA-M2.x, CA-M6.x, CA-S2.x), trajet suivi et en cours, GlassesApi, arrière-plan.
  */
 import { describe, expect, it } from 'vitest';
-import type { Core } from '../../src/core/api';
+import type { Core, Journey, JourneyLabel, Leg } from '../../src/core/api';
+import { textWidth } from '../../src/glasses/font';
+import { layoutPage, geometry, WIDTHS } from '../../src/glasses/layout';
+import { effectiveFrame, initNav } from '../../src/glasses/nav';
+import { stepsPage, type StepsData } from '../../src/glasses/views';
 import { QuaiError } from '../../src/core/errors';
 import { TRIP_KEY, parseTrip, tripPhase } from '../../src/glasses/controller';
 import type { ContainerSpec } from '../../src/glasses/types';
-import { at, defaults, fakeCore, preset, preset11, setupController, type Screen } from './helpers';
+import { APP_VERSION } from '../../src/version';
+import { at, defaults, fakeCore, nb, overflowing, preset, preset11, setupController, type Screen } from './helpers';
 
 const fakeCoreFor = (now: () => number) => fakeCore(now);
 
@@ -731,6 +736,90 @@ describe('état d’arrière-plan : instantané pris au mauvais moment (revue)',
   });
 });
 
+describe('1.1.1 : « Moins de marche » (docs/v1.1/moins-de-marche.md, CA-MW.6, CA-MW.12)', () => {
+  const N = (fr: string) => ({ fr, nl: fr });
+  const NB = '\u00a0';
+  const walk = (from: string, to: string, dep: number, min: number): Leg => ({ kind: 'walk', from: { name: N(from), lat: 0, lon: 0 }, to: { name: N(to), lat: 0, lon: 0 }, dep, arr: dep + min * 60_000, schedDep: dep, schedArr: dep + min * 60_000, walkMin: min });
+  const ride = (p: Partial<Leg> & Pick<Leg, 'dep' | 'arr'>): Leg => ({
+    kind: 'ride', from: { name: N('Namur'), lat: 0, lon: 0 }, to: { name: N('Bruxelles-Central'), lat: 0, lon: 0 },
+    schedDep: p.dep, schedArr: p.arr, op: 'sncb', mode: 'train', line: 'IC', cat: 'IC', head: N('Bruxelles-Midi'), platform: '4', rt: false, delayMin: 0, cancelled: false, ...p,
+  });
+  const journey = (id: string, label: JourneyLabel, reason: string, legs: Leg[], leaveAt: number): Journey => ({
+    id, label, reason, legs, dep: legs[0].dep, arr: legs[legs.length - 1].arr, leaveAt, transfers: Math.max(0, legs.filter((l) => l.kind === 'ride').length - 1), rt: false, alerts: [],
+  });
+  /** CA-MW.6, scène noRT : Maison (S1) vers « Saint-Géry » (50.8470, 4.3480). */
+  const proposals = (): Journey[] => [
+    journey('simple', 'simple', `Le plus simple${NB}: direct, à pied 7 + 11${NB}min`, [walk('Ma position', 'Namur', at(7, 35), 7), ride({ dep: at(7, 42), arr: at(8, 46) }), walk('Bruxelles-Central', 'Saint-Géry', at(8, 46), 11)], at(7, 33)),
+    journey('lesswalk', 'lesswalk', `Moins de marche${NB}: 1 changement, à pied 7 + 2 + 4${NB}min`, [
+      walk('Ma position', 'Namur', at(7, 35), 7),
+      ride({ dep: at(7, 42), arr: at(8, 40), to: { name: N('Bruxelles-Nord'), lat: 0, lon: 0 } }),
+      walk('Bruxelles-Nord', 'Gare du Nord', at(8, 40), 2),
+      ride({ dep: at(8, 44), arr: at(8, 49), from: { name: N('Gare du Nord'), lat: 0, lon: 0 }, to: { name: N('Bourse'), lat: 0, lon: 0 }, op: 'stib', mode: 'tram', line: '3', cat: undefined, head: N('Churchill'), platform: undefined }),
+      walk('Bourse', 'Saint-Géry', at(8, 49), 4),
+    ], at(7, 33)),
+    journey('next', 'next', `Le suivant${NB}: même trajet, 1${NB}h plus tard`, [walk('Ma position', 'Namur', at(8, 35), 7), ride({ dep: at(8, 42), arr: at(9, 46) }), walk('Bruxelles-Central', 'Saint-Géry', at(9, 46), 11)], at(8, 33)),
+  ];
+  const fits = (s: Screen) => {
+    for (const l of [s.title, ...s.lines]) {
+      expect(textWidth(l), l).toBeLessThanOrEqual(WIDTHS.full);
+      expect(l.includes('…'), l).toBe(false);
+    }
+  };
+
+  it('page 1 : « ▼ Moins de marche : 07:33 → 08:53 » ; page 2 : étiquette, raison, journal lesswalk ; « Trajet suivi : IC 07:42 »', async () => {
+    const h = await setupController({ flags: { noRt: true } });
+    await h.until(homeReady);
+    const to = { type: 'address' as const, label: 'Saint-Géry, 1000 Bruxelles', lat: 50.847, lon: 4.348 };
+    const msg = await h.c.showTrip({ title: 'Vers Saint-Géry', from: { type: 'here' }, to, result: { journeys: proposals() }, index: 0 });
+    expect(msg).toBe(`Affiché dans les lunettes${NB}: IC 07:42, voie 4.`);
+    const p1 = await h.until(stepsReady);
+    expect(p1).toMatchObject({ page: 1, pages: 3, label: 'simple', followed: true, title: 'Vers Saint-Géry : 07:33 → 08:57' });
+    expect(p1.lines[0]).toBe('Le plus simple : direct, à pied 7 + 11 min');
+    expect(p1.lines.at(-2)).toBe('▼ Moins de marche : 07:33 → 08:53');
+    fits(p1);
+    await h.gesture('down');
+    const p2 = h.last();
+    expect(p2).toMatchObject({ page: 2, pages: 3, label: 'lesswalk', followed: false, title: 'Vers Saint-Géry : 07:33 → 08:53' });
+    expect(p2.lines[0]).toBe('Moins de marche : 1 changement, à pied 7 + 2 + 4 min');
+    expect(p2.lines).toContain('08:40   À pied vers Gare du Nord (2 min)');
+    expect(p2.lines).toContain('~08:44   T3 vers Churchill');
+    // 7 étapes pour 6 lignes : ▼ montre d'abord la dernière, puis la proposition suivante
+    expect(p2.lines.at(-2)).toBe('▼ 1 étape de plus');
+    expect(p2.lines.at(-1)).toBe('▲▼ autre trajet   toucher : suivre ce trajet   double : retour');
+    fits(p2);
+    await h.gesture('down');
+    expect(h.last()).toMatchObject({ page: 2, label: 'lesswalk' });
+    expect(h.last().lines).toContain('08:53   Arrivée à Saint-Géry (4 min à pied)');
+    expect(h.last().lines.at(-2)).toBe('▼ Le suivant : 08:33 → 09:57');
+    fits(h.last());
+    await h.gesture('tap');
+    expect(h.last()).toMatchObject({ page: 2, label: 'lesswalk', followed: true });
+    expect(h.last().lines.at(-1)).toBe('Trajet suivi : IC 07:42');
+    expect(h.c.followed?.journey.id).toBe('lesswalk');
+    h.c.stop();
+  });
+
+  it('CA-MW.12 : la raison la plus longue (« 2 changements, à pied 12 + 13 + 14 min ») tient au pixel, sans « … »', () => {
+    const s = preset11();
+    const [simple, lesswalk] = proposals();
+    lesswalk.reason = `Moins de marche${NB}: 2 changements, à pied 12 + 13 + 14${NB}min`;
+    const cases: [StepsData, string][] = [
+      [{ journeys: [simple, lesswalk], index: 1, fresh: true }, 'Moins de marche : 2 changements, à pied 12 + 13 + 14 min'],
+      [{ journeys: [simple, lesswalk], index: 0, followedId: 'simple', fresh: true }, 'Le plus simple : direct, à pied 7 + 11 min'],
+    ];
+    for (const [d, top] of cases) {
+      const v = stepsPage({ title: 'Vers Saint-Géry', label: '' }, d, { now: at(7, 31), settings: s });
+      const p = layoutPage(v, effectiveFrame(initNav({ screen: 'home' }).stack[0], v, geometry(v).capacity));
+      expect(overflowing(p)).toEqual([]);
+      expect(nb(p.lines[0])).toBe(top);
+      for (const l of [p.title, ...p.lines]) {
+        expect(textWidth(l), l).toBeLessThanOrEqual(WIDTHS.full);
+        expect(l.includes('…'), l).toBe(false);
+      }
+    }
+  });
+});
+
 describe('S2 : message « Quai 1.1 », GlassesApi', () => {
   it('CA-S2.2 et CA-M7.1 : « Quai 1.1 » une seule fois après la mise à jour ; T mène à l’accueil', async () => {
     const a = await setupController({ settings: preset() });
@@ -739,7 +828,7 @@ describe('S2 : message « Quai 1.1 », GlassesApi', () => {
     await a.gesture('tap');
     expect((await a.until(homeReady)).screen).toBe('home');
     await a.settle();
-    expect(a.settings.get().seenVersion).toBe('1.1.0');
+    expect(a.settings.get().seenVersion).toBe(APP_VERSION);
     a.c.stop();
     const b = await setupController({ settings: a.settings.get() });
     expect((await b.until(homeReady)).screen).toBe('home');
@@ -753,7 +842,7 @@ describe('S2 : message « Quai 1.1 », GlassesApi', () => {
     expect(last()).toMatchObject({ screen: 'message', title: 'Quai' });
     expect(last().lines[0]).toBe('Bienvenue dans Quai !');
     expect(last().lines.at(-1)).toBe('toucher : continuer   double : quitter');
-    expect(settings.get().seenVersion).toBe('1.1.0');
+    expect(settings.get().seenVersion).toBe(APP_VERSION);
     await gesture('tap');
     expect((await until((s) => s.screen === 'home')).screen).toBe('home');
     c.stop();

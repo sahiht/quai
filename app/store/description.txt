@@ -2,7 +2,7 @@ Quai affiche sur tes lunettes Even G2 les prochains départs des transports en c
 
 Dans les lunettes :
 - Mes favoris : la réponse dès l’ouverture, quand partir, quel train ou bus, quelle voie, l’heure d’arrivée.
-- Un toucher ouvre le trajet étape par étape, un glissement montre un autre trajet. Quai propose d’abord le plus simple (moins de changements, moins de marche), le plus rapide s’il est différent, et dit toujours pourquoi.
+- Un toucher ouvre le trajet étape par étape, un glissement montre un autre trajet. Quai propose d’abord le plus simple (moins de changements, moins de marche), le plus rapide s’il est différent, celui qui fait moins marcher quand il existe, et dit toujours pourquoi.
 - Autour de moi : les arrêts proches, tous réseaux confondus, avec le prochain départ.
 - Les départs d’un arrêt : en minutes pour les bus, trams et métros, avec l’heure et la voie pour les trains.
 - Aller à… : le trajet porte à porte vers tes lieux et tes adresses récentes.

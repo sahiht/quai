@@ -116,8 +116,9 @@ describe('cartes de résultats (M3, M4.5)', () => {
     await results(hz.el);
     expect(tags(hz.el).slice(0, 2)).toEqual(['Le plus simple', 'Le plus rapide']);
     const [simple, fast] = cards(hz.el);
-    expect(textOf(simple.querySelector('.why'))).toBe('Le moins de changements et de marche.');
-    expect(textOf(fast.querySelector('.why'))).toBe('Arrive 5 min plus tôt, avec 1 changement de plus.');
+    // 1.1.1 (CA-MW.5) : le T3 fait marcher 5 min de moins (12 contre 17), il tient lieu de « Moins de marche »
+    expect(textOf(simple.querySelector('.why'))).toBe('Le moins de changements.');
+    expect(textOf(fast.querySelector('.why'))).toBe('Arrive 5 min plus tôt, avec 1 changement de plus et 5 min de marche en moins.');
     expect(fast.querySelector('.why')!.textContent).toContain(`5${NB}min`);
     expect(textOf(simple.querySelector('.time'))).toMatch(/^07:3\d → 08:56$/);
   });

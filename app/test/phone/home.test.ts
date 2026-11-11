@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FavoriteAnswer, Settings } from '../../src/core/api';
 import { newsState } from '../../src/phone/app';
+import { APP_VERSION } from '../../src/version';
 import { ANSWER_MAX_AGE_MS, homeScreen, resetAnswers, reusable } from '../../src/phone/screens/home';
 import { catchable } from '../../src/glasses/format';
 import { shortAnswer } from '../../src/phone/text';
@@ -156,9 +157,12 @@ describe('réponses courtes (S8, mêmes règles que les lunettes)', () => {
 
 describe('bannière après la mise à jour (T1) et état des données (M8)', () => {
   it('une fois après une mise à jour depuis la 1.0, jusqu’à « OK » ; jamais après une nouvelle installation', () => {
-    expect(newsState('1.0.0', '1.1.0').visible()).toBe(true);
-    expect(newsState('', '1.1.0').visible()).toBe(false);
-    expect(newsState('1.1.0', '1.1.0').visible()).toBe(false);
+    expect(newsState('1.0.0').visible()).toBe(true);
+    expect(newsState('').visible()).toBe(false);
+    expect(newsState('1.1.0').visible()).toBe(false);
+    // mise à jour 1.1.0 → 1.1.1 : la bannière des nouveautés de la 1.1 ne revient pas
+    expect(APP_VERSION).toBe('1.1.1');
+    expect(newsState('1.1.0').visible()).toBe(false);
     const hz = harness({ settings: defaults() });
     hz.ctx.news = newsState('1.0.0', '1.1.0');
     const el = mount(homeScreen(hz.ctx));

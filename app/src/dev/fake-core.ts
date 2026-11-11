@@ -256,6 +256,8 @@ const GEO: GeoRow[] = [
   G('Veldstraat 1, 9000 Gent', 51.0537, 3.7225, 'vla'),
   G('Chaussée de Bruxelles 1, 1410 Waterloo', 50.7175, 4.399, 'wal'),
   G('Rue du Progrès 20, 1210 Saint-Josse-ten-Noode', 50.8582, 4.36, 'bru', 'adresse', 'Vooruitgangstraat 20, 1210 Sint-Joost-ten-Node'),
+  // Propre au faux cœur : exemple « Moins de marche » depuis S1 (moins-de-marche.md, CA-MW.6).
+  G('Place Saint-Géry 1, 1000 Bruxelles', 50.847, 4.348, 'bru', 'adresse', 'Sint-Goriksplein 1, 1000 Brussel'),
   G('Rue du Bois 1, 6600 Bastogne', 50.003, 5.715, 'wal'),
   G('Rue de Nimy 50, 7000 Mons', 50.46, 3.957, 'wal'),
   G('5000 Namur', 50.4669, 4.8675, 'wal', 'commune', undefined, 0.8),
@@ -739,8 +741,10 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
 
   /**
    * Classement simplifié du PRD § 4 (sur les heures estimées) : changements (marche longue = 1 de plus), marche
-   * (5 min d'écart), arrivée ; garde-fou des 30 min ; propositions simple, rapide ou plus tôt, sans changement ou
-   * moins de changements, à pied, le suivant, plus tard ; 3 au plus, avec la raison (core/routing/reason.ts).
+   * (5 min d'écart), arrivée ; garde-fou de 30 min, 15 min sans 5 min de marche en moins (moins-de-marche.md § 5) ;
+   * propositions simple, rapide ou plus tôt, moins de marche (§ 1), sans changement ou moins de changements, à pied,
+   * le suivant, plus tard ; 3 au plus, avec la raison (core/routing/reason.ts). Exemple de « Moins de marche » : de
+   * S1 (Maison) vers « Place Saint-Géry 1 » à 07:31, sans temps réel (IC jusqu'à Bruxelles-Nord puis tram 3).
    */
   function rank(all: Journey[], walkOnly: Journey | null, settings: Settings, after: number): Journey[] {
     const t = now();
@@ -764,10 +768,18 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
     const earliest = Math.min(...pool.map((c) => c.j.dep));
     const windowEnd = earliest <= after + 60 * MIN ? after + 60 * MIN : earliest + 90 * MIN;
     const win = pool.filter((c) => c.j.dep <= windowEnd);
-    const fastest = Math.min(...win.map((c) => c.j.arr));
-    const eligible = win.filter((c) => c.j.arr <= fastest + 30 * MIN).sort((x, y) => x.j.arr - y.j.arr || x.changes - y.changes || x.walk - y.walk || x.rides - y.rides || y.j.dep - x.j.dep);
-    let simple = eligible[0];
-    for (const c of eligible.slice(1)) if (c.changes < simple.changes || (c.changes === simple.changes && c.walk <= simple.walk - 5)) simple = c;
+    // Garde-fou : jamais plus de 30 min après la première arrivée (à égalité, celle qui marche le moins), ni plus de
+    // 15 min après sans au moins 5 min de marche en moins qu'elle.
+    const first = [...win].sort((x, y) => x.j.arr - y.j.arr || x.walk - y.walk)[0];
+    const blocked = (c: Cand) => c !== first && (c.j.arr > first.j.arr + 30 * MIN || (c.j.arr > first.j.arr + 15 * MIN && c.walk > first.walk - 5));
+    /** Le premier dans l'ordre de « Le plus simple » : arrivée, puis moins de changements ou 5 min de marche en moins. */
+    const firstSimple = (list: Cand[]): Cand | undefined => {
+      const sorted = [...list].sort((x, y) => x.j.arr - y.j.arr || x.changes - y.changes || x.walk - y.walk || x.rides - y.rides || y.j.dep - x.j.dep);
+      let best = sorted[0];
+      for (const c of sorted.slice(1)) if (c.changes < best.changes || (c.changes === best.changes && c.walk <= best.walk - 5)) best = c;
+      return best;
+    };
+    const simple = firstSimple(win.filter((c) => !blocked(c)))!;
     const props: { c: Cand; label: JourneyLabel }[] = [{ c: simple, label: 'simple' }];
     const used = new Set([simple.keyRides]);
     const add = (c: Cand | undefined, label: JourneyLabel) => {
@@ -778,9 +790,18 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
     const isWalk = (c: Cand) => c.rides === 0;
     const fast = win.filter((c) => !isWalk(c) && c.j.arr <= simple.j.arr - 5 * MIN).sort((x, y) => x.j.arr - y.j.arr || x.changes - y.changes || x.walk - y.walk)[0];
     if (fast) add(fast, fast.j.dep >= simple.j.dep - 30 * MIN ? 'fast' : 'earlier');
+    // Moins de marche : une marche du plus simple d'au moins la marche maximale ; même créneau (départ au plus 5 min
+    // avant, arrivée au plus 5 min après), au moins 5 min de marche en moins, au plus un changement de plus ; « Le
+    // plus rapide » en tient lieu s'il remplit ces conditions.
+    const lessWalk = (c: Cand) =>
+      c !== simple && !isWalk(c) && c.walk <= simple.walk - 5 && c.j.transfers <= simple.j.transfers + 1 && c.j.dep >= simple.j.dep - 5 * MIN && c.j.arr <= simple.j.arr + 5 * MIN;
+    const longest = Math.max(0, ...simple.j.legs.filter((l) => l.kind === 'walk').map((l) => l.walkMin ?? 0));
+    if (!isWalk(simple) && longest >= settings.maxWalkMin && !props.some((p) => lessWalk(p.c))) {
+      add(firstSimple(win.filter((c) => lessWalk(c) && !used.has(c.keyRides))), 'lesswalk');
+    }
     const dur = simple.j.arr - simple.j.dep;
     const fewer = pool
-      .filter((c) => !isWalk(c) && c.changes < simple.changes && c.j.arr > fastest + 30 * MIN && c.j.arr <= simple.j.arr + Math.max(45 * MIN, dur / 2))
+      .filter((c) => !isWalk(c) && c.changes < simple.changes && blocked(c) && c.j.arr <= simple.j.arr + Math.max(45 * MIN, dur / 2))
       .sort((x, y) => x.j.arr - y.j.arr)[0];
     if (fewer) add(fewer, fewer.j.transfers === 0 && fewer.changes === 0 ? 'none' : 'fewer');
     if (walkOnly && !isWalk(simple)) {

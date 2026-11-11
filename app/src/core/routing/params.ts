@@ -51,6 +51,15 @@ export const P = {
   fastGainMin: 5,
   fastMaxEarlierMin: 30,
   guardMin: 30,
+  /** Garde-fou resserré (moins-de-marche.md § 5) : 15 min seulement quand « Le plus simple » ne fait pas marcher au
+   *  moins walkTieMin de moins que la référence (première arrivée de la fenêtre). */
+  guardSameWalkMin: 15,
+  /** « Moins de marche » (moins-de-marche.md § 1) : au moins 5 min de marche en moins, au plus un changement de plus,
+   *  départ au plus 5 min avant et arrivée au plus 5 min après « Le plus simple » ; déclenché par une de ses marches
+   *  d'au moins la marche maximale. */
+  lessWalkGainMin: 5,
+  lessWalkExtraTransfers: 1,
+  lessWalkSlotMin: 5,
   walkOnlyMaxMin: 30,
   walkOnlyLateMin: 5,
   longWalkFactor: 1.5,

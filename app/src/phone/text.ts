@@ -205,19 +205,55 @@ const minutes = (ms: number): string => {
   return n < 60 ? `${n} min` : durationText(n);
 };
 
+/** Minute affichée d'un instant (les cartes comparent des heures « HH:MM »). */
+const minuteOf = (t: number): number => Math.floor(t / 60_000);
+
 /** Étiquette d'une carte (« Le plus simple ») ; rien si le cœur n'en a pas donné. */
 export const labelText = (j: Journey): string => (j.label ? LABEL_TEXT[j.label] : '');
 
-/** Phrase d'une carte (PRD § 6.2 T2, « Carte, phrase »). */
+/** Économie de marche qui compte (moins-de-marche.md § 1, seuil d'égalité du PRD § 4.1). */
+export const LESS_WALK_MIN = 5;
+/** Même créneau que « Le plus simple » : départ au plus 5 min avant (moins-de-marche.md § 1, condition 4). */
+const SAME_SLOT_MIN = 5;
+
+/**
+ * « Le plus rapide » tient lieu de « Moins de marche » (moins-de-marche.md § 1, conditions 1 à 4) : un véhicule,
+ * au moins 5 min de marche en moins, au plus un changement de plus, départ au plus 5 min avant « Le plus simple »
+ * (il arrive plus tôt, par définition).
+ */
+export function fastWalksLess(fast: Journey, simple: Journey): boolean {
+  if (!rides(fast).length) return false;
+  const w = walkMinutesOf(simple) - walkMinutesOf(fast);
+  const k = fast.transfers - simple.transfers;
+  return w >= LESS_WALK_MIN && k <= 1 && minuteOf(journeyTimes(simple).start) - minuteOf(journeyTimes(fast).start) <= SAME_SLOT_MIN;
+}
+
+/** Phrase d'une carte (PRD § 6.2 T2, « Carte, phrase » ; moins-de-marche.md § 3). */
 export function cardPhrase(j: Journey, result: PlanResult): string {
   const simple = result.journeys.find((x) => x.label === 'simple') ?? result.journeys[0];
+  const others = result.journeys.filter((x) => x !== simple);
   switch (j.label) {
     case 'simple':
-      return result.journeys.some((x) => x.label === 'fast' || x.label === 'earlier') ? 'Le moins de changements et de marche.' : 'Le plus simple, et aussi le plus rapide.';
+      // « … et aussi le plus rapide » seulement si aucune autre carte n'arrive plus tôt ; « Le moins de
+      // changements. » si une autre carte fait marcher au moins 5 min de moins.
+      if (!others.some((x) => minuteOf(x.arr) < minuteOf(j.arr))) return 'Le plus simple, et aussi le plus rapide.';
+      if (others.some((x) => walkMinutesOf(j) - walkMinutesOf(x) >= LESS_WALK_MIN)) return 'Le moins de changements.';
+      return 'Le moins de changements et de marche.';
     case 'fast': {
       const k = j.transfers - (simple?.transfers ?? j.transfers);
       const n = minutes((simple?.arr ?? j.arr) - j.arr);
-      return k >= 1 ? `Arrive ${n} plus tôt, avec ${k} changement${k > 1 ? 's' : ''} de plus.` : `Arrive ${n} plus tôt, avec plus de marche.`;
+      const changes = `${k} changement${k > 1 ? 's' : ''} de plus`;
+      if (simple && fastWalksLess(j, simple)) {
+        const w = walkMinutesOf(simple) - walkMinutesOf(j);
+        return k >= 1 ? `Arrive ${n} plus tôt, avec ${changes} et ${w} min de marche en moins.` : `Arrive ${n} plus tôt, avec ${w} min de marche en moins.`;
+      }
+      return k >= 1 ? `Arrive ${n} plus tôt, avec ${changes}.` : `Arrive ${n} plus tôt, avec plus de marche.`;
+    }
+    case 'lesswalk': {
+      const w = walkMinutesOf(simple ?? j) - walkMinutesOf(j);
+      const d = minuteOf(j.arr) - minuteOf((simple ?? j).arr);
+      const when = d === 0 ? 'même heure d’arrivée' : d > 0 ? `arrivée ${minutes(d * 60_000)} plus tard` : `arrivée ${minutes(-d * 60_000)} plus tôt`;
+      return `${w} min de marche en moins, ${when}.`;
     }
     case 'earlier':
       return `Arrive ${minutes((simple?.arr ?? j.arr) - j.arr)} plus tôt, en partant à ${hhmm(journeyTimes(j).start)}.`;

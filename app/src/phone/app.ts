@@ -8,7 +8,7 @@ import type { Freshness } from '../glasses/controller';
 import type { Clock } from '../platform/clock';
 import type { LocationPort } from '../platform/types';
 import type { SettingsStore } from '../settings';
-import { APP_VERSION, compareVersions } from '../version';
+import { compareVersions } from '../version';
 import { h, ICON, svgNode } from './dom';
 import { alertsScreen } from './screens/alerts';
 import { dataScreen } from './screens/data';
@@ -74,9 +74,15 @@ export function parseHash(hash: string): { name: string; sub: string[]; params: 
   return { name: parts[0] ?? '', sub: parts.slice(1), params: new URLSearchParams(query) };
 }
 
-/** Bannière « Nouveau » : réglages d'une version antérieure au lancement (mise à jour), jusqu'à « OK ». */
-export function newsState(seenAtStart: string, current = APP_VERSION): { visible(): boolean; dismiss(): void } {
-  let shown = !!seenAtStart && compareVersions(seenAtStart, current) < 0;
+/** Version qui a apporté les nouveautés de la bannière (adresses, trajet le plus simple) : la 1.1. */
+export const NEWS_SINCE = '1.1.0';
+
+/**
+ * Bannière « Nouveau » : seulement au passage de la 1.0 à la 1.1.x (réglages vus avant 1.1.0 au lancement), jusqu'à
+ * « OK ». Une mise à jour 1.1.0 → 1.1.1 ne la remontre pas (comme le message « Quai 1.1 » des lunettes).
+ */
+export function newsState(seenAtStart: string, since = NEWS_SINCE): { visible(): boolean; dismiss(): void } {
+  let shown = !!seenAtStart && compareVersions(seenAtStart, since) < 0;
   return {
     visible: () => shown,
     dismiss: () => {

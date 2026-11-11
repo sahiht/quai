@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * Écran Données (T6, M7.3, M8) : « Version de Quai   1.1.0 », carte « Adresses » (état d'après /api/health),
+ * Écran Données (T6, M7.3, M8) : « Version de Quai   1.1.1 », carte « Adresses » (état d'après /api/health),
  * sources des adresses au pied de page, temps réel en panne dit juste.
  */
 import { afterEach, describe, expect, it } from 'vitest';
@@ -13,10 +13,10 @@ const kv = (el: HTMLElement) => Object.fromEntries([...el.querySelectorAll('.kv'
 const addressCard = (el: HTMLElement) => [...el.querySelectorAll('section')].find((s) => textOf(s.querySelector('h2')) === 'Adresses')!;
 
 describe('écran Données', () => {
-  it('« Mises à jour » : ligne « Version de Quai   1.1.0 » (CA-M7.3)', async () => {
+  it('« Mises à jour » : ligne « Version de Quai   1.1.1 » (CA-M7.3)', async () => {
     const hz = harness({ settings: defaults() });
     const el = mount(dataScreen(hz.ctx));
-    expect(kv(el)['Version de Quai']).toBe('1.1.0');
+    expect(kv(el)['Version de Quai']).toBe('1.1.1');
   });
 
   it('carte « Adresses » : services des trois Régions, « Disponible » puis « Indisponible » quand ils tombent', async () => {

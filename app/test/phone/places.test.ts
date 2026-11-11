@@ -41,7 +41,10 @@ describe('sous-titres des lieux (T3)', () => {
     expect(rows.map((r) => textOf(r.querySelector('.t1')))).toEqual(['Maison', 'Bureau']);
     expect(rows.map((r) => textOf(r.querySelector('.t2')))).toEqual(['Adresse à vérifier', 'Adresse à vérifier']);
     await until(() => rows.every((r) => textOf(r.querySelector('.t3')) !== ''));
-    expect(textOf(rows[0].querySelector('.t3'))).toMatch(/^Namur à \d+ min à pied/);
+    // accès (moins-de-marche.md § 6, CA-MW.11) : l'arrêt le plus proche nommé d'abord, puis la gare utile
+    expect(textOf(rows[0].querySelector('.t3'))).toBe('Bus TEC Namur Place Léopold à 3 min à pied ; gare de Namur à 7 min');
+    expect(rows[0].querySelector('.t3')!.textContent).toContain('à pied\u00a0; gare');
+    expect(textOf(rows[1].querySelector('.t3'))).toBe('Tram Bourse à 9 min à pied');
     noCoords(el);
   });
 });
