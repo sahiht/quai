@@ -1,16 +1,14 @@
 /**
- * Trajets porte à porte (portée v1.0, SPEC § 5.4) :
+ * Calcul de trajets de la 1.0 (SPEC § 5.4), gardé comme repli quand la publication n'a pas de fichiers de ligne
+ * (meta.lines absent, design-routing.md § 9) ; le classement et les étiquettes de la 1.1 s'appliquent ensuite
+ * (routing/engine.ts). Combinaisons :
  *  1. lignes directes urbaines (STIB, De Lijn, TEC) entre les zones à distance de marche du départ et de
  *     l'arrivée, via patterns.next ;
- *  2. trains (direct ou une correspondance) entre gares à distance de marche, avec marche au début et à la fin.
- *     Sans gare à distance de marche, on prend au mieux la ou les gares les plus proches jusqu'à 2 × maxWalkMin
- *     (ex. le bureau à 12 min de Bruxelles-Central pour une marche maximale de 10 min) ;
+ *  2. trains (direct, une ou deux correspondances : trains.ts) entre gares candidates, avec marche au début et à la
+ *     fin. Gares candidates : celles à distance de marche, plus toujours les deux gares les plus desservies jusqu'à
+ *     2 × maxWalkMin (review-tech.md B1 : une petite gare proche ne masque plus la grande gare voisine) ;
  *  3. au mieux, une ligne urbaine directe pour rejoindre la gare de départ ou pour finir après la gare
  *     d'arrivée, quand la marche dépasse maxWalkMin.
- * Marche : départ et arrivée à moins de 100 m → aucun trajet ; arrivée à moins de maxWalkMin à pied → une seule
- * étape à pied ; jamais un trajet en véhicule plus lent que d'y aller à pied (sinon on propose la marche).
- * Sélection sur les horaires prévus : un seul trajet par identité (voyages + montée/descente, sans la date),
- * départ dans les 23 h, trajets dominés retirés ; puis temps réel, tri par arrivée, 3 au plus.
  */
 import type { AreaSummary, Meta, Names, Op } from '../../../shared/types';
 import { normalizeId } from '../../../shared/types';
@@ -36,7 +34,8 @@ export interface PlanEnv {
   refresh(j: Journey): Promise<Journey>;
 }
 
-interface Point {
+/** Extrémité résolue : nom affiché, position, zone éventuelle. */
+export interface PlanPoint {
   name: Names;
   lat: number;
   lon: number;
@@ -65,13 +64,16 @@ const FAR_MAX_M = 2000;
 const STATION_ACCESS_M = 400;
 const TRANSFER_BUFFER_MS = 2 * 60_000;
 const MAX_URBAN_ORIGINS = 12;
+/** Grandes gares toujours candidates (B1), jusqu'à 2 × maxWalkMin. */
+const BIG_STATIONS = 2;
 const MIN = 60_000;
 /** Départ et arrivée plus proches : rien à proposer. */
 export const SAME_PLACE_M = 100;
 /** Jusqu'à cette durée, la marche directe sert de référence : aucun véhicule plus lent n'est proposé. */
 const WALK_REFERENCE_MAX_MIN = 60;
 
-function resolve(e: Endpoint, settings: Settings, here?: { lat: number; lon: number }): Point {
+/** Extrémité d'un trajet (lève une erreur lisible si le lieu est inconnu ou la position absente). */
+export function resolveEndpoint(e: Endpoint, settings: Settings, here?: { lat: number; lon: number } | null): PlanPoint {
   if (e.type === 'here') {
     if (!here || !Number.isFinite(here.lat) || !Number.isFinite(here.lon)) throw new QuaiError('hereMissing');
     return { name: HERE_NAME, lat: here.lat, lon: here.lon };
@@ -79,16 +81,16 @@ function resolve(e: Endpoint, settings: Settings, here?: { lat: number; lon: num
   if (e.type === 'place') {
     const p = settings.places.find((x) => x.id === e.placeId);
     if (!p) throw new QuaiError('placeUnknown');
-    return { name: { fr: p.label, nl: p.label }, lat: p.lat, lon: p.lon };
+    return { name: { fr: p.label, nl: p.label }, lat: p.lat, lon: p.lon, ...(p.areaId ? { areaId: p.areaId } : {}) };
   }
   if (e.type === 'address') return { name: { fr: e.label, nl: e.label }, lat: e.lat, lon: e.lon };
   return { name: e.name, lat: e.lat, lon: e.lon, areaId: e.areaId, op: e.op };
 }
 
-const at = (x: Point | Access) =>
+const at = (x: PlanPoint | Access) =>
   'a' in x ? { name: x.a.n, lat: x.a.lat, lon: x.a.lon, areaId: x.a.id } : { name: x.name, lat: x.lat, lon: x.lon, ...(x.areaId ? { areaId: x.areaId } : {}) };
 
-function walkLeg(from: Point | Access, to: Point | Access, minutes: number, t0: number): Leg {
+function walkLeg(from: PlanPoint | Access, to: PlanPoint | Access, minutes: number, t0: number): Leg {
   return { kind: 'walk', from: at(from), to: at(to), dep: t0, arr: t0 + minutes * MIN, schedDep: t0, schedArr: t0 + minutes * MIN, walkMin: minutes };
 }
 
@@ -125,7 +127,7 @@ function urbanLeg(prep: PreparedArea, di: number, to: AreaSummary, minutes: numb
 }
 
 /** Assemble des étapes : marche initiale juste avant le 1er véhicule, marches suivantes après le véhicule précédent. */
-function assemble(parts: (Leg | { walkFrom: Point | Access; walkTo: Point | Access; minutes: number })[]): Cand | null {
+function assemble(parts: (Leg | { walkFrom: PlanPoint | Access; walkTo: PlanPoint | Access; minutes: number })[]): Cand | null {
   const legs: Leg[] = [];
   parts.forEach((x, i) => {
     if ('kind' in x) {
@@ -183,7 +185,7 @@ export function selectCandidates<T extends { dep: number; arr: number; transfers
   return keep.slice(0, max);
 }
 
-async function accessAround(env: PlanEnv, pt: Point, radiusM: number): Promise<Access[]> {
+async function accessAround(env: PlanEnv, pt: PlanPoint, radiusM: number): Promise<Access[]> {
   const list = await env.areasAround(pt.lat, pt.lon, radiusM);
   const out: Access[] = list.map(({ a, d }) => ({ a, d, walk: a.id === pt.areaId ? 0 : walkMinutes(d) }));
   if (pt.areaId && !out.some((x) => x.a.id === pt.areaId)) {
@@ -193,24 +195,14 @@ async function accessAround(env: PlanEnv, pt: Point, radiusM: number): Promise<A
   return out.sort((x, y) => x.walk - y.walk || x.d - y.d);
 }
 
-export async function planJourneys(
-  from: Endpoint,
-  to: Endpoint,
-  after: number,
-  settings: Settings,
-  here: { lat: number; lon: number } | undefined,
-  env: PlanEnv,
-): Promise<Journey[]> {
-  const O = resolve(from, settings, here);
-  const D = resolve(to, settings, here);
-  const maxWalk = Math.min(30, Math.max(1, Math.round(settings.maxWalkMin || 10)));
+/** Nombre de passages de trains d'une gare (les jours chargés). */
+const trainCount = (days: DayIndex[], id: string) => days.reduce((s, d) => s + (d.byStation.get(id)?.length ?? 0) / 2, 0);
 
-  // Marche directe : déjà sur place, ou destination à distance de marche
-  const directM = distanceM(O, D);
-  if (directM <= SAME_PLACE_M) return [];
-  const directWalk = walkMinutes(directM);
-  const walkOnly = () => env.refresh(skeleton([walkLeg(O, D, directWalk, after)]));
-  if (directWalk <= maxWalk) return [await walkOnly()];
+/**
+ * Trajets candidats de la 1.0 (étapes aux horaires prévus, un par identité, départ dans les 23 h), sans marche seule
+ * ni classement. O et D sont à plus de maxWalkMin à pied l'un de l'autre.
+ */
+export async function planCandidates(O: PlanPoint, D: PlanPoint, after: number, maxWalk: number, env: PlanEnv): Promise<Leg[][]> {
   const farO = Math.min(FAR_MAX_M, tileReachM(O.lat, env.meta.tile));
   const farD = Math.min(FAR_MAX_M, tileReachM(D.lat, env.meta.tile));
 
@@ -219,12 +211,17 @@ export async function planJourneys(
   const nearD = allD.filter((x) => x.walk <= maxWalk);
   const isSncb = (x: Access) => x.a.op === 'sncb';
 
+  let days: DayIndex[] = [];
+  if (allO.some(isSncb) || allD.some(isSncb)) days = await env.trainDays().catch(() => []);
+  const big = (all: Access[], own: Access[]) =>
+    all
+      .filter((x) => isSncb(x) && x.walk <= 2 * maxWalk && !own.some((y) => y.a.id === x.a.id))
+      .sort((a, b) => trainCount(days, b.a.id) - trainCount(days, a.a.id) || a.walk - b.walk)
+      .slice(0, BIG_STATIONS);
   const stationsO = O.op === 'sncb' ? allO.filter((x) => x.a.id === O.areaId) : nearO.filter(isSncb);
   const stationsD = D.op === 'sncb' ? allD.filter((x) => x.a.id === D.areaId) : nearD.filter(isSncb);
-  const longO = stationsO.length ? [] : allO.filter((x) => isSncb(x) && x.walk <= 2 * maxWalk).slice(0, 2);
-  const longD = stationsD.length ? [] : allD.filter((x) => isSncb(x) && x.walk <= 2 * maxWalk).slice(0, 2);
-  const trainFrom = [...stationsO, ...longO];
-  const trainTo = [...stationsD, ...longD];
+  const trainFrom = O.op === 'sncb' ? stationsO : [...stationsO, ...big(allO, stationsO)];
+  const trainTo = D.op === 'sncb' ? stationsD : [...stationsD, ...big(allD, stationsD)];
 
   const urbanO = nearO.filter((x) => !isSncb(x)).slice(0, MAX_URBAN_ORIGINS);
   const preps = new Map<string, PreparedArea>();
@@ -258,9 +255,7 @@ export async function planJourneys(
     });
   }
 
-  // 2. trains entre gares à distance de marche
-  let days: DayIndex[] = [];
-  if (trainFrom.length || (!stationsO.length && allO.some(isSncb))) days = await env.trainDays();
+  // 2. trains entre gares candidates
   for (const so of trainFrom) {
     for (const sd of trainTo) {
       if (so.a.id === sd.a.id) continue;
@@ -297,7 +292,7 @@ export async function planJourneys(
           for (const sd of trainTo) {
             if (sd.a.id === f.a.id) continue;
             for (const opt of env.engine.search(days, f.a.id, sd.a.id, prep.times[first] + access, 2)) {
-              const di = lastDepartureOfPattern(prep, pi, opt.dep - access, earliestDep);
+              const di = lastDepartureOfPattern(prep, pi, opt.dep - access, Math.max(earliestDep, opt.dep - access - 45 * MIN));
               if (di === undefined) continue;
               const ride = urbanLeg(prep, di, b.u.a, b.m);
               push(assemble([{ walkFrom: O, walkTo: o, minutes: o.walk }, ride, { walkFrom: uAcc, walkTo: f, minutes: walkUF }, ...opt.rides.map(trainLeg), { walkFrom: sd, walkTo: D, minutes: sd.walk }]));
@@ -310,7 +305,6 @@ export async function planJourneys(
 
   // 3b. ligne urbaine pour finir après une gare trop loin à pied
   if (!stationsD.length && trainFrom.length) {
-    if (!days.length) days = await env.trainDays();
     for (const g of allD.filter(isSncb).slice(0, 3)) {
       const around = (await env.areasAround(g.a.lat, g.a.lon, STATION_ACCESS_M)).filter((x) => x.a.op !== 'sncb').slice(0, 4);
       for (const u of around) {
@@ -330,7 +324,7 @@ export async function planJourneys(
             if (so.a.id === g.a.id) continue;
             for (const opt of env.engine.search(days, so.a.id, g.a.id, after + so.walk * MIN, 2)) {
               const di = nextDeparturesOfPattern(prep, pi, opt.arr + walkGU * MIN + TRANSFER_BUFFER_MS, 1)[0];
-              if (di === undefined) continue;
+              if (di === undefined || prep.times[di] > opt.arr + 60 * MIN) continue;
               const uAcc: Access = { a: u.a, d: u.d, walk: walkGU };
               push(assemble([{ walkFrom: O, walkTo: so, minutes: so.walk }, ...opt.rides.map(trainLeg), { walkFrom: g, walkTo: uAcc, minutes: walkGU }, urbanLeg(prep, di, b.acc.a, b.m), { walkFrom: b.acc, walkTo: D, minutes: b.acc.walk }]));
             }
@@ -340,15 +334,35 @@ export async function planJourneys(
     }
   }
 
-  // jamais un véhicule plus lent que d'y aller à pied maintenant
-  let usable = cands;
-  if (directWalk <= WALK_REFERENCE_MAX_MIN) {
-    usable = cands.filter((c) => c.arr <= after + directWalk * MIN);
-    if (!usable.length) return [await walkOnly()];
-  }
   // un seul trajet par identité (le même train circule chaque jour), puis départ dans l'horizon
-  const unique = uniqueBy(usable, candidateIdentity, betterCand).sort((a, b) => a.dep - b.dep || a.arr - b.arr);
-  const chosen = selectCandidates(withinHorizon(unique, after, JOURNEY_HORIZON_MS), KEEP_BEFORE_RT);
+  const unique = uniqueBy(cands, candidateIdentity, betterCand).sort((a, b) => a.dep - b.dep || a.arr - b.arr);
+  return withinHorizon(unique, after, JOURNEY_HORIZON_MS).map((c) => c.legs);
+}
+
+/** Calcul 1.0 complet (trajets triés par arrivée, temps réel compris) : gardé pour les outils de comparaison. */
+export async function planJourneys(
+  from: Endpoint,
+  to: Endpoint,
+  after: number,
+  settings: Settings,
+  here: { lat: number; lon: number } | undefined,
+  env: PlanEnv,
+): Promise<Journey[]> {
+  const O = resolveEndpoint(from, settings, here);
+  const D = resolveEndpoint(to, settings, here);
+  const maxWalk = Math.min(30, Math.max(1, Math.round(settings.maxWalkMin || 10)));
+  const directM = distanceM(O, D);
+  if (directM <= SAME_PLACE_M) return [];
+  const directWalk = walkMinutes(directM);
+  const walkOnly = () => env.refresh(skeleton([walkLeg(O, D, directWalk, after)]));
+  if (directWalk <= maxWalk) return [await walkOnly()];
+  const legs = await planCandidates(O, D, after, maxWalk, env);
+  let cands = legs.map((l) => assemble(l)).filter((c): c is Cand => c !== null);
+  if (directWalk <= WALK_REFERENCE_MAX_MIN) {
+    cands = cands.filter((c) => c.arr <= after + directWalk * MIN);
+    if (!cands.length) return [await walkOnly()];
+  }
+  const chosen = selectCandidates(cands, KEEP_BEFORE_RT);
   const journeys = await Promise.all(chosen.map((c) => env.refresh(skeleton(c.legs))));
   const cancelled = (j: Journey) => j.legs.some((l) => l.kind === 'ride' && l.cancelled);
   journeys.sort((a, b) => Number(cancelled(a)) - Number(cancelled(b)) || a.arr - b.arr || a.transfers - b.transfers || b.dep - a.dep);

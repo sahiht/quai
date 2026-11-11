@@ -1,13 +1,17 @@
 /**
- * refresh() : temps réel réappliqué, heure de départ conseillée recalculée, alertes rédigées (≤ 48 caractères).
+ * refresh() : temps réel réappliqué, heure de départ conseillée recalculée, alertes rédigées (≤ 48 caractères),
+ * étiquette et raison gardées (1.1). Temps réel des bus, trams et métros : test/core/routing/rt.test.ts.
  */
 import { describe, expect, it } from 'vitest';
-import type { Journey, Settings } from '../../src/core/api';
+import type { Alert, Journey, Settings } from '../../src/core/api';
 import { forLabel, withArticle } from '../../src/core/text';
 import { hhmm } from '../../src/core/util';
 import { makeEnv, type TestEnv } from './support/env';
 
 const MAISON = { lat: 50.4655, lon: 4.859 };
+/** Textes comparés sans les espaces insécables (typographie française des alertes, core/text.ts). */
+const nb = (s: string | undefined) => (s ?? '').replace(/\u00A0/g, ' ');
+const plainAlert = (a: Alert | undefined) => (a ? { ...a, text: nb(a.text) } : a);
 const IC_0742 = '88____:007::8863008:8814001:10:852:20261231';
 
 async function morning(env: TestEnv, settings?: Settings): Promise<Journey> {
@@ -27,7 +31,7 @@ describe('refresh : scénario 1 (voie modifiée en chemin)', () => {
     env.server.scene = 'base';
     const j1 = await env.core.refresh(j0, env.preset);
     expect(j1.id).toBe(j0.id);
-    expect(j1.alerts[0]).toEqual({ kind: 'platform', text: '! Voie modifiée : l’IC part de la voie 6', at: env.clock.t });
+    expect(plainAlert(j1.alerts[0])).toEqual({ kind: 'platform', text: '! Voie modifiée : l’IC part de la voie 6', at: env.clock.t });
     // la marche déjà commencée garde son heure ; le reste suit le retard de 2 min
     expect(hhmm(j1.legs[0].dep)).toBe('07:33');
     expect(hhmm(j1.dep)).toBe('07:33');
@@ -38,7 +42,7 @@ describe('refresh : scénario 1 (voie modifiée en chemin)', () => {
     expect(j1.legs[1]).toMatchObject({ rt: true, delayMin: 2, newPlatform: '6', platform: '4' });
     // départ conseillé dépassé et train pas encore parti : « Partir maintenant », après l'alerte de voie
     expect(j1.alerts.map((a) => a.kind)).toEqual(['platform', 'leave']);
-    expect(j1.alerts[1].text).toBe('Partir maintenant : 7 min à pied');
+    expect(nb(j1.alerts[1].text)).toBe('Partir maintenant : 7 min à pied');
     // « Dans le train » : arrêts avec heures corrigées
     expect(j1.legs[1].stops?.slice(1, 4).map((s) => `${s.name.fr} ${hhmm(s.est)}`)).toEqual(['Gembloux 07:57', 'Ottignies 08:11', 'Bruxelles-Luxembourg 08:33']);
   });
@@ -54,17 +58,23 @@ describe('refresh : scénario 1 (voie modifiée en chemin)', () => {
     expect(j1.alerts.map((a) => a.kind)).toEqual(['platform']);
   });
 
-  it('source en erreur au rafraîchissement : horaire prévu, aucune alerte de voie', async () => {
+  it('source en erreur au rafraîchissement : horaire prévu ; voie modifiée connue gardée 15 min (M8.5)', async () => {
     const env = makeEnv({ now: '2026-11-10T07:31' });
     const j0 = await morning(env);
     expect(j0.legs[1].newPlatform).toBe('6');
     env.server.scene = 'noRT';
     env.clock.advance(30_000);
     const j1 = await env.core.refresh(j0, env.preset);
-    expect(j1.legs[1]).toMatchObject({ rt: false, delayMin: 0 });
-    expect(j1.legs[1].newPlatform).toBeUndefined();
+    expect(j1.legs[1]).toMatchObject({ rt: false, delayMin: 0, newPlatform: '6' });
+    expect(hhmm(j1.legs[1].dep)).toBe('07:42');
     expect(j1.rt).toBe(false);
-    expect(j1.alerts.some((a) => a.kind === 'platform')).toBe(false);
+    expect(plainAlert(j1.alerts[0])).toMatchObject({ kind: 'platform', text: '! Voie modifiée : l’IC part de la voie 6' });
+    // au-delà de 15 min : plus rien de connu, horaire et voie prévus
+    env.clock.advance(16 * 60_000);
+    const j2 = await env.core.refresh(j0, env.preset);
+    expect(j2.legs[1]).toMatchObject({ rt: false, delayMin: 0 });
+    expect(j2.legs[1].newPlatform).toBeUndefined();
+    expect(j2.alerts.some((a) => a.kind === 'platform')).toBe(false);
   });
 });
 
@@ -73,18 +83,24 @@ describe('alertes', () => {
     const env = makeEnv({ now: '2026-11-10T07:20' });
     env.server.relay.rt.sncb.trips[IC_0742] = { u: [[1, '8863008_4', 420, null, 0]] };
     const j = await morning(env);
-    expect(j.alerts.map((a) => a.text)).toEqual(['! IC 07:42 : +7 min']);
+    expect(j.alerts.map((a) => nb(a.text))).toEqual(['! IC 07:42 : +7 min']);
     const lenient: Settings = { ...env.preset, alerts: { ...env.preset.alerts, delayMin: 10 } };
     expect((await env.core.refresh(j, lenient)).alerts).toEqual([]);
   });
 
-  it('suppression : « ! IC 07:42 supprimé » et le trajet passe après les autres', async () => {
+  it('suppression : jamais proposée (PRD § 4.2) ; sur le trajet affiché, « ! IC 07:42 supprimé », étiquette gardée', async () => {
     const env = makeEnv({ now: '2026-11-10T07:20' });
+    const j0 = await morning(env);
+    expect(j0).toMatchObject({ label: 'simple' });
     env.server.relay.rt.sncb.trips[IC_0742] = { cancelled: true, u: [] };
+    env.clock.advance(21_000); // au-delà du cache du temps réel (20 s)
+    const j1 = await env.core.refresh(j0, env.preset);
+    expect(j1.alerts.map((a) => nb(a.text))).toEqual(['! IC 07:42 supprimé']);
+    expect([j1.id, j1.label, j1.reason]).toEqual([j0.id, j0.label, j0.reason]);
     const js = await env.core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, env.clock.t, env.preset, MAISON);
-    const cancelled = js.find((j) => j.legs.some((l) => l.cancelled));
-    expect(cancelled?.alerts.map((a) => a.text)).toEqual(['! IC 07:42 supprimé']);
-    expect(js[js.length - 1]).toBe(cancelled);
+    expect(js.some((j) => j.legs.some((l) => l.cancelled))).toBe(false);
+    expect(js.map((j) => hhmm(j.legs[1].schedDep))).toEqual(['08:42']);
+    expect(js[0].label).toBe('simple');
   });
 
   it('réglages : chaque alerte se désactive', async () => {
@@ -100,7 +116,7 @@ describe('alertes', () => {
     const j = await morning(env, works);
     expect(j.alerts).toHaveLength(1);
     expect(j.alerts[0].kind).toBe('works');
-    expect(j.alerts[0].text).toBe('Travaux à Ottignies : quelques minutes de retar…');
+    expect(nb(j.alerts[0].text)).toBe('Travaux à Ottignies : quelques minutes de retar…');
     expect((await morning(env)).alerts.some((a) => a.kind === 'works')).toBe(false);
   });
 
@@ -134,12 +150,12 @@ describe('alertes', () => {
     env.server.relay.rt.sncb.trips[s1] = { u: [[1, '8812005_11', 900, null, 0]] };
     let js = await env.core.trains('sncb:8812005', 'sncb:8883006', env.clock.t, 1);
     let j = await env.core.refresh(js[0], all);
-    expect(j.alerts.map((a) => a.text)).toEqual(['! Voie modifiée : le S1 part de la voie 11', '! S1 12:34 : +15 min']);
+    expect(j.alerts.map((a) => nb(a.text))).toEqual(['! Voie modifiée : le S1 part de la voie 11', '! S1 12:34 : +15 min']);
     env.server.relay.rt.sncb.trips[s1] = { cancelled: true, u: [] };
     env.clock.advance(21_000);
     js = await env.core.trains('sncb:8812005', 'sncb:8883006', env.clock.t, 1);
     j = await env.core.refresh(js[0], all);
-    expect(j.alerts.map((a) => a.text)).toEqual(['! S1 12:34 supprimé']);
+    expect(j.alerts.map((a) => nb(a.text))).toEqual(['! S1 12:34 supprimé']);
     for (const a of [...j.alerts, ...js.flatMap((x) => x.alerts)]) {
       expect(a.text.length).toBeLessThanOrEqual(48);
       expect(a.text).not.toContain('—');

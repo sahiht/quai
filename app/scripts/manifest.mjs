@@ -30,8 +30,9 @@ export function readManifestVersion(file, fallback = '1.0.0') {
 export const APP_VERSION = readManifestVersion(new URL('../app.json', import.meta.url));
 
 export const NETWORK_DESC =
-  'Télécharge les horaires préparés chaque nuit (GitHub Pages, par zones d’environ 2 km) ' +
-  'et le temps réel (retards, voies, suppressions) depuis ton relais personnel.';
+  'Télécharge les horaires préparés chaque nuit (GitHub Pages, par zones d’environ 2 km) ' +
+  'et, depuis ton relais personnel, le temps réel (retards, voies, suppressions) et les adresses : ' +
+  'seul le texte tapé est envoyé, jamais la position.';
 export const LOCATION_DESC =
   'Trouve les arrêts proches et propose le bon trajet. La position exacte reste sur le téléphone : ' +
   'l’appli ne télécharge que les horaires de ta zone (environ 2 km) et n’envoie jamais ta position au relais.';
@@ -137,11 +138,11 @@ export function privacyWithDomains(markdown, cfg) {
   const body = cfg
     ? [
         `- Horaires (fichiers statiques) : ${originOf(cfg.dataBase)}`,
-        `- Temps réel (relais personnel) : ${originOf(cfg.relayBase)}`,
+        `- Temps réel et adresses (relais personnel) : ${originOf(cfg.relayBase)}`,
       ].join('\n')
     : [
         '- Horaires (fichiers statiques) : adresse GitHub Pages, remplie par `npm run configure`',
-        '- Temps réel (relais personnel) : adresse Vercel, remplie par `npm run configure`',
+        '- Temps réel et adresses (relais personnel) : adresse Vercel, remplie par `npm run configure`',
       ].join('\n');
   return markdown.slice(0, start + DOMAINS_START.length) + '\n' + body + '\n' + markdown.slice(end);
 }

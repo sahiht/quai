@@ -195,7 +195,8 @@ export interface Journey {
   transfers: number;
   rt: boolean;                  // tous les trajets en véhicule ont du temps réel
   alerts: Alert[];              // selon Settings.alerts, les plus importantes d'abord
-  /** 1.1 : étiquette et raison calculées par le cœur (route) ; la raison suit PRD § 6.1 L3, 48 caractères max,
+  /** 1.1 : étiquette et raison calculées par le cœur (route) ; la raison suit PRD § 6.1 L3 et tient sur une ligne
+   *  des lunettes (542 px mesurés avec la police, pas un nombre de caractères),
    *  ex. « Le plus simple : direct, à pied 7 + 12 min ». Gardées par refresh(). */
   label?: JourneyLabel;
   reason?: string;
@@ -229,8 +230,10 @@ export interface FavoriteRank { favoriteId: string; rule: 1 | 2 | 3 | 4 | 5; dis
 
 /**
  * Réponse d'un favori pour l'accueil et « Autres favoris » (M1), et pour la section « Mes favoris » du téléphone (S8).
- * state : ok (réponse prête) ; here (« tu y es ») ; none (rien dans les 3 heures) ; noPosition (« sans position ») ;
- * missing (arrêt introuvable : « introuvable : modifie-le sur le téléphone »).
+ * state : ok (réponse prête, même lointaine : « partir à 17:13 », « partir demain 06:20 ») ; here (« tu y es ») ;
+ * none (aucun trajet ni départ trouvé dans l'horizon de recherche, environ 23 h : « aucun trajet ») ;
+ * noPosition (« sans position ») ; missing (arrêt introuvable : « introuvable : modifie-le sur le téléphone »).
+ * La règle 5 de l'ordre (« rien dans les 3 heures ») se lit sur l'heure de la réponse, pas sur state.
  */
 export interface FavoriteAnswer {
   favoriteId: string;

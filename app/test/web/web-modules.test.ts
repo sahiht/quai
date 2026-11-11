@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getTextWidth } from '@evenrealities/pretext';
 import { layoutPage } from '../../src/glasses/layout';
-import { boardView, messageView } from '../../src/glasses/views';
+import { boardView, messageView, placesView } from '../../src/glasses/views';
 import type { ContainerSpec } from '../../src/glasses/types';
 import { advance, BASELINE, describeContainers, drawContainers, glyphPositions, LEVEL_ALPHA } from '../../src/web/display';
 import { classifyPress, keyBelongsToFocus, keyToGesture, TapSequencer } from '../../src/web/gestures';
@@ -87,7 +87,7 @@ describe('écran des lunettes dessiné dans un canvas', () => {
     expect(LEVEL_ALPHA[2]).toBeCloseTo(197 / 255, 1);
   });
 
-  it('texte lisible pour les lecteurs d’écran : titre, heure, lignes (sélection), aides', () => {
+  it('texte lisible pour les lecteurs d’écran : titre, heure, lignes, aides ; départs sans curseur (M6.2)', () => {
     const v = boardView(
       {
         area: { id: 'stib:6357F', op: 'stib', n: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 0, lon: 0, modes: ['tram'], lines: ['3'] },
@@ -101,8 +101,12 @@ describe('écran des lunettes dessiné dans un canvas', () => {
     );
     const text = describeContainers(layoutPage(v, { sel: 0, top: 0 }).containers);
     expect(text).toContain('Gare du Nord, tram (STIB)');
-    expect(text).toContain('sélection : T3, Churchill, 2 min');
+    expect(text).toContain('T3, Churchill, 2 min');
+    expect(text).not.toContain('sélection');
     expect(text).toContain('départs');
+    // une liste à curseur dit la ligne choisie
+    const menu = describeContainers(layoutPage(placesView({}, { now: 0, settings: defaults() }), { sel: 0, top: 0 }).containers);
+    expect(menu).toContain('sélection : Aucun lieu enregistré, sur le téléphone');
   });
 });
 

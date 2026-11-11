@@ -192,7 +192,7 @@ describe('buildData avec téléchargement', () => {
     const r = await buildData({ out, dates: ['2026-11-10', '2026-11-11'], key: KEY, sources, download: fast, log: (m) => logs.push(m) });
     expect(r.meta.feeds.stib).toEqual({ ok: false, error: 'téléchargement impossible (STIB, portail BMC : HTTP 403, clé refusée ou abonnement manquant)', areas: 0, trips: 0 });
     expect(r.meta.feeds.sncb).toMatchObject({ ok: false, error: 'source non fournie dans QUAI_SOURCES' });
-    expect(r.meta.feeds.tec).toMatchObject({ ok: true, areas: 5 });
+    expect(r.meta.feeds.tec).toMatchObject({ ok: true, areas: 8 });
     expect(r.meta.feeds.delijn).toMatchObject({ ok: true, areas: 7 });
     expect(r.anyOk).toBe(true);
     const meta = readFileSync(join(out, 'meta.json'), 'utf8');

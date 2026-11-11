@@ -11,6 +11,9 @@ import type {
   AreaFile,
   AreaSummary,
   HealthResponse,
+  LineFile,
+  LineIndex,
+  LineTile,
   Meta,
   Mode,
   Names,
@@ -22,7 +25,7 @@ import type {
   TrainsDay,
 } from '../../../../shared/types';
 import { normalizeId, tileKey } from '../../../../shared/types';
-import { frName, prettyName, searchKey, searchWords } from '../../../../shared/names';
+import { frName, lineName, prettyName, searchKey, searchWords } from '../../../../shared/names';
 import type { Network, NetRoute, NetStop, NetTemplate, NetTrip } from './network';
 
 export const TILE = { lat: 0.02, lon: 0.03 };
@@ -335,8 +338,228 @@ export function buildDataFiles(net: Network): Files {
       tec: { ok: true, areas: count('tec'), trips: tripCount.tec },
     },
   };
+  // 1.1 (routage) : fichiers de ligne, index des lignes et tuiles de lignes (design-routing.md § 3)
+  const lineOut = buildLineFiles(net, trips, (op, stop) => {
+    const loc = areaOfStop.get(`${op}|${stop}`);
+    const a = loc ? areas.get(loc.areaId) : undefined;
+    return loc && a ? { id: a.file.id, lat: a.file.lat, lon: a.file.lon, n: a.file.n, rt: a.file.stops[loc.idx]?.rt ?? '' } : null;
+  }, stations);
+  Object.assign(files, lineOut.files);
+  meta.lines = lineOut.meta;
   files['meta.json'] = meta;
   return files;
+}
+
+/* ------------------------------ 1.1 : fichiers de ligne (équipe routage) ------------------------------ */
+
+/** Rayon des correspondances des fichiers de ligne (LineIndex.conn). */
+export const LINE_CONN_M = 400;
+
+interface ZoneRef {
+  id: string;
+  lat: number;
+  lon: number;
+  n: Names;
+  rt: string;
+}
+
+/**
+ * Fichiers de ligne du mini-réseau, au format du pipeline 1.1 (shared/types.ts LineFile, LineIndex, LineTile) :
+ * un fichier par ligne GTFS (STIB, De Lijn, TEC), motifs = (destination, suite des zones, autorisations), deux arrêts
+ * consécutifs de la même zone = une position (première arrivée, dernier départ), profils partagés, voyages des deux
+ * jours triés par (jour, départ), `trips` normalisés (De Lijn, TEC), `conn` réduites aux bornes des tronçons communs ;
+ * index (numérotation par opérateur puis clé, `stations` : lignes à moins de 400 m de chaque gare) ; tuiles de lignes.
+ */
+export function buildLineFiles(
+  net: Network,
+  trips: TripRec[],
+  zoneOf: (op: Op, stop: string) => ZoneRef | null,
+  stations: { id: string; lat: number; lon: number }[],
+): { files: Files; meta: NonNullable<Meta['lines']> } {
+  const dates = net.serviceDates;
+  const round5 = (x: number) => Math.round(x * 1e5) / 1e5;
+  interface Pat {
+    head: Names;
+    a: string[];
+    s: string[];
+    f: string;
+    prof: number[][];
+    profKey: Map<string, number>;
+    t: number[][];
+  }
+  interface Line {
+    key: string;
+    op: Exclude<Op, 'sncb'>;
+    route: string;
+    line: string;
+    mode: Mode;
+    pats: Pat[];
+    patKey: Map<string, Pat>;
+    trips: string[];
+    tripRank: Map<string, number>;
+    zones: Map<string, ZoneRef>;
+  }
+  const lines = new Map<string, Line>();
+  for (const t of trips) {
+    if (t.op === 'sncb') continue;
+    const op = t.op;
+    const mode = modeOfRouteType(t.route.type);
+    const days = dates.map((d, i) => (runsOn(net.calendars[t.service], d) ? i : -1)).filter((i) => i >= 0);
+    if (!days.length) continue;
+    // positions : zones successives (deux arrêts consécutifs de la même zone = une position)
+    const pos: { z: ZoneRef; arr: number; dep: number }[] = [];
+    for (const x of t.st) {
+      const z = zoneOf(op, x.stop);
+      if (!z) throw new Error(`arrêt inconnu ${op} ${x.stop}`);
+      const last = pos[pos.length - 1];
+      if (last && last.z.id === z.id) {
+        last.dep = x.dep;
+        last.z = { ...last.z, rt: z.rt };
+      } else pos.push({ z, arr: x.arr, dep: x.dep });
+    }
+    if (pos.length < 2) continue;
+    const key = `${op}:${t.route.id}`;
+    let L = lines.get(key);
+    if (!L) {
+      L = { key, op, route: normalizeId(t.route.id), line: lineName(t.route.short, mode), mode, pats: [], patKey: new Map(), trips: [], tripRank: new Map(), zones: new Map() };
+      lines.set(key, L);
+    }
+    for (const p of pos) if (!L.zones.has(p.z.id)) L.zones.set(p.z.id, p.z);
+    const n = pos.length;
+    const f = `b${'x'.repeat(n - 2)}a`;
+    const pk = `${t.head.fr}|${pos.map((p) => p.z.id).join(',')}|${f}`;
+    let P = L.patKey.get(pk);
+    if (!P) {
+      P = { head: t.head, a: pos.map((p) => p.z.id), s: pos.map((p) => p.z.rt), f, prof: [], profKey: new Map(), t: [] };
+      L.patKey.set(pk, P);
+      L.pats.push(P);
+    }
+    const start = pos[0].dep;
+    const prof = pos.map((p, i) => (i === n - 1 ? p.arr : p.dep) - start);
+    const prk = prof.join(',');
+    let pi = P.profKey.get(prk);
+    if (pi === undefined) {
+      pi = P.prof.length;
+      P.prof.push(prof);
+      P.profKey.set(prk, pi);
+    }
+    let rank = -1;
+    if (op !== 'stib') {
+      const id = normalizeId(t.id);
+      rank = L.tripRank.get(id) ?? -1;
+      if (rank < 0) {
+        rank = L.trips.length;
+        L.trips.push(id);
+        L.tripRank.set(id, rank);
+      }
+    }
+    for (const day of days) P.t.push(rank >= 0 ? [day, start, pi, rank] : [day, start, pi]);
+  }
+  const order = [...lines.values()].sort((x, y) => (x.op < y.op ? -1 : x.op > y.op ? 1 : x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
+  const num = new Map(order.map((L, i) => [L.key, i]));
+  // lignes par zone (montée ou descente), positions des zones
+  const linesOfZone = new Map<string, Set<number>>();
+  const zone = new Map<string, ZoneRef>();
+  for (const L of order) {
+    const li = num.get(L.key) ?? 0;
+    for (const P of L.pats)
+      for (const id of P.a) {
+        let s = linesOfZone.get(id);
+        if (!s) linesOfZone.set(id, (s = new Set()));
+        s.add(li);
+        zone.set(id, L.zones.get(id) as ZoneRef);
+      }
+  }
+  const near = (pt: { lat: number; lon: number }, self: number): number[] => {
+    const s = new Set<number>();
+    for (const [id, set] of linesOfZone) {
+      const z = zone.get(id);
+      if (z && distance(pt, z) <= LINE_CONN_M) for (const li of set) if (li !== self) s.add(li);
+    }
+    return [...s].sort((a, b) => a - b);
+  };
+  const files: Files = {};
+  for (const L of order) {
+    const li = num.get(L.key) ?? 0;
+    const local = new Map<string, number>();
+    const areasOut: LineFile['areas'] = [];
+    const loc = (id: string) => {
+      let i = local.get(id);
+      if (i === undefined) {
+        const z = L.zones.get(id) as ZoneRef;
+        i = areasOut.length;
+        local.set(id, i);
+        areasOut.push([z.id, round5(z.lat), round5(z.lon), z.n]);
+      }
+      return i;
+    };
+    const pats = L.pats.map((P) => {
+      const out: LineFile['pats'][number] = {
+        head: P.head,
+        a: P.a.map(loc),
+        s: P.s,
+        prof: P.prof,
+        t: [...P.t].sort((x, y) => x[0] - y[0] || x[1] - y[1] || x[2] - y[2]),
+      };
+      if (P.f !== `b${'x'.repeat(P.a.length - 2)}a`) out.f = P.f;
+      return out;
+    });
+    // correspondances : lignes voisines gardées aux bornes des suites de zones consécutives où elles sont présentes
+    const full = areasOut.map(([id]) => near(zone.get(id) as ZoneRef, li));
+    const keep = areasOut.map(() => new Set<number>());
+    for (const p of pats) {
+      const present = new Map<number, number[]>();
+      p.a.forEach((la, k) => {
+        for (const m of full[la]) (present.get(m) ?? present.set(m, []).get(m)!).push(k);
+      });
+      for (const [m, ks] of present) {
+        let runStart = ks[0];
+        for (let i = 1; i <= ks.length; i++) {
+          if (i === ks.length || ks[i] !== ks[i - 1] + 1) {
+            keep[p.a[runStart]].add(m);
+            keep[p.a[ks[i - 1]]].add(m);
+            if (i < ks.length) runStart = ks[i];
+          }
+        }
+      }
+    }
+    const file: LineFile = {
+      v: 1,
+      id: L.key,
+      op: L.op,
+      route: L.route,
+      line: L.line,
+      mode: L.mode,
+      areas: areasOut,
+      pats,
+      conn: keep.map((s) => [...s].sort((a, b) => a - b)),
+    };
+    if (L.trips.length) file.trips = L.trips;
+    files[`lines/${L.op}/${L.key.slice(L.key.indexOf(':') + 1).replace(/[^A-Za-z0-9_-]/g, '_')}.json`] = file;
+  }
+  const stationLines: Record<string, number[]> = {};
+  for (const st of stations) {
+    const l = near(st, -1);
+    if (l.length) stationLines[st.id] = l;
+  }
+  const index: LineIndex = {
+    v: 1,
+    generatedAt: GENERATED_AT,
+    conn: LINE_CONN_M,
+    lines: order.map((L) => [L.key, L.line, L.mode, L.pats.length]),
+    stations: stationLines,
+  };
+  files['lines/index.json'] = index;
+  const tiles = new Map<string, Record<string, number[]>>();
+  for (const [id, set] of linesOfZone) {
+    const z = zone.get(id) as ZoneRef;
+    const k = tileKey(z.lat, z.lon, TILE);
+    const t = tiles.get(k) ?? tiles.set(k, {}).get(k)!;
+    t[id] = [...set].sort((a, b) => a - b);
+  }
+  for (const [k, a] of tiles) files[`linetiles/${k}.json`] = { v: 1, a } satisfies LineTile;
+  const ops = (['stib', 'delijn', 'tec'] as const).filter((op) => order.some((L) => L.op === op));
+  return { files, meta: { files: order.length, ops: [...ops], conn: LINE_CONN_M } };
 }
 
 export interface RelayFixtures {

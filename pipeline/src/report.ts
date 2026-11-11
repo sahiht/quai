@@ -6,7 +6,7 @@ export interface SizeReport {
   files: number;
   bytes: number;
   biggest: { path: string; bytes: number }[];
-  /** Par dossier de premier niveau (areas/{op} détaillé). */
+  /** Par dossier de premier niveau (areas/{op} et lines/{op} détaillés). */
   groups: { name: string; files: number; bytes: number }[];
 }
 
@@ -26,7 +26,7 @@ export async function sizeReport(dir: string, top = 10): Promise<SizeReport> {
     const bytes = (await stat(p)).size;
     all.push({ path: rel, bytes });
     const parts = rel.split('/');
-    const g = parts.length === 1 ? '(racine)' : parts[0] === 'areas' && parts.length > 2 ? `areas/${parts[1]}` : parts[0];
+    const g = parts.length === 1 ? '(racine)' : (parts[0] === 'areas' || parts[0] === 'lines') && parts.length > 2 ? `${parts[0]}/${parts[1]}` : parts[0];
     const cur = groups.get(g) ?? { files: 0, bytes: 0 };
     cur.files++;
     cur.bytes += bytes;

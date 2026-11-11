@@ -23,8 +23,8 @@ describe('suggest', () => {
       kind: 'favoriteTrip',
       favoriteId: 'fav-bureau',
       autoOpen: false,
-      title: 'Pour le bureau : IC 07:42, voie 4',
-      subtitle: 'partir à 07:33, 7 min à pied',
+      title: 'Pour le bureau\u00a0: IC 07:42, voie 4',
+      subtitle: 'partir à 07:33, 7\u00a0min à pied',
     });
     expect(hhmm(s?.journey?.arr ?? 0)).toBe('08:58');
   });
@@ -32,15 +32,15 @@ describe('suggest', () => {
   it('scénario 1, scène base : retard et voie en direct, départ recalculé', async () => {
     const { core, preset } = makeEnv({ now: '2026-11-10T07:31' });
     const s = await core.suggest(POS.s1, preset);
-    expect(s?.title).toBe('Pour le bureau : IC 07:42 +2, voie 6');
-    expect(s?.subtitle).toBe('partir à 07:35, 7 min à pied');
-    expect(s?.journey?.alerts[0]?.text).toBe('! Voie modifiée : l’IC part de la voie 6');
+    expect(s?.title).toBe('Pour le bureau\u00a0: IC 07:42 +2, voie 6');
+    expect(s?.subtitle).toBe('partir à 07:35, 7\u00a0min à pied');
+    expect(s?.journey?.alerts[0]?.text).toBe('! Voie modifiée\u00a0: l’IC part de la voie 6');
   });
 
   it('scénario 2 : le favori « à moins de 300 m » s’ouvre seul, départs filtrés en direct', async () => {
     const { core, preset } = makeEnv({ now: '2026-11-10T12:10' });
     const s = await core.suggest(POS.s2, preset);
-    expect(s).toMatchObject({ kind: 'favoriteStop', favoriteId: 'fav-gdn', autoOpen: true, title: 'Gare du Nord : T3 Churchill 2 min', subtitle: 'puis T4 Stalle 5 min' });
+    expect(s).toMatchObject({ kind: 'favoriteStop', favoriteId: 'fav-gdn', autoOpen: true, title: 'Gare du Nord\u00a0: T3 Churchill 2\u00a0min', subtitle: 'puis T4 Stalle 5\u00a0min' });
     expect(s?.board?.departures).toHaveLength(5);
     expect(s?.board?.anyPlanned).toBe(false);
   });
@@ -54,7 +54,7 @@ describe('suggest', () => {
     const { core, preset } = makeEnv({ now: '2026-11-10T07:31', scene: 'noRT' });
     expect(await core.suggest(POS.s1, { ...preset, display: { ...preset.display, opening: 'home' } })).toBeNull();
     const first = await core.suggest(POS.s1, { ...preset, display: { ...preset.display, opening: 'firstFavorite' } });
-    expect(first).toMatchObject({ favoriteId: 'fav-bureau', autoOpen: true, title: 'Pour le bureau : IC 07:42, voie 4' });
+    expect(first).toMatchObject({ favoriteId: 'fav-bureau', autoOpen: true, title: 'Pour le bureau\u00a0: IC 07:42, voie 4' });
   });
 
   it('soir : favori « soir » ; sans libellé, le lieu en minuscules ; sans position, pas de trajet « ici »', async () => {
@@ -70,15 +70,18 @@ describe('suggest', () => {
     };
     // sans position : les trajets « ici » sont ignorés, l'arrêt favori est proposé
     const s = await core.suggest(null, evening);
-    expect(s).toMatchObject({ favoriteId: 'fav-dl', autoOpen: false, title: 'Bruxelles-Nord : 232 Vilvorde ~0 min' });
+    expect(s).toMatchObject({ favoriteId: 'fav-dl', autoOpen: false, title: 'Bruxelles-Nord\u00a0: 232 Vilvorde imminent' });
     const nl = await core.suggest(null, { ...evening, lang: 'nl' });
-    expect(nl?.title).toBe('Brussel Noordstation : 232 Vilvoorde ~0 min');
-    // depuis la gare du Nord : pas de train vers Namur dans le mini-réseau, le tram vers la « maison » de Bruxelles
-    const fromNorth = await core.suggest(POS.s2, evening);
+    expect(nl?.title).toBe('Brussel Noordstation\u00a0: 232 Vilvoorde imminent');
+    // depuis la gare du Nord (1.1 : retours du soir vers Namur) : l'IC 17:18 pour la maison de Namur
+    const toNamur = await core.suggest(POS.s2, evening);
+    expect(toNamur).toMatchObject({ favoriteId: 'fav-namur', title: 'Pour la maison\u00a0: IC 17:18, voie 3', subtitle: 'partir à 17:13, 3\u00a0min à pied' });
+    // sans favori vers Namur : le tram vers la « maison » de Bruxelles
+    const fromNorth = await core.suggest(POS.s2, { ...evening, favorites: evening.favorites.filter((f) => f.id !== 'fav-namur') });
     expect(fromNorth?.favoriteId).toBe('fav-retour');
-    expect(fromNorth?.title).toMatch(/^Pour la maison : T[34] 16:0\d$/);
-    expect(fromNorth?.subtitle).toMatch(/^partir à 16:0\d, 2 min à pied$/);
-    for (const x of [s, nl, fromNorth]) {
+    expect(fromNorth?.title).toMatch(/^Pour la maison\u00a0: T[34] 16:0\d$/);
+    expect(fromNorth?.subtitle).toMatch(/^partir à 16:0\d, 2\u00a0min à pied$/);
+    for (const x of [s, nl, toNamur, fromNorth]) {
       expect((x?.title ?? '').length).toBeLessThanOrEqual(48);
       expect((x?.subtitle ?? '').length).toBeLessThanOrEqual(48);
     }
@@ -87,9 +90,9 @@ describe('suggest', () => {
   it('libellé : « Bureau » saisi comme le lieu enregistré devient « Pour le bureau »', async () => {
     const { core, preset } = makeEnv({ now: '2026-11-10T07:31', scene: 'noRT' });
     const favs = preset.favorites.map((f) => (f.id === 'fav-bureau' && f.kind === 'trip' ? { ...f, label: 'Bureau' } : f));
-    expect((await core.suggest(POS.s1, { ...preset, favorites: favs }))?.title).toBe('Pour le bureau : IC 07:42, voie 4');
+    expect((await core.suggest(POS.s1, { ...preset, favorites: favs }))?.title).toBe('Pour le bureau\u00a0: IC 07:42, voie 4');
     const noLabel = preset.favorites.map((f) => (f.id === 'fav-bureau' && f.kind === 'trip' ? { ...f, label: undefined } : f));
-    expect((await core.suggest(POS.s1, { ...preset, favorites: noLabel }))?.title).toBe('Pour le bureau : IC 07:42, voie 4');
+    expect((await core.suggest(POS.s1, { ...preset, favorites: noLabel }))?.title).toBe('Pour le bureau\u00a0: IC 07:42, voie 4');
   });
 
   it('matin ou soir : rien si le premier départ est à plus de 3 heures', async () => {
@@ -127,7 +130,7 @@ describe('dataFreshness', () => {
     expect(dataFreshness(m, at('2026-11-11T03:00'))).toEqual({ ok: true, ageHours: 24.8 });
     const late = dataFreshness(m, at('2026-11-11T09:00'));
     expect(late.ok).toBe(true);
-    expect(late.message).toBe('Horaires d’hier : mise à jour de nuit en retard');
+    expect(late.message).toBe('Horaires d’hier\u00a0: mise à jour de nuit en retard');
   });
 
   it('tôt le matin (avant 04:00) : la date de la veille couvre encore la nuit', () => {
@@ -139,9 +142,9 @@ describe('dataFreshness', () => {
     const f = dataFreshness(m, at('2026-11-13T10:00'));
     expect(f.ok).toBe(false);
     expect(f.ageHours).toBe(79.8);
-    expect(f.message).toBe('Horaires périmés : mise à jour arrêtée le 11/11');
+    expect(f.message).toBe('Horaires périmés\u00a0: mise à jour arrêtée le 11/11');
     const future = dataFreshness(meta(['2026-11-12', '2026-11-13']), at('2026-11-10T10:00'));
-    expect(future).toMatchObject({ ok: false, message: 'Horaires du 12/11 : vérifie la date du téléphone' });
+    expect(future).toMatchObject({ ok: false, message: 'Horaires du 12/11\u00a0: vérifie la date du téléphone' });
     const empty = dataFreshness(meta([]), at('2026-11-10T10:00'));
     expect(empty.ok).toBe(false);
     for (const x of [f, future, empty, dataFreshness(m, at('2026-11-11T09:00'))]) {

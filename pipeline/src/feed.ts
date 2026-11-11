@@ -1,18 +1,24 @@
 /**
  * Traitement d'un flux GTFS d'un opérateur, en flux et en mémoire bornée :
  * calendrier -> lignes -> voyages actifs sur les dates couvertes -> arrêts -> traductions -> stop_times (en flux,
- * seuls les passages des voyages actifs sont gardés, en colonnes compactes) -> zones -> fichiers de zone
- * (motifs, départs) écrits au fil de l'eau -> résumés (tuiles, recherche) et, pour la SNCB, trains du jour.
+ * seuls les passages des voyages actifs sont gardés, en colonnes compactes) -> zones (zones de même nom
+ * fusionnées, M8.3) -> fichiers de zone (motifs, un départ par voyage, M8.2) écrits au fil de l'eau -> résumés
+ * (tuiles, recherche), pour la SNCB les trains du jour (-1 là où la montée ou la descente est interdite) et, pour
+ * les réseaux urbains, les données des fichiers de ligne (lines.ts).
  */
 import type { AreaFile, AreaSummary, Mode, Names, Op, TrainsDay } from '../../shared/types.ts';
 import { normalizeId } from '../../shared/types.ts';
+import { lineName, normalizeForSearch } from '../../shared/names.ts';
 import { readTable } from './csv.ts';
 import type { TableOptions } from './csv.ts';
 import { DAY_COLUMNS, ServiceCalendar } from './calendar.ts';
 import { parseGtfsTime } from './dates.ts';
-import { Translations, langOf, platformOf, resolveNames, rtIdOf } from './naming.ts';
-import { areaFileKey, groupAreas } from './areas.ts';
+import { Translations, delijnFrFromRefs, langOf, platformOf, resolveNames, rtIdOf, splitPlatform } from './naming.ts';
+import type { RefNames } from './naming.ts';
+import { areaFileKey, groupAreas, nameKey } from './areas.ts';
 import type { StopRec } from './areas.ts';
+import { LineCollector } from './lines.ts';
+import type { LineData, TripPosition } from './lines.ts';
 import { MODE_BIT, MODE_RANK, compareLines, modeOf, modesFromMask } from './modes.ts';
 import { OP_LABEL } from './config.ts';
 import { StopTimeStore } from './store.ts';
@@ -44,8 +50,12 @@ export interface FeedResult {
   trips: number;
   /** Zones écrites dans areas/{op}/. */
   areas: AreaSummary[];
+  /** Identifiants des zones sans aucun départ : écrites dans areas/, mais absentes des tuiles et de la recherche (S5). */
+  idle: string[];
   /** SNCB uniquement : un fichier de trains par date couverte. */
   trains?: TrainsDay[];
+  /** Réseaux urbains : lignes des fichiers de ligne, sans les correspondances (ajoutées par build.ts). */
+  lines?: LineData[];
   stats: FeedStats;
   warnings: string[];
 }
@@ -57,6 +67,10 @@ export interface FeedOptions {
   dates: string[];
   writer: JsonWriter;
   log?: (msg: string) => void;
+  /** De Lijn : noms traduits des zones SNCB et STIB déjà préparées (nom français d'une zone voisine de même nom). */
+  refNames?: RefNames;
+  /** Réseaux urbains : préparer les fichiers de ligne (défaut : oui). */
+  lines?: boolean;
 }
 
 /** normalizeId() sans regex quand l'identifiant ne peut pas être préfixé (chemin chaud de stop_times). */
@@ -157,8 +171,9 @@ export async function processFeed(o: FeedOptions): Promise<FeedResult> {
       if (routeIndex.has(id)) return;
       routeIndex.set(id, routeId.length);
       routeId.push(id);
-      routeShort.push(v[1] || v[2] || id);
-      routeMode.push(modeOf(v[3] === '' ? 3 : Number(v[3])));
+      const mode = modeOf(v[3] === '' ? 3 : Number(v[3]));
+      routeShort.push(lineName(v[1] || v[2] || id, mode) || id);
+      routeMode.push(mode);
     }, { required: ['route_id'] });
 
     /* 4. voyages actifs sur au moins une des dates */
@@ -286,10 +301,16 @@ export async function processFeed(o: FeedOptions): Promise<FeedResult> {
     }
     if (droppedTrips) warnings.push(`${droppedTrips} voyage(s) inutilisable(s) (moins de deux arrêts ou horaires absents)`);
 
-    /* 8. zones */
+    /* 8. zones (départs par arrêt : choix de la clé stable d'une zone fusionnée) */
     const used = new Uint8Array(stops.length);
     for (let i = 0; i < n; i++) if (valid[st.trip[i]]) used[st.stop[i]] = 1;
-    const { areas, stopArea } = groupAreas(op, stops, used);
+    const depCount = new Float64Array(stops.length);
+    for (let t = 0; t < nTrips; t++) {
+      if (!valid[t]) continue;
+      const days = popcount2(tripMask[t]);
+      for (let r = start[t]; r < start[t + 1] - 1; r++) if ((st.flags[r] & 1) === 0) depCount[st.stop[r]] += days;
+    }
+    const { areas, stopArea } = groupAreas(op, stops, used, depCount);
     const nA = areas.length;
 
     // passages par zone (tri par comptage ; dans chaque zone, ordre voyage puis stop_sequence)
@@ -332,35 +353,99 @@ export async function processFeed(o: FeedOptions): Promise<FeedResult> {
     }
     const areaIdStr: string[] = new Array<string>(nA);
     const areaNames: Names[] = new Array<Names>(nA);
-    const stationNames = new Map<string, Names>();
+    // noms des zones (nom d'origine, fr, nl) : une destination égale au nom d'une zone reprend ses noms (S5)
+    const zoneByName = new Map<string, Names>();
+    let refFr = 0;
     for (const a of served) {
       const area = areas[a];
       areaIdStr[a] = `${op}:${area.key}`;
       const s = stops[area.nameStop];
-      let names = resolveNames(op, s.name, tr.get('stops', 'stop_name', s.id, s.name), true);
+      const trans = tr.get('stops', 'stop_name', s.id, s.name);
+      let names = resolveNames(op, s.name, trans, true);
       if (!names.fr || !names.nl) names = { ...names, fr: names.fr || names.nl || area.key, nl: names.nl || names.fr || area.key };
+      if (op === 'delijn' && !trans?.fr) {
+        // nom français d'une zone SNCB ou STIB voisine de même nom néerlandais (« Porte de Hal, Saint-Gilles »)
+        const fr = delijnFrFromRefs(names.nl, area.lat, area.lon, o.refNames);
+        if (fr && fr !== names.fr) {
+          names = { ...names, fr };
+          refFr++;
+        }
+      }
       areaNames[a] = names;
-      if (op === 'sncb' && s.name) stationNames.set(s.name.trim(), names);
+      for (const k of [nameKey(s.name), normalizeForSearch(names.fr), normalizeForSearch(names.nl)]) {
+        if (k && !zoneByName.has(k)) zoneByName.set(k, names);
+      }
     }
+    if (refFr) log(`${OP_LABEL[op]} : ${refFr} nom(s) français repris d'une zone SNCB ou STIB voisine`);
 
-    /* 9. destinations */
+    /* 9. destinations : nom d'une zone du même réseau, sinon traductions, sinon règles de shared/names.ts */
     const headCache = new Map<string, Names>();
+    const zoneHead = new Map<string, Names | null>();
     const headOf = (t: number): Names => {
       const raw = tripHead[t].trim();
+      if (!raw) {
+        const last = stopArea[st.stop[start[t + 1] - 1]];
+        return last >= 0 && areaNames[last] ? areaNames[last] : { fr: '', nl: '' };
+      }
+      let zone = zoneHead.get(raw);
+      if (zone === undefined) {
+        zone = zoneByName.get(normalizeForSearch(splitPlatform(raw).base)) ?? null;
+        zoneHead.set(raw, zone);
+      }
+      if (zone) return zone;
       if (tr.record('trips', 'trip_headsign', tripId[t])) {
         return resolveNames(op, raw, tr.get('trips', 'trip_headsign', tripId[t], raw), false);
       }
-      if (!raw) {
-        const last = stopArea[st.stop[start[t + 1] - 1]];
-        return last >= 0 ? areaNames[last] : { fr: '', nl: '' };
-      }
       let h = headCache.get(raw);
       if (h) return h;
-      if (op === 'sncb') h = stationNames.get(raw);
-      h ??= resolveNames(op, raw, tr.get('trips', 'trip_headsign', undefined, raw), false);
+      h = resolveNames(op, raw, tr.get('trips', 'trip_headsign', undefined, raw), false);
       headCache.set(raw, h);
       return h;
     };
+
+    /* 9 bis. SNCB : un même train publié deux fois (même numéro, mêmes arrêts, mêmes heures) n'est gardé qu'une fois
+       par jour, de préférence celui dont la destination est le terminus (M8.2) */
+    if (op === 'sncb') {
+      const groups = new Map<string, number[]>();
+      for (let t = 0; t < nTrips; t++) {
+        if (!valid[t]) continue;
+        let key = `${tripRoute[t]}\u0001${tripShort[t]}`;
+        for (let r = start[t]; r < start[t + 1]; r++) key += `\u0001${st.stop[r]}:${st.arr[r]}:${st.dep[r]}`;
+        const g = groups.get(key);
+        if (g) g.push(t);
+        else groups.set(key, [t]);
+      }
+      let dropped = 0;
+      for (const g of groups.values()) {
+        if (g.length < 2) continue;
+        const lastArea = stopArea[st.stop[start[g[0] + 1] - 1]];
+        const term = lastArea >= 0 ? areaNames[lastArea] : undefined;
+        const toTerminus = (t: number) => {
+          if (!term) return false;
+          const h = headOf(t);
+          return normalizeForSearch(h.fr) === normalizeForSearch(term.fr) || normalizeForSearch(h.nl) === normalizeForSearch(term.nl);
+        };
+        for (let d = 0; d < dates.length && d < 2; d++) {
+          const same = g.filter((t) => tripMask[t] & (1 << d));
+          if (same.length < 2) continue;
+          const keep = same.reduce((best, t) => {
+            const a = toTerminus(t);
+            const b = toTerminus(best);
+            if (a !== b) return a ? t : best;
+            return tripId[t] < tripId[best] ? t : best;
+          });
+          for (const t of same) if (t !== keep) tripMask[t] &= ~(1 << d);
+        }
+        for (const t of g) {
+          if (!tripMask[t]) {
+            valid[t] = 0;
+            validTrips--;
+            dropped++;
+          }
+        }
+      }
+      if (dropped) warnings.push(`${dropped} train(s) en double écarté(s) (même numéro, mêmes arrêts et mêmes heures)`);
+    }
 
     /* 10. formes de voyage : ligne + direction + destination + suite des zones */
     const shapeOf = new Int32Array(nTrips).fill(-1);
@@ -394,29 +479,61 @@ export async function processFeed(o: FeedOptions): Promise<FeedResult> {
       return out;
     };
 
-    /* 11. fichiers de zone */
+    /* 11. fichiers de zone. Départs (M8.2) : un par voyage et par zone, pris dans la première suite de passages
+       consécutifs dans la zone qui permet de monter vers une autre zone (dernier arrêt de la suite où la montée
+       est permise) ; aucun départ vers un terminus situé dans la zone même (next vide) ; doublons (même jour,
+       même minute, même arrêt, même ligne, même destination) écartés. */
     const summaries: AreaSummary[] = [];
+    const idle: string[] = [];
     let depsTotal = 0;
     let patternsTotal = 0;
+    let dupDeps = 0;
     const nDays = dates.length;
+    type Pat = AreaFile['patterns'][number];
     for (const a of served) {
       const area = areas[a];
       const fileKey = fileKeyOf[a];
       const rs = areaRows.subarray(areaStart[a], areaStart[a + 1]);
-      const isDep = (r: number) => r + 1 < start[st.trip[r] + 1] && (st.flags[r] & 1) === 0;
+      // motif = forme du voyage + rang ici, calculé une fois par forme
+      const patCache = new Map<string, Pat>();
+      const patOf = (r: number, t: number): Pat => {
+        const pk = `${shapeOf[t]}:${r - start[t]}`;
+        let p = patCache.get(pk);
+        if (!p) {
+          const ri = tripRoute[t];
+          p = { line: routeShort[ri], mode: routeMode[ri], route: routeId[ri], head: headOf(t), next: nextOf(r, t, a) };
+          patCache.set(pk, p);
+        }
+        return p;
+      };
       let modeMask = 0;
-      let nDep = 0;
-      for (let i = 0; i < rs.length; i++) {
-        const r = rs[i];
-        const t = st.trip[r];
-        modeMask |= MODE_BIT[routeMode[tripRoute[t]]];
-        if (isDep(r)) nDep += popcount2(tripMask[t]);
+      const depRows: number[] = [];
+      for (let i = 0; i < rs.length;) {
+        const t = st.trip[rs[i]];
+        let j = i + 1;
+        while (j < rs.length && st.trip[rs[j]] === t) j++;
+        if (valid[t]) {
+          modeMask |= MODE_BIT[routeMode[tripRoute[t]]];
+          const end = start[t + 1];
+          for (let k = i; k < j;) {
+            let e = k;
+            while (e + 1 < j && rs[e + 1] === rs[e] + 1) e++;
+            let cand = -1;
+            for (let q = e; q >= k && cand < 0; q--) if ((st.flags[rs[q]] & 1) === 0 && rs[q] + 1 < end) cand = rs[q];
+            k = e + 1;
+            if (cand >= 0 && patOf(cand, t).next.length) {
+              depRows.push(cand);
+              break;
+            }
+          }
+        }
+        i = j;
       }
-      const keys = new Float64Array(nDep);
+      let nKeys = 0;
+      for (const r of depRows) nKeys += popcount2(tripMask[st.trip[r]]);
+      const keys = new Float64Array(nKeys);
       let k = 0;
-      for (let i = 0; i < rs.length; i++) {
-        const r = rs[i];
-        if (!isDep(r)) continue;
+      for (const r of depRows) {
         const t = st.trip[r];
         for (let d = 0; d < nDays && d < 2; d++) if (tripMask[t] & (1 << d)) keys[k++] = (d * DAY_FACTOR + st.dep[r]) * n + r;
       }
@@ -430,15 +547,16 @@ export async function processFeed(o: FeedOptions): Promise<FeedResult> {
         return platform ? { id: sr.id, platform, rt: rtIdOf(op, sr.id) } : { id: sr.id, rt: rtIdOf(op, sr.id) };
       });
 
-      // motif = forme du voyage + rang ici ; deux formes qui ne diffèrent qu'en amont donnent le même contenu
-      // (ligne, destination, suite) : elles partagent alors une seule entrée de patterns.
-      const patIndex = new Map<string, number>();
+      // deux formes qui ne diffèrent qu'en amont donnent le même contenu (ligne, destination, suite) :
+      // elles partagent alors une seule entrée de patterns.
+      const patIndex = new Map<Pat, number>();
       const patByContent = new Map<string, number>();
       const patterns: AreaFile['patterns'] = [];
-      const deps: AreaFile['deps'] = new Array(nDep);
+      const deps: AreaFile['deps'] = [];
+      const seen = new Set<string>();
       const lineCount = new Map<string, number>();
       const lineMode = new Map<string, Mode>();
-      for (let i = 0; i < nDep; i++) {
+      for (let i = 0; i < nKeys; i++) {
         const key = keys[i];
         const r = key % n;
         const rest = (key - r) / n;
@@ -446,10 +564,16 @@ export async function processFeed(o: FeedOptions): Promise<FeedResult> {
         const d = (rest - m) / DAY_FACTOR;
         const t = st.trip[r];
         const ri = tripRoute[t];
-        const pk = `${shapeOf[t]}:${r - start[t]}`;
-        let pi = patIndex.get(pk);
+        const p = patOf(r, t);
+        const stopIdx = localStop.get(st.stop[r]) ?? 0;
+        const dk = `${d}|${m}|${stopIdx}|${p.line}|${p.head.fr}`;
+        if (seen.has(dk)) {
+          dupDeps++;
+          continue;
+        }
+        seen.add(dk);
+        let pi = patIndex.get(p);
         if (pi === undefined) {
-          const p = { line: routeShort[ri], mode: routeMode[ri], route: routeId[ri], head: headOf(t), next: nextOf(r, t, a) };
           const content = JSON.stringify(p);
           pi = patByContent.get(content);
           if (pi === undefined) {
@@ -457,16 +581,20 @@ export async function processFeed(o: FeedOptions): Promise<FeedResult> {
             patterns.push(p);
             patByContent.set(content, pi);
           }
-          patIndex.set(pk, pi);
+          patIndex.set(p, pi);
         }
-        deps[i] = [d, m, pi, localStop.get(st.stop[r]) ?? 0, op === 'stib' ? '' : tripId[t], st.seq[r]];
+        deps.push([d, m, pi, stopIdx, op === 'stib' ? '' : tripId[t], st.seq[r]]);
         lineCount.set(routeShort[ri], (lineCount.get(routeShort[ri]) ?? 0) + 1);
         if (!lineMode.has(routeShort[ri])) lineMode.set(routeShort[ri], routeMode[ri]);
       }
-      if (!nDep) {
-        // zone sans départ (terminus) : lignes qui y arrivent
+      const id = areaIdStr[a];
+      if (!deps.length) {
+        // zone sans départ (terminus, arrivée seule) : lignes qui y arrivent ; absente des tuiles et de la recherche
+        idle.push(id);
         for (let i = 0; i < rs.length; i++) {
-          const ri = tripRoute[st.trip[rs[i]]];
+          const t = st.trip[rs[i]];
+          if (!valid[t]) continue;
+          const ri = tripRoute[t];
           lineCount.set(routeShort[ri], (lineCount.get(routeShort[ri]) ?? 0) + 1);
           if (!lineMode.has(routeShort[ri])) lineMode.set(routeShort[ri], routeMode[ri]);
         }
@@ -477,16 +605,20 @@ export async function processFeed(o: FeedOptions): Promise<FeedResult> {
         .map(([l]) => l)
         .sort((x, y) => MODE_RANK.indexOf(lineMode.get(x) ?? 'bus') - MODE_RANK.indexOf(lineMode.get(y) ?? 'bus') || compareLines(x, y));
 
-      const id = areaIdStr[a];
       const n2 = areaNames[a];
       const lat = round5(area.lat);
       const lon = round5(area.lon);
       const file: AreaFile = { v: 1, id, op, n: n2, lat, lon, stops: stopsOut, patterns, deps };
       await writer.write(`areas/${op}/${fileKey}.json`, file);
-      summaries.push({ id, op, n: n2, lat, lon, modes: modesFromMask(modeMask), lines });
-      depsTotal += nDep;
+      const summary: AreaSummary = { id, op, n: n2, lat, lon, modes: modesFromMask(modeMask), lines };
+      if (area.aka?.length) summary.aka = area.aka.map((key) => `${op}:${key}`);
+      summaries.push(summary);
+      depsTotal += deps.length;
       patternsTotal += patterns.length;
     }
+    if (dupDeps) warnings.push(`${dupDeps} départ(s) en double écarté(s) (même ligne, destination, minute et arrêt)`);
+    const merged = summaries.filter((s) => s.aka).length;
+    if (merged) log(`${OP_LABEL[op]} : ${merged} zone(s) fusionnée(s) avec des zones de même nom à moins de 300 m`);
 
     /* 12. SNCB : trains de chaque jour */
     let trains: TrainsDay[] | undefined;
@@ -518,7 +650,9 @@ export async function processFeed(o: FeedOptions): Promise<FeedResult> {
               stationIdx.set(a, si);
               stations.push({ id: areaIdStr[a], n: areaNames[a], lat: round5(areas[a].lat), lon: round5(areas[a].lon) });
             }
-            s.push([si, st.arr[r], st.dep[r], platformAt(st.stop[r]), st.seq[r]]);
+            // 1.1 : -1 = descente interdite (drop_off_type 1) ou montée interdite (pickup_type 1)
+            const f = st.flags[r];
+            s.push([si, f & 2 ? -1 : st.arr[r], f & 1 ? -1 : st.dep[r], platformAt(st.stop[r]), st.seq[r]]);
           }
           const num = tripShort[t];
           return num
@@ -529,13 +663,60 @@ export async function processFeed(o: FeedOptions): Promise<FeedResult> {
       });
     }
 
+    /* 13. réseaux urbains : données des fichiers de ligne (design-routing.md § 3.1). Deux arrêts consécutifs dans la
+       même zone donnent une seule position (première descente permise, dernière montée permise). */
+    let lines: LineData[] | undefined;
+    if (op !== 'sncb' && o.lines !== false) {
+      const col = new LineCollector(op);
+      const runs: { a: number; first: number; pick: number; drop: number }[] = [];
+      // voyages par premier départ puis trip_id (rangs de `trips` et ordre des motifs stables, comme gen-fixtures du cœur)
+      const order: number[] = [];
+      for (let t = 0; t < nTrips; t++) if (valid[t]) order.push(t);
+      order.sort((x, y) => st.dep[start[x]] - st.dep[start[y]] || (tripId[x] < tripId[y] ? -1 : tripId[x] > tripId[y] ? 1 : 0));
+      for (const t of order) {
+        const days: number[] = [];
+        for (let d = 0; d < nDays && d < 2; d++) if (tripMask[t] & (1 << d)) days.push(d);
+        if (!days.length) continue;
+        runs.length = 0;
+        for (let r = start[t]; r < start[t + 1]; r++) {
+          const a = stopArea[st.stop[r]];
+          if (a < 0 || areaIdStr[a] === undefined) continue;
+          const f = st.flags[r];
+          const last = runs[runs.length - 1];
+          if (last && last.a === a) {
+            if ((f & 1) === 0) last.pick = r;
+            if ((f & 2) === 0 && last.drop < 0) last.drop = r;
+          } else {
+            runs.push({ a, first: r, pick: f & 1 ? -1 : r, drop: f & 2 ? -1 : r });
+          }
+        }
+        if (runs.length < 2) continue;
+        const positions: TripPosition[] = runs.map((u, i) => {
+          const board = i < runs.length - 1 && u.pick >= 0;
+          const alight = i > 0 && u.drop >= 0;
+          const row = board ? u.pick : alight ? u.drop : u.first;
+          return {
+            area: u.a,
+            time: board ? st.dep[row] : st.arr[row],
+            flag: board ? (alight ? 'x' : 'b') : alight ? 'a' : 'n',
+            rt: rtIdOf(op, stops[st.stop[row]].id),
+          };
+        });
+        const ri = tripRoute[t];
+        col.addTrip(ri, { id: routeId[ri], line: routeShort[ri], mode: routeMode[ri] }, tripDir[t], headOf(t), positions, days,
+          op === 'stib' ? undefined : tripId[t]);
+      }
+      lines = col.finish((a) => [areaIdStr[a], round5(areas[a].lat), round5(areas[a].lon), areaNames[a]]);
+    }
+
     const stats: FeedStats = {
       tripsInFeed, stopTimesRows: rows, keptRows: n, deps: depsTotal, patterns: patternsTotal,
       storeMB: Math.round(st.bytes() / 1048576), ms: Date.now() - t0,
     };
-    log(`${OP_LABEL[op]} : ${validTrips} voyages retenus sur ${tripsInFeed}, ${n} passages gardés sur ${rows} lus, ${summaries.length} zones, ${depsTotal} départs (${(stats.ms / 1000).toFixed(1).replace('.', ',')} s)`);
+    const linesText = lines ? `, ${lines.length} lignes` : '';
+    log(`${OP_LABEL[op]} : ${validTrips} voyages retenus sur ${tripsInFeed}, ${n} passages gardés sur ${rows} lus, ${summaries.length} zones, ${depsTotal} départs${linesText} (${(stats.ms / 1000).toFixed(1).replace('.', ',')} s)`);
     for (const w of warnings) log(`${OP_LABEL[op]} : attention, ${w}`);
-    return { op, feedVersion, trips: validTrips, areas: summaries, trains, stats, warnings };
+    return { op, feedVersion, trips: validTrips, areas: summaries, idle, trains, lines, stats, warnings };
   } finally {
     zip.close();
   }

@@ -32,21 +32,32 @@ import { naturalCompare, prepareArea, tileKeysAround, type PreparedArea } from '
 import { buildBoards } from './boards';
 import { DataClient, OPS } from './data';
 import { QuaiError } from './errors';
-import { isCovered } from './freshness';
-import { refreshJourney, skeleton, type RefreshEnv } from './journeys';
+import { answerFavorite, orderFavorites, relocateAmong } from './favorites';
+import { addDays, isCovered } from './freshness';
+import { GeocodeClient, relayGeoTransport } from './geocode';
+import { brokenConnection, refreshJourney, refreshJourneys, skeleton, type RefreshEnv } from './journeys';
 import { makeFetch, mapPool } from './net';
 import { PersistentCache } from './persist';
-import { planJourneys, type NearArea } from './plan';
+import { planCandidates, type NearArea } from './plan';
 import { RealtimeClient, stibPoint, type AlertItem } from './realtime';
-import { rankSearch, searchFileKey } from './search';
+import { computeRoute } from './routing/engine';
+import { netOf, recalcAlert, repairLegs } from './routing/repair';
+import { rankSearch, searchFileKeys } from './search';
 import { suggestOpening } from './suggest';
 import { indexDay, TrainEngine, trainLeg, type DayIndex } from './trains';
-import { distanceM, walkMinutes } from './util';
+import { brusselsParts, distanceM, localDate, walkMinutes } from './util';
+import { DAY_START_HOUR } from './text';
 
 export { dataFreshness, type Freshness } from './freshness';
 export { QuaiError, MESSAGES, type QuaiErrorCode } from './errors';
 
 const NEARBY_DEPS = 4;
+/** « Autour de moi » : départs calculés pour les 20 zones les plus proches au plus (une liste des lunettes). */
+const NEARBY_MAX = 20;
+/** Zone d'un favori disparue : zones candidates dans ce rayon (puis 150 m au plus, core/favorites.ts). */
+const RELOCATE_M = 300;
+/** S7 : à partir de cette heure, les trains du lendemain sont chargés aussi. */
+const NEXT_DAY_HOUR = 18;
 const trimSlash = (s: string) => s.replace(/\/+$/, '');
 
 function minimalSummary(id: string): AreaSummary {
@@ -75,6 +86,7 @@ export function createCore(opts: CoreOptions): Core {
   const persist = new PersistentCache(opts.storage);
   const data = new DataClient(trimSlash(opts.dataBase), fetchFn, persist);
   const rt = new RealtimeClient(trimSlash(opts.relayBase), fetchFn, now);
+  const geo = new GeocodeClient(relayGeoTransport(trimSlash(opts.relayBase), fetchFn), now);
   const engine = new TrainEngine();
 
   const ensure = (): Promise<Meta> => data.requireMeta();
@@ -92,21 +104,37 @@ export function createCore(opts: CoreOptions): Core {
     }
   }
 
-  async function trainDays(): Promise<DayIndex[]> {
+  /**
+   * Trains des jours utiles (S7) : le jour de maintenant (avant 04:00, aussi la veille) ; le lendemain seulement le
+   * soir (à partir de 18:00) ou sur demande (`all`, par exemple faute de résultat).
+   */
+  async function trainDays(opts?: { all?: boolean }): Promise<DayIndex[]> {
     const meta = await ensure();
+    const dates = meta.serviceDates.slice(0, 2);
+    const t = now();
+    const today = localDate(t);
+    const h = brusselsParts(t).h;
+    let wanted = opts?.all ? dates : dates.filter((d) => d === today || (h < DAY_START_HOUR && d === addDays(today, -1)) || (h >= NEXT_DAY_HOUR && d === addDays(today, 1)));
+    if (!wanted.length) wanted = dates.slice(0, 1);
     let failed = false;
+    let unreachable = false;
     const files = await Promise.all(
-      meta.serviceDates.slice(0, 2).map((d) =>
-        data.trains(d).catch(() => {
+      wanted.map((d) =>
+        data.trains(d).catch((e: unknown) => {
           failed = true;
+          if (e instanceof QuaiError && e.code === 'dataUnreachable') unreachable = true;
           return null;
         }),
       ),
     );
     const days = files.filter((f): f is NonNullable<typeof f> => f !== null).map(indexDay);
-    if (!days.length && failed) throw new QuaiError('dataUnavailable');
+    if (!days.length && failed) throw new QuaiError(unreachable ? 'dataUnreachable' : 'dataUnavailable');
     return days;
   }
+
+  /** M8.3 : ancien identifiant (`aka` d'une zone fusionnée, ou favori retrouvé) → zone actuelle ; résumés vus. */
+  const aliasOf = new Map<string, string>();
+  const summaryOf = new Map<string, AreaSummary>();
 
   async function areasAround(lat: number, lon: number, radiusM: number): Promise<NearArea[]> {
     const meta = await ensure();
@@ -117,6 +145,10 @@ export function createCore(opts: CoreOptions): Core {
       for (const a of t?.areas ?? []) {
         if (!a || seen.has(a.id)) continue;
         seen.add(a.id);
+        if (a.aka?.length) {
+          summaryOf.set(a.id, a);
+          for (const old of a.aka) if (old !== a.id) aliasOf.set(old, a.id);
+        }
         const d = distanceM({ lat, lon }, a);
         if (d <= radiusM) out.push({ a, d });
       }
@@ -158,18 +190,22 @@ export function createCore(opts: CoreOptions): Core {
       return data.loadMeta();
     },
 
-    async nearby(lat: number, lon: number, radiusM: number): Promise<NearbyItem[]> {
+    async nearby(lat: number, lon: number, radiusM: number, o?: { light?: boolean }): Promise<NearbyItem[]> {
       const meta = await ensure();
       const list = await areasAround(lat, lon, radiusM);
       const t = now();
       const items: NearbyItem[] = list.map(({ a, d }) => ({ area: a, distanceM: Math.round(d / 10) * 10, walkMin: walkMinutes(d) }));
-      if (!isCovered(meta, t) || !items.length) return items;
-      const preps = await mapPool(list, 4, (x) => preparedOrNull(x.a.id));
+      // M8.7 : accueil léger, le nombre d'arrêts se compte sur les tuiles seules (ni fichier de zone, ni relais).
+      if (o?.light || !isCovered(meta, t) || !items.length) return items;
+      // Départs des NEARBY_MAX zones les plus proches seulement (review-tech M8).
+      const near = list.slice(0, NEARBY_MAX);
+      const preps = await mapPool(near, 4, (x) => preparedOrNull(x.a.id));
       const reqs: { prep: PreparedArea; limit: number }[] = [];
       const at: number[] = [];
       preps.forEach((p, i) => {
         if (p) {
-          reqs.push({ prep: p, limit: NEARBY_DEPS });
+          // marge : des départs de la minute écoulée ne doivent pas cacher le prochain (review-tech m1)
+          reqs.push({ prep: p, limit: NEARBY_DEPS + 6 });
           at.push(i);
         }
       });
@@ -185,13 +221,17 @@ export function createCore(opts: CoreOptions): Core {
       const meta = await ensure();
       const t = now();
       const limit = Math.max(1, Math.round(o?.limit ?? 8));
+      // M8.3 : identifiant d'une zone fusionnée (`aka`) accepté, une fois la zone connue (tuiles chargées).
+      const id = aliasOf.get(areaId) ?? areaId;
       if (!isCovered(meta, t)) {
-        const prep = await preparedOrNull(areaId);
+        const prep = await preparedOrNull(id);
         return { area: prep?.summary ?? minimalSummary(areaId), departures: [], anyPlanned: false, rtErrors: [], updatedAt: t };
       }
-      const prep = await prepared(areaId);
+      const prep = await prepared(id);
       const [b] = await buildBoards([{ prep, limit, filter: o?.filter }], rt, t);
-      return b;
+      if (id === areaId) return b;
+      // zone fusionnée : le résumé publié (avec `aka`) de préférence au résumé tiré du fichier de zone
+      return { ...b, area: summaryOf.get(id) ?? b.area };
     },
 
     async linesAt(areaId: string): Promise<{ line: string; mode: Mode; head: Names; filter: LineFilter }[]> {
@@ -209,35 +249,43 @@ export function createCore(opts: CoreOptions): Core {
 
     async search(query: string, near?: { lat: number; lon: number }): Promise<SearchItem[]> {
       if (normalizeForSearch(query ?? '').replace(/ /g, '').length < 2) return [];
-      const key = searchFileKey(query);
-      if (!key) return [];
+      // M4.2 : un fichier par variante de la requête (noms usuels, St/Sint/Saint, « gare » facultatif)
+      const keys = searchFileKeys(query);
+      if (!keys.length) return [];
       await ensure();
-      return rankSearch(await data.search(key), query, near);
+      const files = await Promise.all(keys.map((k) => data.search(k)));
+      return rankSearch(files, query, near);
     },
 
     async trains(fromAreaId: string, toAreaId: string, after: number, limit = 3): Promise<Journey[]> {
       const meta = await ensure();
       if (!isCovered(meta, now())) return [];
-      const days = await trainDays();
-      const options = engine.search(days, fromAreaId, toAreaId, after, Math.max(1, limit));
-      return Promise.all(options.map((o) => refreshJourney(skeleton(o.rides.map(trainLeg)), DEFAULT_SETTINGS, refreshEnv, true)));
+      // 1.1 : direct, une ou deux correspondances (M5c), montée et descente permises seulement (trains.ts) ;
+      // rien avec les trains du jour : aussi ceux du lendemain
+      let options = engine.search(await trainDays(), fromAreaId, toAreaId, after, Math.max(1, limit));
+      if (!options.length) options = engine.search(await trainDays({ all: true }), fromAreaId, toAreaId, after, Math.max(1, limit));
+      return refreshJourneys(
+        options.map((o) => skeleton(o.rides.map(trainLeg))),
+        DEFAULT_SETTINGS,
+        refreshEnv,
+        true,
+      );
     },
 
+    /** 1.0, gardé : les propositions de route(), dans l'ordre d'affichage. */
     async plan(from: Endpoint, to: Endpoint, after: number, settings: Settings, here?: { lat: number; lon: number }): Promise<Journey[]> {
-      const meta = await ensure();
-      if (!isCovered(meta, now())) return [];
-      return planJourneys(from, to, after, settings, here, {
-        meta,
-        areasAround,
-        area: preparedOrNull,
-        trainDays,
-        engine,
-        refresh: (j) => refreshJourney(j, settings, refreshEnv, true),
-      });
+      return (await core.route(from, to, after, settings, here)).journeys;
     },
 
     async refresh(j: Journey, settings: Settings): Promise<Journey> {
-      return refreshJourney(j, settings, refreshEnv, false);
+      const out = await refreshJourney(j, settings, refreshEnv, false);
+      // correspondance devenue impossible : reste du trajet recalculé sur le réseau de la recherche (routing/repair.ts)
+      if (brokenConnection(out) < 0) return out;
+      const memo = netOf(data.meta?.generatedAt, j.id);
+      const legs = memo ? repairLegs(out, memo.net, memo.D, memo.maxWalk) : null;
+      if (!legs) return out;
+      const [fixed] = await refreshJourneys([{ ...out, legs }], settings, refreshEnv, false);
+      return { ...fixed, id: j.id, alerts: [recalcAlert(now()), ...fixed.alerts] };
     },
 
     async suggest(here: { lat: number; lon: number } | null, settings: Settings): Promise<Suggestion | null> {
@@ -261,37 +309,52 @@ export function createCore(opts: CoreOptions): Core {
     },
 
     /* --- 1.1 : points d'attache provisoires (remplacés par les équipes cœur et routage) --- */
+    /** 1.1 (routage) : calcul de routing/engine.ts sur les fichiers de ligne ; repli 1.0 sans meta.lines. */
     async route(from: Endpoint, to: Endpoint, after: number, settings: Settings, here?: { lat: number; lon: number } | null): Promise<PlanResult> {
-      try {
-        const journeys = await core.plan(from, to, after, settings, here ?? undefined);
-        return journeys.length ? { journeys } : { journeys, empty: 'noTrip' };
-      } catch (e) {
-        if ((from.type === 'here' || to.type === 'here') && !here) return { journeys: [], empty: 'noPosition' };
-        throw e;
+      for (let attempt = 0; ; attempt++) {
+        const meta = await ensure();
+        if (!isCovered(meta, now())) return { journeys: [], empty: 'noTrip' };
+        const result = await computeRoute(from, to, after, settings, here, {
+          source: { meta, tile: (k) => data.tile(k), json: (p, v) => data.json(p, v), trains: (d) => data.trains(d) },
+          now,
+          refresh: (js, fresh) => refreshJourneys(js, settings, refreshEnv, fresh),
+          legacy: (O, D, t, maxWalk) =>
+            planCandidates(O, D, t, maxWalk, { meta, areasAround, area: preparedOrNull, trainDays, engine, refresh: (j) => refreshJourney(j, settings, refreshEnv, true) }),
+        });
+        // une génération de données à la fois : publication changée pendant le calcul, on recommence une fois
+        if (attempt === 0 && data.meta && data.meta.generatedAt !== meta.generatedAt) continue;
+        return result;
       }
     },
 
-    orderFavorites(_here: { lat: number; lon: number } | null, settings: Settings): FavoriteRank[] {
-      return settings.favorites.map((f) => ({ favoriteId: f.id, rule: 4 as const }));
+    /** M1.4 : ordre intelligent (core/favorites.ts, commun au faux cœur). */
+    orderFavorites(here: { lat: number; lon: number } | null, settings: Settings, last?: ReadonlyMap<string, FavoriteAnswer>): FavoriteRank[] {
+      return orderFavorites(here, settings, now(), last);
     },
 
-    async answer(fav: Favorite, here: { lat: number; lon: number } | null, settings: Settings): Promise<FavoriteAnswer> {
-      const t = now();
-      if (fav.kind === 'stop') {
-        const board = await core.board(fav.areaId, { limit: settings.display.depsPerStop, filter: fav.filter });
-        return { favoriteId: fav.id, kind: 'stop', state: board.departures.length ? 'ok' : 'none', board, updatedAt: t };
-      }
-      if ((fav.from.type === 'here' || fav.to.type === 'here') && !here) return { favoriteId: fav.id, kind: 'trip', state: 'noPosition', updatedAt: t };
-      const plan = await core.route(fav.from, fav.to, t, settings, here);
-      return { favoriteId: fav.id, kind: 'trip', state: plan.empty === 'here' ? 'here' : plan.journeys.length ? 'ok' : 'none', plan, updatedAt: t };
+    /** M1.5 : réponse d'un favori (core/favorites.ts) ; zone disparue retrouvée par `aka`, puis par nom et position. */
+    answer(fav: Favorite, here: { lat: number; lon: number } | null, settings: Settings): Promise<FavoriteAnswer> {
+      return answerFavorite(fav, here, settings, {
+        now,
+        board: (id, o) => core.board(id, o),
+        route: (from, to, after, s, h) => core.route(from, to, after, s, h),
+        relocate: async (f) => {
+          const list = await areasAround(f.lat, f.lon, RELOCATE_M);
+          const found = relocateAmong(f, list.map((x) => x.a));
+          if (found) aliasOf.set(f.areaId, found.id);
+          return found;
+        },
+      });
     },
 
-    async geocode(): Promise<GeocodeAnswer> {
-      return { results: [], error: 'down' };
+    /** M4 : adresses par le relais (core/geocode.ts) : seuls le texte et la langue partent du téléphone. */
+    geocode(q: string, lang: 'fr' | 'nl', near?: { lat: number; lon: number } | null): Promise<GeocodeAnswer> {
+      return geo.geocode(q, lang, near);
     },
 
+    /** M8.5 : état du temps réel d'après les dernières requêtes au relais. */
     status(): CoreStatus {
-      return { rt: 'unknown' };
+      return rt.status();
     },
 
     health(): Promise<HealthResponse> {

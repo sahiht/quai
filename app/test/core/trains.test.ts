@@ -1,5 +1,7 @@
 /**
- * Trains A → B (direct ou une correspondance) avec temps réel, et filtre de Pareto.
+ * Trains A → B (direct, une ou deux correspondances en 1.1) avec temps réel, et filtre de Pareto.
+ * 1.1 : attente en correspondance de 60 min au plus (review-tech.md M3) ; deux correspondances et montée interdite :
+ * test/core/routing/networks.test.ts.
  */
 import { describe, expect, it } from 'vitest';
 import type { Journey } from '../../src/core/api';
@@ -109,15 +111,17 @@ describe('trains : régression « doublons » (même train chaque jour)', () => 
     expect(js.map(fmt)).toEqual(['14:10 → 14:39 voie 4 à l’heure', '14:22 → 14:56 voie 6 +3 min', '14:40 → 15:09 voie 4 à l’heure']);
   });
 
-  it('Namur → Gand à 07:31 : l’IC 08:42 du lendemain n’est pas reproposé ; le soir, le premier train du lendemain', async () => {
+  it('Namur → Gand à 07:31 : chaque train une fois ; jamais plus de 60 min d’attente en correspondance (M3)', async () => {
     const { core } = makeEnv({ now: '2026-11-10T07:31', scene: 'noRT' });
     const js = await core.trains(NAMUR, GAND, at('2026-11-10T07:31'), 5);
     expect(new Set(js.map(identity)).size).toBe(js.length);
-    expect(js.map((j) => hhmm(j.legs[0].schedDep))).toEqual(['07:42', '08:42']);
+    // l'IC 08:42 attendrait 4 h 24 à Bruxelles-Central (IC 14:10) : refusé (la 1.0 le proposait)
+    expect(js.map((j) => hhmm(j.legs[0].schedDep))).toEqual(['07:42']);
+    // le soir : le 11 (férié), IC 08:42 et 09:42 à Namur puis plus de 3 h d'attente avant un train vers Gand : rien
     const late = makeEnv({ now: '2026-11-10T20:00', scene: 'noRT' });
-    const next = await late.core.trains(NAMUR, GAND, at('2026-11-10T20:00'), 3);
-    // le 11 (férié), l'IC 09:42 (HOLI) attrape la même correspondance que l'IC 08:42 : on part le plus tard possible
-    expect(next.map((j) => `${j.legs[0].schedDep === at('2026-11-11T09:42')} ${hhmm(j.arr)}`)).toEqual(['true 14:39']);
+    expect(await late.core.trains(NAMUR, GAND, at('2026-11-10T20:00'), 3)).toEqual([]);
+    // un train du lendemain reste proposé quand la correspondance est courte : Midi → Anvers après minuit (IC 2199)
+    expect((await late.core.trains('sncb:8814001', 'sncb:8821006', at('2026-11-10T23:30'), 1))[0].legs[0].num).toBe('2199');
   });
 });
 

@@ -102,9 +102,18 @@ export function textWidth(text: string): number {
   return text ? getTextWidth(glyphSafe(text)) : 0;
 }
 
+/**
+ * Typographie française des textes affichés (PRD § 6.0), filet de sécurité pour les textes venus d'ailleurs (alertes
+ * du cœur, messages des opérateurs) : espace insécable devant « ! ? : ; » et entre un nombre et son unité. Même
+ * largeur au pixel que l'espace ordinaire (5 px).
+ */
+export function frenchSpaces(text: string): string {
+  return text.replace(/(\S) ([!?:;])(?=\s|$)/g, '$1 $2').replace(/(\d) (min|h|s|m|km)(?=[\s,.;:)!?]|$)/g, '$1 $2');
+}
+
 /** Coupe une ligne à `maxPx` avec « … » (mesure au pixel). Espaces multiples conservés. */
 export function truncate(text: string, maxPx: number): string {
-  const t = glyphSafe(text).replace(/[\r\n]+/g, ' ').replace(/^\s+|\s+$/g, '');
+  const t = glyphSafe(frenchSpaces(text)).replace(/[\r\n]+/g, ' ').replace(/^\s+|\s+$/g, '');
   if (!t || getTextWidth(t) <= maxPx) return t;
   const cps = [...t];
   let lo = 0;

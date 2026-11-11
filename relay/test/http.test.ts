@@ -3,6 +3,7 @@ import * as apiRt from '../api/rt.js';
 import * as apiStib from '../api/stib.js';
 import * as apiAlerts from '../api/alerts.js';
 import * as apiHealth from '../api/health.js';
+import * as apiGeocode from '../api/geocode.js';
 import { handleAlerts, handleHealth, handleRt, handleStib } from '../lib/handlers.js';
 import { CACHE_OK } from '../lib/http.js';
 import type { RtResponse } from '../lib/shared/types.js';
@@ -17,7 +18,7 @@ function expectCors(h: Headers) {
 
 describe('points d’entrée Vercel (api/*.ts)', () => {
   it('chaque fichier exporte GET et OPTIONS (signature Web Request → Response)', () => {
-    for (const mod of [apiRt, apiStib, apiAlerts, apiHealth]) {
+    for (const mod of [apiRt, apiStib, apiAlerts, apiHealth, apiGeocode]) {
       expect(typeof mod.GET).toBe('function');
       expect(typeof mod.OPTIONS).toBe('function');
       expect(Object.keys(mod).sort()).toEqual(['GET', 'OPTIONS']);
@@ -25,7 +26,7 @@ describe('points d’entrée Vercel (api/*.ts)', () => {
   });
 
   it('OPTIONS : 204, CORS ouvert, pré-vérification mise en cache', async () => {
-    for (const mod of [apiRt, apiStib, apiAlerts, apiHealth]) {
+    for (const mod of [apiRt, apiStib, apiAlerts, apiHealth, apiGeocode]) {
       const res = await mod.OPTIONS();
       expect(res.status).toBe(204);
       expectCors(res.headers);
@@ -116,9 +117,9 @@ describe('source en erreur : HTTP 200, error en français, données vides', () =
     });
   }
 
-  it('délai réel de 8 s par défaut (configuration de production)', async () => {
+  it('délai réel de 8 s par défaut (configuration de production) ; adresses : 2 s par service, 2,5 s en tout', async () => {
     const { defaultCtx } = await import('../lib/context.js');
-    expect(defaultCtx().timeouts).toEqual({ upstream: 8000, health: 3000 });
+    expect(defaultCtx().timeouts).toEqual({ upstream: 8000, health: 3000, geoSource: 2000, geoTotal: 2500 });
   });
 
   it('une erreur n’est pas mise en cache : la requête suivante réessaie', async () => {

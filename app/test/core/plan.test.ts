@@ -1,6 +1,6 @@
 /**
- * Trajets porte à porte (plan) : scénario 1 Maison → Bureau, lignes urbaines directes,
- * ligne urbaine avant ou après le train, extrémités.
+ * Trajets porte à porte (plan = route().journeys en 1.1) : scénario 1 Maison → Bureau, lignes urbaines directes,
+ * ligne urbaine avant ou après le train, extrémités. Les propositions sont dans l'ordre d'affichage (PRD § 4.3).
  */
 import { describe, expect, it } from 'vitest';
 import type { Journey, Settings } from '../../src/core/api';
@@ -9,6 +9,8 @@ import { makeEnv } from './support/env';
 import { at } from './support/network';
 
 const MAISON = { lat: 50.4655, lon: 4.859 };
+/** Textes comparés sans les espaces insécables (typographie française, core/text.ts). */
+const nb = (s: string | undefined) => (s ?? '').replace(/\u00A0/g, ' ');
 
 export function steps(j: Journey): string[] {
   return j.legs.map((l) =>
@@ -37,11 +39,9 @@ describe('plan : scénario 1, Maison → Bureau à 07:31', () => {
     expect(j.rt).toBe(false);
     expect(j.legs[1]).toMatchObject({ cat: 'IC', num: '2112', head: { fr: 'Bruxelles-Midi' } });
     expect(j.legs[0].from.name.fr).toBe('Ma position');
-    // triés par arrivée, aucun trajet dominé
-    for (let i = 1; i < js.length; i++) {
-      expect(js[i].arr).toBeGreaterThanOrEqual(js[i - 1].arr);
-      expect(js[i].dep).toBeGreaterThan(js[0].dep);
-    }
+    // propositions étiquetées : le plus simple, puis le suivant (même trajet, 1 h plus tard)
+    expect(js.map((x) => x.label)).toEqual(['simple', 'next']);
+    for (let i = 1; i < js.length; i++) expect(js[i].dep).toBeGreaterThan(js[0].dep);
   });
 
   it('avec temps réel : IC 07:44 voie 6, Bruxelles-Central 08:48, arrivée 09:00, alerte de voie en tête', async () => {
@@ -55,7 +55,7 @@ describe('plan : scénario 1, Maison → Bureau à 07:31', () => {
     ]);
     expect(hhmm(j.leaveAt)).toBe('07:35');
     expect(hhmm(j.arr)).toBe('09:00');
-    expect(j.alerts[0]).toMatchObject({ kind: 'platform', text: '! Voie modifiée : l’IC part de la voie 6' });
+    expect({ ...j.alerts[0], text: nb(j.alerts[0]?.text) }).toMatchObject({ kind: 'platform', text: '! Voie modifiée : l’IC part de la voie 6' });
     expect(j.legs[1].stops?.map((s) => `${s.name.fr} ${hhmm(s.est)}`)).toEqual([
       'Namur 07:44',
       'Gembloux 07:57',
@@ -67,10 +67,11 @@ describe('plan : scénario 1, Maison → Bureau à 07:31', () => {
     ]);
   });
 
-  it('extrémités : lieu inconnu, position absente', async () => {
+  it('extrémités : lieu inconnu (erreur lisible), position absente (aucun trajet, route : noPosition)', async () => {
     const { core, preset } = makeEnv({ now: '2026-11-10T07:31' });
     await expect(core.plan({ type: 'here' }, { type: 'place', placeId: 'nulle-part' }, at('2026-11-10T07:31'), preset, MAISON)).rejects.toThrow('Lieu introuvable');
-    await expect(core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, at('2026-11-10T07:31'), preset)).rejects.toThrow('Position inconnue');
+    expect(await core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, at('2026-11-10T07:31'), preset)).toEqual([]);
+    expect(await core.route({ type: 'here' }, { type: 'place', placeId: 'bureau' }, at('2026-11-10T07:31'), preset)).toEqual({ journeys: [], empty: 'noPosition' });
   });
 
   it('gare → gare (favori fav-gand) : les trains, sans marche', async () => {
@@ -83,6 +84,7 @@ describe('plan : scénario 1, Maison → Bureau à 07:31', () => {
       '14:25 IC Bruxelles-Central → Gand-Saint-Pierre 14:56 voie 6 +3',
       '14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09 voie 4',
     ]);
+    expect(js.map((j) => j.label)).toEqual(['simple', 'next', 'next']);
     expect(hhmm(js[0].leaveAt)).toBe('14:08');
   });
 });
@@ -99,9 +101,12 @@ describe('plan : lignes urbaines', () => {
     expect(['3', '4']).toContain(ride?.line);
     expect(ride?.rt).toBe(true);
     expect(j.legs[0]).toMatchObject({ kind: 'walk', walkMin: 2 });
-    expect(j.legs[j.legs.length - 1]).toMatchObject({ kind: 'walk', walkMin: 1 });
-    // premier tram en direct : T3 Churchill 12:12 → Bourse 12:17
+    // le lieu est à l'arrêt même (moins de 25 m) : pas de marche à la fin
+    expect(j.legs[j.legs.length - 1]).toMatchObject({ kind: 'ride', to: { areaId: 'stib:6362' } });
+    // premier tram en direct : T3 Churchill 12:12 → Bourse 12:17 (temps réel STIB du point 6357)
     expect(steps(j)[1]).toBe('12:12 T3 Gare du Nord → Bourse 12:17');
+    expect(ride).toMatchObject({ fromStop: '6357', toStop: '6362' });
+    expect(ride?.stops?.map((s) => s.name.fr)).toEqual(['Gare du Nord', 'Rogier', 'De Brouckere', 'Bourse']);
   });
 
   it('train puis ligne urbaine quand la gare d’arrivée est trop loin à pied', async () => {
@@ -116,15 +121,15 @@ describe('plan : lignes urbaines', () => {
       '07:42 IC Namur → Bruxelles-Nord 08:40 voie 4',
       '08:40 marche 2 min → Gare du Nord',
       '08:44 T3 Gare du Nord → Bourse 08:49',
-      '08:49 marche 1 min → Bourse',
     ]);
     expect(withTram.transfers).toBe(1);
-    expect(hhmm(withTram.arr)).toBe('08:50');
+    expect(withTram.label).toBe('simple');
+    expect(hhmm(withTram.arr)).toBe('08:49');
   });
 
   it('ligne urbaine pour rejoindre une gare trop loin à pied, puis le train', async () => {
-    // Depuis la Bourse, marche maximale 5 min : Bruxelles-Central est à 10 min (marche « au mieux »),
-    // le T4 rejoint Bruxelles-Midi et permet de partir plus tard pour le même IC vers Gand.
+    // Depuis la Bourse, marche maximale 5 min : Bruxelles-Central est à 10 min (marche longue : un changement),
+    // le T4 rejoint Bruxelles-Midi pour le même IC vers Gand : autant de changements, moins de marche, il passe d'abord.
     const { core, preset } = makeEnv({ now: '2026-11-10T13:30', scene: 'noRT' });
     const settings: Settings = {
       ...preset,
@@ -133,19 +138,10 @@ describe('plan : lignes urbaines', () => {
     };
     const bourse = { lat: 50.8483, lon: 4.3497 };
     const js = await core.plan({ type: 'here' }, { type: 'place', placeId: 'gand' }, at('2026-11-10T13:30'), settings, bourse);
-    expect(steps(js[0])).toEqual(['13:58 marche 10 min → Bruxelles-Central', '14:10 IC Bruxelles-Central → Gand-Saint-Pierre 14:39 voie 4', '14:39 marche 1 min → Gand']);
-    const viaUrban = js.find((j) => j.legs[1]?.kind === 'ride' && j.legs[1].op === 'stib');
-    expect(viaUrban, JSON.stringify(js.map(steps))).toBeDefined();
-    if (!viaUrban) return;
-    expect(steps(viaUrban)).toEqual([
-      '14:01 marche 1 min → Bourse',
-      '14:04 T4 Bourse → Gare du Midi 14:09',
-      '14:09 marche 1 min → Bruxelles-Midi',
-      '14:14 IC Bruxelles-Midi → Gand-Saint-Pierre 14:39 voie 12',
-      '14:39 marche 1 min → Gand',
-    ]);
-    expect(viaUrban.transfers).toBe(1);
-    expect(viaUrban.dep).toBeGreaterThan(js[0].dep);
+    expect(steps(js[0])).toEqual(['14:04 T4 Bourse → Gare du Midi 14:09', '14:09 marche 1 min → Bruxelles-Midi', '14:14 IC Bruxelles-Midi → Gand-Saint-Pierre 14:39 voie 12']);
+    expect(js[0]).toMatchObject({ label: 'simple', transfers: 1 });
+    // la marche de 10 min jusqu'à Bruxelles-Central pour le même IC : dominée (part plus tôt, même arrivée, plus de marche)
+    expect(js.some((j) => j.legs[0].kind === 'walk' && j.legs[0].walkMin === 10)).toBe(false);
   });
 });
 
@@ -172,7 +168,7 @@ describe('plan : régression « propositions en double »', () => {
 describe('plan : régression « train pour aller à pied »', () => {
   const near = (lat: number, lon: number): Settings['places'][number] => ({ id: 'proche', label: 'Proche', lat, lon });
 
-  it('départ et arrivée au même endroit (ou à moins de 100 m) : aucun trajet', async () => {
+  it('départ et arrivée au même endroit (ou à moins de 300 m) : aucun trajet (route : here)', async () => {
     const { core, preset } = makeEnv({ now: '2026-11-10T07:31' });
     expect(await core.plan({ type: 'here' }, { type: 'place', placeId: 'maison' }, at('2026-11-10T07:31'), preset, MAISON)).toEqual([]);
     const s: Settings = { ...preset, places: [...preset.places, near(50.4659, 4.8594)] };
@@ -190,7 +186,8 @@ describe('plan : régression « train pour aller à pied »', () => {
     expect(js).toHaveLength(1);
     expect(js[0].legs).toHaveLength(1);
     expect(js[0].legs[0]).toMatchObject({ kind: 'walk', walkMin: 7, to: { name: { fr: 'Proche' } } });
-    expect(js[0]).toMatchObject({ transfers: 0, rt: true, alerts: [] });
+    expect(js[0]).toMatchObject({ transfers: 0, rt: true, alerts: [], label: 'simple' });
+    expect(js[0].reason).toBe('Le plus simple\u00A0: à pied, 7\u00A0min');
     expect([hhmm(js[0].dep), hhmm(js[0].arr), hhmm(js[0].leaveAt)]).toEqual(['07:31', '07:38', '07:31']);
     // refresh() garde la marche telle quelle
     const r = await core.refresh(js[0], s);
@@ -204,7 +201,7 @@ describe('plan : régression « train pour aller à pied »', () => {
     const js = await core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, at('2026-11-10T13:55'), preset, central);
     expect(js.map(steps)).toEqual([['13:55 marche 12 min → Bureau']]);
     const s = await core.suggest(central, { ...preset, favorites: [{ kind: 'trip', id: 'f', from: { type: 'here' }, to: { type: 'place', placeId: 'bureau' }, label: 'bureau', propose: 'never' }], display: { ...preset.display, opening: 'firstFavorite' } });
-    expect([s?.title, s?.subtitle]).toEqual(['Pour le bureau : à pied, 12 min', 'arrivée à 14:07']);
+    expect([nb(s?.title), nb(s?.subtitle)]).toEqual(['Pour le bureau : à pied, 12 min', 'arrivée à 14:07']);
   });
 
   it('jamais un véhicule plus lent que la marche directe', async () => {

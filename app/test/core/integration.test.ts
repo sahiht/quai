@@ -30,10 +30,10 @@ function suite(label: string, dataDir: string) {
       it('accueil : suggestion du favori fav-bureau (noRT puis base)', async () => {
         const a = env('2026-11-10T07:31', 'noRT');
         const s = await a.core.suggest(MAISON, a.preset);
-        expect([s?.favoriteId, s?.title, s?.subtitle]).toEqual(['fav-bureau', 'Pour le bureau : IC 07:42, voie 4', 'partir à 07:33, 7 min à pied']);
+        expect([s?.favoriteId, s?.title, s?.subtitle]).toEqual(['fav-bureau', 'Pour le bureau\u00a0: IC 07:42, voie 4', 'partir à 07:33, 7\u00a0min à pied']);
         const b = env('2026-11-10T07:31');
         const t = await b.core.suggest(MAISON, b.preset);
-        expect([t?.title, t?.subtitle]).toEqual(['Pour le bureau : IC 07:42 +2, voie 6', 'partir à 07:35, 7 min à pied']);
+        expect([t?.title, t?.subtitle]).toEqual(['Pour le bureau\u00a0: IC 07:42 +2, voie 6', 'partir à 07:35, 7\u00a0min à pied']);
       });
 
       it('autour de moi (500 m) : 3 zones', async () => {
@@ -55,11 +55,11 @@ function suite(label: string, dataDir: string) {
         const k = (await b.core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, b.clock.t, b.preset, MAISON))[0];
         expect(steps(k)).toEqual(['marche 7', 'IC 07:44 voie 6 → Bruxelles-Central 08:48', 'marche 12']);
         expect(hhmm(k.arr)).toBe('09:00');
-        expect(k.alerts[0].text).toBe('! Voie modifiée : l’IC part de la voie 6');
+        expect(k.alerts[0].text).toBe('! Voie modifiée\u00a0: l’IC part de la voie 6');
         // étapes rafraîchies en chemin
         b.clock.set('2026-11-10T07:37');
         const r = await b.core.refresh(j, b.preset);
-        expect(r.alerts[0].text).toBe('! Voie modifiée : l’IC part de la voie 6');
+        expect(r.alerts[0].text).toBe('! Voie modifiée\u00a0: l’IC part de la voie 6');
         expect([hhmm(r.dep), hhmm(r.arr)]).toEqual(['07:33', '09:00']);
       });
     });

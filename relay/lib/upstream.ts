@@ -3,7 +3,7 @@
  * Les messages destinés aux clients sont en français, sans adresse ni clé ; le détail technique va au journal.
  */
 import type { Ctx } from './context.js';
-import { readConfig, type Source } from './config.js';
+import { USER_AGENT, readConfig, type Source } from './config.js';
 import { errorText } from './log.js';
 
 export const MISSING_KEY = 'Clé BMC_KEY absente sur le relais';
@@ -57,7 +57,7 @@ interface Opened { res: Response; t0: number }
 
 /** `shownMs` : délai annoncé dans le message d'erreur (budget total quand une requête en enchaîne plusieurs). */
 async function open(ctx: Ctx, src: Source, timeoutMs: number, accept: string, shownMs = timeoutMs): Promise<Opened> {
-  const headers: Record<string, string> = { Accept: accept, 'User-Agent': 'quai-relay/1.0' };
+  const headers: Record<string, string> = { Accept: accept, 'User-Agent': USER_AGENT };
   if (src.auth) {
     const { key } = readConfig(ctx.env);
     if (!key) throw new MissingKeyError(src.label);

@@ -106,7 +106,7 @@ describe('buildData avec --cache-dir', () => {
     expect(r.logs.some((l) => /^De Lijn : aucun voyage les 10\/11 et 11\/11 ; repli sur le GTFS gardé du 10\/11$/.test(l))).toBe(true);
     expect(r.logs.some((l) => /^SNCB : téléchargement impossible .* repli sur le GTFS gardé du 10\/11$/.test(l))).toBe(true);
     // les fichiers produits sont ceux du GTFS gardé : trains et zones SNCB présents
-    expect(JSON.parse(readFileSync(join(r.out, 'trains/2026-11-10.json'), 'utf8')).trips.length).toBe(10);
+    expect(JSON.parse(readFileSync(join(r.out, 'trains/2026-11-10.json'), 'utf8')).trips.length).toBe(20);
     expect(existsSync(join(r.out, 'areas/delijn/308611.json'))).toBe(true);
     // un flux inutilisable ne remplace jamais le GTFS gardé
     expect(JSON.parse(readFileSync(join(cacheDir, 'delijn.json'), 'utf8')).date).toBe('2026-11-10');

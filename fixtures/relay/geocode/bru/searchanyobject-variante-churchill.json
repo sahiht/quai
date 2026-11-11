@@ -1,0 +1,34 @@
+{
+ "resultsList": [
+  {
+   "objectType": "Address",
+   "result": {
+    "score": 87.5,
+    "address": {
+     "addressId": "18822",
+     "policeNumber": "100",
+     "streetName": {
+      "fr": "Avenue Winston Churchill",
+      "nl": "Winston Churchilllaan"
+     },
+     "municipality": {
+      "fr": "Uccle",
+      "nl": "Ukkel"
+     },
+     "postalCode": "1180",
+     "addressPosition": {
+      "pointGeometry": {
+       "point": {
+        "pos": [
+         149735.57,
+         166394.57
+        ],
+        "srsName": "urn:ogc:def:crs:EPSG::31370"
+       }
+      }
+     }
+    }
+   }
+  }
+ ]
+}

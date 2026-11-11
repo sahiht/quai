@@ -26,6 +26,18 @@ describe('validation des réglages', () => {
     expect(validateSettings({}).seenVersion).toBe('');
   });
 
+  it('préréglage 1.1 (PRD A.2) : réglages v2 valides tels quels, le 1.0 plus « Vers la maison » le soir, en dernier', () => {
+    const raw = JSON.parse(readFileSync(PRESET_PATH.replace(/preset\.json$/, 'preset-1.1.json'), 'utf8'));
+    const v10 = migrateSettings(JSON.parse(readFileSync(PRESET_PATH, 'utf8')));
+    expect(validateSettings(raw)).toEqual(raw);
+    expect(migrateSettings(raw)).toEqual(raw);
+    expect(raw.seenVersion).toBe('1.1.0');
+    expect(raw.places).toEqual(v10.places);
+    expect(raw.favorites.slice(0, -1)).toEqual(v10.favorites);
+    expect(raw.favorites.at(-1)).toEqual({ kind: 'trip', id: 'fav-maison', from: { type: 'here' }, to: { type: 'place', placeId: 'maison' }, label: 'maison', propose: 'evening' });
+    expect({ ...raw, favorites: v10.favorites, seenVersion: '1.0.0' }).toEqual(v10);
+  });
+
   it('extrémité adresse, lieu par adresse et adresses récentes', () => {
     const s = validateSettings({
       places: [{ id: 'p1', label: 'Rendez-vous', lat: 51.0537, lon: 3.7225, address: 'Veldstraat 1, 9000 Gent', src: 'address' }, { id: 'p2', label: 'X', lat: 50, lon: 4, src: 'nimporte' }],

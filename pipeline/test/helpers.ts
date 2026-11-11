@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeZip } from '../../fixtures/pipeline/zip.ts';
 import { JsonWriter } from '../src/writer.ts';
 import { processFeed } from '../src/feed.ts';
+import { buildData } from '../src/build.ts';
 import type { Op } from '../../shared/types.ts';
 
 export const PIPELINE_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -49,4 +50,19 @@ export async function runFeed(op: Op, files: Record<string, string>, dates = ['2
   const result = await processFeed({ op, zipPath: zip, dates, writer });
   await writer.flush();
   return { result, out };
+}
+
+/** Préparation complète (buildData) sur des flux en mémoire ; un réseau absent est « source indisponible ». */
+export async function runBuild(feeds: Partial<Record<Op, Record<string, string>>>, dates = ['2026-11-10', '2026-11-11']) {
+  const dir = tempDir();
+  const out = join(dir, 'data');
+  const sources = {} as Parameters<typeof buildData>[0]['sources'];
+  for (const op of ['sncb', 'stib', 'delijn', 'tec'] as Op[]) {
+    const files = feeds[op];
+    sources[op] = files ? { kind: 'file', path: writeGtfsZip(dir, `${op}.zip`, files) } : { kind: 'missing', reason: 'source non fournie' };
+  }
+  const logs: string[] = [];
+  const result = await buildData({ out, dates, sources, log: (m) => logs.push(m), now: () => new Date('2026-11-10T01:15:00Z') });
+  const read = <T>(rel: string): T => JSON.parse(readFileSync(join(out, rel), 'utf8')) as T;
+  return { out, result, logs, read };
 }

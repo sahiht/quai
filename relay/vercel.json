@@ -1,4 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "ignoreCommand": "sh scripts/vercel-ignore.sh"
+  "ignoreCommand": "sh scripts/vercel-ignore.sh",
+  "functions": {
+    "api/geocode.ts": {
+      "maxDuration": 5
+    }
+  }
 }

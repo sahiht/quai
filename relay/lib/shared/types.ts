@@ -31,6 +31,13 @@ export interface Meta {
    * utilisé (portail injoignable, flux sans voyage) ; absent quand le flux de la nuit a servi.
    */
   feeds: Record<Op, { ok: boolean; error?: string; areas: number; trips: number; feedVersion?: string; cachedFrom?: string }>;
+  /**
+   * 1.1 : fichiers de ligne publiés cette nuit (lines/, lines/index.json, linetiles/). Absent : pas de fichiers de
+   * ligne (pipeline 1.0 ou étape en échec) ; l'appli retombe alors sur le calcul 1.0 (lignes directes).
+   * `ops` : réseaux dont les fichiers de ligne existent. Toutes les lignes d'une même nuit sont numérotées
+   * ensemble : ne jamais mélanger des fichiers de deux `generatedAt` différents.
+   */
+  lines?: { files: number; ops: Exclude<Op, 'sncb'>[]; conn: number };
 }
 
 /** Index de tuile : ty = floor(lat / tile.lat), tx = floor(lon / tile.lon). Fichier DATA_BASE/tiles/{ty}_{tx}.json */
@@ -46,6 +53,11 @@ export interface AreaSummary {
   lon: number;
   modes: Mode[];
   lines: string[];       // noms courts des lignes, max 12, ex. ['3', '4'] ou ['IC', 'S1']
+  /**
+   * 1.1 : identifiants d'anciennes zones fusionnées dans celle-ci (même nom, même opérateur, moins de 300 m).
+   * Sert à retrouver un favori dont la zone a changé d'identifiant. Absent si aucune fusion.
+   */
+  aka?: string[];
 }
 
 /** DATA_BASE/tiles/{ty}_{tx}.json */
@@ -100,9 +112,95 @@ export interface TrainsDay {
     cat: string;         // 'IC', 'S1', 'L', 'P', 'EUR'...
     num?: string;        // numéro de train si connu
     head: Names;         // destination
-    /** Arrêts : [index gare, arrivée (min), départ (min), quai ou '' , stop_sequence] */
+    /**
+     * Arrêts : [index gare, arrivée (min), départ (min), quai ou '' , stop_sequence]
+     * 1.1 : arrivée -1 = descente interdite (drop_off_type 1), départ -1 = montée interdite (pickup_type 1).
+     * Un train de nuit qui ne fait que déposer à Bruxelles a donc départ -1 à Bruxelles : on ne peut pas y monter.
+     */
     s: [number, number, number, string, number][];
   }[];
+}
+
+/* ------------------------------------------------------------------ */
+/* 1.1 : réseau urbain pour le calcul de trajets (ajouts seulement)    */
+/* Voir docs/v1.1/design-routing.md § 3.                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * DATA_BASE/lines/{op}/{routeKey}.json : une ligne GTFS (route_id) de la STIB, de De Lijn ou du TEC,
+ * toutes directions, voyages des deux dates de service. routeKey = route_id normalisé, caractère hors
+ * [A-Za-z0-9_-] remplacé par '_' (comme fileKey).
+ */
+export interface LineFile {
+  v: 1;
+  id: string;            // `${op}:${route_id}`, ex. 'tec:L0149-21069'
+  op: Exclude<Op, 'sncb'>;
+  route: string;         // route_id normalisé (alertes)
+  line: string;          // nom court, ex. '149'
+  mode: Mode;
+  /** Zones desservies : [AreaSummary.id, lat, lon, noms]. Coordonnées = celles de la zone (5 décimales). */
+  areas: [id: string, lat: number, lon: number, n: Names][];
+  pats: {
+    head: Names;         // destination mise en forme
+    a: number[];         // zones du motif, dans l'ordre (indices dans areas ; une zone peut revenir dans une boucle)
+    s: string[];         // arrêt physique par position, identifiant temps réel (rt) ; '' si inconnu
+    /** Autorisations par position : b montée seule, a descente seule, x les deux, n aucune.
+     *  Absent = 'b' puis 'x'… puis 'a' (premier arrêt montée seule, dernier descente seule). */
+    f?: string;
+    /** Profils : minutes depuis le départ du premier arrêt, une valeur par position (départ ; arrivée au dernier). */
+    prof: number[][];
+    /** Voyages triés par (jour, départ) : [jour 0|1, départ du 1er arrêt en minutes (peut dépasser 1440),
+     *  profil (indice dans prof), rang du trip_id dans trips (absent pour la STIB)]. */
+    t: number[][];
+  }[];
+  /** Correspondances : pour chaque zone de areas, numéros (LineIndex) des autres lignes à moins de
+   *  LineIndex.conn mètres, réduits aux bornes de chaque tronçon commun. */
+  conn: number[][];
+  /** trip_id normalisés, pour /api/rt (De Lijn, TEC). Absent pour la STIB (temps réel par pointid). */
+  trips?: string[];
+}
+
+/** DATA_BASE/lines/index.json : numérotation des lignes de la nuit (cohérente avec tous les fichiers de la nuit). */
+export interface LineIndex {
+  v: 1;
+  generatedAt?: string;                                // = Meta.generatedAt de la même nuit (contrôle de cohérence)
+  conn: number;                                        // rayon des correspondances en mètres (400)
+  /** numéro de ligne = rang dans ce tableau ; key = LineFile.id (`${op}:${route_id}`), fichier
+   *  lines/{op}/{routeKey}.json (routeKey = route_id normalisé comme fileKey). */
+  lines: [key: string, line: string, mode: Mode, patterns: number][];
+  stations: Record<string, number[]>;                  // gare SNCB (AreaSummary.id) → lignes à moins de `conn` m
+}
+
+/** DATA_BASE/linetiles/{ty}_{tx}.json (même découpage que tiles/) : zone urbaine → numéros des lignes qui la desservent. */
+export interface LineTile { v: 1; a: Record<string, number[]> }
+
+/* ------------------------------------------------------------------ */
+/* 1.1 : adresses (relais GET /api/geocode). Voir design-routing.md § 6 */
+/* ------------------------------------------------------------------ */
+
+/** Source d'adresses : Flandre (Digitaal Vlaanderen), Bruxelles (Paradigm, UrbIS), Wallonie (SPW, ICAR), Google (désactivé). */
+export type GeoSource = 'vla' | 'bru' | 'wal' | 'google';
+
+export interface GeocodeResult {
+  label: string;                     // « Rue de Fer 25, 5000 Namur » ; rue sans numéro : « Rue Neuve, 1000 Bruxelles »
+  lat: number; lon: number;          // WGS84, 5 décimales
+  kind: 'adresse' | 'rue' | 'commune' | 'lieu';
+  approx?: boolean;                  // rue, commune, numéro interpolé : position approximative
+  source: GeoSource;
+  score: number;                     // 0..1 après normalisation
+  parts?: { street?: string; number?: string; postcode?: string; municipality?: string };
+  names?: { fr?: string; nl?: string }; // Bruxelles : libellé dans les deux langues
+}
+
+/** GET /api/geocode?q=texte&lang=fr|nl (seuls q et lang partent du téléphone : jamais de position ni d'identifiant). */
+export interface GeocodeResponse {
+  q: string;                         // texte normalisé (espaces)
+  fetchedAt: string;
+  results: GeocodeResult[];          // 8 au plus, classés
+  sources: Partial<Record<GeoSource, { ok: boolean; ms?: number; n?: number; error?: string }>>;
+  partial?: boolean;                 // au moins une source interrogée n'a pas répondu à temps
+  attribution: string;               // ex. « Adresses : Digitaal Vlaanderen, Paradigm (UrbIS), SPW (ICAR) »
+  error?: string;                    // toutes les sources en erreur (texte en français)
 }
 
 /* ------------------------------------------------------------------ */
@@ -156,6 +254,10 @@ export interface HealthResponse {
   time: string;
   data?: { generatedAt: string; ok: boolean; feeds?: Meta['feeds'] };
   sources: Record<'sncb' | 'delijn' | 'tec' | 'stib', { ok: boolean; ms?: number; error?: string }>;
+  /** 1.1 : services d'adresses (requête de test au plus toutes les 10 min, en cache). */
+  geocode?: Partial<Record<GeoSource, { ok: boolean; ms?: number; error?: string }>>;
+  /** 1.1 : version du relais (ex. '1.1.0'). */
+  version?: string;
 }
 
 /** Normalisation des identifiants préfixés par le portail BMC : 'gt:tec:123' -> '123', 'gs:nmbssncb:8812005' -> '8812005'. */

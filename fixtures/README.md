@@ -1,6 +1,6 @@
 # Fixtures communes
 
-`network.json` décrit un mini-réseau cohérent (SNCB, STIB, De Lijn, TEC) autour de Namur, Bruxelles-Nord, Bruxelles-Central et Gand, aligné sur les maquettes Visite1-3. C'est la source unique des données de test :
+`network.json` décrit un mini-réseau cohérent (SNCB, STIB, De Lijn, TEC) autour de Namur, Bruxelles-Nord, Bruxelles-Central, Gand et (1.1) Waterloo, aligné sur les maquettes Visite1-3. C'est la source unique des données de test :
 
 - `fixtures/pipeline/` (équipe données) : générateur `network.json` → 4 zips GTFS réalistes (`sncb.zip`, `stib.zip`, `delijn.zip`, `tec.zip`) ;
 - `fixtures/relay/` (équipe relais) : générateur `network.json` → flux GTFS-RT protobuf (trip-update, alert) au format du portail BMC (identifiants préfixés), réponse STIB WaitingTimes, et serveur « faux portail BMC » ;
@@ -11,7 +11,9 @@
 - Dates de service : mardi 2026-11-10 et mercredi 2026-11-11 (jour férié : le calendrier WEEK est retiré, HOLI ajouté). Heure belge = UTC+1.
 - Gabarits (`templates`) : un voyage par heure de départ, de `from` à `to` inclus tous les `every` minutes ; `idTpl` remplace `{HHMM}` par l'heure de départ au premier arrêt (ex. `70232{HHMM}` → `702321230`). Décalages en minutes depuis le premier arrêt ; arrivée = départ.
 - Voyages explicites (`trips[].st`) : `[stop_id, "HH:MM"]` ou `[stop_id, "arrivée", "départ"]`, heures GTFS pouvant dépasser 24:00. stop_sequence = 1, 2, 3… dans l'ordre.
-- Identifiant de zone (AreaSummary.id) : `${op}:${areaKey}` ; areaKey = parent_station (SNCB : sans le « S » initial), sinon le plus petit stop_id du groupe (comparaison de chaînes). Exemples attendus : `sncb:8812005`, `stib:6357F` (Gare du Nord), `stib:6359` (Rogier), `delijn:308611` (Bruxelles-Nord), `delijn:200553` (Gand-Saint-Pierre), `delijn:200101` (Korenmarkt), `tec:N508aga` (Namur Gare).
+- Identifiant de zone (AreaSummary.id) : `${op}:${areaKey}` ; areaKey = parent_station (SNCB : sans le « S » initial), sinon le plus petit stop_id du groupe (comparaison de chaînes). Exemples attendus : `sncb:8812005`, `stib:6357F` (Gare du Nord), `stib:6359` (Rogier), `delijn:308611` (Bruxelles-Nord), `delijn:200553` (Gand-Saint-Pierre), `delijn:200101` (Korenmarkt), `tec:N508aga` (Namur Gare) ; 1.1 : `sncb:8814266` (Waterloo), `tec:Bwategl1` (Waterloo Eglise), `tec:Bbxlmid1` (Bruxelles Midi), `tec:Bbrlgar1` (Braine-l’Alleud Gare), `stib:8302` (Roi Baudouin).
+- Noms : `network.json` donne les noms tels qu'écrits dans le GTFS (STIB en capitales, TEC de la ligne W avec la commune en capitales, « perron » et « quai » dans le nom) ; les fichiers publiés les remettent en forme (`shared/names.ts`). Les zips ajoutent quelques particularités des vrais flux absentes de `network.json` (en-tête de `make-gtfs.ts`), dont le préfixe « T » des trams De Lijn dans `route_short_name` (« T1 », la ligne publiée reste « 1 »).
+- `addresses` (1.1) : adresses des scénarios porte à porte, en complément du tableau A.2 du PRD pour les faux services d'adresses (`rogier` : destination du scénario 4, à 3 min à pied de Rogier et 5 min de Bruxelles-Nord).
 
 ## Résultats attendus (base pour les tests de bout en bout)
 
@@ -39,3 +41,31 @@ Scène « base » (tout le temps réel de `network.json`) et scène « noRT » (
 **Jour férié** : le 2026-11-11, à Namur, seuls partent l'IC 08:42 (DAILY) et l'IC 09:42 (HOLI).
 
 **Après minuit** : IC 2199 à Bruxelles-Nord à 24:01 (= 00:01 le 11) ; bus TEC 4 à 24:10.
+
+## Extension 1.1 (PRD annexe A.2, CA-M3.4, CA-M3.5, CA-M5.2, CA-M5.3)
+
+Ajouts au réseau (les résultats attendus de la 1.0 ci-dessus restent vrais) :
+
+- **SNCB, gare de Waterloo** `sncb:8814266` (50.7154, 4.3835), quais 1 et 2. S1 1960 à 1967 (DAILY) Nivelles → Waterloo → Bruxelles-Midi → Bruxelles-Central → Bruxelles-Nord (terminus, aucun départ ajouté à Bruxelles-Nord) : Nivelles HH:10 et HH:40, Waterloo +15 (06:25 à 09:55, toutes les 30 min, voie 1), Midi +35 (voie 6), Central +40 (voie 1, 25 min après Waterloo), Nord +45 (voie 3).
+- **Retours du soir** : IC 2137 et 2138 (DAILY) Bruxelles-Midi 17:06 / 18:06 (voie 6) → Bruxelles-Central **17:12 / 18:12** (voie 5) → Bruxelles-Nord 17:17-17:18 / 18:17-18:18 (voie 3) → Schuman → Luxembourg → Ottignies → Gembloux → Namur **18:16 / 19:16** (voie 5).
+- **TEC, ligne W** (`tec:B0536-23747`, bus, DAILY, toutes les 20 min) : vers « BRUXELLES Midi » (`W-HHMM`) BRAINE-L'ALLEUD Gare `Bbrlgar1` HH:04, HH:24, HH:44 → WATERLOO Eglise `Bwategl1` +12 (06:16 à 21:56) → BRUXELLES Midi `Bbxlmid1` +57 (45 min après Waterloo) ; retour vers « BRAINE-L'ALLEUD Gare » (`WR-HHMM`) `Bbxlmid2` HH:10, HH:30, HH:50 → `Bwategl2` +45 → `Bbrlgar1` +57. Zones : `tec:Bwategl1` (50.7174, 4.3979), `tec:Bbxlmid1` (50.8361, 4.3352, à 80 m du métro STIB Gare du Midi `8402` et à 90 m de la gare SNCB), `tec:Bbrlgar1`.
+- **Changements du réseau 1.0** : le T3 vers Esplanade (`1203HHMM`) ne s'arrête plus à Gare du Midi (arrêt `6365` sans passage ; mêmes heures à Rogier et à Gare du Nord), pour que seul le métro M2 mène de Gare du Midi à Rogier (scénario 4) ; Roi Baudouin `8302` déplacé de 25 m (50.8913, 4.3345), à 1 min à pied du boulevard du Centenaire 1.
+
+Résultats attendus en 1.1 (horaire prévu ; marche maximale 10 min ; minutes de marche = `walkMinutes` de la 1.0, à 2 min près selon les règles de correspondance du cœur) :
+
+**Scénario 4 (Waterloo, cas H)** : 2026-11-10 07:31, départ « Chaussée de Bruxelles 1, 1410 Waterloo » (50.7175, 4.3990), arrivée « Rue du Progrès 20, 1210 Saint-Josse-ten-Noode » (50.8582, 4.3600).
+- `simple` : 2 min à pied, bus W 07:36 à Waterloo Eglise, Bruxelles Midi 08:21, 2 min à pied, métro M2 08:29 vers Simonis (08:23 si la correspondance compte 2 min), Rogier 08:43 (08:37), 3 min à pied, arrivée vers 08:46 (08:40). 1 changement, peu de marche.
+- `fast` : 19 min à pied jusqu'à la gare de Waterloo, S1 07:55 voie 1, Bruxelles-Nord 08:25, 5 min à pied, arrivée 08:30 (au moins 10 min avant `simple`). La marche de 19 min compte comme un changement : égalité, puis moins de marche pour le bus.
+- Pas d'autre chemin plus simple : le bus puis le S1 de Bruxelles-Midi (08:45) arrive à 09:00 ; aucun tram ne va de Gare du Midi vers Rogier.
+
+**CA-M5.2** : position S2 (50.8600, 4.3590) à 12:10 vers « Boulevard du Centenaire 1, 1020 Bruxelles » (50.8915, 4.3340) : 6 min à pied jusqu'à Rogier, M6 12:25 vers Roi Baudouin (le 12:15 part trop tôt), Roi Baudouin 12:39, 1 min à pied, arrivée 12:40 : « direct, à pied 6 + 1 min ». L'autre chemin (T3 jusqu'à Esplanade puis 15 min à pied) compte un changement.
+
+**CA-M5.3** : « Avenue Winston Churchill 100, 1180 Uccle » (50.8080, 4.3650) à 08:00 vers le boulevard du Centenaire 1 : 2 min à pied jusqu'à Churchill, T3 08:09 vers Esplanade (08:01 part trop tôt), Rogier 08:30, M6 08:35, Roi Baudouin 08:49, 1 min à pied, arrivée 08:50 (1 changement). La 1.0 ne trouve aucun trajet.
+
+**CA-M3.4** : Maison 07:31, scène `noRT`, vers « Rue Neuve 1, 1000 Bruxelles » (50.8505, 4.3545) : `simple` IC 07:42 jusqu'à Bruxelles-Central 08:46, 10 min à pied, arrivée 08:56 ; `fast` IC jusqu'à Bruxelles-Nord 08:40 (avant Central), 2 min à pied, T3 08:44 Gare du Nord → De Brouckère 08:48, 3 min à pied, arrivée 08:51.
+
+**Le soir** : depuis Bruxelles-Central, IC 17:12 et 18:12 vers Namur (arrivées 18:16 et 19:16), aussi le 11/11.
+
+**Noms (pipeline 1.1)** : « Waterloo Eglise », « Bruxelles Midi », « Braine-l’Alleud Gare » (capitales de la commune retirées, sans accent inventé) ; départs de Waterloo Eglise « W Bruxelles Midi » ; tram De Lijn « 1 » (jamais « T1 ») ; zones sans aucun départ absentes des tuiles et de la recherche (`sncb:8821006` Anvers-Central, `sncb:8891009` Bruges, `stib:6370` Stalle, `stib:8302` Roi Baudouin, `delijn:300120`, `delijn:300450`, `delijn:301870`, `tec:N520aaa`, `tec:N530aaa`, `tec:N540aaa`), mais présentes dans `areas/` et dans les fichiers de ligne.
+
+**Comptes** : SNCB 15 zones, 21 voyages (`trains/` : 20 le 10/11, 18 le 11/11) ; STIB 10 zones ; De Lijn 7 ; TEC 8.

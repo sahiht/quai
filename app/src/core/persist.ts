@@ -4,7 +4,12 @@
  *
  * - Validité : meta.generatedAt (une génération par nuit) ; une nouvelle génération invalide tout.
  * - Taille bornée : SLOTS emplacements fixes de SLOT_CHARS caractères (clés réutilisées, jamais d'effacement
- *   à faire) ; un fichier occupe 1 à MAX_SLOTS_PER_FILE emplacements ; les plus anciens sont réutilisés d'abord.
+ *   à faire) ; un fichier occupe 1 à MAX_SLOTS_PER_FILE emplacements ; les moins récemment lus sont réutilisés
+ *   d'abord.
+ * - 1.1 (S7, review-tech M9) : budget de 3 millions de caractères (le localStorage de Quai Web en tient environ 5),
+ *   assez pour le fichier de trains du jour (1,65 Mo sur les vraies données) : une deuxième ouverture sans réseau
+ *   retrouve les trains (CA-S7.1). Emplacements de 47 000 caractères : un seul appel au pont par emplacement
+ *   (le KV découpe au-delà de 48 000).
  * - Index en mémoire (lu une fois) : on ne lit le KV que pour un fichier réellement enregistré.
  * - Tous les appels KV passent par une file unique, un à la fois, avec un délai maximal de 3 s.
  * - Écritures réduites : l'index n'est réécrit qu'une fois par rafale d'enregistrements.
@@ -17,9 +22,9 @@ const IDX_KEY = `${PREFIX}idx`;
 const META_KEY = `${PREFIX}meta`;
 const slotKey = (i: number) => `${PREFIX}slot.${i}`;
 
-export const SLOT_CHARS = 50_000;
-export const SLOTS = 24; // 1,2 million de caractères au plus
-export const MAX_SLOTS_PER_FILE = 4;
+export const SLOT_CHARS = 47_000;
+export const SLOTS = 64; // 3 millions de caractères au plus
+export const MAX_SLOTS_PER_FILE = 40; // 1,88 million de caractères
 const KV_TIMEOUT_MS = 3_000;
 
 interface Item {
@@ -29,7 +34,7 @@ interface Item {
 }
 interface Index {
   gen: string;
-  items: Item[]; // du plus ancien au plus récent
+  items: Item[]; // du moins récemment utilisé au plus récent
 }
 
 export interface PersistOptions {
@@ -83,7 +88,14 @@ export class PersistentCache {
     const guard = `${gen}|${path}\n`;
     if (!text.startsWith(guard)) return null;
     const body = text.slice(guard.length);
-    return body.length === item.len ? body : null;
+    if (body.length !== item.len) return null;
+    // fichier utile : il passe en dernier dans l'ordre de réutilisation des emplacements
+    if (idx && idx.items[idx.items.length - 1] !== item && idx.items.includes(item)) {
+      idx.items = [...idx.items.filter((x) => x !== item), item];
+      this.indexDirty = true;
+      this.scheduleIndexWrite();
+    }
+    return body;
   }
 
   /** Enregistre un fichier (en arrière-plan). Trop gros : ignoré. */

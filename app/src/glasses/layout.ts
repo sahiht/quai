@@ -6,7 +6,7 @@
  * change que les textes (textContainerUpgrade, sans clignotement) ; seule une nouvelle forme
  * (autre écran, ligne d'alerte qui apparaît) impose rebuildPageContainer.
  */
-import { LINE_H, SCREEN_H, padLeftTo, textWidth, truncate, utf8Bytes } from './font';
+import { LINE_H, SCREEN_H, frenchSpaces, padLeftTo, textWidth, truncate, utf8Bytes } from './font';
 import type { Brightness, ContainerSpec, GlassesView, Item, Layout, PageSpec } from './types';
 
 export const GEO = {
@@ -39,6 +39,8 @@ interface LayoutDef {
   a: Col;
   b: Col;
   c: Col;
+  /** Écart entre deux colonnes (marge de sécurité en plus) ; 12 px par défaut. */
+  gap?: number;
 }
 
 const { X_TEXT, X_END, GAP } = GEO;
@@ -46,23 +48,41 @@ const right = (w: number): number => X_END - w;
 
 /**
  * Positions des colonnes par gabarit (maquettes : grilles 76 px / 1fr / auto, 60 px / 1fr / auto…).
- * Prochain départ (Autour de moi, favoris) : 182 px, pour ne jamais couper la voie modifiée
+ * Prochain départ (Autour de moi) : 182 px, pour ne jamais couper la voie modifiée
  * (« S10 07:42 +12 v.12 ! » = 170 px) ni un départ du lendemain (« 460 ~demain 08:08 » = 178 px).
  */
 const NEXT_W = 182;
-/** Colonne de droite des menus (accueil, favoris, Aller à…) : « arrivée demain 09:58 » = 186 px. */
+/**
+ * Colonnes des menus (accueil, favoris, Aller à…, PRD § 6.0) : gauche 340 px, droite 190 px
+ * (« partir demain 06:20 » = 170 px, « arrivée demain 09:58 » = 186 px).
+ */
 const MENU_W = 192;
+/** Étapes (S6) : heure 70 px, texte 342 px, état 108 px utiles (« dans 30 min » = 108 px). */
+const STATE_W = 110;
+/** Écart entre colonnes des menus et des étapes (largeurs utiles du PRD § 6.0). */
+const TIGHT = 10;
+/** Titre : 476 px utiles avant l'heure. */
+const TITLE_W = X_END - GEO.CLOCK_W - TIGHT - X_TEXT;
 export const LAYOUTS: Record<Layout, LayoutDef> = {
-  menu: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(MENU_W), w: MENU_W, align: 'right', level: 3 } },
+  menu: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(MENU_W), w: MENU_W, align: 'right', level: 3 }, gap: TIGHT },
   nearby: { a: { x: X_TEXT, level: 4 }, b: { x: right(NEXT_W) - GAP - 64, w: 64, level: 3 }, c: { x: right(NEXT_W), w: NEXT_W, level: 4 } },
   board: { a: { x: X_TEXT, w: 52, level: 4 }, b: { x: X_TEXT + 52 + GAP, level: 3 }, c: { x: right(96), w: 96, level: 4 } },
   boardTrain: { a: { x: X_TEXT, w: 40, level: 4 }, b: { x: X_TEXT + 40 + GAP, level: 3 }, c: { x: right(160), w: 160, level: 4 } },
-  trip: { a: { x: X_TEXT, w: 70, level: 4 }, b: { x: X_TEXT + 70 + GAP, level: 3 }, c: { x: right(96), w: 96, level: 4 } },
-  steps: { a: { x: X_TEXT, w: 70, level: 4 }, b: { x: X_TEXT + 70 + GAP, level: 3 }, c: { x: right(96), w: 96, level: 4 } },
+  steps: { a: { x: X_TEXT, w: 70, level: 4 }, b: { x: X_TEXT + 70 + TIGHT, level: 3 }, c: { x: right(STATE_W), w: STATE_W, level: 4 }, gap: TIGHT },
   train: { a: { x: X_TEXT, level: 4 }, b: { x: right(96) - GAP - 70, w: 70, level: 4 }, c: { x: right(96), w: 96, level: 3 } },
   arrival: { a: { x: X_TEXT, w: 96, level: 4 }, b: { x: X_TEXT + 96 + GAP, level: 3 }, c: { x: right(96), w: 96, level: 4 } },
-  journeys: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(220), w: 220, align: 'right', level: 3 } },
   message: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(96), w: 96, level: 3 } },
+};
+
+/** Largeurs utiles (au pixel) des colonnes des menus et des étapes, pour les tests de largeur (CA-M1.7). */
+export const WIDTHS = {
+  full: X_END - X_TEXT - GEO.SAFETY,
+  title: TITLE_W - GEO.SAFETY,
+  menuLeft: right(MENU_W) - TIGHT - X_TEXT - GEO.SAFETY,
+  menuRight: MENU_W - GEO.SAFETY,
+  stepsTime: 70 - GEO.SAFETY,
+  stepsText: right(STATE_W) - TIGHT - (X_TEXT + 70 + TIGHT) - GEO.SAFETY,
+  stepsState: STATE_W - GEO.SAFETY,
 };
 
 export interface Frame {
@@ -71,7 +91,22 @@ export interface Frame {
 }
 
 /** Nombre de lignes d'un élément (1 ou 2). */
-export const itemLines = (it: Item): number => (it.a2 || it.b2 ? 2 : 1);
+export const itemLines = (it: Item): number => (it.two || it.a2 || it.b2 ? 2 : 1);
+
+/** Premier élément visible le plus bas possible (écrans sans curseur : la fin de la liste tient à l'écran). */
+export function maxTop(items: Item[], capacity: number): number {
+  let used = 0;
+  for (let i = items.length - 1; i >= 0; i--) {
+    used += itemLines(items[i]);
+    if (used > capacity) return i + 1;
+  }
+  return 0;
+}
+
+/** Défilement borné d'un écran sans curseur. */
+export function clampTop(items: Item[], top: number, capacity: number): number {
+  return Math.min(Math.max(0, Math.round(top) || 0), maxTop(items, capacity));
+}
 
 export interface Geometry {
   rowsY: number;
@@ -133,7 +168,7 @@ export function wrapLines(lines: string[], maxPx: number): string[] {
   const out: string[] = [];
   for (const line of lines) {
     // Espaces ordinaires seulement : l'espace insécable (devant « : », « m ») reste collé.
-    const words = line.split(/[ \t\n]+/).filter(Boolean);
+    const words = frenchSpaces(line).split(/[ \t\n]+/).filter(Boolean);
     let cur = '';
     for (const w of words) {
       const cand = cur ? `${cur} ${w}` : w;
@@ -154,15 +189,18 @@ function room(def: LayoutDef, col: 'a' | 'b' | 'c', next: { b?: string; c?: stri
   if (c.w !== undefined && (col === 'c' || (col === 'a' && next.b) || (col === 'b' && next.c))) {
     return Math.min(c.w, X_END - c.x) - GEO.SAFETY;
   }
-  if (col === 'a' && next.b && def.b.x > c.x) return def.b.x - GAP - c.x - GEO.SAFETY;
-  if ((col === 'a' || col === 'b') && next.c) return def.c.x - GAP - c.x - GEO.SAFETY;
+  const gap = def.gap ?? GAP;
+  if (col === 'a' && next.b && def.b.x > c.x) return def.b.x - gap - c.x - GEO.SAFETY;
+  if ((col === 'a' || col === 'b') && next.c) return def.c.x - gap - c.x - GEO.SAFETY;
   return X_END - c.x - GEO.SAFETY;
 }
 
 /** Colonne b avec une fin protégée : le début est coupé (« … ») pour que `tail` tienne toujours en entier. */
 export function withTail(text: string, tail: string | undefined, maxPx: number): string {
   if (!tail) return text ? truncate(text, maxPx) : '';
-  const end = truncate(tail, maxPx);
+  // L'espace de tête de la fin (« (7 min) » après le texte) est gardée : truncate retire les espaces des bords.
+  const lead = /^[  ]*/.exec(tail)?.[0] ?? '';
+  const end = lead + truncate(tail, maxPx - textWidth(lead));
   if (!text.trim()) return truncate(tail.replace(/^[,\s]+/, ''), maxPx);
   const head = truncate(text, maxPx - textWidth(end));
   return head ? head + end : truncate(tail.replace(/^[,\s]+/, ''), maxPx);
@@ -188,8 +226,9 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     ? wrapLines(v.items.map((i) => i.a), X_END - X_TEXT - GEO.SAFETY).map((a): Item => ({ a }))
     : v.items;
   const g = geometry(v);
-  const sel = items.length ? Math.min(Math.max(0, frame.sel), items.length - 1) : 0;
-  const top = message ? 0 : ensureVisible(items, sel, frame.top, g.capacity);
+  const scroll = !!v.scroll && !message;
+  const sel = scroll ? (v.mark ?? -1) : items.length ? Math.min(Math.max(0, frame.sel), items.length - 1) : 0;
+  const top = message ? 0 : scroll ? clampTop(items, frame.top, g.capacity) : ensureVisible(items, sel, frame.top, g.capacity);
   const { from, to } = visibleRange(items, top, g.capacity);
 
   const colA: string[] = [];
@@ -219,7 +258,8 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
       colB.push(b2);
       colC.push('');
       cursor.push('');
-      lines.push([a2, b2].filter(Boolean).join(COL_SEP));
+      // 2e ligne réservée mais vide (favori en calcul) : rien à journaliser.
+      if (a2 || b2) lines.push([a2, b2].filter(Boolean).join(COL_SEP));
     }
   }
 
@@ -231,7 +271,7 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   if (noteText) lines.push(noteText);
   if (hintText) lines.push(hintText);
 
-  const titleW = X_END - GEO.CLOCK_W - GAP - X_TEXT;
+  const titleW = TITLE_W;
   const title = truncate(v.title, titleW - GEO.SAFETY) || 'Quai';
   const rowsH = g.capacity * LINE_H;
   const C = (id: number, name: string, x: number, y: number, w: number, h: number, content: string, level: Brightness): ContainerSpec => ({

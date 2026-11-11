@@ -155,6 +155,96 @@ input.switch:checked::after { left: 21px; }
 .card .det { font-size: 13px; line-height: 18px; color: var(--muted); }
 .foot { margin: 0; font-size: 12px; line-height: 17px; color: var(--muted); text-align: center; }
 
+/* 1.1 : écrans */
+.screen { display: flex; flex-direction: column; gap: 16px; }
+.form-body { display: flex; flex-direction: column; gap: 14px; }
+
+/* 1.1 : champ unique (adresse, gare, arrêt, lieu) */
+.fields { display: flex; flex-direction: column; gap: 6px; }
+.od .end-row { display: flex; align-items: center; gap: 8px; }
+.od .end-row svg { flex-shrink: 0; }
+.field-note { margin: 0; font-size: 13px; line-height: 19px; color: var(--body); }
+.field-note:empty { display: none; }
+.privacy { font-size: 12px; line-height: 17px; }
+.suggest .s1 { min-width: 0; overflow-wrap: anywhere; }
+.save-link { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.save-link:empty { display: none; }
+.save-link .save-panel { align-self: stretch; }
+.shortcuts { display: flex; flex-wrap: wrap; gap: 8px; }
+.shortcut { min-height: 44px; padding: 0 14px; border: 1px solid var(--btn-border); border-radius: 22px; background: var(--card); color: var(--accent-ink); font-size: 14px; font-weight: 500; cursor: pointer; }
+.shortcut:hover { background: var(--accent-soft); }
+
+/* 1.1 : cartes de trajets (choix unique) et bouton « Lunettes » */
+.results-box { display: flex; flex-direction: column; gap: 10px; }
+.results-box:empty { display: none; }
+.res-title { display: flex; flex-direction: column; min-width: 0; }
+.res-head .btn-link { white-space: nowrap; flex-shrink: 0; }
+.time-box { display: flex; gap: 8px; align-items: center; }
+.result { position: relative; background: var(--card); border: 1px solid var(--border); border-radius: 14px; }
+.result.on { border: 2px solid var(--accent); }
+.result .card { border: 0; background: transparent; padding: 14px 16px; }
+.result.on .card { padding: 13px 15px; }
+.result .tagrow { display: flex; align-items: center; min-height: 44px; padding-right: 128px; margin: -6px 0 -4px; }
+.tag { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink); font-size: 13px; font-weight: 600; }
+.card .why { font-size: 14px; line-height: 20px; color: var(--body); }
+.card .sep { color: #8a938c; }
+.btn-glasses { border: 1px solid var(--btn-border); background: var(--card); color: var(--accent); min-height: 44px; padding: 0 12px; font-size: 14px; }
+.btn-glasses:hover:not([disabled]) { background: var(--accent-soft); }
+.result .btn-glasses { position: absolute; top: 10px; right: 10px; }
+.result.on .btn-glasses { top: 9px; right: 9px; }
+.msg { margin: 0; font-size: 14px; line-height: 20px; color: var(--accent-ink); }
+.msg:empty { display: none; }
+.msg.err { color: #8a2a1d; }
+.result .msg { padding: 0 16px 12px; }
+.below-results { display: flex; flex-direction: column; gap: 10px; }
+.below-results:empty { display: none; }
+
+/* 1.1 : confirmation dans la page, question après un nouveau lieu */
+.confirm { border: 1px solid var(--btn-border); border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; background: var(--card); }
+.confirm-q { margin: 0; font-size: 15px; line-height: 22px; font-weight: 500; }
+.confirm-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.confirm-actions .btn { flex: 1 1 140px; }
+.btn-danger-solid { border: 0; background: #8a2a1d; color: #fff; }
+.btn-small { min-height: 44px; padding: 0 12px; font-size: 14px; }
+.offer .confirm-q { font-weight: 600; }
+
+/* 1.1 : accueil (« Où vas-tu ? », Mes favoris, nouveauté) */
+.where { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.where-label { font-size: 16px; line-height: 22px; font-weight: 600; color: var(--text); }
+.where-box { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 14px; border: 1px solid var(--input); border-radius: 12px; background: var(--card); font-size: 16px; color: var(--muted); }
+.where:hover .where-box { border-color: var(--accent); }
+.home-favs { display: flex; flex-direction: column; gap: 8px; }
+.fav-list { background: var(--card); }
+.fav-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; min-height: 60px; padding: 8px 10px 8px 16px; }
+.fav-row .txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fav-row .t1 { font-size: 16px; line-height: 22px; font-weight: 500; }
+.fav-row .t2 { font-size: 14px; line-height: 20px; color: var(--body); }
+.fav-row .msg { grid-column: 1 / -1; }
+.empty-row { padding: 14px 16px; }
+.more-link { align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 15px; font-weight: 500; text-decoration: none; }
+.news { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 12px 12px 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); }
+.news p { margin: 0; font-size: 15px; line-height: 21px; }
+.news .btn { min-height: 44px; flex-shrink: 0; }
+
+/* 1.1 : favoris (ordre), lieux (confirmation de position) */
+.order-row { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 10px 8px 14px; }
+.order-row > .ico { width: 36px; height: 36px; border-radius: 10px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.order-row .txt { display: flex; flex-direction: column; gap: 2px; flex-grow: 1; min-width: 0; }
+.order-row .t1 { font-size: 16px; line-height: 22px; font-weight: 500; }
+.order-row .t2 { font-size: 13px; line-height: 18px; color: var(--muted); }
+.order-btns { display: flex; gap: 6px; flex-shrink: 0; }
+.spot { display: flex; flex-direction: column; gap: 2px; }
+.spot:empty { display: none; }
+.spot .t1 { font-size: 15px; line-height: 21px; font-weight: 500; }
+.spot .t2, .spot .t3 { font-size: 13px; line-height: 18px; color: var(--body); }
+.here-btn .cc { display: flex; flex-direction: column; align-items: flex-start; line-height: 18px; }
+.here-btn .sub { font-size: 13px; font-weight: 400; color: var(--muted); }
+.verify { font-size: 14px; line-height: 20px; }
+.verify strong { font-weight: 600; }
+.verify .btn { align-self: flex-start; }
+.check-row { gap: 12px; border-bottom: 0; font-size: 15px; line-height: 20px; }
+.plain { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+
 /* États */
 .status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--accent); }
 .status.off { color: var(--muted); }

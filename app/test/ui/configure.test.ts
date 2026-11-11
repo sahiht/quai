@@ -61,7 +61,7 @@ describe('npm run configure', () => {
     expect(isConfiguredManifest(manifest)).toBe(true);
     const privacy = readFileSync(join(dir, 'store', 'privacy.md'), 'utf8');
     expect(privacy).toContain('- Horaires (fichiers statiques) : https://moi.github.io');
-    expect(privacy).toContain('- Temps réel (relais personnel) : https://quai-relais.vercel.app');
+    expect(privacy).toContain('- Temps réel et adresses (relais personnel) : https://quai-relais.vercel.app');
     writeConfiguration(dir, null);
     expect(readFileSync(join(dir, 'src', 'generated', 'config.ts'), 'utf8')).toContain('CONFIGURED = false');
     expect(readFileSync(join(dir, 'store', 'privacy.md'), 'utf8')).toContain('remplie par `npm run configure`');

@@ -1,0 +1,1 @@
+{"v":1,"areas":[{"id":"sncb:8814266","op":"sncb","n":{"fr":"Waterloo","nl":"Waterloo","l":"nl"},"lat":50.7154,"lon":4.3835,"modes":["train"],"lines":["S1"]},{"id":"tec:Bwategl1","op":"tec","n":{"fr":"WATERLOO Eglise","nl":"WATERLOO Eglise"},"lat":50.7174,"lon":4.3979,"modes":["bus"],"lines":["W"]}]}

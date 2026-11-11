@@ -1,0 +1,176 @@
+{
+ "inputValues": {
+  "searchLanguage": "fr",
+  "freeText": "rue neuve 1",
+  "model": "BeStPlus"
+ },
+ "resultsList": [
+  {
+   "objectType": "Address",
+   "result": [
+    {
+     "score": 13,
+     "address": {
+      "code": {
+       "namespace": "https://data.vlaanderen.be/id/adres",
+       "objectIdentifier": "169839",
+       "versionIdentifier": "1"
+      },
+      "sortField": "Rue Neuve 1",
+      "addressStatus": {
+       "status": "current",
+       "validFrom": "2019-12-31"
+      },
+      "houseNumber": "1",
+      "officiallyAssigned": true,
+      "beginLifeSpanVersion": "2019-12-31T00:00:00",
+      "href": "https://geoservices.irisnet.be/geocoding/api/v1/brussels/address/169839",
+      "position": {
+       "positionGeometryMethod": "assignedByAdministrator",
+       "positionSpecification": "stand",
+       "pointGeometry": {
+        "point": {
+         "srsDimension": 2,
+         "srsName": "EPSG:31370",
+         "pos": "148962.829 171134.478"
+        }
+       }
+      },
+      "hasStreetName": {
+       "streetname": {
+        "code": {
+         "namespace": "https://data.vlaanderen.be/id/straatnaam",
+         "objectIdentifier": "4611",
+         "versionIdentifier": "1"
+        },
+        "name": [
+         {
+          "language": "fr",
+          "spelling": "Rue Neuve"
+         },
+         {
+          "language": "nl",
+          "spelling": "Nieuwstraat"
+         }
+        ],
+        "streetNameStatus": {
+         "status": "current",
+         "validFrom": "2019-12-31"
+        },
+        "beginLifeSpanVersion": "2019-12-31T00:00:00",
+        "href": "https://geoservices.irisnet.be/geocoding/api/v1/brussels/streetname/4611"
+       }
+      },
+      "hasMunicipality": {
+       "code": {
+        "namespace": "https://data.vlaanderen.be/id/gemeente",
+        "objectIdentifier": "21004",
+        "versionIdentifier": "1"
+       },
+       "name": [
+        {
+         "language": "fr",
+         "spelling": "Bruxelles"
+        },
+        {
+         "language": "nl",
+         "spelling": "Brussel"
+        }
+       ],
+       "href": "https://geoservices.irisnet.be/geocoding/api/v1/brussels/municipality/21004"
+      },
+      "hasPostalInfo": {
+       "code": {
+        "namespace": "https://data.vlaanderen.be/id/postinfo",
+        "objectIdentifier": "1000",
+        "versionIdentifier": "1"
+       },
+       "href": "https://geoservices.irisnet.be/geocoding/api/v1/brussels/postalinfo/1000"
+      }
+     }
+    },
+    {
+     "score": 12,
+     "address": {
+      "code": {
+       "namespace": "https://data.vlaanderen.be/id/adres",
+       "objectIdentifier": "149139",
+       "versionIdentifier": "1"
+      },
+      "sortField": "Rue Terre-Neuve 1",
+      "addressStatus": {
+       "status": "current",
+       "validFrom": "2019-12-31"
+      },
+      "houseNumber": "1",
+      "officiallyAssigned": true,
+      "beginLifeSpanVersion": "2019-12-31T00:00:00",
+      "href": "https://geoservices.irisnet.be/geocoding/api/v1/brussels/address/149139",
+      "position": {
+       "positionGeometryMethod": "assignedByAdministrator",
+       "positionSpecification": "stand",
+       "pointGeometry": {
+        "point": {
+         "srsDimension": 2,
+         "srsName": "EPSG:31370",
+         "pos": "148100.000 169900.000"
+        }
+       }
+      },
+      "hasStreetName": {
+       "streetname": {
+        "code": {
+         "namespace": "https://data.vlaanderen.be/id/straatnaam",
+         "objectIdentifier": "4620",
+         "versionIdentifier": "1"
+        },
+        "name": [
+         {
+          "language": "fr",
+          "spelling": "Rue Terre-Neuve"
+         },
+         {
+          "language": "nl",
+          "spelling": "Nieuwland"
+         }
+        ],
+        "streetNameStatus": {
+         "status": "current",
+         "validFrom": "2019-12-31"
+        },
+        "beginLifeSpanVersion": "2019-12-31T00:00:00",
+        "href": "https://geoservices.irisnet.be/geocoding/api/v1/brussels/streetname/4620"
+       }
+      },
+      "hasMunicipality": {
+       "code": {
+        "namespace": "https://data.vlaanderen.be/id/gemeente",
+        "objectIdentifier": "21004",
+        "versionIdentifier": "1"
+       },
+       "name": [
+        {
+         "language": "fr",
+         "spelling": "Bruxelles"
+        },
+        {
+         "language": "nl",
+         "spelling": "Brussel"
+        }
+       ],
+       "href": "https://geoservices.irisnet.be/geocoding/api/v1/brussels/municipality/21004"
+      },
+      "hasPostalInfo": {
+       "code": {
+        "namespace": "https://data.vlaanderen.be/id/postinfo",
+        "objectIdentifier": "1000",
+        "versionIdentifier": "1"
+       },
+       "href": "https://geoservices.irisnet.be/geocoding/api/v1/brussels/postalinfo/1000"
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

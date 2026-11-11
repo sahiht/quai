@@ -13,7 +13,7 @@ import type { Fix, GlassesPort, LocationPort, Platform } from '../../src/platfor
 import { SettingsStore } from '../../src/settings';
 import { dataFreshness } from '../../src/dev/fake-core';
 import { textWidth } from '../../src/glasses/font';
-import { defaults, fakeCore, preset, SCENARIO } from '../ui/helpers';
+import { defaults, fakeCore, preset11, SCENARIO } from '../ui/helpers';
 
 function movableLocation(fix: Fix | null): LocationPort & { set(f: Fix | null): void } {
   let cur = fix;
@@ -36,7 +36,7 @@ async function setup(opts: { web?: boolean; onboarded?: boolean; here?: Fix | nu
   const loc = movableLocation(opts.here === undefined ? { lat: sc.lat, lon: sc.lon, at: 0, source: 'mock' } : opts.here);
   const kv = createKV(memoryBackend());
   const platform: Platform = { kind: 'web', glasses: port, kv, location: loc, closeWebView: vi.fn() };
-  const settings = new SettingsStore(kv, { ...preset(), onboarded: opts.onboarded ?? true, display: { ...preset().display, opening: 'home' } });
+  const settings = new SettingsStore(kv, { ...preset11(), onboarded: opts.onboarded ?? true, display: { ...preset11().display, opening: 'home' } });
   const logs: string[] = [];
   const opened: string[] = [];
   const c = new GlassesController({
@@ -100,7 +100,7 @@ describe('contrôleur en mode web', () => {
   it('position choisie ou perdue : appliquée tout de suite (sans attendre 30 s)', async () => {
     const { c, last, settle, loc } = await setup({ here: null });
     const around = () => last().lines.find((l) => l.startsWith('Autour de moi'));
-    expect(around()).toBe('Autour de moi   …');
+    expect(around()).toBe('Autour de moi   sans position');
     loc.set({ lat: SCENARIO.s2.lat, lon: SCENARIO.s2.lon, at: 0, source: 'manual' });
     await c.relocate();
     await settle();
@@ -108,16 +108,17 @@ describe('contrôleur en mode web', () => {
     loc.set(null);
     await c.relocate();
     await settle();
-    expect(around()).toBe('Autour de moi   …');
+    expect(around()).toBe('Autour de moi   sans position');
     c.stop();
   });
 
-  it('Aller à… « Autre lieu » ouvre la recherche dans l’onglet Réglages', async () => {
+  it('Aller à… « Autre adresse » ouvre la recherche dans l’onglet Réglages', async () => {
     const { c, last, settle, opened } = await setup();
     await c.replaceRoute({ screen: 'places' });
     await settle();
     expect(last().screen).toBe('places');
-    const idx = last().lines.findIndex((l) => l.startsWith('Autre lieu'));
+    const idx = last().lines.findIndex((l) => l.startsWith('Autre adresse'));
+    expect(last().lines[idx]).toBe('Autre adresse   dans Réglages');
     for (let i = 0; i < idx; i++) c.onGesture('down');
     await settle();
     c.onGesture('tap');
@@ -134,20 +135,21 @@ describe('écrans des lunettes en mode web', () => {
     const v = firstRunView(ctx());
     expect(v.items.map((i) => i.a).join(' ')).toContain('l’onglet Réglages');
     expect(v.items.map((i) => i.a).join(' ')).not.toMatch(/Even Hub|téléphone/);
+    expect(v.items.map((i) => i.a.replace(/\u00a0/g, ' '))).toEqual(['Bienvenue dans Quai !', 'Termine les réglages dans l’onglet Réglages :', 'position, langue et tes lieux, en une minute.']);
     expect(v.hints).toBe('toucher : continuer');
     expect(firstRunView({ ...ctx(), web: false }).hints).toMatch(/quitter/);
   });
 
   it('favoris et lieux : renvoient à l’onglet Réglages', () => {
-    expect(favoritesView({}, ctx()).items.map((i) => i.a)).toEqual(['Aucun favori pour l’instant.', 'Ajoute-les dans l’onglet Réglages.']);
+    expect(favoritesView({}, ctx()).items.map((i) => i.a)).toEqual(['Aucun favori pour l’instant.', 'Ouvre un arrêt dans Autour de moi et touche-le,', 'ou ajoute un trajet dans l’onglet Réglages.']);
     const p = placesView({}, ctx());
     expect(p.items.map((i) => [i.a, i.c])).toEqual([
       ['Aucun lieu enregistré', 'dans Réglages'],
-      ['Autre lieu', 'dans Réglages'],
+      ['Autre adresse', 'dans Réglages'],
     ]);
     expect(p.items.map((i) => i.action)).toEqual([
       { kind: 'phone', hash: '#/lieux/nouveau', text: 'Ajoute Maison ou Bureau dans l’onglet Réglages' },
-      { kind: 'phone', hash: '#/recherche', text: 'Cherche un autre lieu dans l’onglet Réglages' },
+      { kind: 'phone', hash: '#/recherche', text: 'Tape l’adresse dans l’onglet Réglages' },
     ]);
     // appli Even : inchangé
     expect(placesView({}, { ...ctx(), web: false }).items.map((i) => i.c)).toEqual(['sur le téléphone', 'sur le téléphone']);

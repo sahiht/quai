@@ -7,9 +7,10 @@
 import { normalizeId } from './shared/types.js';
 import type { AlertsResponse, HealthResponse, Meta, RtResponse, StibResponse } from './shared/types.js';
 import {
-  DEFAULT_LANG, LIMITS, OP_LABEL, RT_OPS, alertsSource, metaSource, readConfig, stibSource, tripUpdatesSource,
+  DEFAULT_LANG, LIMITS, OP_LABEL, RELAY_VERSION, RT_OPS, alertsSource, metaSource, readConfig, stibSource, tripUpdatesSource,
   type RelayConfig, type RtOp, type Source,
 } from './config.js';
+import { geocodeHealth } from './geocode/service.js';
 import type { Ctx } from './context.js';
 import { badRequest, json, requestUrl } from './http.js';
 import { decodeFeed, extractAlerts, indexTripUpdates, isActive, sncbStation, type AlertItem, type FeedMessage } from './gtfsrt.js';
@@ -274,21 +275,26 @@ async function readMeta(ctx: Ctx, cfg: RelayConfig): Promise<HealthResponse['dat
   }
 }
 
+/**
+ * `ok` : temps réel et données de nuit (comme en 1.0). Les services d'adresses ont leur propre état dans `geocode`
+ * et ne changent pas `ok` (une recherche d'adresse en panne laisse gares et arrêts).
+ */
 export async function handleHealth(_req: Request, ctx: Ctx): Promise<Response> {
   return guard(ctx, async () => {
     const cfg = readConfig(ctx.env);
-    const [sncb, delijn, tec, stib, data] = await Promise.all([
+    const [sncb, delijn, tec, stib, data, geocode] = await Promise.all([
       check(ctx, tripUpdatesSource(cfg, 'sncb')),
       check(ctx, tripUpdatesSource(cfg, 'delijn')),
       check(ctx, tripUpdatesSource(cfg, 'tec')),
       check(ctx, stibSource(cfg, 'limit=1')),
       readMeta(ctx, cfg),
+      geocodeHealth(ctx),
     ]);
     const sources = { sncb, delijn, tec, stib };
     const ok = Object.values(sources).every((s) => s.ok) && (data ? data.ok : true);
     const body: HealthResponse = data
-      ? { ok, time: iso(ctx.now()), data, sources }
-      : { ok, time: iso(ctx.now()), sources };
+      ? { ok, time: iso(ctx.now()), data, sources, geocode, version: RELAY_VERSION }
+      : { ok, time: iso(ctx.now()), sources, geocode, version: RELAY_VERSION };
     return json(body, 200, ok);
   });
 }

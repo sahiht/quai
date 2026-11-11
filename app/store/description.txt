@@ -1,16 +1,17 @@
 Quai affiche sur tes lunettes Even G2 les prochains départs des transports en commun belges, en temps réel : SNCB, STIB, De Lijn et TEC.
 
 Dans les lunettes :
+- Mes favoris : la réponse dès l’ouverture, quand partir, quel train ou bus, quelle voie, l’heure d’arrivée.
+- Un toucher ouvre le trajet étape par étape, un glissement montre un autre trajet. Quai propose d’abord le plus simple (moins de changements, moins de marche), le plus rapide s’il est différent, et dit toujours pourquoi.
 - Autour de moi : les arrêts proches, tous réseaux confondus, avec le prochain départ.
 - Les départs d’un arrêt : en minutes pour les bus, trams et métros, avec l’heure et la voie pour les trains.
-- Mes favoris : tes arrêts et trajets habituels, avec le prochain départ.
-- Aller à… : le trajet porte à porte vers tes lieux (Maison, Bureau…), heure de départ à pied comprise.
-- Le suivi du trajet : changement de voie, retard ou suppression s’affichent en tête de l’écran.
+- Aller à… : le trajet porte à porte vers tes lieux et tes adresses récentes.
+- Le suivi du trajet : changement de voie, retard ou suppression s’affichent en tête de l’écran, et le trajet en cours revient quand tu rouvres Quai.
 
-Sur le téléphone, tu règles tes lieux, tes favoris, l’affichage et les alertes, et tu cherches un trajet à afficher dans les lunettes.
+Sur le téléphone, un seul champ pour une adresse, une gare ou un arrêt : vas-y, ou enregistre l’adresse comme lieu. Tu y règles aussi tes lieux, tes favoris, l’affichage et les alertes, et le bouton « Lunettes » affiche un trajet ou un favori dans les lunettes.
 
 Le signe ~ signale un horaire prévu, sans temps réel.
 
-Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company, licence CC BY 4.0. Les horaires sont préparés chaque nuit et le temps réel passe par ton relais personnel. Quai ne crée aucun compte et ne suit personne.
+Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company, licence CC BY 4.0. Adresses : services officiels des Régions bruxelloise, flamande et wallonne ; seul le texte tapé leur est envoyé, jamais ta position. Les horaires sont préparés chaque nuit, le temps réel et les adresses passent par ton relais personnel. Quai ne crée aucun compte et ne suit personne.
 
 Usage personnel et non commercial.

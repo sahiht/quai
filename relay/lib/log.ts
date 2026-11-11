@@ -12,11 +12,13 @@ export interface Logger {
 
 export type LogSink = Pick<Console, 'log' | 'warn' | 'error'>;
 
-/** Chaînes à ne jamais écrire : la clé BMC et tout ou partie de SNCB_RT_URL. */
+/** Chaînes à ne jamais écrire : la clé BMC, la clé Google (inutilisée en 1.1) et tout ou partie de SNCB_RT_URL. */
 export function secretsFrom(env: Env): string[] {
   const out: string[] = [];
   const key = (env.BMC_KEY ?? '').trim();
   if (key) out.push(key);
+  const google = (env.GOOGLE_GEOCODING_KEY ?? '').trim();
+  if (google) out.push(google);
   const direct = (env.SNCB_RT_URL ?? '').trim();
   if (direct) {
     out.push(direct);

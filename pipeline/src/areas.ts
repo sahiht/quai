@@ -3,7 +3,11 @@
  * - parent_station si présent (SNCB : clé = parent sans le « S » initial ; l'arrêt « gare » sans quai en fait partie) ;
  * - sinon même nom (sans casse ni accents, après retrait du suffixe « perron N » / « quai X ») à moins de 300 m ;
  * - clé = parent_station, sinon le plus petit stop_id du groupe (comparaison de chaînes) ;
- * - position = parent si présent, sinon moyenne des arrêts.
+ * - position = parent si présent, sinon moyenne des arrêts ;
+ * - 1.1 (M8.3) : les zones de même nom à moins de 300 m les unes des autres sont ensuite fusionnées (tram et bus
+ *   « Gare du Nord » de la STIB, quais TEC « LA HULPE Gare » ayant chacun leur parent). La zone fusionnée garde la
+ *   clé, le nom et la position du membre qui a le plus de départs (à égalité, la plus petite clé) ; `aka` donne
+ *   les clés des autres membres.
  */
 import { normalizeForSearch } from '../../shared/names.ts';
 import type { Op } from '../../shared/types.ts';
@@ -30,6 +34,8 @@ export interface Area {
   parent: number;
   lat: number;
   lon: number;
+  /** Clés des zones fusionnées dans celle-ci (M8.3), triées ; absent si aucune fusion. */
+  aka?: string[];
 }
 
 export const GROUP_RADIUS_M = 300;
@@ -76,16 +82,16 @@ class UnionFind {
   }
 }
 
-/** Regroupe en grappes (lien simple) les arrêts d'un même nom à moins de 300 m les uns des autres. */
-function clusterByDistance(stops: StopRec[], idx: number[]): number[][] {
+/** Regroupe en grappes (lien simple) des points à moins de 300 m les uns des autres ; renvoie des listes d'indices de idx. */
+function clusterPoints(pos: (i: number) => { lat: number; lon: number }, idx: number[]): number[][] {
   const n = idx.length;
   if (n === 1) return [idx];
   const uf = new UnionFind(n);
   if (n <= 200) {
     for (let a = 0; a < n; a++) {
-      const sa = stops[idx[a]];
+      const sa = pos(idx[a]);
       for (let b = a + 1; b < n; b++) {
-        const sb = stops[idx[b]];
+        const sb = pos(idx[b]);
         if (distanceM(sa.lat, sa.lon, sb.lat, sb.lon) <= GROUP_RADIUS_M) uf.union(a, b);
       }
     }
@@ -95,20 +101,21 @@ function clusterByDistance(stops: StopRec[], idx: number[]): number[][] {
     const cLon = 0.005;
     const grid = new Map<string, number[]>();
     idx.forEach((si, k) => {
-      const key = `${Math.floor(stops[si].lat / cLat)}:${Math.floor(stops[si].lon / cLon)}`;
+      const p = pos(si);
+      const key = `${Math.floor(p.lat / cLat)}:${Math.floor(p.lon / cLon)}`;
       const cell = grid.get(key);
       if (cell) cell.push(k);
       else grid.set(key, [k]);
     });
     idx.forEach((si, a) => {
-      const sa = stops[si];
+      const sa = pos(si);
       const y = Math.floor(sa.lat / cLat);
       const x = Math.floor(sa.lon / cLon);
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
           for (const b of grid.get(`${y + dy}:${x + dx}`) ?? []) {
             if (b <= a) continue;
-            const sb = stops[idx[b]];
+            const sb = pos(idx[b]);
             if (distanceM(sa.lat, sa.lon, sb.lat, sb.lon) <= GROUP_RADIUS_M) uf.union(a, b);
           }
         }
@@ -125,12 +132,53 @@ function clusterByDistance(stops: StopRec[], idx: number[]): number[][] {
   return [...groups.values()];
 }
 
+/** Regroupe en grappes (lien simple) les arrêts d'un même nom à moins de 300 m les uns des autres. */
+function clusterByDistance(stops: StopRec[], idx: number[]): number[][] {
+  return clusterPoints((i) => stops[i], idx);
+}
+
+/**
+ * M8.3 : fusion des zones de même nom (nameKey) à moins de 300 m (lien simple sur les positions des zones).
+ * `depCount[i]` : départs de l'arrêt i (sert à choisir le membre principal, dont la clé reste stable).
+ */
+function mergeSameName(areas: Area[], stops: StopRec[], depCount?: ArrayLike<number>): Area[] {
+  const byName = new Map<string, number[]>();
+  areas.forEach((a, i) => {
+    const k = nameKey(stops[a.nameStop].name);
+    if (!k) return;
+    const list = byName.get(k);
+    if (list) list.push(i);
+    else byName.set(k, [i]);
+  });
+  const deps = (a: Area) => (depCount ? a.members.reduce((s, m) => s + (depCount[m] ?? 0), 0) : 0);
+  const drop = new Set<number>();
+  const out = areas.slice();
+  for (const idx of byName.values()) {
+    if (idx.length < 2) continue;
+    for (const cluster of clusterPoints((i) => areas[i], idx)) {
+      if (cluster.length < 2) continue;
+      const count = new Map(cluster.map((i) => [i, deps(areas[i])]));
+      const main = cluster.reduce((best, i) => {
+        const d = (count.get(i) ?? 0) - (count.get(best) ?? 0);
+        return d > 0 || (d === 0 && areas[i].key < areas[best].key) ? i : best;
+      });
+      const members = [...new Set(cluster.flatMap((i) => areas[i].members))]
+        .sort((x, y) => (stops[x].id < stops[y].id ? -1 : stops[x].id > stops[y].id ? 1 : 0));
+      const aka = cluster.filter((i) => i !== main).flatMap((i) => [areas[i].key, ...(areas[i].aka ?? [])]).sort();
+      out[main] = { ...areas[main], members, aka };
+      for (const i of cluster) if (i !== main) drop.add(i);
+    }
+  }
+  return drop.size ? out.filter((_, i) => !drop.has(i)) : out;
+}
+
 /**
  * Calcule les zones d'un opérateur.
  * `used[i]` = 1 si l'arrêt i est desservi : les gares (location_type 1) ou nœuds desservis directement sont
- * alors traités comme des arrêts physiques. Renvoie aussi la zone de chaque arrêt (-1 si aucune).
+ * alors traités comme des arrêts physiques. `depCount[i]` : nombre de départs de l'arrêt i (choix de la clé d'une
+ * zone fusionnée, M8.3 ; sans lui, la plus petite clé). Renvoie aussi la zone de chaque arrêt (-1 si aucune).
  */
-export function groupAreas(op: Op, stops: StopRec[], used?: Uint8Array): { areas: Area[]; stopArea: Int32Array } {
+export function groupAreas(op: Op, stops: StopRec[], used?: Uint8Array, depCount?: ArrayLike<number>): { areas: Area[]; stopArea: Int32Array } {
   const byId = new Map<string, number>();
   stops.forEach((s, i) => byId.set(s.id, i));
 
@@ -175,8 +223,7 @@ export function groupAreas(op: Op, stops: StopRec[], used?: Uint8Array): { areas
     }
   }
 
-  const areas: Area[] = [];
-  const stopArea = new Int32Array(stops.length).fill(-1);
+  const grouped: Area[] = [];
   for (const [key, g] of groups) {
     const members = [...new Set(g.members)].sort((a, b) => (stops[a].id < stops[b].id ? -1 : stops[a].id > stops[b].id ? 1 : 0));
     let lat = NaN;
@@ -201,10 +248,13 @@ export function groupAreas(op: Op, stops: StopRec[], used?: Uint8Array): { areas
     }
     if (!validCoord(lat, lon)) continue; // zone sans position : ignorée
     const nameStop = g.parent >= 0 && stops[g.parent].name ? g.parent : members[0];
-    const ai = areas.length;
-    areas.push({ key, members, nameStop, parent: g.parent, lat, lon });
-    for (const i of members) stopArea[i] = ai;
+    grouped.push({ key, members, nameStop, parent: g.parent, lat, lon });
   }
+  const areas = mergeSameName(grouped, stops, depCount);
+  const stopArea = new Int32Array(stops.length).fill(-1);
+  areas.forEach((a, ai) => {
+    for (const i of a.members) stopArea[i] = ai;
+  });
   return { areas, stopArea };
 }
 

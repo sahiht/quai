@@ -1,16 +1,17 @@
-/** Réglage 4 sur 6 : affichage, avec aperçu en direct des lunettes. Maquette Config4. */
+/** Réglage 4 sur 6 : affichage (T5), avec aperçu en direct de l'accueil des lunettes et de ses favoris. Maquette Config4. */
 import type { Settings } from '../../core/api';
 import { LIMITS } from '../../settings';
 import { header, type PhoneCtx } from '../app';
 import { h } from '../dom';
-import { displayPreview } from '../samples';
+import { homePreview } from '../samples';
+import { typo } from '../text';
 import { glassesPreview, radios, segmented, stepper, switchRow } from '../ui';
 
 export function displayScreen(ctx: PhoneCtx): HTMLElement {
   const s = ctx.settings.get();
   const previewSlot = h('div');
   const refresh = (): void => {
-    previewSlot.replaceChildren(glassesPreview('Aperçu dans les lunettes', displayPreview(ctx.settings.get())));
+    previewSlot.replaceChildren(glassesPreview('Aperçu dans les lunettes', homePreview(ctx.settings.get())));
   };
   const set = (fn: (d: Settings['display']) => Settings['display']): void => {
     void ctx.settings.update((x) => ({ ...x, display: fn({ ...x.display }) })).then(refresh);
@@ -40,9 +41,9 @@ export function displayScreen(ctx: PhoneCtx): HTMLElement {
           legend: 'Rayon de « Autour de moi »',
           value: s.display.radiusM,
           options: [
-            { value: 300, label: '300 m' },
-            { value: 500, label: '500 m' },
-            { value: 800, label: '800 m' },
+            { value: 300, label: typo('300 m') },
+            { value: 500, label: typo('500 m') },
+            { value: 800, label: typo('800 m') },
           ],
           onChange: (v) => set((d) => ({ ...d, radiusM: v })),
         }),
@@ -57,14 +58,27 @@ export function displayScreen(ctx: PhoneCtx): HTMLElement {
         legend: 'À l’ouverture de Quai',
         value: s.display.opening,
         options: [
-          { value: 'suggest', label: 'Suggestion selon l’heure et le lieu' },
-          { value: 'home', label: 'Toujours l’accueil' },
-          { value: 'firstFavorite', label: 'Toujours le premier favori' },
+          { value: 'suggest', label: 'Mes favoris en tête, selon l’heure et le lieu' },
+          { value: 'firstFavorite', label: 'Toujours ouvrir le favori en tête' },
+          { value: 'home', label: 'Accueil sans favoris' },
         ],
         onChange: (v) => set((d) => ({ ...d, opening: v })),
       }),
     ),
+    h(
+      'div',
+      { class: 'box', style: 'padding:12px 16px 2px' },
+      radios<Settings['display']['favOrder']>({
+        legend: 'Ordre des favoris',
+        value: s.display.favOrder,
+        options: [
+          { value: 'smart', label: 'Selon l’heure et le lieu' },
+          { value: 'mine', label: 'Dans mon ordre' },
+        ],
+        onChange: (v) => set((d) => ({ ...d, favOrder: v })),
+      }),
+    ),
     previewSlot,
-    h('p', { class: 'small muted' }, 'Dans les lunettes : l’écran suit ces réglages tout de suite.'),
+    h('p', { class: 'small muted' }, typo('Dans les lunettes : l’écran suit ces réglages tout de suite.')),
   );
 }

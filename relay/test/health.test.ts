@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { handleHealth } from '../lib/handlers.js';
 import type { HealthResponse, Meta } from '../lib/shared/types.js';
-import { BMC, NOW_MS, TEST_KEY, bmcRoute, call, jsonBody, makeCtx, never, type Route } from './helpers.js';
+import { BMC, GEO, NOW_MS, TEST_KEY, bmcRoute, call, jsonBody, makeCtx, never, type Route } from './helpers.js';
 
 const health = (t = makeCtx()) => call<HealthResponse>(handleHealth, '/api/health', t.ctx);
 const DATA = 'https://data.test/quai/data';
@@ -30,13 +30,19 @@ describe('/api/health', () => {
       expect(typeof r.body.sources[op].ms).toBe('number');
     }
     expect(r.headers.get('cache-control')).toBe('public, s-maxage=20, stale-while-revalidate=40');
-    expect(t.calls.map((c) => c.url).sort()).toEqual([
+    const bmcCalls = t.calls.filter((c) => c.url.startsWith(BMC));
+    expect(bmcCalls.map((c) => c.url).sort()).toEqual([
       `${BMC}/api/datasets/stibmivb/rt/WaitingTimes?limit=1`,
       `${BMC}/api/gtfs/feed/delijn/rt/trip-update?format=protobuf`,
       `${BMC}/api/gtfs/feed/nmbssncb/rt/trip-update?format=protobuf`,
       `${BMC}/api/gtfs/feed/tec/rt/trip-update?format=protobuf`,
     ]);
-    expect(t.calls.every((c) => c.headers['bmc-partner-key'] === TEST_KEY && c.headers['ocp-apim-subscription-key'] === TEST_KEY)).toBe(true);
+    expect(bmcCalls.every((c) => c.headers['bmc-partner-key'] === TEST_KEY && c.headers['ocp-apim-subscription-key'] === TEST_KEY)).toBe(true);
+    // 1.1 : services d'adresses (requête de test « Namur ») et version
+    expect(r.body.version).toBe('1.1.0');
+    expect(Object.keys(r.body.geocode ?? {})).toEqual(['vla', 'bru', 'wal']);
+    for (const id of ['vla', 'bru', 'wal'] as const) expect(r.body.geocode?.[id]).toMatchObject({ ok: true });
+    expect(t.calls.filter((c) => c.url.startsWith(GEO))).toHaveLength(3);
   });
 
   it('lit meta.json de DATA_BASE : dernière génération de nuit et état des flux', async () => {
@@ -44,7 +50,7 @@ describe('/api/health', () => {
     const r = await health(makeCtx({ env: { DATA_BASE: `${DATA}/` }, route: withMeta(m) }));
     expect(r.body.data).toEqual({ generatedAt: m.generatedAt, ok: true, feeds: m.feeds });
     expect(r.body.ok).toBe(true);
-    expect(Object.keys(r.body)).toEqual(['ok', 'time', 'data', 'sources']);
+    expect(Object.keys(r.body)).toEqual(['ok', 'time', 'data', 'sources', 'geocode', 'version']);
   });
 
   it('données de nuit en échec, trop anciennes ou absentes : data.ok = false', async () => {
@@ -87,7 +93,7 @@ describe('/api/health', () => {
     for (const op of ['sncb', 'delijn', 'tec', 'stib'] as const) {
       expect(r.body.sources[op]).toEqual({ ok: false, error: 'Clé BMC_KEY absente sur le relais' });
     }
-    expect(t.calls).toHaveLength(0);
+    expect(t.calls.filter((c) => c.url.startsWith(BMC))).toHaveLength(0);
     expect(t.logs.filter((l) => l.includes('BMC_KEY manquante'))).toHaveLength(1);
   });
 

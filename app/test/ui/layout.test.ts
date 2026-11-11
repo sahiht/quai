@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { validateEvenHubPageContainer } from '@evenrealities/even_hub_sdk';
 import { toTextProperty } from '../../src/platform/even';
-import { ensureVisible, geometry, IDS, layoutPage, LAYOUTS, shapeKey, visibleRange, withOptionalTail, withTail, wrapLines } from '../../src/glasses/layout';
+import { clampTop, ensureVisible, geometry, IDS, layoutPage, LAYOUTS, maxTop, shapeKey, visibleRange, WIDTHS, withOptionalTail, withTail, wrapLines } from '../../src/glasses/layout';
 import { textWidth } from '../../src/glasses/font';
 import type { GlassesView, Item, Layout } from '../../src/glasses/types';
-import { overflowing } from './helpers';
+import { nb, overflowing } from './helpers';
 
 const view = (patch: Partial<GlassesView> = {}): GlassesView => ({
   screen: 'board',
@@ -73,7 +73,7 @@ describe('mise en page des conteneurs', () => {
     expect(p.visible).toBe(7);
     const cursor = p.containers.find((c) => c.name === 'cursor')!.content.split('\n');
     expect(cursor.indexOf('▶')).toBe(6);
-    expect(p.lines[0]).toBe('T3   Churchill 3   5 min');
+    expect(nb(p.lines[0])).toBe('T3   Churchill 3   5 min');
   });
 
   it('éléments sur deux lignes', () => {
@@ -81,7 +81,7 @@ describe('mise en page des conteneurs', () => {
     expect(visibleRange(items, 0, 2)).toEqual({ from: 0, to: 1 });
     expect(ensureVisible(items, 1, 0, 2)).toBe(1);
     const p = layoutPage(view({ layout: 'menu', items }), { sel: 0, top: 0 });
-    expect(p.lines.slice(0, 3)).toEqual(['Pour le bureau : IC 07:42, voie 4', 'partir à 07:33, 7 min à pied', 'Autour de moi   3 arrêts']);
+    expect(p.lines.slice(0, 3).map(nb)).toEqual(['Pour le bureau : IC 07:42, voie 4', 'partir à 07:33, 7 min à pied', 'Autour de moi   3 arrêts']);
   });
 
   it('messages longs repliés au mot, espace insécable respectée', () => {
@@ -95,6 +95,11 @@ describe('mise en page des conteneurs', () => {
 describe('fins de colonne protégées (« , dernier »)', () => {
   it('withTail : la fin reste entière, le début est coupé au pixel', () => {
     expect(withTail('Churchill', ', dernier', 300)).toBe('Churchill, dernier');
+    // espace de tête de la fin gardée (durées des étapes, S6)
+    expect(withTail('Partir à pied vers la gare', ' (7\u00a0min)', 300)).toBe('Partir à pied vers la gare (7\u00a0min)');
+    const walk = withTail('À pied vers Bruxelles-Luxembourg, quai de la gare', ' (12\u00a0min)', 200);
+    expect(walk.endsWith('… (12\u00a0min)')).toBe(true);
+    expect(textWidth(walk)).toBeLessThanOrEqual(200);
     const long = withTail('Une destination beaucoup trop longue pour la place', ', dernier', 200);
     expect(long.endsWith('…, dernier')).toBe(true);
     expect(textWidth(long)).toBeLessThanOrEqual(200);
@@ -103,8 +108,8 @@ describe('fins de colonne protégées (« , dernier »)', () => {
   });
 
   it('withOptionalTail : ajoutée seulement si tout tient, la colonne n’est jamais coupée pour elle', () => {
-    expect(withOptionalTail('T3 2 min', ', dernier', 180)).toBe('T3 2 min, dernier');
-    expect(withOptionalTail('T3 2 min', ', dernier', 100)).toBe('T3 2 min');
+    expect(nb(withOptionalTail('T3 2 min', ', dernier', 180))).toBe('T3 2 min, dernier');
+    expect(nb(withOptionalTail('T3 2 min', ', dernier', 100))).toBe('T3 2 min');
     expect(withOptionalTail('', ', dernier', 180)).toBe('');
   });
 
@@ -113,10 +118,47 @@ describe('fins de colonne protégées (« , dernier »)', () => {
       view({ items: [{ a: 'T3', b: 'Simonis (Elisabeth) par le boulevard Léopold II et la basilique', bTail: ', dernier', c: '12 min' }] }),
       { sel: 0, top: 0 },
     );
-    expect(p.lines[0]).toMatch(/^T3 {3}Simonis .*…, dernier {3}12 min$/);
+    expect(nb(p.lines[0])).toMatch(/^T3 {3}Simonis .*…, dernier {3}12 min$/);
     expect(overflowing(p)).toEqual([]);
     const colB = p.containers.find((c) => c.name === 'colB')!;
     const colC = p.containers.find((c) => c.name === 'colC')!;
     expect(colB.x + textWidth(colB.content.split('\n')[0])).toBeLessThan(colC.x);
+  });
+});
+
+describe('1.1 : largeurs du PRD (§ 6.0), écrans sans curseur, deux lignes réservées', () => {
+  it('largeurs utiles : ligne 542, titre 476, menus 340 + 190, étapes 342 + 108', () => {
+    expect(WIDTHS).toMatchObject({ full: 542, title: 476, menuLeft: 340, menuRight: 190, stepsText: 342, stepsState: 108 });
+    // « dans 30 min » (108 px) tient dans la colonne d'état ; « ~07:42 » dans celle de l'heure
+    expect(textWidth('dans 30\u00a0min')).toBeLessThanOrEqual(WIDTHS.stepsState);
+    expect(textWidth('~07:42')).toBeLessThanOrEqual(WIDTHS.stepsTime);
+    // le plus long des textes du PRD
+    expect(textWidth('▲▼ autre trajet   toucher\u00a0: suivre ce trajet   double\u00a0: retour')).toBeLessThanOrEqual(WIDTHS.full);
+  });
+
+  it('sans curseur : ▶ seulement sur la ligne marquée, défilement borné à la fin de la liste', () => {
+    const items: Item[] = Array.from({ length: 9 }, (_, i) => ({ a: `0${i}:00`, b: `Étape ${i}` }));
+    const v = view({ layout: 'steps', screen: 'steps', items, scroll: true, mark: 2, top: { text: 'Le plus simple : direct' }, note: '▼ 3 étapes de plus' });
+    const cap = geometry(v).capacity;
+    expect(cap).toBe(6);
+    expect(maxTop(items, cap)).toBe(3);
+    expect(clampTop(items, 99, cap)).toBe(3);
+    const p = layoutPage(v, { sel: 5, top: 0 });
+    const cursor = p.containers.find((c) => c.name === 'cursor')!.content.split('\n');
+    expect(cursor.indexOf('▶')).toBe(2);
+    expect(cursor.filter((x) => x === '▶')).toHaveLength(1);
+    expect(p.sel).toBe(2);
+    const unmarked = layoutPage({ ...v, mark: undefined }, { sel: 0, top: 4 });
+    expect(unmarked.containers.find((c) => c.name === 'cursor')!.content.trim()).toBe('');
+    expect(unmarked.sel).toBe(-1);
+    expect(unmarked.top).toBe(3);
+  });
+
+  it('favori en calcul : deux lignes réservées, la 2e vide n’est pas journalisée', () => {
+    const items: Item[] = [{ a: 'Vers le bureau', c: '…', two: true }, { a: 'Autour de moi', c: '3 arrêts' }];
+    const p = layoutPage(view({ layout: 'menu', items }), { sel: 0, top: 0 });
+    expect(p.lines.slice(0, 2)).toEqual(['Vers le bureau   …', 'Autour de moi   3 arrêts']);
+    const colA = p.containers.find((c) => c.name === 'colA')!.content.split('\n');
+    expect(colA[2]).toBe('Autour de moi');
   });
 });

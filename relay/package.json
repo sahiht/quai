@@ -1,8 +1,8 @@
 {
   "name": "quai-relay",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "Quai : relais temps réel (Vercel) entre le portail Belgian Mobility Company et l'appli",
+  "description": "Quai : relais (Vercel) entre le portail Belgian Mobility Company, les services d'adresses des Régions et l'appli",
   "type": "module",
   "engines": {
     "node": "22.x"
@@ -14,6 +14,7 @@
     "test": "vitest run",
     "dev": "tsx scripts/dev.ts",
     "mock-bmc": "tsx ../fixtures/relay/mock-bmc.ts",
+    "mock-geocode": "tsx ../fixtures/relay/mock-geocode.ts",
     "make-rt": "tsx ../fixtures/relay/make-rt.ts",
     "sync-shared": "tsx scripts/sync-shared.ts"
   },

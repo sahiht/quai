@@ -1,15 +1,21 @@
 /**
  * Trajets : identifiant stable, application du temps réel aux étapes, marche, heure de départ conseillée
  * et alertes (« ! Voie modifiée : … », retard, suppression, « Partir maintenant », travaux).
+ *
+ * 1.1 : étapes en bus, tram et métro issues des fichiers de ligne (`fromStop`, `toStop`, sans stop_sequence) :
+ * De Lijn et TEC par /api/rt (trip_id de LineFile.trips, arrêt reconnu par son identifiant, sinon retard de la
+ * dernière mise à jour qui le précède dans l'horaire) ; STIB par /api/stib sur le seul point de montée. Le temps
+ * réel de plusieurs trajets est demandé en un appel par opérateur (refreshJourneys).
  */
 import type { Op } from '../../../shared/types';
 import { normalizeId } from '../../../shared/types';
+import { prettyName } from '../../../shared/names';
 import type { Alert, Journey, Leg, Settings } from './api';
 import type { PreparedArea } from './areas';
 import { stibPassages, type StibPassage } from './boards';
 import type { RealtimeClient, RtTrip, StibEntry } from './realtime';
 import { stibPoint } from './realtime';
-import { delayMinutes, headKey, headScore, rtAtStop, rtOccurrence, type TripContext } from './rtmerge';
+import { delayMinutes, headKey, headScore, platformOfStopId, RT_MAX_SHIFT_MS, rtAtStop, rtOccurrence, sameStop, type TripContext } from './rtmerge';
 import { locateTrip, type DayIndex } from './trains';
 import { hhmm, fit } from './util';
 import { cancelAlert, delayAlert, leaveAlert, platformAlert, vehicleLabel, worksAlert } from './text';
@@ -178,7 +184,111 @@ function legPassages(l: Leg, prep: PreparedArea | null, map: Map<string, StibEnt
   return prep.file.stops.flatMap((st, i) => stibPassages(prep, i, map.get(stibPoint(st.rt || st.id)) ?? [], l.schedDep - STIB_BEFORE_MS, l.schedDep + STIB_AFTER_MS));
 }
 
-/** Applique le temps réel aux étapes en véhicule (en place). Une source en erreur → horaire prévu. */
+/**
+ * Passages STIB du point de montée d'une étape 1.1 (`fromStop`) autour de son horaire prévu : même ligne ; une
+ * destination vide vaut celle de l'étape (le point d'arrêt est propre à un sens) ; « Ne pas embarquer » écarté.
+ */
+function pointPassages(l: Leg, entries: readonly StibEntry[]): StibPassage[] {
+  const out: StibPassage[] = [];
+  for (const e of entries) {
+    if (e.noBoarding || e.line !== l.line) continue;
+    const blank = !e.dest.fr.trim() && !e.dest.nl.trim();
+    const head = blank ? (l.head ?? { fr: '', nl: '' }) : { fr: prettyName(e.dest.fr), nl: prettyName(e.dest.nl) };
+    for (const t of e.times) {
+      if (t < l.schedDep - STIB_BEFORE_MS || t > l.schedDep + STIB_AFTER_MS) continue;
+      const x: StibPassage = { t, line: e.line, pi: -1, head, rt: !e.planned, last: !!e.last };
+      if (e.msg) x.msg = e.msg;
+      out.push(x);
+    }
+  }
+  return out;
+}
+
+interface UrbanAt {
+  rt: boolean;
+  est: number;
+  cancelled: boolean;
+  /** Heure tirée du flux (mise à jour de l'arrêt, ou d'un arrêt qui le précède dans l'horaire). */
+  known: boolean;
+}
+
+/**
+ * Temps réel GTFS-RT d'un arrêt d'une étape 1.1 (bus, tram De Lijn ou TEC), sans stop_sequence : mise à jour de
+ * l'arrêt (identifiant temps réel), sinon retard de la dernière mise à jour dont l'horaire prévu (heure estimée moins
+ * retard) précède celui de l'arrêt ; rien d'utilisable : à l'heure, `known` faux.
+ */
+function urbanAt(trip: RtTrip | null | undefined, stopId: string | undefined, sched: number): UrbanAt {
+  if (!trip) return { rt: false, est: sched, cancelled: false, known: false };
+  if (trip.cancelled) return { rt: true, est: sched, cancelled: true, known: true };
+  const plausible = (est: number): UrbanAt =>
+    Math.abs(est - sched) > RT_MAX_SHIFT_MS ? { rt: false, est: sched, cancelled: false, known: false } : { rt: true, est, cancelled: false, known: true };
+  const match = stopId ? trip.u.find((u) => sameStop(u[1], stopId)) : undefined;
+  if (match) {
+    if (match[4] === 1) return { rt: true, est: sched, cancelled: true, known: true };
+    if (match[3] !== null) return plausible(match[3] * 1000);
+    if (match[2] !== null) return plausible(sched + match[2] * 1000);
+  }
+  let best: { at: number; delay: number } | null = null;
+  for (const u of trip.u) {
+    if (u[4] === 1 || u[2] === null || u[3] === null) continue;
+    const at = (u[3] - u[2]) * 1000;
+    if (at <= sched + 30_000 && (!best || at > best.at)) best = { at, delay: u[2] };
+  }
+  return best ? plausible(sched + best.delay * 1000) : { rt: true, est: sched, cancelled: false, known: false };
+}
+
+/** Applique le temps réel GTFS-RT à une étape 1.1 en bus, tram ou métro (De Lijn, TEC). */
+function applyUrbanTrip(l: Leg, trip: RtTrip | null | undefined): void {
+  if (!trip) {
+    resetPlanned(l);
+    return;
+  }
+  const dep = urbanAt(trip, l.fromStop, l.schedDep);
+  const arr0 = urbanAt(trip, l.toStop, l.schedArr);
+  // rien de connu à la descente : le retard de la montée se propage (règle GTFS-RT)
+  const arr = arr0.known ? arr0 : { ...arr0, est: l.schedArr + (dep.est - l.schedDep) };
+  l.rt = dep.rt;
+  l.cancelled = dep.cancelled || arr.cancelled;
+  l.dep = dep.est;
+  l.arr = Math.max(arr.est, dep.est);
+  l.delayMin = l.cancelled ? 0 : delayMinutes(dep.est, l.schedDep);
+  delete l.newPlatform;
+  const d0 = l.dep - l.schedDep;
+  const d1 = l.arr - l.schedArr;
+  const span = l.schedArr - l.schedDep;
+  const stops = l.stops ?? [];
+  stops.forEach((so, q) => {
+    if (q === 0) so.est = l.dep;
+    else if (q === stops.length - 1) so.est = l.arr;
+    else so.est = so.sched + Math.round(span > 0 ? d0 + ((d1 - d0) * (so.sched - l.schedDep)) / span : d0);
+  });
+}
+
+/**
+ * Panne du temps réel (PRD M8.5) : suppression, arrêt sauté ou voie modifiée connus depuis 15 min au plus
+ * (RealtimeClient `remembered`) ; horaire prévu.
+ */
+function applyMemoryLeg(l: Leg, mem: RtTrip): void {
+  resetPlanned(l);
+  if (mem.cancelled) {
+    l.cancelled = true;
+    return;
+  }
+  const sncb = l.op === 'sncb';
+  const lastStop = l.stops?.[l.stops.length - 1];
+  const find = (seq: number | undefined, stopId: string | undefined) =>
+    mem.u.find((x) => (x[0] !== null && seq !== undefined && x[0] === seq) || sameStop(x[1], stopId));
+  const dep = find(l.fromSeq, sncb ? stopIdOf(l.from.areaId, l.platform) : l.fromStop);
+  const arr = find(l.toSeq, sncb ? stopIdOf(l.to.areaId, lastStop?.platform) : l.toStop);
+  if (dep?.[4] === 1 || arr?.[4] === 1) {
+    l.cancelled = true;
+    return;
+  }
+  const p = platformOfStopId(dep?.[1]);
+  if (p && l.platform && p !== l.platform) l.newPlatform = p;
+}
+
+/** Applique le temps réel aux étapes en véhicule (en place), un appel par opérateur. Source en erreur → horaire prévu. */
 export async function applyRealtime(legs: Leg[], env: RefreshEnv): Promise<void> {
   const rides = legs.filter(isRide);
   const now = env.now();
@@ -193,18 +303,29 @@ export async function applyRealtime(legs: Leg[], env: RefreshEnv): Promise<void>
   }
   const stibLegs = rides.filter((l) => l.op === 'stib' && live(l));
   const stibAreaOf = new Map<Leg, PreparedArea | null>();
+  // étapes 1.0 (sans point de montée) : tous les points de la zone de montée
   await Promise.all(
-    stibLegs.map(async (l) => {
-      let prep: PreparedArea | null = null;
-      try {
-        prep = l.from.areaId ? await env.area(l.from.areaId) : null;
-      } catch {
-        prep = null;
-      }
-      stibAreaOf.set(l, prep);
-    }),
+    stibLegs
+      .filter((l) => !l.fromStop)
+      .map(async (l) => {
+        let prep: PreparedArea | null = null;
+        try {
+          prep = l.from.areaId ? await env.area(l.from.areaId) : null;
+        } catch {
+          prep = null;
+        }
+        stibAreaOf.set(l, prep);
+      }),
   );
-  const allPoints = [...new Set([...stibAreaOf.values()].flatMap((prep) => (prep ? prep.file.stops.map((st) => stibPoint(st.rt || st.id)) : [])))];
+  const points = new Set<string>();
+  for (const l of stibLegs) {
+    if (l.fromStop) {
+      const p = stibPoint(l.fromStop);
+      if (p) points.add(p);
+    }
+  }
+  for (const prep of stibAreaOf.values()) for (const st of prep?.file.stops ?? []) points.add(stibPoint(st.rt || st.id));
+  const allPoints = [...points].filter(Boolean);
   const [tripRes, stibRes, days] = await Promise.all([
     Promise.all([...tripIds].map(async ([op, ids]) => [op, await env.rt.trips(op, [...ids])] as const)),
     allPoints.length ? env.rt.stib(allPoints) : Promise.resolve(null),
@@ -217,12 +338,19 @@ export async function applyRealtime(legs: Leg[], env: RefreshEnv): Promise<void>
       continue;
     }
     if (l.op === 'stib') {
-      applyStib(l, stibRes && !stibRes.error ? legPassages(l, stibAreaOf.get(l) ?? null, stibRes.map) : []);
+      const ok = stibRes && !stibRes.error;
+      if (!ok) applyStib(l, []);
+      else if (l.fromStop) applyStib(l, pointPassages(l, stibRes.map.get(stibPoint(l.fromStop)) ?? []));
+      else applyStib(l, legPassages(l, stibAreaOf.get(l) ?? null, stibRes.map));
       continue;
     }
     const res = l.op ? byOp.get(l.op) : undefined;
-    const trip = res && l.tripId ? res.map.get(normalizeId(l.tripId)) : undefined;
-    applyTrip(l, trip, days);
+    const id = l.tripId ? normalizeId(l.tripId) : '';
+    const trip = res && id ? res.map.get(id) : undefined;
+    const mem = !trip && res?.error && id ? res.remembered?.get(id) : undefined;
+    if (mem) applyMemoryLeg(l, mem);
+    else if (l.op !== 'sncb' && l.fromSeq === undefined && (l.fromStop || l.toStop)) applyUrbanTrip(l, trip);
+    else applyTrip(l, trip, days);
   }
 }
 
@@ -326,13 +454,42 @@ async function worksFor(j: Journey, env: RefreshEnv): Promise<string[]> {
   return [...new Set(texts)];
 }
 
+/**
+ * Applique le temps réel à plusieurs trajets (un appel au relais par opérateur pour tous) et recalcule heure de
+ * départ conseillée et alertes. Étiquette et raison sont gardées.
+ */
+export async function refreshJourneys(js: readonly Journey[], settings: Settings, env: RefreshEnv, fresh = false): Promise<Journey[]> {
+  const legs = js.map((j) => j.legs.map(cloneLeg));
+  await applyRealtime(legs.flat(), env);
+  const now = env.now();
+  return Promise.all(
+    js.map(async (j, i) => {
+      const out = recompute(j, legs[i], settings, now, fresh);
+      const works = settings.alerts.works ? await worksFor(out, env) : [];
+      out.alerts = buildAlerts(out, settings, now, works);
+      return out;
+    }),
+  );
+}
+
 /** Applique le temps réel à un trajet et recalcule heure de départ conseillée et alertes. */
 export async function refreshJourney(j: Journey, settings: Settings, env: RefreshEnv, fresh = false): Promise<Journey> {
-  const legs = j.legs.map(cloneLeg);
-  await applyRealtime(legs, env);
-  const now = env.now();
-  const out = recompute(j, legs, settings, now, fresh);
-  const works = settings.alerts.works ? await worksFor(out, env) : [];
-  out.alerts = buildAlerts(out, settings, now, works);
-  return out;
+  return (await refreshJourneys([j], settings, env, fresh))[0];
+}
+
+/** Rang de la première étape en véhicule partie avant l'arrivée du véhicule précédent (marche comprise), -1 sinon. */
+export function brokenConnection(j: Journey): number {
+  let prev: Leg | undefined;
+  let walk = 0;
+  for (let i = 0; i < j.legs.length; i++) {
+    const l = j.legs[i];
+    if (l.kind === 'walk') {
+      walk += (l.walkMin ?? 0) * 60_000;
+      continue;
+    }
+    if (prev && l.dep < prev.arr + walk) return i;
+    prev = l;
+    walk = 0;
+  }
+  return -1;
 }

@@ -1,0 +1,1 @@
+{"geotag":{"address":"gembloux","levels":"7","bbox":false,"geom":true,"crs":"EPSG:31370","scopes":["WAL"],"lang":"fr"},"candidates":[{"score":0.0630929768,"geotag":{"ident":"BE00438","level":7,"name":"Gare de Gembloux","lang":"fr","geometry":{"type":"Point","crs":{"type":"name","properties":{"name":"EPSG:31370"}},"coordinates":[172835.01647250124,139989.62418902013]}}}]}

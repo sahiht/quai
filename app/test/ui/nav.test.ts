@@ -68,6 +68,29 @@ describe('machine d’états des gestes', () => {
     expect(current(s).top).toBe(5);
   });
 
+  it('écran sans curseur (étapes, départs) : ▲▼ font défiler, puis « edge » au bout ; toucher = action de l’écran', () => {
+    const rows = (n: number): Item[] => Array.from({ length: n }, (_, i) => ({ a: `Étape ${i}` }));
+    const v = view(8, { layout: 'steps', screen: 'steps', items: rows(8), scroll: true, tap: { kind: 'follow' } });
+    let s: NavState = initNav({ screen: 'home' });
+    let r = handleGesture(s, 'down', v, 6);
+    expect(r.effect.kind).toBe('render');
+    expect(current(r.state).top).toBe(2);
+    s = r.state;
+    r = handleGesture(s, 'down', v, 6);
+    expect(r.effect).toEqual({ kind: 'edge', dir: 'down' });
+    r = handleGesture(s, 'up', v, 6);
+    expect(r.effect.kind).toBe('render');
+    expect(current(r.state).top).toBe(0);
+    expect(handleGesture(r.state, 'up', v, 6).effect).toEqual({ kind: 'edge', dir: 'up' });
+    expect(handleGesture(s, 'tap', v, 6).effect).toEqual({ kind: 'intent', intent: { kind: 'follow' } });
+    // tout tient : chaque glissement est un « edge »
+    const short = { ...v, items: rows(3) };
+    expect(handleGesture(initNav({ screen: 'home' }), 'down', short, 6).effect).toEqual({ kind: 'edge', dir: 'down' });
+    // départs sans action d'élément : le toucher reste celui de l'écran
+    const board = view(3, { layout: 'board', screen: 'board', items: rows(3), scroll: true, tap: { kind: 'toggleFavoriteStop' } });
+    expect(handleGesture(initNav({ screen: 'home' }), 'tap', board, 6).effect).toEqual({ kind: 'intent', intent: { kind: 'toggleFavoriteStop' } });
+  });
+
   it('instantané sérialisable pour l’arrière-plan', () => {
     const s = push(initNav({ screen: 'home' }), { screen: 'board', areaId: 'stib:6357F', filter: [{ line: '3', head: 'churchill' }] });
     const back = parseNav(serializeNav(s));
@@ -75,6 +98,10 @@ describe('machine d’états des gestes', () => {
     expect(parseNav('{"stack":[]}')).toBeNull();
     expect(parseNav('pas du json')).toBeNull();
     expect(parseNav({ stack: [{ route: {} }] })).toBeNull();
+    // écrans de la 1.0 retirés en 1.1 (Q6) : ôtés de la pile
+    const old = { stack: [{ route: { screen: 'home' }, sel: 0, top: 0 }, { route: { screen: 'journeys', label: 'Bureau' }, sel: 1, top: 0 }] };
+    expect(parseNav(old)?.stack.map((f) => f.route.screen)).toEqual(['home']);
+    expect(parseNav({ stack: [{ route: { screen: 'trip' }, sel: 0, top: 0 }] })).toBeNull();
   });
 });
 

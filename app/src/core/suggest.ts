@@ -6,7 +6,7 @@
  *    résultat → ligne de suggestion ; (3) sinon rien.
  */
 import type { Board, Endpoint, Favorite, Journey, LineFilter, Settings, Suggestion } from './api';
-import { forLabel, departureSummary, rideSummary } from './text';
+import { forLabel, departureSummary, NB, rideSummary, shortAddress } from './text';
 import { brusselsParts, displayName, distanceM, fit, hhmm } from './util';
 
 export interface SuggestEnv {
@@ -51,6 +51,7 @@ export function tripLabel(f: Extract<Favorite, { kind: 'trip' }>, settings: Sett
     if (p) return p.label.toLowerCase();
   }
   if (to.type === 'area') return displayName(to.name, settings.lang);
+  if (to.type === 'address') return shortAddress(to.label);
   return 'ma position';
 }
 
@@ -81,7 +82,7 @@ async function forFavorite(
       kind: 'favoriteStop',
       favoriteId: f.id,
       autoOpen,
-      title: fit(`${name} : ${departureSummary(deps[0], env.now, settings.lang, mark)}`),
+      title: fit(`${name}${NB}: ${departureSummary(deps[0], env.now, settings.lang, mark)}`),
     };
     if (deps[1]) s.subtitle = fit(`puis ${departureSummary(deps[1], env.now, settings.lang, mark)}`);
     if (board) s.board = board;
@@ -101,16 +102,16 @@ async function forFavorite(
   const walk = j.legs[0]?.kind === 'walk' ? j.legs[0] : undefined;
   if (!ride) {
     // trajet entièrement à pied
-    return { kind: 'favoriteTrip', favoriteId: f.id, autoOpen, title: fit(`${label} : à pied, ${walk?.walkMin ?? 0} min`), subtitle: fit(`arrivée à ${hhmm(j.arr)}`), journey: j };
+    return { kind: 'favoriteTrip', favoriteId: f.id, autoOpen, title: fit(`${label}${NB}: à pied, ${walk?.walkMin ?? 0}${NB}min`), subtitle: fit(`arrivée à ${hhmm(j.arr)}`), journey: j };
   }
   const s: Suggestion = {
     kind: 'favoriteTrip',
     favoriteId: f.id,
     autoOpen,
-    title: fit(`${label} : ${rideSummary(ride, env.now)}`),
+    title: fit(`${label}${NB}: ${rideSummary(ride, env.now)}`),
     journey: j,
   };
-  s.subtitle = fit(walk ? `partir à ${hhmm(j.leaveAt)}, ${walk.walkMin ?? 0} min à pied` : `arrivée à ${hhmm(j.arr)}`);
+  s.subtitle = fit(walk ? `partir à ${hhmm(j.leaveAt)}, ${walk.walkMin ?? 0}${NB}min à pied` : `arrivée à ${hhmm(j.arr)}`);
   return s;
 }
 

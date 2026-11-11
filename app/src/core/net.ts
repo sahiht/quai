@@ -58,6 +58,25 @@ export async function getText(fetchFn: FetchLike, url: string, timeoutMs: number
   }
 }
 
+/** Le téléphone se dit hors ligne (WebView : navigator.onLine). Inconnu = en ligne. */
+export function isOffline(): boolean {
+  const nav = (globalThis as { navigator?: { onLine?: boolean } }).navigator;
+  return nav?.onLine === false;
+}
+
+/** Résout `p`, ou 'late' si `ms` passe avant (p continue en arrière-plan). */
+export async function withDeadline<T>(p: Promise<T>, ms: number): Promise<T | 'late'> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<'late'>((resolve) => {
+    timer = setTimeout(() => resolve('late'), ms);
+  });
+  try {
+    return await Promise.race([p, late]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export function safeJson(text: string): unknown {
   try {
     return JSON.parse(text) as unknown;

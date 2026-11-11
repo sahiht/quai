@@ -8,12 +8,15 @@ import { createLogger } from '../lib/log.js';
 import { encodeFeed } from '../lib/gtfsrt.js';
 import type { Env } from '../lib/config.js';
 import { wherePoints } from '../../fixtures/relay/mock-bmc.js';
+import { createMockGeoState, loadFakeAddresses, mockGeoReply, type MockGeoState } from '../../fixtures/relay/mock-geocode.js';
 
 export const FIXTURES_DIR = fileURLToPath(new URL('../../fixtures/relay/', import.meta.url));
 /** Horodatage des fixtures : 2026-11-10T12:10:00+01:00. */
 export const NOW_MS = Date.parse('2026-11-10T12:10:00+01:00');
 export const TEST_KEY = 'test-key-5f1c2b9d';
 export const BMC = 'https://bmc.test';
+/** Faux service d'adresses en mémoire (QUAI_GEO_BASE des tests). */
+export const GEO = 'https://geo.test';
 
 export const sec = (iso: string) => Math.round(Date.parse(iso) / 1000);
 export const fixture = (path: string) => readFileSync(FIXTURES_DIR + path);
@@ -68,6 +71,26 @@ export function bmcRoute(opts: { key?: string } = {}): Route {
   };
 }
 
+/**
+ * Faux service d'adresses en mémoire (mêmes réponses que npm run mock-geocode). La scène slow devient une réponse
+ * qui n'arrive jamais (le délai du relais tombe).
+ */
+export function geoRoute(state: MockGeoState = createMockGeoState()): Route {
+  const table = loadFakeAddresses();
+  return (url, c) => {
+    const reply = mockGeoReply(state, table, 'GET', url, c.headers);
+    if (reply.delayMs > 0) return never();
+    return new Response(reply.body, { status: reply.status, headers: { 'Content-Type': reply.type } });
+  };
+}
+
+/** Portail BMC et faux service d'adresses selon l'hôte. */
+export function stackRoute(opts: { key?: string; geo?: MockGeoState } = {}): Route {
+  const bmc = bmcRoute(opts.key ? { key: opts.key } : {});
+  const geo = geoRoute(opts.geo);
+  return (url, c) => (url.origin === GEO ? geo(url, c) : bmc(url, c));
+}
+
 /** Route qui sert un flux GTFS-RT construit dans le test (objet protobufjs). */
 export const feedRoute = (feed: Record<string, unknown>): Route => () => protobuf(encodeFeed(feed));
 
@@ -76,8 +99,8 @@ export interface TestCtx { ctx: Ctx; logs: string[]; calls: Call[]; advance(ms: 
 export function makeCtx(opts: { env?: Env; route?: Route; now?: number; timeouts?: Partial<Ctx['timeouts']> } = {}): TestCtx {
   const logs: string[] = [];
   const sink = { log: (m: string) => void logs.push(m), warn: (m: string) => void logs.push(m), error: (m: string) => void logs.push(m) };
-  const env: Env = { BMC_KEY: TEST_KEY, BMC_BASE: BMC, ...opts.env };
-  const { fetch, calls } = fakeFetch(opts.route ?? bmcRoute());
+  const env: Env = { BMC_KEY: TEST_KEY, BMC_BASE: BMC, QUAI_GEO_BASE: GEO, ...opts.env };
+  const { fetch, calls } = fakeFetch(opts.route ?? stackRoute());
   let now = opts.now ?? NOW_MS;
   const ctx: Ctx = {
     env,
@@ -85,7 +108,7 @@ export function makeCtx(opts: { env?: Env; route?: Route; now?: number; timeouts
     now: () => now,
     log: createLogger(env, sink),
     caches: createCaches(),
-    timeouts: { upstream: 8000, health: 3000, ...opts.timeouts },
+    timeouts: { upstream: 8000, health: 3000, geoSource: 2000, geoTotal: 2500, ...opts.timeouts },
   };
   return { ctx, logs, calls, advance: (ms) => void (now += ms), setNow: (ms) => void (now = ms) };
 }
@@ -98,8 +121,9 @@ export async function call<T = Record<string, unknown>>(
   path: string,
   ctx: Ctx,
   sink?: Result<unknown>[],
+  headers?: Record<string, string>,
 ): Promise<Result<T>> {
-  const res = await handler(new Request(`https://relay.test${path}`), ctx);
+  const res = await handler(new Request(`https://relay.test${path}`, { headers }), ctx);
   const text = await res.text();
   const out: Result<T> = { status: res.status, headers: res.headers, text, body: (text ? JSON.parse(text) : null) as T };
   sink?.push(out as Result<unknown>);

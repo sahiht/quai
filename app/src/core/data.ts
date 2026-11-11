@@ -11,6 +11,8 @@ const TIMEOUT_MS = 10_000;
 /** Lecture du cache persistant (pont de l'appli, parfois lent) : au-delà, on passe au réseau. */
 const PERSIST_DEADLINE_MS = 1_500;
 const MEM_MAX = 400;
+/** Fichier absent (404) gardé dans le cache persistant. */
+const ABSENT = '';
 export const OPS: readonly Op[] = ['sncb', 'stib', 'delijn', 'tec'];
 
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -91,9 +93,21 @@ export class DataClient {
     return this.file(`trains/${date}.json`, isTrains, null);
   }
 
+  /**
+   * Fichier JSON quelconque de la publication (1.1 : lines/index.json, linetiles/, lines/ pour le calcul de
+   * trajets), par le même cache (mémoire LRU, persistant, génération meta.generatedAt). 404 → null ;
+   * échec réseau → QuaiError('dataUnreachable') ; contenu invalide → QuaiError('dataUnavailable').
+   * Chemin et validation : à l'appelant.
+   */
+  json<T>(path: string, valid: (x: unknown) => x is T): Promise<T | null> {
+    return this.file(path, valid, null);
+  }
+
   private async fetchMeta(): Promise<Meta> {
     let text: string | null = null;
     let fromNetwork = false;
+    // Serveur injoignable (réseau, délai, erreur serveur) ou serveur qui répond sans le fichier (PRD M8.6).
+    let unreachable = false;
     try {
       const r = await this.fetchRetry('meta.json');
       if (r.status === 200 && isMeta(safeJson(r.text))) {
@@ -102,10 +116,11 @@ export class DataClient {
       }
     } catch {
       text = null;
+      unreachable = true;
     }
     if (text === null) text = await this.persist.getMeta();
     const parsed = text === null ? undefined : safeJson(text);
-    if (!isMeta(parsed)) throw new QuaiError('dataUnavailable');
+    if (!isMeta(parsed)) throw new QuaiError(unreachable ? 'dataUnreachable' : 'dataUnavailable');
     if (fromNetwork && text !== null) this.persist.putMeta(text);
     if (!this.meta || this.meta.generatedAt !== parsed.generatedAt) {
       this.mem.clear();
@@ -148,6 +163,8 @@ export class DataClient {
       if (timer !== undefined) clearTimeout(timer);
     });
     if (cached !== null) {
+      // fichier absent de la publication (tuile vide…) : gardé aussi, une ouverture sans réseau ne bute pas dessus
+      if (cached === ABSENT && notFound === null) return null;
       const parsed = safeJson(cached);
       if (valid(parsed)) return parsed;
     }
@@ -155,10 +172,13 @@ export class DataClient {
     try {
       r = await this.fetchRetry(path);
     } catch {
-      throw new QuaiError('dataUnavailable');
+      throw new QuaiError('dataUnreachable');
     }
     if (r.status === 404) {
-      if (notFound === null) return null;
+      if (notFound === null) {
+        this.persist.put(gen, path, ABSENT);
+        return null;
+      }
       throw new QuaiError(notFound);
     }
     const parsed = safeJson(r.text);

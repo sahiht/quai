@@ -80,10 +80,10 @@ describe('meta.json', () => {
     expect(meta).toMatchObject({ v: 1, timezone: 'Europe/Brussels', serviceDates: DATES, tile: { lat: 0.02, lon: 0.03 } });
     expect(new Date(meta.generatedAt).toISOString()).toBe(meta.generatedAt);
     expect(Object.keys(meta.feeds).sort()).toEqual(['delijn', 'sncb', 'stib', 'tec']);
-    expect(meta.feeds.sncb).toEqual({ ok: true, areas: 14, trips: 11, feedVersion: '2026-11-09.sncb' });
+    expect(meta.feeds.sncb).toEqual({ ok: true, areas: 15, trips: 21, feedVersion: '2026-11-09.sncb' });
     expect(meta.feeds.stib).toMatchObject({ ok: true, areas: 10, feedVersion: '20261109' });
     expect(meta.feeds.delijn).toMatchObject({ ok: true, areas: 7, feedVersion: 'DL-2026-11-09' });
-    expect(meta.feeds.tec).toMatchObject({ ok: true, areas: 5, feedVersion: 'TEC-20261109' });
+    expect(meta.feeds.tec).toMatchObject({ ok: true, areas: 8, feedVersion: 'TEC-20261109' });
     expect(result.anyOk).toBe(true);
   });
 
@@ -269,8 +269,9 @@ describe('scénarios de fixtures/README.md', () => {
     const ic2112 = t.trips.find((x) => x.num === '2112');
     expect(ic2112?.s[5]).toEqual([t.stations.findIndex((s) => s.id === 'sncb:8812005'), 520, 521, '11', 6]);
     const holiday = read<TrainsDay>('trains/2026-11-11.json');
-    expect(holiday.trips.map((x) => x.num).sort()).toEqual(['1510', '1511', '1810', '2113', '2192', '2199', '2312', '2412']);
-    expect(t.trips.map((x) => x.num).sort()).toEqual(['1508', '1510', '1511', '1810', '1987', '2112', '2113', '2199', '2312', '2412']);
+    const s1 = ['1960', '1961', '1962', '1963', '1964', '1965', '1966', '1967'];
+    expect(holiday.trips.map((x) => x.num).sort()).toEqual(['1510', '1511', '1810', ...s1, '2113', '2137', '2138', '2192', '2199', '2312', '2412']);
+    expect(t.trips.map((x) => x.num).sort()).toEqual(['1508', '1510', '1511', '1810', ...s1, '1987', '2112', '2113', '2137', '2138', '2199', '2312', '2412']);
   });
 });
 
@@ -287,7 +288,7 @@ describe('cohérence de tous les fichiers', () => {
   it('aucun fichier ne référence une zone absente ; index et tris valides', () => {
     const ids = new Set<string>();
     for (const op of OPS) for (const f of readdirSync(join(out, `areas/${op}`))) ids.add(read<AreaFile>(`areas/${op}/${f}`).id);
-    expect(ids.size).toBe(36);
+    expect(ids.size).toBe(40);
     for (const f of readdirSync(join(out, 'tiles'))) {
       const tile = read<TileFile>(`tiles/${f}`);
       for (const a of tile.areas) {
@@ -331,15 +332,26 @@ describe('cohérence de tous les fichiers', () => {
     }
   });
 
-  it('chaque zone est trouvable par la recherche sous chacun de ses mots', () => {
+  it('chaque zone avec départs est trouvable par la recherche sous chacun de ses mots ; les autres en sont absentes (S5)', () => {
+    const idle: string[] = [];
     for (const op of OPS) {
       for (const f of readdirSync(join(out, `areas/${op}`))) {
         const a = read<AreaFile>(`areas/${op}/${f}`);
         for (const w of searchWords(a.n.fr, a.n.nl)) {
-          expect(read<SearchFile>(`search/${searchKey(w)}.json`).items.some((i) => i.id === a.id), `${a.id} ${w}`).toBe(true);
+          let found = false;
+          try {
+            found = read<SearchFile>(`search/${searchKey(w)}.json`).items.some((i) => i.id === a.id);
+          } catch {
+            found = false;
+          }
+          expect(found, `${a.id} ${w}`).toBe(a.deps.length > 0);
         }
+        if (!a.deps.length) idle.push(a.id);
       }
     }
+    expect(idle.sort()).toEqual(['delijn:300120', 'delijn:300450', 'delijn:301870', 'sncb:8821006', 'sncb:8891009', 'stib:6370', 'stib:8302', 'tec:N520aaa', 'tec:N530aaa', 'tec:N540aaa']);
+    const inTiles = new Set(readdirSync(join(out, 'tiles')).flatMap((f) => read<TileFile>(`tiles/${f}`).areas.map((a) => a.id)));
+    for (const id of idle) expect(inTiles.has(id), id).toBe(false);
   });
 
   it('licence et page d’état', () => {
@@ -374,6 +386,8 @@ describe('reproductibilité', () => {
     const a = listFiles(out).map((f) => relative(out, f)).filter((f) => f !== 'meta.json' && f !== 'LICENSE-DATA.txt').sort();
     const b = listFiles(out2).map((f) => relative(out2, f)).filter((f) => f !== 'meta.json' && f !== 'LICENSE-DATA.txt').sort();
     expect(b).toEqual(a);
-    for (const f of a) expect(readFileSync(join(out2, f), 'utf8'), f).toBe(readFileSync(join(out, f), 'utf8'));
+    // lines/index.json porte la date de génération (celle de meta.json)
+    const strip = (f: string, text: string) => (f === join('lines', 'index.json') ? text.replace(/"generatedAt":"[^"]*",/, '') : text);
+    for (const f of a) expect(strip(f, readFileSync(join(out2, f), 'utf8')), f).toBe(strip(f, readFileSync(join(out, f), 'utf8')));
   });
 });

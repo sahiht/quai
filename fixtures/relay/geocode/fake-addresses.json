@@ -1,0 +1,15 @@
+{
+  "about": "Faux service d'adresses (npm run mock-geocode) : tableau du PRD, annexe A.2, plus la destination du scénario 4 proposée par l'équipe données (fixtures/network.json, addresses[]). Positions WGS84 ; le faux service les rend dans le format de chaque service officiel (Lambert 72 pour Bruxelles).",
+  "addresses": [
+    { "id": "fer-namur", "region": "wal", "street": { "fr": "Rue de Fer" }, "number": "25", "postcode": "5000", "municipality": { "fr": "Namur" }, "lat": 50.4662, "lon": 4.8648, "typed": ["rue de fer 25 namur", "rue de fer 25"] },
+    { "id": "fer-liege", "region": "wal", "street": { "fr": "Rue de Fer" }, "number": "25", "postcode": "4000", "municipality": { "fr": "Liège" }, "lat": 50.64, "lon": 5.57, "typed": ["rue de fer 25"], "note": "homonyme fictif" },
+    { "id": "rue-neuve-1", "region": "bru", "street": { "fr": "Rue Neuve", "nl": "Nieuwstraat" }, "number": "1", "postcode": "1000", "municipality": { "fr": "Bruxelles", "nl": "Brussel" }, "lat": 50.8505, "lon": 4.3545, "typed": ["rue neuve 1 bruxelles", "nieuwstraat 1"] },
+    { "id": "rue-neuve", "region": "bru", "kind": "rue", "street": { "fr": "Rue Neuve", "nl": "Nieuwstraat" }, "postcode": "1000", "municipality": { "fr": "Bruxelles", "nl": "Brussel" }, "lat": 50.852, "lon": 4.3555, "typed": ["rue neuve bruxelles"] },
+    { "id": "churchill", "region": "bru", "street": { "fr": "Avenue Winston Churchill", "nl": "Winston Churchilllaan" }, "number": "100", "postcode": "1180", "municipality": { "fr": "Uccle", "nl": "Ukkel" }, "lat": 50.808, "lon": 4.365, "typed": ["avenue winston churchill 100"] },
+    { "id": "centenaire", "region": "bru", "street": { "fr": "Boulevard du Centenaire", "nl": "Eeuwfeestlaan" }, "number": "1", "postcode": "1020", "municipality": { "fr": "Bruxelles", "nl": "Brussel" }, "lat": 50.8915, "lon": 4.334, "typed": ["boulevard du centenaire 1"] },
+    { "id": "veldstraat", "region": "vla", "street": { "nl": "Veldstraat" }, "number": "1", "postcode": "9000", "municipality": { "nl": "Gent" }, "lat": 51.0537, "lon": 3.7225, "typed": ["veldstraat 1 gent"] },
+    { "id": "waterloo", "region": "wal", "street": { "fr": "Chaussée de Bruxelles" }, "number": "1", "postcode": "1410", "municipality": { "fr": "Waterloo" }, "lat": 50.7175, "lon": 4.399, "typed": ["chaussée de bruxelles 1 waterloo"] },
+    { "id": "bastogne", "region": "wal", "street": { "fr": "Rue du Bois" }, "number": "1", "postcode": "6600", "municipality": { "fr": "Bastogne" }, "lat": 50.003, "lon": 5.715, "typed": ["rue du bois 1 bastogne"] },
+    { "id": "rogier", "region": "bru", "street": { "fr": "Rue du Progrès", "nl": "Vooruitgangstraat" }, "number": "20", "postcode": "1210", "municipality": { "fr": "Saint-Josse-ten-Noode", "nl": "Sint-Joost-ten-Node" }, "lat": 50.8582, "lon": 4.36, "typed": ["rue du progrès 20"], "note": "scénario 4 (PRD A.1), ajout de l'équipe données" }
+  ]
+}

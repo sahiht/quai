@@ -1,0 +1,200 @@
+{
+ "resultsList": [
+  {
+   "objectType": "ext:StreetName",
+   "result": [
+    {
+     "score": 0.93,
+     "streetname": {
+      "code": {
+       "namespace": "https://databrussels.be/id/streetname",
+       "objectIdentifier": "3410",
+       "versionIdentifier": "2026-11-04T00:00:00"
+      },
+      "name": [
+       {
+        "language": "fr",
+        "spelling": "Rue Neuve"
+       },
+       {
+        "language": "nl",
+        "spelling": "Nieuwstraat"
+       }
+      ],
+      "hasMunicipality": {
+       "code": {
+        "namespace": "https://databrussels.be/id/municipality",
+        "objectIdentifier": "21004",
+        "versionIdentifier": "2026-11-04T00:00:00"
+       },
+       "name": [
+        {
+         "language": "fr",
+         "spelling": "Bruxelles"
+        },
+        {
+         "language": "nl",
+         "spelling": "Brussel"
+        }
+       ]
+      },
+      "hasPostalInfo": [
+       {
+        "code": {
+         "namespace": "https://databrussels.be/id/postalinfo",
+         "objectIdentifier": "1000",
+         "versionIdentifier": "2026-11-04T00:00:00"
+        }
+       }
+      ],
+      "position": {
+       "pointGeometry": {
+        "point": {
+         "pos": "149066.80 171289.21",
+         "srsName": "EPSG:31370"
+        }
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
+   "objectType": "ext:Address",
+   "result": [
+    {
+     "score": 0.71,
+     "address": {
+      "code": {
+       "namespace": "https://databrussels.be/id/address",
+       "objectIdentifier": "4103",
+       "versionIdentifier": "2026-11-04T00:00:00"
+      },
+      "houseNumber": "1",
+      "boxNumber": null,
+      "addressStatus": {
+       "status": "current"
+      },
+      "position": {
+       "pointGeometry": {
+        "point": {
+         "pos": "148962.75 171134.43",
+         "srsName": "EPSG:31370"
+        }
+       },
+       "positionGeometryMethod": "assignedByAdministrator",
+       "positionSpecification": "entrance"
+      },
+      "hasStreetName": {
+       "code": {
+        "namespace": "https://databrussels.be/id/streetname",
+        "objectIdentifier": "3410",
+        "versionIdentifier": "2026-11-04T00:00:00"
+       },
+       "name": [
+        {
+         "language": "fr",
+         "spelling": "Rue Neuve"
+        },
+        {
+         "language": "nl",
+         "spelling": "Nieuwstraat"
+        }
+       ]
+      },
+      "hasMunicipality": {
+       "code": {
+        "namespace": "https://databrussels.be/id/municipality",
+        "objectIdentifier": "21004",
+        "versionIdentifier": "2026-11-04T00:00:00"
+       },
+       "name": [
+        {
+         "language": "fr",
+         "spelling": "Bruxelles"
+        },
+        {
+         "language": "nl",
+         "spelling": "Brussel"
+        }
+       ]
+      },
+      "hasPostalInfo": {
+       "code": {
+        "namespace": "https://databrussels.be/id/postalinfo",
+        "objectIdentifier": "1000",
+        "versionIdentifier": "2026-11-04T00:00:00"
+       }
+      }
+     }
+    },
+    {
+     "score": 0.69,
+     "address": {
+      "code": {
+       "namespace": "https://databrussels.be/id/address",
+       "objectIdentifier": "4104",
+       "versionIdentifier": "2026-11-04T00:00:00"
+      },
+      "houseNumber": "10",
+      "boxNumber": null,
+      "addressStatus": {
+       "status": "current"
+      },
+      "position": {
+       "pointGeometry": {
+        "point": {
+         "pos": "148949.60 171159.44",
+         "srsName": "EPSG:31370"
+        }
+       },
+       "positionGeometryMethod": "assignedByAdministrator",
+       "positionSpecification": "entrance"
+      },
+      "hasStreetName": {
+       "code": {
+        "namespace": "https://databrussels.be/id/streetname",
+        "objectIdentifier": "3410",
+        "versionIdentifier": "2026-11-04T00:00:00"
+       },
+       "name": [
+        {
+         "language": "fr",
+         "spelling": "Rue Neuve"
+        },
+        {
+         "language": "nl",
+         "spelling": "Nieuwstraat"
+        }
+       ]
+      },
+      "hasMunicipality": {
+       "code": {
+        "namespace": "https://databrussels.be/id/municipality",
+        "objectIdentifier": "21004",
+        "versionIdentifier": "2026-11-04T00:00:00"
+       },
+       "name": [
+        {
+         "language": "fr",
+         "spelling": "Bruxelles"
+        },
+        {
+         "language": "nl",
+         "spelling": "Brussel"
+        }
+       ]
+      },
+      "hasPostalInfo": {
+       "code": {
+        "namespace": "https://databrussels.be/id/postalinfo",
+        "objectIdentifier": "1000",
+        "versionIdentifier": "2026-11-04T00:00:00"
+       }
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

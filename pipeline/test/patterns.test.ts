@@ -16,7 +16,7 @@ function stopsCsv(n: number, prefix = 'S'): string {
 }
 
 describe('départs et motifs', () => {
-  it('boucle : deux passages à la même zone = deux motifs ; pas de départ au terminus', async () => {
+  it('boucle : un seul départ par voyage et par zone (le premier passage, M8.2) ; pas de départ au terminus', async () => {
     const files = miniFeed({
       'stops.txt': stopsCsv(4),
       'trips.txt': 'route_id,service_id,trip_id,trip_headsign,direction_id\nR1,ALL,T1,Boucle,0\n',
@@ -25,9 +25,9 @@ describe('départs et motifs', () => {
     });
     const { out } = await runFeed('tec', files, ['2026-11-10']);
     const a = area(out, 'tec', 'S000');
-    expect(a.deps).toEqual([[0, 480, 0, 0, 'T1', 1], [0, 496, 1, 0, 'T1', 4]]);
+    expect(a.deps).toEqual([[0, 480, 0, 0, 'T1', 1]]);
+    expect(a.patterns).toHaveLength(1);
     expect(a.patterns[0].next).toEqual([['tec:S001', 5], ['tec:S002', 10], ['tec:S003', 20]]);
-    expect(a.patterns[1].next).toEqual([['tec:S003', 4]]);
     expect(area(out, 'tec', 'S003').deps).toEqual([]);
     expect(area(out, 'tec', 'S003').patterns).toEqual([]);
   });

@@ -1,11 +1,13 @@
 /**
  * Préparation complète des données : pour chaque opérateur, obtention du zip (fichier local ou téléchargement)
- * puis traitement ; un échec n'arrête pas les autres. Écrit tiles/, areas/, search/, trains/, LICENSE-DATA.txt,
- * puis meta.json EN DERNIER (un lecteur ne voit jamais un meta.json qui annonce des fichiers absents).
+ * puis traitement ; un échec n'arrête pas les autres. Écrit tiles/, areas/, search/, trains/, puis (1.1) les
+ * fichiers de ligne lines/{op}/, lines/index.json et linetiles/, LICENSE-DATA.txt, puis meta.json EN DERNIER
+ * (un lecteur ne voit jamais un meta.json qui annonce des fichiers absents).
  */
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import type { AreaSummary, Meta, Op, SearchFile, TileFile, TrainsDay } from '../../shared/types.ts';
 import { tileKey } from '../../shared/types.ts';
 import { searchKey, searchWords } from '../../shared/names.ts';
@@ -18,7 +20,11 @@ import { DownloadError, downloadFeed, maskSecrets } from './download.ts';
 import type { DownloadOptions } from './download.ts';
 import { FeedError, processFeed } from './feed.ts';
 import type { FeedResult } from './feed.ts';
+import { buildLineOutputs } from './lines.ts';
+import type { LineData } from './lines.ts';
 import { MODE_RANK } from './modes.ts';
+import { RefNames } from './naming.ts';
+import { mb } from './report.ts';
 import { licenseText, statusPage } from './site.ts';
 import { JsonWriter } from './writer.ts';
 import { ZipError } from './zip.ts';
@@ -61,13 +67,48 @@ export function errorMessage(e: unknown, secrets: (string | undefined)[]): strin
 async function prepareOut(out: string): Promise<void> {
   await mkdir(out, { recursive: true });
   await rm(join(out, 'meta.json'), { force: true });
-  for (const d of ['tiles', 'areas', 'search', 'trains']) await rm(join(out, d), { recursive: true, force: true });
+  for (const d of ['tiles', 'areas', 'search', 'trains', 'lines', 'linetiles']) await rm(join(out, d), { recursive: true, force: true });
   await rm(join(out, 'LICENSE-DATA.txt'), { force: true });
 }
 
 function mainRank(modes: string[]): number {
   const r = MODE_RANK.findIndex((m) => modes.includes(m));
   return r < 0 ? MODE_RANK.length : r;
+}
+
+/**
+ * 1.1 : écrit lines/{op}/{routeKey}.json, linetiles/{ty}_{tx}.json et lines/index.json, et journalise leur taille
+ * (brute et gzip niveau 6, comme GitHub Pages). Renvoie Meta.lines.
+ */
+export async function writeLineFiles(writer: JsonWriter, lineData: LineData[], stations: { id: string; lat: number; lon: number }[],
+  generatedAt: string, say: (m: string) => void): Promise<NonNullable<Meta['lines']>> {
+  const out = buildLineOutputs(lineData, stations, generatedAt);
+  for (const w of out.warnings) say(`Fichiers de ligne : attention, ${w}`);
+  const sizes = new Map<string, { n: number; raw: number; gz: number }>();
+  const put = async (group: string, rel: string, data: unknown) => {
+    const buf = Buffer.from(JSON.stringify(data), 'utf8');
+    const g = sizes.get(group) ?? { n: 0, raw: 0, gz: 0 };
+    g.n++;
+    g.raw += buf.length;
+    g.gz += gzipSync(buf, { level: 6 }).length;
+    sizes.set(group, g);
+    await writer.writeBuffer(rel, buf);
+  };
+  for (const { path, file } of out.files) await put(file.op, path, file);
+  for (const [k, t] of out.tiles) await put('linetiles', `linetiles/${k}.json`, t);
+  await put('index', 'lines/index.json', out.index);
+  await writer.flush();
+  const sum = (keys: string[]) => keys.reduce((s, k) => {
+    const g = sizes.get(k);
+    return g ? { n: s.n + g.n, raw: s.raw + g.raw, gz: s.gz + g.gz } : s;
+  }, { n: 0, raw: 0, gz: 0 });
+  const all = sum(['stib', 'delijn', 'tec']);
+  const byOp = (['stib', 'delijn', 'tec'] as const).filter((op) => sizes.has(op)).map((op) => `${OP_LABEL[op]} ${sizes.get(op)?.n}`).join(', ');
+  const tiles = sum(['linetiles']);
+  const index = sum(['index']);
+  say(`Fichiers de ligne : ${all.n} lignes${byOp ? ` (${byOp})` : ''}, ${mb(all.raw)} bruts, ${mb(all.gz)} en gzip ; `
+    + `index ${mb(index.raw)} (${mb(index.gz)} en gzip) ; ${tiles.n} tuiles de lignes, ${mb(tiles.raw)} (${mb(tiles.gz)} en gzip)`);
+  return { files: out.files.length, ops: out.ops, conn: out.index.conn };
 }
 
 export async function buildData(o: BuildOptions): Promise<BuildResult> {
@@ -99,6 +140,11 @@ export async function buildData(o: BuildOptions): Promise<BuildResult> {
   const feeds = {} as Meta['feeds'];
   const results: Partial<Record<Op, FeedResult>> = {};
   const summaries: AreaSummary[] = [];
+  /** Zones sans aucun départ : fichier de zone écrit, mais absentes des tuiles et de la recherche (S5). */
+  const idle = new Set<string>();
+  const lineData: LineData[] = [];
+  /** Noms traduits des zones SNCB et STIB, pour les noms français De Lijn (traitée ensuite). */
+  const refNames = new RefNames();
   let trains: TrainsDay[] | undefined;
   const at = o.now ? o.now() : new Date();
   const today = brusselsDate(at);
@@ -106,7 +152,7 @@ export async function buildData(o: BuildOptions): Promise<BuildResult> {
   /** Traite un zip ; un flux sans aucun voyage sur les deux journées est une erreur (le repli reste possible). */
   const prepare = async (op: Op, zipPath: string): Promise<FeedResult> => {
     try {
-      const r = await processFeed({ op, zipPath, dates: o.dates, writer, log: say });
+      const r = await processFeed({ op, zipPath, dates: o.dates, writer, log: say, refNames: op === 'delijn' ? refNames : undefined });
       await writer.flush();
       if (r.trips === 0) throw new FeedError(`aucun voyage les ${o.dates.map(ddmm).join(' et ')}`);
       return r;
@@ -120,6 +166,9 @@ export async function buildData(o: BuildOptions): Promise<BuildResult> {
   const accept = (op: Op, r: FeedResult, cachedFrom?: string): void => {
     results[op] = r;
     for (const a of r.areas) summaries.push(a);
+    for (const id of r.idle) idle.add(id);
+    if (r.lines) lineData.push(...r.lines);
+    if (op === 'sncb' || op === 'stib') for (const a of r.areas) refNames.add(a.n, a.lat, a.lon);
     if (r.trains) trains = r.trains;
     feeds[op] = { ok: true, areas: r.areas.length, trips: r.trips, ...(r.feedVersion ? { feedVersion: r.feedVersion } : {}), ...(cachedFrom ? { cachedFrom } : {}) };
   };
@@ -169,9 +218,11 @@ export async function buildData(o: BuildOptions): Promise<BuildResult> {
     await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
   }
 
-  /* tuiles */
+  /* tuiles et recherche : zones qui ont au moins un départ */
+  const listed = summaries.filter((a) => !idle.has(a.id));
+  if (idle.size) say(`${idle.size} zone(s) sans aucun départ, absentes des tuiles et de la recherche`);
   const tiles = new Map<string, AreaSummary[]>();
-  for (const a of summaries) {
+  for (const a of listed) {
     const k = tileKey(a.lat, a.lon, TILE);
     const list = tiles.get(k);
     if (list) list.push(a);
@@ -185,7 +236,7 @@ export async function buildData(o: BuildOptions): Promise<BuildResult> {
 
   /* recherche */
   const search = new Map<string, SearchFile['items']>();
-  for (const a of summaries) {
+  for (const a of listed) {
     const keys = new Set(searchWords(a.n.fr, a.n.nl).map(searchKey).filter((k) => /^[a-z0-9]{2}$/.test(k)));
     const item = { id: a.id, op: a.op, n: a.n, modes: a.modes, lat: a.lat, lon: a.lon };
     for (const k of keys) {
@@ -207,13 +258,30 @@ export async function buildData(o: BuildOptions): Promise<BuildResult> {
   }
   await writer.flush();
 
+  /* 1.1 : fichiers de ligne (même generatedAt que meta.json) ; en cas d'échec, aucun fichier de ligne */
+  const generatedAt = (o.now ? o.now() : new Date()).toISOString();
+  let lines: Meta['lines'];
+  if (OPS.some((op) => feeds[op].ok)) {
+    try {
+      const stations = summaries.filter((a) => a.op === 'sncb').map((a) => ({ id: a.id, lat: a.lat, lon: a.lon }));
+      lines = await writeLineFiles(writer, lineData, stations, generatedAt, say);
+    } catch (e) {
+      say(`Fichiers de ligne : en erreur (${errorMessage(e, secrets)}) ; pas de fichiers de ligne cette nuit`);
+      await writer.flush().catch(() => undefined);
+      for (const d of ['lines', 'linetiles']) await rm(join(o.out, d), { recursive: true, force: true }).catch(() => undefined);
+      lines = undefined;
+    }
+  }
+  lineData.length = 0;
+
   const meta: Meta = {
     v: 1,
-    generatedAt: (o.now ? o.now() : new Date()).toISOString(),
+    generatedAt,
     timezone: 'Europe/Brussels',
     serviceDates: o.dates,
     tile: TILE,
     feeds,
+    ...(lines ? { lines } : {}),
   };
   const license = licenseText(meta);
   await writeFile(join(o.out, 'LICENSE-DATA.txt'), license, 'utf8');

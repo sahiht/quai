@@ -3,16 +3,19 @@
  * En production : defaultCtx() (process.env, fetch global, caches partagés par l'instance).
  * Les tests construisent leur propre contexte (fetch simulé, horloge fixe, journal capturé).
  */
-import { LIMITS, type Env } from './config.js';
+import { GEO_LIMITS, LIMITS, type Env } from './config.js';
 import { BatchCache, TtlCache } from './cache.js';
 import { createLogger, type Logger } from './log.js';
 import type { AlertItem, TripIndex } from './gtfsrt.js';
 import type { StibGroup } from './stib.js';
+import { createGeoState, type GeoState } from './geocode/state.js';
 
 export interface Caches {
   trips: TtlCache<TripIndex>;
   alerts: TtlCache<AlertItem[]>;
   stib: BatchCache<StibGroup[]>;
+  /** Adresses : cache, disjoncteurs, limites, état des services. */
+  geo: GeoState;
   /** Dernier message « clé absente » journalisé (pour ne pas le répéter à chaque requête). */
   state: { missingKeyLoggedAt: number | null };
   clear(): void;
@@ -23,11 +26,13 @@ export function createCaches(ttlMs: number = LIMITS.cacheTtlMs): Caches {
     trips: new TtlCache<TripIndex>(ttlMs),
     alerts: new TtlCache<AlertItem[]>(ttlMs),
     stib: new BatchCache<StibGroup[]>(ttlMs),
+    geo: createGeoState(),
     state: { missingKeyLoggedAt: null },
     clear() {
       caches.trips.clear();
       caches.alerts.clear();
       caches.stib.clear();
+      caches.geo.clear();
       caches.state.missingKeyLoggedAt = null;
     },
   };
@@ -41,7 +46,8 @@ export interface Ctx {
   now: () => number;
   log: Logger;
   caches: Caches;
-  timeouts: { upstream: number; health: number };
+  /** upstream, health : temps réel ; geoSource, geoTotal : adresses (2 s par service, 2,5 s en tout). */
+  timeouts: { upstream: number; health: number; geoSource: number; geoTotal: number };
 }
 
 const shared = createCaches();
@@ -67,6 +73,11 @@ export function defaultCtx(): Ctx {
     now: () => Date.now() + clockOffsetMs,
     log: createLogger(process.env),
     caches: shared,
-    timeouts: { upstream: LIMITS.upstreamTimeoutMs, health: LIMITS.healthTimeoutMs },
+    timeouts: {
+      upstream: LIMITS.upstreamTimeoutMs,
+      health: LIMITS.healthTimeoutMs,
+      geoSource: GEO_LIMITS.sourceTimeoutMs,
+      geoTotal: GEO_LIMITS.totalTimeoutMs,
+    },
   };
 }

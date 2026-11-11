@@ -1,12 +1,19 @@
-/** Réglage 2 sur 6 : mes lieux (adresse saisie ou position actuelle, marche maximale). Maquette Config2. */
-import type { NearbyItem, Place, SearchItem } from '../../core/api';
+/**
+ * Réglage 2 sur 6 : mes lieux (T3, maquette Config2). Un lieu se place par le champ unique (adresse normalisée, ou
+ * arrêt : « Près de Namur »), ou par « Utiliser ma position actuelle » ; jamais de coordonnées à l'écran.
+ * Lieux de la 1.0 à adresse libre : « Adresse à vérifier » et « Vérifier l’adresse » (M4.8).
+ * Après un nouveau lieu : « Ajouter le trajet vers {nom} à tes favoris ? » (S3). Adresses récentes (S4).
+ */
+import type { FavoriteTrip, NearbyItem, Place, Propose } from '../../core/api';
 import { displayName, mainMode, modeWord } from '../../core/util';
 import { LIMITS, newId } from '../../settings';
 import { header, type PhoneCtx } from '../app';
-import { debounce, h, icon, ICON, liveRegion } from '../dom';
-import { listRow, stepper } from '../ui';
+import { append, h, icon, ICON, liveRegion } from '../dom';
+import { placeField, privacyNote } from '../field';
+import { addTripQuestion, defaultSlot, legacyQuery, needsCheck, placeSubtitle, PROPOSE_LABEL, removePlaceText, T, typo } from '../text';
+import { confirmInPage, listRow, messageHub, nameShortcuts, radios, stepper } from '../ui';
 
-/** « Namur à 7 min à pied, bus TEC à 2 min » : accès depuis un lieu. */
+/** « Namur à 7 min à pied, bus TEC à 2 min » : accès depuis un lieu (1.0). */
 export function accessText(list: NearbyItem[], lang: 'fr' | 'nl' | 'local'): string {
   const station = list.find((n) => mainMode(n.area.modes) === 'train');
   const other = list.find((n) => mainMode(n.area.modes) !== 'train');
@@ -19,29 +26,92 @@ export function accessText(list: NearbyItem[], lang: 'fr' | 'nl' | 'local'): str
 
 const placeIcon = (label: string) => (/maison|domicile|chez/i.test(label) ? icon('home') : /bureau|travail|boulot/i.test(label) ? icon('work') : icon('pin'));
 
+/** Accès d'un lieu, écrit dans `el` quand les arrêts proches sont connus. */
+function fillAccess(ctx: PhoneCtx, el: Element, at: { lat: number; lon: number }): void {
+  void ctx
+    .core()
+    .then((core) => core.nearby(at.lat, at.lon, 800, { light: true }))
+    .then((items) => {
+      el.textContent = typo(accessText(items, ctx.settings.get().lang));
+    })
+    .catch(() => {
+      el.textContent = '';
+    });
+}
+
+/** Question après un nouveau lieu (S3) : le trajet depuis « Ma position », créneau proposé d'office. */
+function tripOffer(ctx: PhoneCtx, place: Place): HTMLElement {
+  const hub = messageHub();
+  const msg = hub.slot();
+  let propose: Propose = defaultSlot(place.label);
+  const add = h('button', { type: 'button', class: 'btn btn-primary' }, T.addFav);
+  const no = h('button', { type: 'button', class: 'btn btn-secondary' }, T.noThanks);
+  const qid = 'offre-trajet';
+  const actions = h('div', { class: 'confirm-actions' }, add, no);
+  const slots = radios<Propose>({
+    legend: 'Le proposer à l’ouverture',
+    value: propose,
+    options: (['never', 'near', 'morning', 'evening'] as const).map((v) => ({ value: v, label: typo(PROPOSE_LABEL[v]) })),
+    onChange: (v) => (propose = v),
+  });
+  const box = h('section', { class: 'offer box pad', 'aria-labelledby': qid }, h('p', { id: qid, class: 'confirm-q' }, typo(addTripQuestion(place.label))), slots, actions, msg);
+  const forget = (): void => {
+    // La question ne revient pas au prochain affichage de « Mes lieux ».
+    if (/[?&]nouveau=/.test(location.hash)) history.replaceState(null, '', '#/lieux');
+  };
+  add.addEventListener('click', async () => {
+    const s = ctx.settings.get();
+    const exists = s.favorites.some((f) => f.kind === 'trip' && f.from.type === 'here' && f.to.type === 'place' && f.to.placeId === place.id);
+    if (!exists && s.favorites.length >= LIMITS.favorites) return hub.say(msg, typo(`${LIMITS.favorites} favoris au plus : supprimes-en un dans Mes favoris.`), true);
+    if (!exists) {
+      const fav: FavoriteTrip = { kind: 'trip', id: newId('fav', s.favorites.map((f) => f.id)), from: { type: 'here' }, to: { type: 'place', placeId: place.id }, propose };
+      await ctx.settings.update((x) => ({ ...x, favorites: [...x.favorites, fav] }));
+    }
+    slots.remove();
+    actions.remove();
+    hub.say(msg, exists ? T.favExists : T.favAdded);
+    forget();
+  });
+  no.addEventListener('click', () => {
+    forget();
+    box.remove();
+  });
+  return box;
+}
+
 export function placesScreen(ctx: PhoneCtx): HTMLElement {
   const s = ctx.settings.get();
   const list = h('ul', { class: 'list box' });
   for (const p of s.places) {
-    const row = listRow({ icon: placeIcon(p.label), title: p.label, sub: p.address ?? coords(p), sub2: ' ', label: `Modifier ${p.label}`, onClick: () => ctx.go(`#/lieux/${encodeURIComponent(p.id)}`) });
+    const row = listRow({ icon: placeIcon(p.label), title: p.label, sub: typo(placeSubtitle(p)), sub2: ' ', label: `Modifier ${p.label}`, onClick: () => ctx.go(`#/lieux/${encodeURIComponent(p.id)}`) });
     list.appendChild(row);
-    void ctx
-      .core()
-      .then((core) => core.nearby(p.lat, p.lon, 800))
-      .then((items) => {
-        const t3 = row.querySelector('.t3');
-        if (t3) t3.textContent = accessText(items, s.lang);
-      })
-      .catch(() => {
-        const t3 = row.querySelector('.t3');
-        if (t3) t3.textContent = '';
-      });
+    const t3 = row.querySelector('.t3');
+    if (t3) fillAccess(ctx, t3, p);
   }
   if (!s.places.length) list.appendChild(h('li', { class: 'small', style: 'padding:14px 16px' }, 'Aucun lieu pour l’instant. Ajoute Maison ou Bureau.'));
+  const fresh = s.places.find((p) => p.id === ctx.params.get('nouveau'));
+  const offered = fresh && !s.favorites.some((f) => f.kind === 'trip' && f.to.type === 'place' && f.to.placeId === fresh.id);
+  const recent = s.recent.length
+    ? h(
+        'section',
+        { class: 'box pad', 'aria-labelledby': 'recents' },
+        h('h2', { id: 'recents' }, 'Adresses récentes'),
+        h('ul', { class: 'plain' }, s.recent.map((r) => h('li', { class: 'small' }, r.label))),
+        h('button', {
+          type: 'button',
+          class: 'btn btn-secondary btn-block',
+          onclick: async () => {
+            await ctx.settings.update((x) => ({ ...x, recent: [] }));
+            ctx.go('#/lieux');
+          },
+        }, T.clearRecent),
+      )
+    : null;
   return h(
     'div',
-    { style: 'display:flex;flex-direction:column;gap:16px' },
+    { class: 'screen' },
     header(ctx, 'Mes lieux', 'Les arrêts proches sont trouvés automatiquement.', { label: 'Accueil', hash: '#/' }),
+    offered ? tripOffer(ctx, fresh) : null,
     list,
     h('button', { type: 'button', class: 'btn btn-secondary btn-block', onclick: () => ctx.go('#/lieux/nouveau'), disabled: s.places.length >= LIMITS.places, html: `${ICON.plus}<span>Ajouter un lieu</span>` }),
     h(
@@ -53,131 +123,134 @@ export function placesScreen(ctx: PhoneCtx): HTMLElement {
         value: s.maxWalkMin,
         min: LIMITS.maxWalkMin[0],
         max: LIMITS.maxWalkMin[1],
-        format: (v) => `${v} min`,
+        format: (v) => typo(`${v} min`),
         less: 'Réduire la marche maximale',
         more: 'Augmenter la marche maximale',
         onChange: (v) => void ctx.settings.update((x) => ({ ...x, maxWalkMin: v })),
       }),
     ),
-    h('p', { class: 'note', html: `${ICON.clock}<span>Chaque nuit, Quai prépare les horaires du jour ; les trajets entre tes lieux sont calculés sur le téléphone, correspondances comprises.</span>` }),
+    recent,
+    h('p', { class: 'note', html: `${ICON.clock}<span>${typo('Chaque nuit, Quai prépare les horaires du jour ; les trajets entre tes lieux sont calculés sur le téléphone, correspondances comprises.')}</span>` }),
   );
 }
 
-const coords = (p: { lat: number; lon: number }): string => `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`;
-
-/** « 50.4655, 4.8590 » ou « 50,4655 ; 4,8590 » saisi dans le champ adresse. */
-export function parseCoords(text: string): { lat: number; lon: number } | null {
-  const m = /^\s*(-?\d{1,2}(?:[.,]\d+)?)\s*[,; ]\s*(-?\d{1,3}(?:[.,]\d+)?)\s*$/.exec(text);
-  if (!m) return null;
-  const lat = Number(m[1].replace(',', '.'));
-  const lon = Number(m[2].replace(',', '.'));
-  return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon } : null;
-}
+/** Position choisie pour un lieu (adresse, arrêt ou position actuelle). */
+type Spot = Pick<Place, 'lat' | 'lon' | 'src' | 'address' | 'approx' | 'areaId'>;
 
 export function placeEditScreen(ctx: PhoneCtx, id: string): HTMLElement {
   const s = ctx.settings.get();
   const existing = s.places.find((p) => p.id === id);
   const isNew = !existing;
-  const draft: Partial<Place> = existing ? { ...existing } : {};
+  let spot: Spot | null = existing ? { lat: existing.lat, lon: existing.lon, src: existing.src, address: existing.address, approx: existing.approx, areaId: existing.areaId } : null;
   const live = liveRegion();
-  const name = h('input', { id: 'pl-name', class: 'input', type: 'text', value: draft.label ?? '', maxlength: LIMITS.label, autocomplete: 'off', placeholder: 'Maison, Bureau…' });
-  const addr = h('input', { id: 'pl-addr', class: 'input', type: 'text', value: draft.address ?? '', maxlength: LIMITS.address, autocomplete: 'street-address', placeholder: 'Rue, commune (ou « 50.4655, 4.8590 »)' });
-  const where = h('p', { class: 'small', id: 'pl-where' });
-  const save = h('button', { type: 'button', class: 'btn btn-primary btn-big btn-block' }, 'Enregistrer le lieu');
+  const name = h('input', { id: 'pl-name', class: 'input', type: 'text', value: existing?.label ?? '', maxlength: LIMITS.label, autocomplete: 'off', placeholder: 'Maison, Bureau…' });
+  const save = h('button', { type: 'button', class: 'btn btn-primary btn-big btn-block', 'aria-describedby': 'pl-hint' }, T.savePlace);
+  const hint = h('p', { class: 'small muted', id: 'pl-hint' });
+  const where = h('div', { class: 'spot', 'aria-live': 'polite' });
+
   const sync = (): void => {
-    where.textContent = draft.lat !== undefined && draft.lon !== undefined ? `Position du lieu : ${coords(draft as Place)}${draft.address ? '' : ''}` : 'Position du lieu : pas encore choisie.';
-    save.disabled = !name.value.trim() || draft.lat === undefined;
+    save.disabled = !name.value.trim() || !spot;
+    hint.textContent = !name.value.trim() ? 'Donne un nom au lieu.' : !spot ? 'Choisis une adresse ou un arrêt dans la liste.' : '';
   };
-  name.addEventListener('input', sync);
-  addr.addEventListener('input', () => {
-    const c = parseCoords(addr.value);
-    if (c) {
-      draft.lat = c.lat;
-      draft.lon = c.lon;
-    }
-    sync();
+  /** Confirmation du choix : adresse normalisée (ou « Près de … »), rue sans numéro, puis l'accès. */
+  const confirmSpot = (): void => {
+    where.replaceChildren();
+    if (!spot) return;
+    const access = h('span', { class: 't3' }, '…');
+    // Lieu 1.0 pas encore vérifié : « Adresse à vérifier » est dit au-dessus, seul l'accès est rappelé ici.
+    const what = spot.src ? h('span', { class: 't1' }, typo(placeSubtitle({ id: '', label: '', ...spot }))) : null;
+    append(where, [what, spot.approx ? h('span', { class: 't2' }, typo(T.approx)) : null, access]);
+    fillAccess(ctx, access, spot);
+  };
+
+  const legacy = existing && needsCheck(existing);
+  const field = placeField(ctx, {
+    id: 'pl-addr',
+    label: 'Adresse',
+    placeholder: T.addrPlaceholder,
+    value: existing && !legacy ? (existing.src === 'stop' ? legacyQuery(existing) : existing.src === 'address' ? existing.address : undefined) : undefined,
+    recent: true,
+    onPick: (c) => {
+      if (c.kind === 'address') spot = { lat: c.lat, lon: c.lon, src: 'address', address: c.label, approx: c.approx || undefined };
+      else if (c.kind === 'stop') spot = { lat: c.item.lat, lon: c.item.lon, src: 'stop', address: `Près de ${c.label}`, areaId: c.item.id };
+      else if (c.kind === 'place') spot = { lat: c.place.lat, lon: c.place.lon, src: c.place.src, address: c.place.address, approx: c.place.approx, areaId: c.place.areaId };
+      if (!name.value.trim() && c.kind === 'stop') name.value = c.label.slice(0, LIMITS.label);
+      live.say('');
+      confirmSpot();
+      sync();
+    },
   });
-  const here = h('button', { type: 'button', class: 'btn btn-secondary btn-block', html: `${ICON.pin}<span>Utiliser ma position actuelle</span>` });
+  // Lieu 1.0 : le texte libre est gardé tel quel, prêt à être vérifié (CA-M4.10).
+  if (legacy) field.input.value = existing.address ?? '';
+
+  const here = h('button', { type: 'button', class: 'btn btn-secondary btn-block here-btn', html: `${ICON.pin}<span class="cc"><span>${T.useHere}</span><span class="sub">${T.hereSub}</span></span>` });
   here.addEventListener('click', async () => {
     live.say('Recherche de la position…');
     const fix = await ctx.location.current(10_000);
-    if (!fix) return live.say(ctx.web ? 'Position indisponible : autorise-la dans le navigateur, ou place le lieu près d’un arrêt ci-dessous.' : 'Position indisponible : autorise la position pour Quai dans l’appli Even.', true);
-    draft.lat = Math.round(fix.lat * 1e5) / 1e5;
-    draft.lon = Math.round(fix.lon * 1e5) / 1e5;
+    if (!fix) {
+      live.say(typo(ctx.web ? 'Position indisponible : autorise-la dans le navigateur, ou choisis une adresse ou un arrêt.' : 'Position indisponible : autorise la position pour Quai dans l’appli Even.'), true);
+      return;
+    }
+    spot = { lat: Math.round(fix.lat * 1e5) / 1e5, lon: Math.round(fix.lon * 1e5) / 1e5, src: 'here' };
+    field.show('');
     live.say('Position actuelle enregistrée pour ce lieu.');
+    confirmSpot();
     sync();
   });
-  const stopQ = h('input', { id: 'pl-stop', class: 'input', type: 'search', autocomplete: 'off', placeholder: 'Nom d’un arrêt ou d’une gare' });
-  const results = h('ul', { class: 'suggest', 'aria-label': 'Arrêts proposés' });
-  const search = debounce(async () => {
-    const q = stopQ.value.trim();
-    results.replaceChildren();
-    if (q.length < 2) return;
-    try {
-      const core = await ctx.core();
-      const items: SearchItem[] = await core.search(q, ctx.location.last() ?? undefined);
-      for (const it of items.slice(0, 6)) {
-        results.appendChild(
-          h(
-            'li',
-            null,
-            h(
-              'button',
-              {
-                type: 'button',
-                onclick: () => {
-                  draft.lat = it.lat;
-                  draft.lon = it.lon;
-                  if (!addr.value.trim()) {
-                    addr.value = `Près de ${displayName(it.n, s.lang)}`;
-                    draft.address = addr.value;
-                  }
-                  results.replaceChildren();
-                  stopQ.value = '';
-                  live.say(`Lieu placé près de ${displayName(it.n, s.lang)}.`);
-                  sync();
-                },
-              },
-              h('span', { class: 's1' }, displayName(it.n, s.lang)),
-              h('span', { class: 's2' }, it.kindLabel),
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      live.say(e instanceof Error ? e.message : 'Recherche impossible', true);
-    }
-  }, 250);
-  stopQ.addEventListener('input', search);
+
+  name.addEventListener('input', sync);
   save.addEventListener('click', async () => {
     const label = name.value.trim();
-    if (!label || draft.lat === undefined || draft.lon === undefined) return;
-    const place: Place = { id: existing?.id ?? newId('lieu', s.places.map((p) => p.id)), label, lat: draft.lat, lon: draft.lon };
-    const a = addr.value.trim();
-    if (a) place.address = a;
+    if (!label || !spot) return;
+    const place: Place = { id: existing?.id ?? newId('lieu', ctx.settings.get().places.map((p) => p.id)), label, lat: spot.lat, lon: spot.lon };
+    if (spot.address) place.address = spot.address;
+    if (spot.src) place.src = spot.src;
+    if (spot.approx) place.approx = true;
+    if (spot.areaId) place.areaId = spot.areaId;
     await ctx.settings.update((x) => ({ ...x, places: isNew ? [...x.places, place] : x.places.map((p) => (p.id === place.id ? place : p)) }));
-    ctx.go('#/lieux');
+    ctx.go(isNew ? `#/lieux?nouveau=${encodeURIComponent(place.id)}` : '#/lieux');
   });
+
+  const verify = legacy
+    ? h(
+        'div',
+        { class: 'box pad verify' },
+        h('strong', null, T.toVerify),
+        h('span', null, typo(`Texte enregistré avec la version précédente : « ${existing.address} ».`)),
+        h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => field.search(legacyQuery(existing)) }, T.verify),
+      )
+    : null;
   const del = existing
-    ? h('button', {
-        type: 'button',
-        class: 'btn btn-danger btn-block',
-        onclick: async () => {
-          if (!window.confirm(`Supprimer le lieu « ${existing.label} » ?`)) return;
-          await ctx.settings.update((x) => ({ ...x, places: x.places.filter((p) => p.id !== existing.id), favorites: x.favorites.filter((f) => !(f.kind === 'trip' && [f.from, f.to].some((e) => e.type === 'place' && e.placeId === existing.id))) }));
+    ? confirmInPage({
+        trigger: 'Supprimer ce lieu',
+        question: typo(removePlaceText(existing.label)),
+        confirm: T.remove,
+        cancel: T.cancel,
+        onConfirm: async () => {
+          await ctx.settings.update((x) => ({
+            ...x,
+            places: x.places.filter((p) => p.id !== existing.id),
+            favorites: x.favorites.filter((f) => !(f.kind === 'trip' && [f.from, f.to].some((e) => e.type === 'place' && e.placeId === existing.id))),
+          }));
           ctx.go('#/lieux');
         },
-      }, 'Supprimer ce lieu')
+      })
     : null;
+  if (existing) confirmSpot();
   sync();
   return h(
     'div',
-    { style: 'display:flex;flex-direction:column;gap:16px' },
+    { class: 'screen' },
     header(ctx, isNew ? 'Nouveau lieu' : existing!.label, undefined, { label: 'Mes lieux', hash: '#/lieux' }),
-    h('div', { class: 'field' }, h('label', { for: 'pl-name' }, 'Nom du lieu'), name),
-    h('div', { class: 'field' }, h('label', { for: 'pl-addr' }, 'Adresse (texte libre)'), addr),
-    h('section', { class: 'box pad' }, h('h2', null, 'Position du lieu'), where, here, h('div', { class: 'field' }, h('label', { for: 'pl-stop' }, 'Ou placer le lieu près d’un arrêt'), stopQ), results, live.el),
+    h('div', { class: 'field' }, h('label', { for: 'pl-name' }, 'Nom du lieu'), name, nameShortcuts(name)),
+    verify,
+    field.el,
+    where,
+    here,
+    live.el,
+    privacyNote(),
     save,
+    hint,
     del,
   );
 }

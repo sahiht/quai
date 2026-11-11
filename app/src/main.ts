@@ -58,7 +58,7 @@ async function main(): Promise<void> {
   } catch (e) {
     console.error('[Quai] cœur absent', e);
     await started;
-    const msg = layoutPage(messageView('Quai', ['Le cœur de l’appli est absent :', 'app/src/core/index.ts (équipe cœur).', 'En développement : ajouter ?fake=1.'], { now: clock.now(), settings: settings.get() }), { sel: 0, top: 0 });
+    const msg = layoutPage(messageView('Quai', ['Le cœur de l’appli est absent\u00a0:', 'app/src/core/index.ts (équipe cœur).', 'En développement\u00a0: ajouter ?fake=1.'], { now: clock.now(), settings: settings.get() }), { sel: 0, top: 0 });
     await platform.glasses.rebuild(msg.containers);
     root.replaceChildren(Object.assign(document.createElement('p'), { className: 'warn', textContent: 'Le cœur de l’appli est absent (app/src/core/index.ts). En développement, ajoutez ?fake=1 à l’adresse.' }));
     return;
@@ -104,5 +104,5 @@ async function main(): Promise<void> {
 void main().catch((e) => {
   console.error('[Quai] démarrage', e);
   const root = document.getElementById('app');
-  if (root) root.textContent = `Quai n’a pas pu démarrer : ${e instanceof Error ? e.message : String(e)}`;
+  if (root) root.textContent = `Quai n’a pas pu démarrer\u00a0: ${e instanceof Error ? e.message : String(e)}`;
 });

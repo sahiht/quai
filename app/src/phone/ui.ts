@@ -104,6 +104,101 @@ export function listRow(opts: { icon: Child; title: string; sub?: string; sub2?:
   );
 }
 
+/**
+ * Messages d'état à côté des boutons touchés (PRD M4.5) : un seul message à la fois sur l'écran, les autres
+ * emplacements sont vidés. Chaque emplacement est annoncé aux lecteurs d'écran.
+ */
+export interface MessageHub {
+  slot(): HTMLParagraphElement;
+  say(slot: HTMLElement, text: string, error?: boolean): void;
+  clear(): void;
+}
+
+export function messageHub(): MessageHub {
+  const slots = new Set<HTMLElement>();
+  const reset = (el: HTMLElement): void => {
+    el.textContent = '';
+    el.classList.remove('err');
+  };
+  return {
+    slot() {
+      const p = h('p', { class: 'msg', role: 'status', 'aria-live': 'polite' });
+      slots.add(p);
+      return p;
+    },
+    say(slot, text, error = false) {
+      for (const el of [...slots]) {
+        if (el === slot) continue;
+        if (!el.isConnected) slots.delete(el);
+        else reset(el);
+      }
+      slots.add(slot);
+      slot.textContent = text;
+      slot.classList.toggle('err', error);
+    },
+    clear() {
+      for (const el of slots) reset(el);
+    },
+  };
+}
+
+/**
+ * Confirmation dans la page (S6), jamais de boîte du système : le bouton déclencheur laisse place à la question,
+ * « Supprimer » et « Annuler ».
+ */
+export function confirmInPage(opts: { trigger: string; question: string; confirm: string; cancel: string; onConfirm: () => void | Promise<void> }): HTMLElement {
+  const wrap = h('div', { class: 'confirm-wrap' });
+  const qid = nextId('confirm');
+  const trigger = h('button', { type: 'button', class: 'btn btn-danger btn-block' }, opts.trigger);
+  const yes = h('button', { type: 'button', class: 'btn btn-danger-solid' }, opts.confirm);
+  const no = h('button', { type: 'button', class: 'btn btn-secondary' }, opts.cancel);
+  const box = h('div', { class: 'confirm', role: 'group', 'aria-labelledby': qid }, h('p', { id: qid, class: 'confirm-q' }, opts.question), h('div', { class: 'confirm-actions' }, yes, no));
+  const showTrigger = (): void => {
+    wrap.replaceChildren(trigger);
+  };
+  trigger.addEventListener('click', () => {
+    wrap.replaceChildren(box);
+    no.focus();
+  });
+  no.addEventListener('click', () => {
+    showTrigger();
+    trigger.focus();
+  });
+  yes.addEventListener('click', async () => {
+    yes.disabled = true;
+    try {
+      await opts.onConfirm();
+    } finally {
+      yes.disabled = false;
+    }
+  });
+  showTrigger();
+  return wrap;
+}
+
+/** Raccourcis de nom touchables (« Maison », « Bureau », « École ») qui remplissent un champ. */
+export function nameShortcuts(input: HTMLInputElement, onPick?: (name: string) => void, names: readonly string[] = ['Maison', 'Bureau', 'École']): HTMLElement {
+  return h(
+    'div',
+    { class: 'shortcuts', role: 'group', 'aria-label': 'Noms proposés' },
+    names.map((n) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'shortcut',
+          onclick: () => {
+            input.value = n;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            onPick?.(n);
+          },
+        },
+        n,
+      ),
+    ),
+  );
+}
+
 /** Dessin d'un aperçu dans sa boîte (Quai Web : même rendu que l'écran des lunettes de la page). */
 export type PreviewPainter = (box: HTMLElement, containers: ContainerSpec[]) => void;
 let previewPainter: PreviewPainter | null = null;

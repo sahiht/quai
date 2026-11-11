@@ -16,7 +16,9 @@ describe('init et fichiers statiques', () => {
   it('meta.json absent : erreur lisible en français', async () => {
     const env = makeEnv({ now: '2026-11-10T12:10' });
     env.server.overrides.set('/quai/data/meta.json', () => new Response('Not Found', { status: 404 }));
-    await expect(env.core.init()).rejects.toThrow('Données indisponibles : vérifie la publication de cette nuit');
+    // Le serveur répond sans le fichier : la publication est en cause (PRD M8.6).
+    await expect(env.core.init()).rejects.toThrow('Données indisponibles\u00a0: vérifie la publication de cette nuit');
+    await expect(env.core.init()).rejects.toMatchObject({ code: 'dataUnavailable' });
     await expect(env.core.board('stib:6357F')).rejects.toThrow('Données indisponibles');
     expect(env.core.meta).toBeNull();
   });
@@ -46,7 +48,8 @@ describe('init et fichiers statiques', () => {
       return new Promise<Response>(() => undefined);
     });
     const p = env.core.init();
-    const check = expect(p).rejects.toThrow('Données indisponibles');
+    // Serveur injoignable (délai dépassé) : « Horaires injoignables : nouvel essai dans 30 s » (PRD M8.6).
+    const check = expect(p).rejects.toMatchObject({ code: 'dataUnreachable', message: 'Horaires injoignables\u00a0: nouvel essai dans 30\u00a0s' });
     await vi.advanceTimersByTimeAsync(9_999);
     expect(calls).toBe(1);
     await vi.advanceTimersByTimeAsync(2);
@@ -79,7 +82,7 @@ describe('init et fichiers statiques', () => {
     expect(board.departures).toHaveLength(2);
     expect(board.rtErrors).toEqual(['stib']);
     expect((await b.core.search('Gand')).length).toBeGreaterThan(3);
-    await expect(b.core.board('stib:6359')).rejects.toThrow('Données indisponibles');
+    await expect(b.core.board('stib:6359')).rejects.toMatchObject({ code: 'dataUnreachable' });
   });
 
   it('cache persistant borné : emplacements fixes réutilisés, fichiers trop gros ignorés, nouvelle génération', async () => {

@@ -81,3 +81,32 @@ Ensuite : contrôle qualité de bout en bout (`tests/e2e/**`, simulateur), puis 
 - Pas de `git commit` ni de `git push` : le responsable technique s'en charge.
 - Chaque équipe lance les tests et la vérification des types de son paquet avant de rendre son travail.
 - Rapport final court : fichiers modifiés, tests ajoutés et résultat, écarts au PRD, points ouverts.
+
+## 7. Ajustements décidés pendant la construction
+
+- `FavoriteAnswer.state` 'none' = aucun trajet ni départ dans l'horizon de recherche (environ 23 h). Une réponse
+  lointaine reste 'ok' (« partir à 17:13 », « partir demain 06:20 ») ; la règle 5 de l'ordre (« rien dans les
+  3 heures ») se lit sur l'heure de la réponse.
+- CA-M2.7 (trajet à pied) : la position du PRD (50.8460, 4.3500) est à 279 m du Bureau, donc « tu y es ». Le test
+  utilise (50.8480, 4.3520), à 9 min à pied.
+- M8.6 : nouveau code `QuaiError` 'dataUnreachable' (« Horaires injoignables : nouvel essai dans 30 s ») pour
+  réseau coupé, délai dépassé ou erreur serveur ; 'dataUnavailable' seulement quand le serveur répond sans le
+  fichier. `tests/e2e/robustness.test.ts` est à aligner au contrôle qualité.
+- Réseau de test 1.1 (équipe données) : scénario 4 de Waterloo vers « Rue du Progrès 20, 1210 Saint-Josse-ten-Noode »
+  (3 min de Rogier) ; le T3 vers Esplanade ne s'arrête plus à Gare du Midi ; Roi Baudouin déplacé de 25 m.
+  Valeurs attendues : `fixtures/README.md`, section « Extension 1.1 ».
+- CA-M2.1 et CA-M2.2 : le 10/11, le réseau de test n'a que deux IC du matin depuis Namur (07:42 et 08:42). Le
+  trajet Maison → Bureau a donc deux propositions (« Le plus simple », puis « Le suivant : même trajet, 1 h plus
+  tard ») et ▼ sur la page 2 affiche « Pas d’autre trajet pour l’instant ». La navigation sur trois pages se teste
+  sur un cas qui a trois propositions : Rue Neuve 1 en scène noRT (simple 07:33 → 08:56, fast 07:33 → 08:51,
+  next 08:33 → 09:56) ou Waterloo à 07:31 (simple 07:32 → 08:46, fast 07:34 → 08:30, next 07:52 → 09:04).
+- `Journey.reason` : une ligne des lunettes mesurée au pixel (542 px), pas 48 caractères ; trois marches restent
+  listées comme dans le PRD (« Le plus simple : 1 changement, à pied 2 + 1 + 1 min »).
+- Lunettes : toucher un autre favori ou un lieu pendant un trajet en cours montre la proposition sans remplacer le
+  trajet suivi ; il faut toucher pour le suivre (« Trajet suivi : … »). Toucher le favori du trajet en cours rouvre
+  ce trajet. Dernière page des étapes : la ligne du bas reste « ▲ trajet précédent », ▼ affiche « Pas d’autre trajet
+  pour l’instant ». Hors ligne, la ligne du haut dit « Pas de réseau : horaires prévus ~ ». Validé.
+- Téléphone : réponse courte d'un trajet favori « partir à 07:33 » (pas de compte à rebours) ; enregistrer un lieu
+  sous un nom existant met ce lieu à jour (favoris gardés) ; carte « Adresses » « Disponible, sauf en Wallonie »
+  quand une seule Région est en panne ; le téléphone n'écrit jamais seenVersion. Validé.
+

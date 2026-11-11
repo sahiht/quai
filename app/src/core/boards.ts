@@ -2,12 +2,13 @@
  * Tableaux de départs : horaires statiques + temps réel (par lots, pour plusieurs zones à la fois).
  */
 import type { Mode, Names, Op } from '../../../shared/types';
-import { prettyName } from '../../../shared/names';
+import { normalizeForSearch, prettyName } from '../../../shared/names';
+import { normalizeId } from '../../../shared/types';
 import type { Board, Departure, LineFilter } from './api';
 import { lowerBound, type PreparedArea } from './areas';
 import type { RealtimeClient, RtTrip, StibEntry } from './realtime';
 import { stibPoint } from './realtime';
-import { delayMinutes, headKey, headScore, rtAtStop, rtOccurrence } from './rtmerge';
+import { delayMinutes, headKey, headScore, platformOfStopId, rtAtStop, rtOccurrence, sameStop } from './rtmerge';
 
 /** Fenêtre : départs depuis maintenant - 1 min ; voyages GTFS-RT déjà partis en théorie mais en retard : 30 min. */
 const PAST_MS = 60_000;
@@ -262,6 +263,42 @@ export function mergeStib(
 
 const byEst = (a: Departure, b: Departure) => a.est - b.est || a.sched - b.sched || a.line.localeCompare(b.line);
 
+/**
+ * Garde-fou M8.2 (le pipeline 1.1 dédoublonne déjà) : un départ par voyage dans la zone, et un seul départ de même
+ * ligne, même destination et même heure prévue (doublons SNCB de trip_id différents) ; le premier (trié) l'emporte,
+ * en préférant celui qui a du temps réel.
+ */
+export function uniqueDepartures(deps: readonly Departure[]): Departure[] {
+  const out: Departure[] = [];
+  const byTrip = new Map<string, number>();
+  const byKey = new Map<string, number>();
+  for (const d of deps) {
+    const tk = d.tripId ? normalizeId(d.tripId) : '';
+    const key = `${d.line}|${normalizeForSearch(d.head.fr)}|${d.sched}`;
+    const prev = (tk ? byTrip.get(tk) : undefined) ?? byKey.get(key);
+    if (prev !== undefined) {
+      if (!out[prev].rt && d.rt) out[prev] = d;
+      continue;
+    }
+    if (tk) byTrip.set(tk, out.length);
+    byKey.set(key, out.length);
+    out.push(d);
+  }
+  return out;
+}
+
+/** Pendant une panne : suppression, arrêt sauté ou voie modifiée déjà connus, sans retard (horaire prévu, « ~ »). */
+export function applyMemory(d: Departure, mem: RtTrip, stopRt: string | undefined): Departure {
+  const out: Departure = { ...d, rt: false, est: d.sched, delayMin: 0 };
+  if (mem.cancelled) return { ...out, cancelled: true };
+  const u = mem.u.find((x) => (x[0] !== null && d.stopSeq !== undefined && x[0] === d.stopSeq) || sameStop(x[1], stopRt ?? d.stopId));
+  if (u?.[4] === 1) return { ...out, cancelled: true };
+  const p = platformOfStopId(u?.[1]);
+  const planned = d.platform || platformOfStopId(d.stopId);
+  if (p && planned && p !== planned) out.newPlatform = p;
+  return out;
+}
+
 /** Calcule plusieurs tableaux en groupant les appels au relais (un lot par opérateur). */
 export async function buildBoards(reqs: BoardRequest[], rt: RealtimeClient, now: number): Promise<Board[]> {
   const cands = reqs.map((r) => candidates(r.prep, now, r.limit, patternFilter(r.prep, r.filter)));
@@ -304,8 +341,12 @@ export async function buildBoards(reqs: BoardRequest[], rt: RealtimeClient, now:
         const base = staticDeparture(prep, c.di, c.t);
         const st = prep.file.stops[prep.file.deps[c.di][3]];
         // le flux est indexé par trip_id sans date : seulement pour l'occurrence proche de maintenant
-        const trip = base.tripId && rtOccurrence(c.t, now) ? res?.map.get(base.tripId) : undefined;
-        const d = applyTripToDeparture(base, trip, st?.rt);
+        const live = !!base.tripId && rtOccurrence(c.t, now);
+        const trip = live ? res?.map.get(normalizeId(base.tripId!)) : undefined;
+        let d = applyTripToDeparture(base, trip, st?.rt);
+        // panne (M8.5) : suppressions et voies modifiées déjà connues, horaire prévu
+        const mem = live && !trip ? res?.remembered?.get(normalizeId(base.tripId!)) : undefined;
+        if (mem) d = applyMemory(d, mem, st?.rt);
         if (d.est < now - PAST_MS) continue;
         if (!d.rt && d.sched < now - PAST_MS) continue;
         if (d.cancelled && d.sched < now - PAST_MS) continue;
@@ -313,7 +354,7 @@ export async function buildBoards(reqs: BoardRequest[], rt: RealtimeClient, now:
       }
     }
     deps.sort(byEst);
-    const departures = deps.slice(0, Math.max(0, r.limit));
+    const departures = uniqueDepartures(deps).slice(0, Math.max(0, r.limit));
     return {
       area: prep.summary,
       departures,

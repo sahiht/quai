@@ -12,9 +12,10 @@
  *    pour les arrêts et field_value pour les destinations.
  *  - De Lijn : suffixe « perron N » ; pas de translations.txt ; stop_times.txt avec colonnes dans un ordre
  *    non standard ; colonne supplémentaire inconnue dans trips.txt ; route_type 700 ; pickup_type/drop_off_type 1
- *    aux terminus.
+ *    aux terminus ; trams avec le préfixe déjà dans route_short_name (« T1 », network.json dit « 1 »).
  *  - TEC : suffixe « quai X » ; stops.txt avec BOM UTF-8, colonne stop_desc entre guillemets contenant une
- *    virgule et des guillemets échappés ; heures sans zéro initial (6:00:00) ; voyage de nuit à 24:10.
+ *    virgule et des guillemets échappés ; heures sans zéro initial (6:00:00) ; voyage de nuit à 24:10 ;
+ *    ligne W avec la commune en capitales dans les noms (« WATERLOO Eglise », « BRAINE-L'ALLEUD Gare »).
  *  - Tous : calendar.txt + calendar_dates.txt (WEEK retiré le 2026-11-11, HOLI ajouté), feed_info.txt avec feed_version.
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -164,6 +165,7 @@ const SNCB_DE_EN: Record<string, [string, string]> = {
   '8822004': ['Mecheln', 'Mechelen'],
   '8821006': ['Antwerpen-Zentral', 'Antwerp-Central'],
   '8883006': ['Nivelles', 'Nivelles'],
+  '8814266': ['Waterloo', 'Waterloo'],
 };
 
 function sncbFeed(net: Network): Record<string, string> {
@@ -268,8 +270,9 @@ function delijnFeed(net: Network): Record<string, string> {
     'agency.txt': agencyFile(o.agency, '\n'),
     'stops.txt': csv(['stop_id', 'stop_code', 'stop_name', 'stop_desc', 'stop_lat', 'stop_lon', 'location_type', 'parent_station', 'wheelchair_boarding'],
       o.stops.map((s) => [s.id, s.id.slice(1), s.name, '', s.lat.toFixed(5), s.lon.toFixed(5), 0, '', 1])),
+    // comme le vrai flux : les trams portent déjà le préfixe dans route_short_name (« T1 ») ; le pipeline doit rendre « 1 »
     'routes.txt': csv(['route_id', 'agency_id', 'route_short_name', 'route_long_name', 'route_type', 'route_color', 'route_text_color'],
-      o.routes.map((r) => [r.id, o.agency.id, r.short, r.long, r.type, 'FFFF00', '000000'])),
+      o.routes.map((r) => [r.id, o.agency.id, r.type === 0 || (r.type >= 900 && r.type <= 906) ? `T${r.short}` : r.short, r.long, r.type, 'FFFF00', '000000'])),
     'trips.txt': csv(['route_id', 'service_id', 'trip_id', 'trip_headsign', 'trip_short_name', 'direction_id', 'block_id', 'shape_id', 'exceptional'],
       trips.map((t) => [t.route, t.service, t.id, t.head, '', t.id.startsWith('70002') ? 1 : 0, '', '', 0])),
     'stop_times.txt': csv(['stop_sequence', 'stop_id', 'trip_id', 'departure_time', 'arrival_time', 'pickup_type', 'drop_off_type', 'timepoint', 'shape_dist_traveled'], stopTimes),

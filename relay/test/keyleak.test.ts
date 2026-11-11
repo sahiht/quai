@@ -4,8 +4,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import { handleAlerts, handleHealth, handleRt, handleStib } from '../lib/handlers.js';
+import { handleGeocode } from '../lib/geocode/service.js';
 import { scrub, secretsFrom } from '../lib/log.js';
-import { bmcRoute, call, jsonBody, makeCtx, never, protobuf, type Result, type Route } from './helpers.js';
+import { bmcRoute, call, jsonBody, makeCtx, never, protobuf, stackRoute, type Result, type Route } from './helpers.js';
 
 const KEY = 'K3Y-tres-secrete-7c41a9';
 const TOKEN = 'jeton-sncb-9d8e7f6a5b4c';
@@ -30,12 +31,16 @@ const PATHS = [
   '/api/rt?op=stib&trips=1',
   `/api/rt?op=sncb&trips=${KEY}`,
   '/api/stib?points=abc',
+  '/api/geocode?q=rue%20de%20fer%2025%20namur',
+  '/api/geocode?q=rue%20de%20fer%2025&lang=nl',
+  '/api/geocode?q=ab',
 ];
 
 function handlerFor(path: string) {
   if (path.startsWith('/api/rt')) return handleRt;
   if (path.startsWith('/api/stib')) return handleStib;
   if (path.startsWith('/api/alerts')) return handleAlerts;
+  if (path.startsWith('/api/geocode')) return handleGeocode;
   return handleHealth;
 }
 
@@ -71,13 +76,14 @@ describe('la clé ne fuit jamais', () => {
     }
   });
 
-  it('la clé n’est envoyée qu’au portail BMC, jamais au flux direct ni au site de données', async () => {
-    const t = makeCtx({ env: { BMC_KEY: KEY, SNCB_RT_URL: DIRECT.replace(`user:${TOKEN}@`, ''), DATA_BASE: 'https://data.test/d' }, route: bmcRoute({ key: KEY }) });
+  it('la clé n’est envoyée qu’au portail BMC, jamais au flux direct, au site de données ni aux services d’adresses', async () => {
+    const t = makeCtx({ env: { BMC_KEY: KEY, SNCB_RT_URL: DIRECT.replace(`user:${TOKEN}@`, ''), DATA_BASE: 'https://data.test/d' }, route: stackRoute({ key: KEY }) });
     await call(handleHealth, '/api/health', t.ctx);
     await call(handleRt, `/api/rt?op=sncb&trips=${S1}`, t.ctx);
+    await call(handleGeocode, '/api/geocode?q=rue%20de%20fer%2025', t.ctx);
     const outside = t.calls.filter((c) => !c.url.startsWith('https://bmc.test/'));
-    expect(outside.length).toBeGreaterThanOrEqual(2);
-    for (const c of outside) expect(JSON.stringify(c.headers)).not.toContain(KEY);
+    expect(outside.length).toBeGreaterThanOrEqual(8);
+    for (const c of outside) expect(`${c.url} ${JSON.stringify(c.headers)}`).not.toContain(KEY);
   });
 
   it('scrub masque la clé, SNCB_RT_URL (en entier ou en partie) et les chaînes de requête', () => {

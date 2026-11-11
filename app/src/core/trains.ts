@@ -1,23 +1,28 @@
 /**
- * Trains d'une gare à une autre, direct ou avec une correspondance, sur les fichiers trains/{date}.json
- * des deux jours couverts (heures absolues : un voyage de la veille après minuit est pris en compte).
+ * Trains d'une gare à une autre (direct, une ou deux correspondances, PRD M5c) sur les fichiers trains/{date}.json
+ * des jours couverts (heures absolues : un voyage de la veille après minuit est pris en compte).
  *
- * Balayage des connexions par profil : pour la gare d'arrivée B, on construit pour chaque gare X la liste
- * (départ de X, arrivée à B) de tous les trains qui desservent X puis B, triée par départ, avec le minimum
- * suffixe des arrivées. Pour chaque train au départ de A, chaque arrêt X suivant donne en une recherche
- * dichotomique la meilleure correspondance (au moins 4 min en gare, autre voyage).
- * Puis filtre de Pareto sur (départ plus tard, arrivée plus tôt, moins de correspondances).
+ * 1.1 : même calcul que les trajets porte à porte (RAPTOR par rondes sur une plage de départs, routing/raptor.ts),
+ * sur les seuls trains : trois trains au plus, au moins 4 min de correspondance dans une gare, attente de 60 min au
+ * plus, montée et descente seulement là où elles sont permises (TrainsDay : -1 = interdit ; un fichier sans -1, celui
+ * de la 1.0, permet tout), jamais une correspondance qui ne fait gagner que moins de 5 min sur le même premier train.
+ * Puis filtre de Pareto (départ plus tard, arrivée plus tôt, moins de correspondances), un trajet par identité.
  */
 import type { Names, TrainsDay } from '../../../shared/types';
 import type { Leg, Stopover } from './api';
+import { Net, trainPart, trainTimes, trainTripOf, type TrainPart } from './routing/network';
+import { P } from './routing/params';
+import { raptor, type Cand } from './routing/raptor';
 import { serviceDayBase } from './util';
 
-export const MIN_TRANSFER_MS = 4 * 60_000;
+export const MIN_TRANSFER_MS = P.mctStation * 60_000;
 /**
  * Trajets proposés : ceux qui partent dans les 23 h ; sinon le premier trouvé. Moins de 24 h : un trajet du
  * lendemain a toujours une heure de départ antérieure à l'heure actuelle (pas de confusion avec ceux du jour).
  */
 export const JOURNEY_HORIZON_MS = 23 * 3_600_000;
+/** Plage de départs parcourue d'abord (puis tout l'horizon s'il manque des trajets). */
+const FIRST_WINDOW_MIN = 4 * 60;
 
 /** Un seul élément par identité, le meilleur selon `better` ; l'ordre de la liste est conservé. */
 export function uniqueBy<T>(list: readonly T[], key: (x: T) => string, better: (a: T, b: T) => boolean): T[] {
@@ -34,17 +39,6 @@ export function uniqueBy<T>(list: readonly T[], key: (x: T) => string, better: (
 export function withinHorizon<T extends { dep: number }>(list: readonly T[], after: number, horizonMs: number): T[] {
   const inside = list.filter((x) => x.dep <= after + horizonMs);
   return inside.length ? inside : list.slice(0, 1);
-}
-
-/** Identité d'une option : voyages et gares de montée/descente, sans la date (un même train circule chaque jour). */
-export function optionIdentity(o: TrainOption): string {
-  return o.rides
-    .map((r) => {
-      const t = r.day.file.trips[r.trip];
-      const st = (p: number) => r.day.file.stations[t.s[p][0]]?.id ?? '';
-      return `${t.id}@${st(r.i)}>${st(r.k)}`;
-    })
-    .join('|');
 }
 
 export interface DayIndex {
@@ -68,14 +62,15 @@ export interface TrainOption {
   rides: TrainRide[];
 }
 
-interface Profile {
-  dep: number[];
-  arr: number[];
-  day: DayIndex[];
-  trip: number[];
-  posX: number[];
-  posB: number[];
-  best: number[]; // index du minimum suffixe des arrivées
+/** Identité d'une option : voyages et gares de montée/descente, sans la date (un même train circule chaque jour). */
+export function optionIdentity(o: TrainOption): string {
+  return o.rides
+    .map((r) => {
+      const t = r.day.file.trips[r.trip];
+      const st = (p: number) => r.day.file.stations[t.s[p][0]]?.id ?? '';
+      return `${t.id}@${st(r.i)}>${st(r.k)}`;
+    })
+    .join('|');
 }
 
 const indexes = new WeakMap<TrainsDay, DayIndex>();
@@ -101,126 +96,80 @@ export function indexDay(file: TrainsDay): DayIndex {
 }
 
 const ms = (d: DayIndex, minutes: number) => d.base + minutes * 60_000;
+const trainNets = new WeakMap<TrainPart, Net>();
 
-export class TrainEngine {
-  private profiles: { days: DayIndex[]; to: string; prof: Map<string, Profile> }[] = [];
-
-  search(days: DayIndex[], fromId: string, toId: string, after: number, limit: number): TrainOption[] {
-    if (!fromId || !toId || fromId === toId || limit <= 0) return [];
-    const prof = this.profileTo(days, toId);
-    const cands: TrainOption[] = [];
-    for (const d of days) {
-      const ev = d.byStation.get(fromId);
-      if (!ev) continue;
-      for (let e = 0; e < ev.length; e += 2) {
-        const ti = ev[e];
-        const i = ev[e + 1];
-        const s = d.file.trips[ti].s;
-        const dep = ms(d, s[i][2]);
-        if (dep < after) continue;
-        let best: TrainOption | null = null;
-        let bestBuf = -1;
-        for (let k = i + 1; k < s.length; k++) {
-          const sid = d.file.stations[s[k][0]]?.id;
-          if (!sid) continue;
-          if (sid === fromId) break;
-          const arrK = ms(d, s[k][1]);
-          if (sid === toId) {
-            cands.push({ dep, arr: arrK, rides: [{ day: d, trip: ti, i, k }] });
-            break;
-          }
-          const P = prof.get(sid);
-          if (!P) continue;
-          const at = lowerBound(P.dep, arrK + MIN_TRANSFER_MS);
-          if (at >= P.dep.length) continue;
-          const b = P.best[at];
-          if (P.day[b] === d && P.trip[b] === ti) continue; // même voyage : le direct le couvre
-          const arr = P.arr[b];
-          const buf = P.dep[b] - arrK;
-          if (!best || arr < best.arr || (arr === best.arr && buf > bestBuf)) {
-            best = { dep, arr, rides: [{ day: d, trip: ti, i, k }, { day: P.day[b], trip: P.trip[b], i: P.posX[b], k: P.posB[b] }] };
-            bestBuf = buf;
-          }
-        }
-        if (best) cands.push(best);
-      }
-    }
-    const unique = uniqueBy(pareto(cands), optionIdentity, (a, b) => a.arr < b.arr || (a.arr === b.arr && a.dep > b.dep));
-    return withinHorizon(unique, after, JOURNEY_HORIZON_MS).slice(0, limit);
+/** Réseau des seuls trains (sans marche entre gares), gardé en mémoire pour les mêmes fichiers. */
+function trainNet(days: DayIndex[]): Net | null {
+  if (!days.length) return null;
+  const base0 = Math.min(...days.map((d) => d.base));
+  const part = trainPart(
+    days.map((d) => d.file),
+    base0,
+  );
+  let net = trainNets.get(part);
+  if (!net) {
+    net = new Net(base0, part).finish(false);
+    trainNets.set(part, net);
   }
-
-  private profileTo(days: DayIndex[], toId: string): Map<string, Profile> {
-    const hit = this.profiles.find((p) => p.to === toId && p.days.length === days.length && p.days.every((d, i) => d === days[i]));
-    if (hit) return hit.prof;
-    const tmp = new Map<string, { dep: number; arr: number; day: DayIndex; trip: number; posX: number; posB: number }[]>();
-    for (const d of days) {
-      const ev = d.byStation.get(toId);
-      if (!ev) continue;
-      for (let e = 0; e < ev.length; e += 2) {
-        const ti = ev[e];
-        const j = ev[e + 1];
-        const s = d.file.trips[ti].s;
-        const arrB = ms(d, s[j][1]);
-        for (let m = 0; m < j; m++) {
-          const sid = d.file.stations[s[m][0]]?.id;
-          if (!sid || sid === toId) continue;
-          let list = tmp.get(sid);
-          if (!list) tmp.set(sid, (list = []));
-          list.push({ dep: ms(d, s[m][2]), arr: arrB, day: d, trip: ti, posX: m, posB: j });
-        }
-      }
-    }
-    const prof = new Map<string, Profile>();
-    for (const [sid, list] of tmp) {
-      list.sort((a, b) => a.dep - b.dep || a.arr - b.arr);
-      const n = list.length;
-      const P: Profile = { dep: new Array(n), arr: new Array(n), day: new Array(n), trip: new Array(n), posX: new Array(n), posB: new Array(n), best: new Array(n) };
-      list.forEach((x, i) => {
-        P.dep[i] = x.dep;
-        P.arr[i] = x.arr;
-        P.day[i] = x.day;
-        P.trip[i] = x.trip;
-        P.posX[i] = x.posX;
-        P.posB[i] = x.posB;
-      });
-      for (let i = n - 1; i >= 0; i--) {
-        // à arrivée égale, on garde le départ le plus tardif (plus de marge pour changer)
-        P.best[i] = i === n - 1 || P.arr[i] < P.arr[P.best[i + 1]] ? i : P.best[i + 1];
-      }
-      prof.set(sid, P);
-    }
-    this.profiles.unshift({ days, to: toId, prof });
-    if (this.profiles.length > 6) this.profiles.length = 6;
-    return prof;
-  }
-}
-
-function lowerBound(arr: number[], t: number): number {
-  let lo = 0;
-  let hi = arr.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >>> 1;
-    if (arr[mid] < t) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo;
+  return net;
 }
 
 /** Ne garde que les trajets non dominés (départ ≥, arrivée ≤, correspondances ≤), triés par départ. */
 export function pareto(list: TrainOption[]): TrainOption[] {
   const tr = (o: TrainOption) => o.rides.length - 1;
   const sorted = [...list].sort((a, b) => b.dep - a.dep || a.arr - b.arr || tr(a) - tr(b));
-  let best0 = Infinity;
-  let bestAny = Infinity;
   const keep: TrainOption[] = [];
   for (const o of sorted) {
-    const t = tr(o);
-    if ((t === 0 ? best0 : bestAny) <= o.arr) continue;
+    if (keep.some((k) => k.dep >= o.dep && k.arr <= o.arr && tr(k) <= tr(o))) continue;
     keep.push(o);
-    if (t === 0) best0 = Math.min(best0, o.arr);
-    bestAny = Math.min(bestAny, o.arr);
   }
   return keep.sort((a, b) => a.dep - b.dep || a.arr - b.arr);
+}
+
+export class TrainEngine {
+  /** Trains de `fromId` à `toId` partant à `after` ou après, `limit` au plus, triés par départ. */
+  search(days: DayIndex[], fromId: string, toId: string, after: number, limit: number): TrainOption[] {
+    if (!fromId || !toId || fromId === toId || limit <= 0) return [];
+    const net = trainNet(days);
+    if (!net) return [];
+    const from = net.idx.get(fromId);
+    const to = net.idx.get(toId);
+    if (from === undefined || to === undefined) return [];
+    const dayOf = new Map(days.map((d) => [d.file, d]));
+    const afterMin = (after - net.base0) / 60_000;
+    const run = (windowMin: number): TrainOption[] => {
+      const cands = raptor(net, { access: new Map([[from, 0]]), egress: new Map([[to, 0]]), after: afterMin, windowMin, urbanUrbanMax: P.rounds });
+      const opts: { o: TrainOption; first: string; arr: number; n: number }[] = [];
+      for (const c of cands) {
+        if (c.maxWait > P.maxWaitMin) continue;
+        const o = toOption(net, c, dayOf);
+        if (o) opts.push({ o, first: `${c.rides[0].route}/${c.rides[0].trip}/${c.rides[0].bpos}`, arr: c.arr, n: c.rides.length });
+      }
+      // jamais une correspondance qui ne fait gagner que moins de 5 min sur le même premier train
+      const useful = opts.filter((x) => !opts.some((y) => y !== x && y.first === x.first && y.n < x.n && y.arr < x.arr + P.uselessTransferMin)).map((x) => x.o);
+      const unique = uniqueBy(pareto(useful), optionIdentity, (a, b) => a.arr < b.arr || (a.arr === b.arr && a.dep > b.dep));
+      return withinHorizon(unique, after, JOURNEY_HORIZON_MS);
+    };
+    let out = run(FIRST_WINDOW_MIN);
+    if (out.length < limit) out = run(JOURNEY_HORIZON_MS / 60_000);
+    return out.slice(0, limit);
+  }
+}
+
+function toOption(net: Net, c: Cand, dayOf: Map<TrainsDay, DayIndex>): TrainOption | null {
+  const rides: TrainRide[] = [];
+  for (const r of c.rides) {
+    const route = net.routes[r.route];
+    const t = trainTripOf(route, r.trip);
+    const day = t ? dayOf.get(t.day.file) : undefined;
+    if (!t || !day) return null;
+    rides.push({ day, trip: t.ti, i: r.bpos, k: r.apos });
+  }
+  const first = rides[0];
+  const last = rides[rides.length - 1];
+  const s0 = first.day.file.trips[first.trip].s;
+  const sl = last.day.file.trips[last.trip].s;
+  return { dep: ms(first.day, trainTimes(s0, first.i).dep), arr: ms(last.day, trainTimes(sl, last.k).arr), rides };
 }
 
 /** Trajet en train (montée → descente) sous forme d'étape, horaires prévus (temps réel appliqué ensuite). */
@@ -230,11 +179,14 @@ export function trainLeg(r: TrainRide): Leg {
   const s = trip.s;
   const station = (p: number) => d.file.stations[s[p][0]];
   const names = (p: number): Names => station(p)?.n ?? { fr: '', nl: '' };
-  const dep = ms(d, s[r.i][2]);
-  const arr = ms(d, s[r.k][1]);
+  const dep = ms(d, trainTimes(s, r.i).dep);
+  const arr = ms(d, trainTimes(s, r.k).arr);
   const stops: Stopover[] = [];
   for (let p = r.i; p <= r.k; p++) {
-    const t = ms(d, p === r.i ? s[p][2] : s[p][1]);
+    // arrêt sans montée ni descente (passage) : pas dans la liste
+    if (p !== r.i && p !== r.k && s[p][1] < 0 && s[p][2] < 0) continue;
+    const x = trainTimes(s, p);
+    const t = ms(d, p === r.i ? x.dep : x.arr);
     const so: Stopover = { name: names(p), sched: t, est: t };
     const st = station(p);
     if (st) so.areaId = st.id;
@@ -277,7 +229,7 @@ export function locateTrip(days: DayIndex[], leg: Leg): { day: DayIndex; trip: n
     if (ti === undefined) continue;
     const s = d.file.trips[ti].s;
     const p = s.findIndex((x) => x[4] === leg.fromSeq);
-    if (p >= 0 && ms(d, s[p][2]) === leg.schedDep) return { day: d, trip: ti };
+    if (p >= 0 && ms(d, trainTimes(s, p).dep) === leg.schedDep) return { day: d, trip: ti };
   }
   return null;
 }

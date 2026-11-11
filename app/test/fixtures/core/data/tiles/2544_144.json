@@ -1,1 +1,1 @@
-{"v":1,"areas":[{"id":"stib:6380","op":"stib","n":{"fr":"Esplanade","nl":"Esplanade"},"lat":50.899025,"lon":4.33905,"modes":["tram"],"lines":["3"]},{"id":"stib:8302","op":"stib","n":{"fr":"Roi Baudouin","nl":"Koning Boudewijn"},"lat":50.8912,"lon":4.3348,"modes":["metro"],"lines":["6"]}]}
+{"v":1,"areas":[{"id":"stib:6380","op":"stib","n":{"fr":"Esplanade","nl":"Esplanade"},"lat":50.899025,"lon":4.33905,"modes":["tram"],"lines":["3"]},{"id":"stib:8302","op":"stib","n":{"fr":"Roi Baudouin","nl":"Koning Boudewijn"},"lat":50.8913,"lon":4.3345,"modes":["metro"],"lines":["6"]}]}

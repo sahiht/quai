@@ -137,7 +137,8 @@ describe('performance', () => {
     console.info(`trains 4 000 voyages/jour : ${cold.toFixed(1)} ms (premier appel), ${warm.toFixed(1)} ms (suivant)`);
     expect(js.length).toBeGreaterThan(0);
     expect(again.length).toBeGreaterThan(0);
-    expect(js[0].transfers).toBeLessThanOrEqual(1);
+    // 1.1 (M5c) : jusqu'à deux correspondances en train.
+    expect(js[0].transfers).toBeLessThanOrEqual(2);
     expect(hhmm(js[0].dep) >= '07:00').toBe(true);
     expect(cold).toBeLessThan(300);
     expect(warm).toBeLessThan(100);

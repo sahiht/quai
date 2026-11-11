@@ -1,0 +1,3 @@
+Tes favoris donnent la réponse dès l’ouverture : quand partir, quel train ou bus, quelle voie, l’arrivée. Un toucher ouvre le trajet étape par étape, un glissement montre un autre trajet.
+Le trajet le plus simple d’abord (moins de changements, moins de marche), le plus rapide s’il est différent, toujours avec la raison.
+Sur le téléphone, un seul champ pour une adresse, une gare ou un arrêt : vas-y, ou enregistre l’adresse comme lieu.

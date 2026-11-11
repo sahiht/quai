@@ -115,8 +115,9 @@ export function lineLabel(mode: Mode, line: string): string {
   return line;
 }
 
-/** Coupe un texte à `max` caractères avec « … » si besoin (les lunettes affichent ~48 caractères par ligne). */
+/** Coupe un texte à `max` caractères avec « … » si besoin (les lunettes affichent ~48 caractères par ligne).
+ *  Les espaces sont resserrées, sauf les espaces insécables (typographie française). */
 export function fit(text: string, max = 48): string {
-  const t = text.replace(/\s+/g, ' ').trim();
+  const t = text.replace(/[^\S\u00a0]+/g, ' ').trim();
   return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';
 }

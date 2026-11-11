@@ -102,7 +102,8 @@ describe('search', () => {
   it('noms néerlandais, plusieurs mots, accents et mots vides', async () => {
     const { core } = makeEnv({ now: '2026-11-10T13:55' });
     expect((await core.search('Gent Sint')).map((x) => x.id)).toEqual(['sncb:8892007', 'delijn:200553']);
-    expect((await core.search('gare du no')).map((x) => x.id)).toEqual(['stib:6357F']);
+    // 1.1 (M4.2) : « gare » facultatif, la gare SNCB d'abord
+    expect((await core.search('gare du no')).map((x) => x.id)).toEqual(['sncb:8812005', 'stib:6357F', 'delijn:308611']);
     expect((await core.search('du nord')).map((x) => x.id)).toContain('stib:6357F');
     expect((await core.search('NAMUR place léo')).map((x) => x.id)).toEqual(['tec:N509aaa']);
     expect((await core.search('Namur')).map((x) => `${x.id} ${x.kindLabel}`)).toEqual(['sncb:8863008 gare SNCB', 'tec:N508aga bus TEC', 'tec:N509aaa bus TEC']);

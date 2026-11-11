@@ -35,7 +35,11 @@ export default defineConfig(({ command }) => {
     root: fileURLToPath(new URL('./web', import.meta.url)),
     base: cfg.base,
     publicDir: 'public',
-    define: { __QUAI_WEB__: JSON.stringify({ dataBase: cfg.dataBase, relayBase: cfg.relayBase, version: cfg.version }) },
+    define: {
+      __QUAI_WEB__: JSON.stringify({ dataBase: cfg.dataBase, relayBase: cfg.relayBase, version: cfg.version }),
+      // Version de app.json, affichée sur le téléphone (src/version.ts).
+      __QUAI_VERSION__: JSON.stringify(cfg.version),
+    },
     plugins: command === 'build' ? [coreGuard()] : [],
     server: { host: true, port: 5174, strictPort: false, fs: { allow: ['..', '../..'] } },
     preview: { host: true, port: 4174 },

@@ -1,0 +1,57 @@
+/**
+ * Textes 1.1 du cœur (PRD S6, § 6.1) : « imminent », heure au-delà de 60 min avec « ~ » devant l'heure, « demain »
+ * jamais avant 04:00, « Vers … » (article de la 1.0), adresse courte. CA-S6.1, CA-S6.2 (cas synthétique), CA-S6.4.
+ */
+import { describe, expect, it } from 'vitest';
+import type { Departure } from '../../src/core/api';
+import { departureSummary, NB, shortAddress, timeText, vers, waitText } from '../../src/core/text';
+import { gtfsTime } from '../../src/core/util';
+
+const at = (hh: number, mm: number, day = 0, ss = 0) => gtfsTime('2026-11-10', hh * 60 + mm) + day * 86_400_000 + ss * 1000;
+
+describe('S6 : attentes et heures', () => {
+  it('CA-S6.1 : « imminent » à moins d’une minute ; minutes avec espace insécable', () => {
+    const now = at(12, 10);
+    expect(waitText(at(12, 10, 0, 59), now)).toBe('imminent');
+    expect(waitText(at(12, 10, 0, 30), now, true)).toBe('imminent');
+    expect(waitText(at(12, 9, 0, 40), now)).toBe('imminent'); // déjà passé de quelques secondes
+    expect(waitText(at(12, 11), now)).toBe(`1${NB}min`);
+    expect(waitText(at(12, 15), now, true)).toBe(`~5${NB}min`);
+    expect(waitText(at(13, 9, 0, 59), now)).toBe(`59${NB}min`);
+  });
+
+  it('CA-S6.2 : au-delà de 60 min, une heure, « ~ » devant l’heure (jamais « ~298 min »)', () => {
+    const now = at(0, 20, 1);
+    expect(waitText(at(5, 18, 1), now, true)).toBe('~05:18');
+    expect(waitText(at(13, 10), at(12, 10))).toBe('13:10');
+    const m5: Departure = { op: 'stib', mode: 'metro', line: '5', head: { fr: 'Erasme', nl: 'Erasmus' }, sched: at(5, 18, 1), est: at(5, 18, 1), rt: false, delayMin: 0, cancelled: false };
+    expect(departureSummary(m5, now, 'fr', true)).toBe('M5 Erasme ~05:18');
+    expect(departureSummary(m5, now, 'fr', false)).toBe('M5 Erasme 05:18');
+  });
+
+  it('CA-S6.4 et « demain » : pas avant 04:00 du lendemain ; « demain ~06:02 »', () => {
+    const late = at(23, 30);
+    expect(timeText(at(0, 1, 1), late)).toBe('00:01');
+    expect(timeText(at(6, 2, 1), late, true)).toBe('demain ~06:02');
+    expect(waitText(at(6, 2, 1), late, true)).toBe('demain ~06:02');
+    expect(timeText(at(8, 0, 2), late)).toBe('le 12/11 08:00');
+  });
+});
+
+describe('§ 6.1 : « Vers … » et adresse courte', () => {
+  it('vers() garde les articles de la 1.0', () => {
+    expect(vers('bureau')).toBe('Vers le bureau');
+    expect(vers('maison')).toBe('Vers la maison');
+    expect(vers('école')).toBe('Vers l’école');
+    expect(vers('chez Karim')).toBe('Vers chez Karim');
+    expect(vers('Gand-Saint-Pierre')).toBe('Vers Gand-Saint-Pierre');
+    expect(vers('Veldstraat 1')).toBe('Vers Veldstraat 1');
+    expect(vers('')).toBe('Trajet');
+  });
+
+  it('shortAddress : avant la première virgule', () => {
+    expect(shortAddress('Veldstraat 1, 9000 Gent')).toBe('Veldstraat 1');
+    expect(shortAddress('Rue Neuve, 1000 Bruxelles')).toBe('Rue Neuve');
+    expect(shortAddress('Namur')).toBe('Namur');
+  });
+});

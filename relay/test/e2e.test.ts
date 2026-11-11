@@ -1,7 +1,8 @@
 /**
- * Bout en bout : faux portail BMC (npm run mock-bmc) et relais local (npm run dev) lancés comme processus séparés
- * sur des ports éphémères, un petit serveur pour meta.json, puis appels HTTP réels des quatre points d'entrée.
- * Pour finir : la clé ne doit apparaître dans aucune réponse ni dans aucun journal des deux processus.
+ * Bout en bout : faux portail BMC (npm run mock-bmc), faux service d'adresses (npm run mock-geocode) et relais local
+ * (npm run dev) lancés comme processus séparés sur des ports éphémères, un petit serveur pour meta.json, puis appels
+ * HTTP réels des cinq points d'entrée. Pour finir : la clé ne doit apparaître dans aucune réponse ni dans aucun journal
+ * des trois processus, et le texte cherché jamais dans le journal du relais.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -9,7 +10,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { AlertsResponse, HealthResponse, RtResponse, StibResponse } from '../lib/shared/types.js';
+import type { AlertsResponse, GeocodeResponse, HealthResponse, RtResponse, StibResponse } from '../lib/shared/types.js';
 
 const RELAY_DIR = fileURLToPath(new URL('..', import.meta.url));
 const KEY = `e2e-${randomUUID()}`;
@@ -30,7 +31,10 @@ const seen: string[] = [];
 
 function cleanEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
   const env = { ...process.env };
-  for (const k of ['BMC_KEY', 'BMC_BASE', 'SNCB_RT_URL', 'DATA_BASE', 'QUAI_NOW', 'MOCK_BMC_KEY', 'NODE_OPTIONS']) delete env[k];
+  for (const k of [
+    'BMC_KEY', 'BMC_BASE', 'SNCB_RT_URL', 'DATA_BASE', 'QUAI_NOW', 'MOCK_BMC_KEY', 'NODE_OPTIONS',
+    'QUAI_GEO_BASE', 'QUAI_GEO_VLA_BASE', 'QUAI_GEO_BRU_BASE', 'QUAI_GEO_WAL_BASE', 'GEOCODE_SOURCES', 'GOOGLE_GEOCODING_KEY',
+  ]) delete env[k];
   return { ...env, ...extra };
 }
 
@@ -74,6 +78,7 @@ async function waitForOutput(p: Proc, re: RegExp, ms = 3000): Promise<boolean> {
 }
 
 const startMock = () => start('../fixtures/relay/mock-bmc.ts', { MOCK_BMC_KEY: KEY }, /prêt : http:\/\/localhost:(\d+)/);
+const startGeo = () => start('../fixtures/relay/mock-geocode.ts', {}, /prêt : http:\/\/localhost:(\d+)/);
 const startRelay = (env: Record<string, string>) => start('scripts/dev.ts', env, /Relais Quai \(dev\) : http:\/\/localhost:(\d+)/);
 
 async function request<T = Record<string, unknown>>(url: string, init?: RequestInit) {
@@ -84,6 +89,7 @@ async function request<T = Record<string, unknown>>(url: string, init?: RequestI
 }
 
 let mock: Proc;
+let geo: Proc;
 let relay: Proc;
 let dataServer: http.Server;
 let dataBase: string;
@@ -96,8 +102,8 @@ beforeAll(async () => {
   });
   await new Promise<void>((r) => dataServer.listen(0, '127.0.0.1', () => r()));
   dataBase = `http://127.0.0.1:${(dataServer.address() as AddressInfo).port}/data`;
-  mock = await startMock();
-  relay = await startRelay({ BMC_BASE: mock.url, BMC_KEY: KEY, QUAI_NOW: NOW, DATA_BASE: dataBase });
+  [mock, geo] = await Promise.all([startMock(), startGeo()]);
+  relay = await startRelay({ BMC_BASE: mock.url, BMC_KEY: KEY, QUAI_NOW: NOW, DATA_BASE: dataBase, QUAI_GEO_BASE: geo.url });
 });
 
 afterAll(async () => {
@@ -177,11 +183,14 @@ describe('relais local (npm run dev) sur le faux portail', () => {
     expect(none.body.alerts).toEqual([]);
   });
 
-  it('/api/health : sources joignables et génération de nuit lue dans DATA_BASE', async () => {
+  it('/api/health : sources joignables, génération de nuit lue dans DATA_BASE, services d’adresses, version', async () => {
     const r = await request<HealthResponse>(`${relay.url}/api/health`);
     expect(r.body.ok).toBe(true);
     expect(r.body.data).toEqual({ generatedAt: META.generatedAt, ok: true, feeds: META.feeds });
     expect(Object.values(r.body.sources).every((s) => s.ok && typeof s.ms === 'number')).toBe(true);
+    expect(r.body.version).toBe('1.1.0');
+    expect(Object.keys(r.body.geocode ?? {})).toEqual(['vla', 'bru', 'wal']);
+    expect(Object.values(r.body.geocode ?? {}).every((s) => s?.ok)).toBe(true);
   });
 
   it('OPTIONS 204, paramètres invalides 400, chemin inconnu 404, méthode non prise en charge 405', async () => {
@@ -224,6 +233,79 @@ describe('relais local (npm run dev) sur le faux portail', () => {
     const back = await request<RtResponse>(`${relay.url}/api/rt?op=sncb&trips=${encodeURIComponent(NAMUR_IC)}`);
     expect(back.body.error).toBeUndefined();
     expect(back.body.trips[NAMUR_IC].u).toHaveLength(2);
+  });
+});
+
+describe('faux service d’adresses (processus)', () => {
+  it('sert les trois services officiels sur leurs vrais chemins, dans leurs formats', async () => {
+    const vla = await request<{ LocationResult: { FormattedAddress: string; LocationType: string; Location: { X_Lambert72: number } }[] }>(`${geo.url}/geolocation/v4/Location?q=veldstraat%201%20gent&c=5`);
+    expect(vla.body.LocationResult[0]).toMatchObject({ FormattedAddress: 'Veldstraat 1, 9000 Gent', LocationType: 'basisregisters_huisnummer_aangeduidDoorBeheerder' });
+    expect(vla.body.LocationResult[0].Location.X_Lambert72).toBeGreaterThan(100_000);
+    const bru = await request<{ resultsList: { objectType: string; result: { address: { position: { pointGeometry: { point: { srsName: string } } } } }[] }[] }>(
+      `${geo.url}/geocoding/api/v1/brussels/geocoding/freeSearch/searchAnyObject?searchLanguage=fr&freeText=rue%20neuve%201&model=BeStPlus`);
+    expect(bru.body.resultsList[0].objectType).toBe('ext:Address');
+    expect(bru.body.resultsList[0].result[0].address.position.pointGeometry.point.srsName).toBe('EPSG:31370');
+    const wal = await request<{ candidates: { geotag: { name: string; level: number; geometry: { coordinates: number[] } } }[] }>(
+      `${geo.url}/geocodeWS/searchAll?address=rue%20de%20fer%2025%20namur&crs=EPSG:4326&geom=true&lang=fr&levels=1,2,3,4,7`);
+    expect(wal.body.candidates[0].geotag).toMatchObject({ name: 'Rue de Fer 25 5000 Namur', level: 4, geometry: { coordinates: [4.8648, 50.4662] } });
+    expect((await request(`${geo.url}/geocodeWS/searchAll`)).status).toBe(400);
+  });
+});
+
+describe('relais local : /api/geocode sur le faux service d’adresses', () => {
+  const geocode = (q: string, lang = 'fr') => request<GeocodeResponse>(`${relay.url}/api/geocode?q=${encodeURIComponent(q)}&lang=${lang}`);
+
+  it('CA-M4.1 : « rue de fer 25 namur » → « Rue de Fer 25, 5000 Namur », adresse, en moins d’1 s', async () => {
+    const t0 = performance.now();
+    const r = await geocode('rue de fer 25 namur');
+    expect(performance.now() - t0).toBeLessThan(1000);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('access-control-allow-origin')).toBe('*');
+    expect(r.headers.get('cache-control')).toBe('public, s-maxage=86400, stale-while-revalidate=604800');
+    expect(r.body.results[0]).toMatchObject({ label: 'Rue de Fer 25, 5000 Namur', kind: 'adresse', lat: 50.4662, lon: 4.8648 });
+  });
+
+  it('S3 et S1 : « Veldstraat 1, 9000 Gent » et « Rue Neuve 1, 1000 Bruxelles » (nl : Nieuwstraat)', async () => {
+    expect((await geocode('veldstraat 1 gent')).body.results[0].label).toBe('Veldstraat 1, 9000 Gent');
+    expect((await geocode('Veldstraat 1, 9000 Gent')).body.results[0].label).toBe('Veldstraat 1, 9000 Gent');
+    const nl = await geocode('nieuwstraat 1', 'nl');
+    expect(nl.body.results[0]).toMatchObject({ label: 'Nieuwstraat 1, 1000 Brussel', names: { fr: 'Rue Neuve 1, 1000 Bruxelles' } });
+  });
+
+  it('CA-M4.8 : le faux service ne reçoit que le texte tapé (et la langue), sans position ni identifiant', async () => {
+    await request(`${geo.url}/__journal/reset`, { method: 'POST' });
+    await request(`${relay.url}/__cache/clear`, { method: 'POST' });
+    await request(`${relay.url}/api/geocode?q=${encodeURIComponent('avenue winston churchill 100')}&lang=fr&lat=50.8&lon=4.3&id=abc`, {
+      headers: { 'X-Forwarded-For': '203.0.113.9', Cookie: 'session=1', Referer: 'https://quai.example/' },
+    });
+    const j = await request<{ requests: { source: string; params: Record<string, string>; headers: Record<string, string> }[] }>(`${geo.url}/__journal`);
+    expect(j.body.requests.map((x) => x.source).sort()).toEqual(['bru', 'vla', 'wal']);
+    for (const x of j.body.requests) {
+      const values = Object.values(x.params);
+      expect(values).toContain(x.source === 'bru' ? 'fr' : x.source === 'vla' ? '5' : 'EPSG:4326');
+      expect(Object.entries(x.params).filter(([k]) => ['q', 'freeText', 'address'].includes(k)).map(([, v]) => v)).toEqual(['avenue winston churchill 100']);
+      expect(Object.keys(x.params).some((k) => /lat|lon|id$|position|near/i.test(k) && k !== 'searchLanguage')).toBe(false);
+      expect(x.headers['user-agent']).toBe('quai-relay/1.1');
+      for (const h of ['x-forwarded-for', 'cookie', 'referer', 'authorization', 'bmc-partner-key', 'ocp-apim-subscription-key']) expect(x.headers).not.toHaveProperty(h);
+    }
+  });
+
+  it('CA-M4.6 : scène down : HTTP 200 avec error en français, puis retour à la normale', async () => {
+    await request(`${geo.url}/__scene/down`, { method: 'POST' });
+    await request(`${relay.url}/__cache/clear`, { method: 'POST' });
+    const down = await geocode('rue du bois 1 bastogne');
+    expect(down.status).toBe(200);
+    expect(down.body).toMatchObject({ results: [], partial: true, error: 'Recherche d’adresse indisponible pour l’instant : gares et arrêts seulement.' });
+    expect(down.headers.get('cache-control')).toBe('no-store');
+    await request(`${geo.url}/__scene/base`, { method: 'POST' });
+    await request(`${relay.url}/__cache/clear`, { method: 'POST' });
+    expect((await geocode('rue du bois 1 bastogne')).body.results[0].label).toBe('Rue du Bois 1, 6600 Bastogne');
+  });
+
+  it('le journal du relais ne contient jamais le texte cherché', () => {
+    const log = relay.output.join('');
+    expect(log).toMatch(/GET \/api\/geocode\?q=\(\d+ car\.\)/);
+    for (const w of ['churchill', 'bastogne', 'veldstraat', 'nieuwstraat', 'rue de fer']) expect(log.toLowerCase()).not.toContain(w);
   });
 });
 

@@ -81,6 +81,13 @@ export const MUNI_FR: Record<string, string> = {
   // Wallonie (rare dans les données De Lijn, utile pour les destinations)
   'Luik': 'Liège', 'Namen': 'Namur', 'Bergen': 'Mons', 'Doornik': 'Tournai', 'Nijvel': 'Nivelles',
   'Waver': 'Wavre', 'Edingen': 'Enghien', 'Aat': 'Ath', 'Hoei': 'Huy', 'Moeskroen': 'Mouscron', 'Komen': 'Comines',
+  // 1.1 : communes wallonnes desservies par De Lijn (« Terhulpen » → « La Hulpe ») et quelques exonymes flamands
+  'Terhulpen': 'La Hulpe', 'Eigenbrakel': 'Braine-l’Alleud', 'Kasteelbrakel': 'Braine-le-Château', 'Tubeke': 'Tubize',
+  'Itter': 'Ittre', 'Geldenaken': 'Jodoigne', 'Hannuit': 'Hannut', 'Borgworm': 'Waremme', 'Lijsem': 'Lincent',
+  'Graven': 'Grez-Doiceau', 'Bevekom': 'Beauvechain', 'Lessen': 'Lessines', 'Zinnik': 'Soignies', 'Opzullik': 'Silly',
+  'Genepiën': 'Genappe', 'Aarlen': 'Arlon', 'Bastenaken': 'Bastogne',
+  'Leopoldsburg': 'Bourg-Léopold', 'Wervik': 'Wervicq', 'Mesen': 'Messines',
+  'Spiere-Helkijn': 'Espierres-Helchin',
 };
 
 /** Noms complets bien connus (néerlandais → français), prioritaires sur les règles. Clés comparées sans casse ni accents. */
@@ -133,6 +140,88 @@ export function frName(nl: string): string {
     }
   }
   return name;
+}
+
+/** Nom français d'un nom néerlandais complet bien connu (table NAME_FR), sinon undefined. */
+export function knownFrName(nl: string): string | undefined {
+  return NAME_FR_FOLDED.get(fold(nl ?? ''));
+}
+
+/** Nom français d'une commune néerlandophone (exonyme de MUNI_FR), sinon le nom tel quel. */
+export function communeFr(nl: string): string {
+  const name = (nl ?? '').trim();
+  const k = MUNI_KEYS.find((m) => fold(m) === fold(name));
+  return k ? MUNI_FR[k] : name;
+}
+
+/* ------------------------------ noms TEC (1.1) ------------------------------ */
+
+/** Particules en minuscules à l'intérieur d'un nom composé (« Braine-le-Comte », « Saint-Josse-ten-Noode »). */
+const COMPOUND_LOWER = new Set([
+  'la', 'le', 'les', 'de', 'du', 'des', 'en', 'sur', 'sous', 'lez', 'lès', 'aux', 'au', 'à', 'a', 'et',
+  'ten', 'ter', 'te', 'op', 'den', 'der', 'van', 'het', 'aan', 'bij',
+]);
+
+function casePart(p: string, initial: boolean, inner: boolean, abbrev: boolean): string {
+  if (!p) return p;
+  // élision : « l'alleud » → « l’Alleud » dans un nom composé, « L’Esplanade » en tête
+  const el = /^([ldjmnst])['’](.+)$/u.exec(p);
+  if (el) return (initial ? el[1].toUpperCase() : el[1]) + '’' + casePart(el[2], true, false, abbrev);
+  if (inner && COMPOUND_LOWER.has(p)) return p;
+  if (KEEP_UPPER.test(p) || isAcronym(p, abbrev)) return p.toUpperCase();
+  return p.charAt(0).toUpperCase() + p.slice(1);
+}
+
+/** Un mot écrit en capitales remis en casse, noms composés compris (« BRAINE-L'ALLEUD » → « Braine-l’Alleud »). */
+function caseWord(w: string, first: boolean): string {
+  const m = /^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}]*)$/u.exec(w);
+  if (!m || !m[2]) return w;
+  const [, pre, core, post] = m;
+  const lower = core.toLowerCase();
+  if (!first && LOWER_WORDS.has(lower)) return pre + lower + post;
+  if (lower === 's' && /['’]$/.test(pre)) return pre + lower + post; // article néerlandais : « 's Gravenvoeren »
+  const parts = lower.split('-');
+  return pre + parts.map((p, i) => casePart(p, first && i === 0, i > 0, i === parts.length - 1 && post.startsWith('.'))).join('-') + post;
+}
+
+const isUpperWord = (w: string): boolean => {
+  const letters = w.replace(/[^\p{L}]/gu, '');
+  return letters.length > 0 && letters === letters.toUpperCase() && letters !== letters.toLowerCase();
+};
+
+/**
+ * Noms TEC (arrêts et destinations) : la commune écrite en capitales en tête est remise en casse
+ * (« WATERLOO Eglise » → « Waterloo Eglise », « BRAINE-L'ALLEUD Gare » → « Braine-l’Alleud Gare »), et retirée
+ * quand elle est répétée juste après (« LIEGE Liège Expo » → « Liège Expo »). Aucun accent n'est ajouté
+ * (« LIEGE Gare » → « Liege Gare »). Les sigles restent en capitales (« LIEGE CHU Sart-Tilman » → « Liege CHU
+ * Sart-Tilman »). Un nom tout en capitales est entièrement remis en casse ; les autres noms sont inchangés.
+ */
+export function tecName(s: string): string {
+  const t = (s ?? '').trim().replace(/\s+/g, ' ');
+  if (!t) return t;
+  const words = t.split(' ');
+  let k = 0;
+  while (k < words.length && isUpperWord(words[k])) k++;
+  if (k === 0) return t;
+  if (k === words.length) return words.map((w, i) => caseWord(w, i === 0)).join(' ');
+  const rest = words.slice(k);
+  if (rest.length >= k && normalizeForSearch(rest.slice(0, k).join(' ')) === normalizeForSearch(words.slice(0, k).join(' '))) {
+    return rest.join(' ');
+  }
+  return [...words.slice(0, k).map((w, i) => caseWord(w, i === 0)), ...rest].join(' ');
+}
+
+/**
+ * Nom court d'une ligne sans le préfixe de mode déjà écrit dans le GTFS : « T2 » d'un tram devient « 2 »,
+ * « M3 » d'un métro devient « 3 » (l'appli ajoute elle-même T et M, sinon « TT2 », « MM3 »).
+ * `mode` : 'train', 'metro', 'tram' ou 'bus' ; les autres noms sont seulement nettoyés (espaces).
+ */
+export function lineName(short: string, mode: string): string {
+  const s = (short ?? '').trim().replace(/\s+/g, ' ');
+  const prefix = mode === 'tram' ? 't' : mode === 'metro' ? 'm' : '';
+  if (!prefix) return s;
+  const m = /^([A-Za-z])\s?(\d.*)$/.exec(s);
+  return m && m[1].toLowerCase() === prefix ? m[2] : s;
 }
 
 /** Forme normalisée pour comparer et chercher : sans accents, minuscules, ponctuation remplacée par des espaces. */

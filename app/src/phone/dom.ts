@@ -50,6 +50,8 @@ export const ICON = {
   clock: svg('<circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>', 18),
   swap: svg('<path d="M8 4v16M8 4L5 7M8 4l3 3M16 20V4M16 20l-3-3M16 20l3-3"></path>'),
   glasses: svg('<circle cx="7" cy="14" r="3.5"></circle><circle cx="17" cy="14" r="3.5"></circle><path d="M10.5 14h3M3.5 14L5 8M20.5 14L19 8"></path>', 22, '#FFFFFF'),
+  glassesGreen: svg('<circle cx="7" cy="14" r="3.5"></circle><circle cx="17" cy="14" r="3.5"></circle><path d="M10.5 14h3M3.5 14L5 8M20.5 14L19 8"></path>', 20),
+  searchGrey: svg('<circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path>', 20, '#6B756E'),
   search: svg('<circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path>', 20, '#FFFFFF'),
   walk: svg('<circle cx="13" cy="4" r="2"></circle><path d="M10 21l2-6-2-3 1-5 4 3 3 1"></path><path d="M12 15l3 6M9 9l-3 2"></path>', 14, '#3F4842'),
   trainSmall: svg('<rect x="5" y="3" width="14" height="13" rx="3"></rect><path d="M5 10h14M8 20l2-4M16 20l-2-4"></path>', 14, '#161A17'),

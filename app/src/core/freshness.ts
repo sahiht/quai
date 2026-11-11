@@ -5,7 +5,7 @@
  */
 import type { Meta } from '../../../shared/types';
 import { brusselsParts, serviceDayBase } from './util';
-import { ddmm } from './text';
+import { ddmm, NB } from './text';
 
 export interface Freshness {
   ok: boolean;
@@ -34,15 +34,15 @@ export function dataFreshness(meta: Meta, now: number): Freshness {
   const gen = Date.parse(meta?.generatedAt ?? '');
   const ref = Number.isFinite(gen) ? gen : dates.length ? serviceDayBase(dates[0]) : now;
   const ageHours = Math.round(((now - ref) / 3_600_000) * 10) / 10;
-  if (!dates.length) return { ok: false, ageHours, message: 'Horaires indisponibles : publication à vérifier' };
+  if (!dates.length) return { ok: false, ageHours, message: `Horaires indisponibles${NB}: publication à vérifier` };
   const p = brusselsParts(now);
   const today = p.date;
   const covered = dates.includes(today) || (p.h < EARLY_HOUR && dates.includes(addDays(today, -1)));
   if (!covered) {
-    if (today < dates[0]) return { ok: false, ageHours, message: `Horaires du ${ddmm(dates[0])} : vérifie la date du téléphone` };
-    return { ok: false, ageHours, message: `Horaires périmés : mise à jour arrêtée le ${ddmm(addDays(dates[0], 1))}` };
+    if (today < dates[0]) return { ok: false, ageHours, message: `Horaires du ${ddmm(dates[0])}${NB}: vérifie la date du téléphone` };
+    return { ok: false, ageHours, message: `Horaires périmés${NB}: mise à jour arrêtée le ${ddmm(addDays(dates[0], 1))}` };
   }
-  if (today > dates[0] && p.h >= LATE_HOUR) return { ok: true, ageHours, message: 'Horaires d’hier : mise à jour de nuit en retard' };
+  if (today > dates[0] && p.h >= LATE_HOUR) return { ok: true, ageHours, message: `Horaires d’hier${NB}: mise à jour de nuit en retard` };
   return { ok: true, ageHours };
 }
 

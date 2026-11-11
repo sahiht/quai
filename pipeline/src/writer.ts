@@ -27,8 +27,12 @@ export class JsonWriter {
 
   /** Programme l'écriture de `rel` (chemin relatif à la racine) ; attend si trop d'écritures sont en cours. */
   async write(rel: string, data: unknown): Promise<void> {
+    await this.writeBuffer(rel, Buffer.from(JSON.stringify(data), 'utf8'));
+  }
+
+  /** Comme write(), pour un contenu déjà sérialisé (JSON compact). */
+  async writeBuffer(rel: string, buf: Buffer): Promise<void> {
     if (this.error) throw this.error;
-    const buf = Buffer.from(JSON.stringify(data), 'utf8');
     const path = join(this.root, rel);
     this.files++;
     this.bytes += buf.length;
