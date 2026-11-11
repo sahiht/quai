@@ -66,19 +66,30 @@ export interface FavoriteTrip {
   label?: string;               // ex. 'bureau' pour « Pour le bureau : … »
   propose: Propose;
 }
-export type Favorite = FavoriteStop | FavoriteTrip;
+/**
+ * 1.2 (docs/v1.2/PRD-1.2.md § 2) : favori « lieu ». Un lieu (adresse, arrêt ou position prise sur place, avec un nom)
+ * donne « Vers {lieu} » depuis la position : il se comporte comme le trajet « Ma position → lieu » de la 1.1.
+ * Un Endpoint { type: 'place', placeId } désigne un favori lieu par son id. propose : 'never' | 'morning' | 'evening'
+ * ('near' n'a pas de sens pour un lieu et devient 'never').
+ */
+export interface FavoritePlace extends Place {
+  kind: 'place';
+  propose: Propose;
+}
+/** 1.2 : un trajet fixe ne part jamais de « Ma position » (ce cas est un favori lieu). */
+export type Favorite = FavoriteStop | FavoriteTrip | FavoritePlace;
 
 /**
- * Réglages, version 2 (1.1). Une version 1 est migrée par settings.ts : tout est gardé, recent = [],
- * seenVersion = '1.0.0' (le message « Quai 1.1 » s'affiche une fois), favOrder = 'smart'.
+ * Réglages, version 3 (1.2). Une version 2 (1.1) ou 1 (1.0) est migrée par settings.ts (PRD-1.2 § 2.4) : chaque
+ * lieu devient un favori lieu ; un favori « Ma position → ce lieu » fusionne avec lui (place, id, nom, créneau) ;
+ * « Ma position → adresse ou arrêt » devient un lieu ; le reste est gardé. `places` n'existe plus.
  */
 export interface Settings {
-  v: 2;
+  v: 3;
   onboarded: boolean;
   lang: NameLang;
-  places: Place[];
-  maxWalkMin: number;           // 5..20
-  favorites: Favorite[];        // dans l'ordre choisi sur le téléphone
+  maxWalkMin: number;           // 5..20 : préférence (PRD-1.2 § 1.2), plus un mur
+  favorites: Favorite[];        // 32 au plus, dans l'ordre choisi sur le téléphone
   recent: RecentAddress[];      // 5 au plus, la plus récente d'abord (S4)
   /**
    * Dernière version dont les nouveautés ont été vues (« 1.1.0 »). '' = nouvelle installation : les lunettes
@@ -103,10 +114,9 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  v: 2,
+  v: 3,
   onboarded: false,
   lang: 'fr',
-  places: [],
   maxWalkMin: 10,
   favorites: [],
   recent: [],
@@ -172,14 +182,14 @@ export interface Alert {
 }
 
 /**
- * Étiquette d'une proposition (PRD § 4.3) : simple « Le plus simple », fast « Le plus rapide », earlier « Plus tôt »,
- * fewer « Moins de changements », none « Sans changement », walk « À pied », next « Le suivant », later « Plus tard ».
- * 1.1.1 (docs/v1.1/moins-de-marche.md) : lesswalk « Moins de marche ».
+ * Étiquette d'une proposition (PRD-1.2 § 1.3) : short « Le plus court », earlier « Plus tôt », lesswalk « Moins de
+ * marche », none « Sans changement », fewer « Moins de changements », walk « À pied », next « Le suivant »,
+ * later « Plus tard ». 'simple' et 'fast' (1.1) n'existent plus : un trajet suivi gardé par la 1.1 dans 'quai.trip'
+ * est relu avec 'simple' → 'short' et 'fast' → 'earlier' (labelOf).
  */
-export type JourneyLabel = 'simple' | 'fast' | 'earlier' | 'fewer' | 'none' | 'walk' | 'next' | 'later' | 'lesswalk';
+export type JourneyLabel = 'short' | 'earlier' | 'fewer' | 'none' | 'walk' | 'next' | 'later' | 'lesswalk';
 export const LABEL_TEXT: Record<JourneyLabel, string> = {
-  simple: 'Le plus simple',
-  fast: 'Le plus rapide',
+  short: 'Le plus court',
   earlier: 'Plus tôt',
   fewer: 'Moins de changements',
   none: 'Sans changement',
@@ -188,6 +198,12 @@ export const LABEL_TEXT: Record<JourneyLabel, string> = {
   later: 'Plus tard',
   lesswalk: 'Moins de marche',
 };
+/** Étiquette lue dans des données d'une version antérieure (trajet suivi gardé par la 1.1). */
+export function labelOf(x: unknown): JourneyLabel | undefined {
+  if (x === 'simple') return 'short';
+  if (x === 'fast') return 'earlier';
+  return typeof x === 'string' && x in LABEL_TEXT ? (x as JourneyLabel) : undefined;
+}
 
 export interface Journey {
   id: string;                   // stable d'un rafraîchissement à l'autre
