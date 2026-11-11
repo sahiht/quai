@@ -6,6 +6,7 @@ import type { Core, Favorite, FavoriteAnswer, Settings } from '../../core/api';
 import type { PhoneCtx } from '../app';
 import { h, icon, ICON } from '../dom';
 import { glassesButton, showBoard, showTrip } from '../glasses-link';
+import { catchable } from '../../glasses/format';
 import { favoriteName, shortAnswer, T, towardsText, typo } from '../text';
 import { listRow, messageHub } from '../ui';
 
@@ -13,6 +14,18 @@ const LANG_TEXT = { fr: 'Noms en français', nl: 'Noms en néerlandais', local: 
 
 /** Rafraîchissement des réponses des favoris (comme les lunettes). */
 export const ANSWER_REFRESH_MS = 30_000;
+/** Au-delà, une réponse gardée n'est plus envoyée telle quelle aux lunettes : elle est recalculée. */
+export const ANSWER_MAX_AGE_MS = 2 * 60_000;
+
+/**
+ * Réponse d'un trajet favori encore bonne à envoyer aux lunettes : calculée il y a moins de 2 min et dont la
+ * 1re proposition est encore attrapable (on peut partir à temps pour son premier véhicule).
+ */
+export function reusable(a: FavoriteAnswer | undefined, now: number): a is FavoriteAnswer {
+  if (!a || now - a.updatedAt >= ANSWER_MAX_AGE_MS || now < a.updatedAt) return false;
+  const j = a.plan?.journeys[0];
+  return !j || catchable(j, now);
+}
 
 /** Dernières réponses connues, pour l'ordre (règle 5) et un affichage immédiat au retour sur l'accueil. */
 const lastAnswers = new Map<string, FavoriteAnswer>();
@@ -69,8 +82,9 @@ function favoritesSection(ctx: PhoneCtx, answered?: () => void): HTMLElement {
       const st = ctx.settings.get();
       const fav = st.favorites.find((x) => x.id === f.id) ?? f;
       if (fav.kind === 'stop') return showBoard(ctx, fav.areaId, fav.filter);
+      // Jamais une réponse ancienne (retour sur l'accueil plus tard) : les lunettes suivraient un train parti.
       let a = lastAnswers.get(fav.id);
-      if (!a?.plan) {
+      if (!reusable(a, ctx.clock.now())) {
         const fx = ctx.location.last() ?? (await ctx.location.current(6000));
         a = await (await ctx.core()).answer(fav, fx ? { lat: fx.lat, lon: fx.lon } : null, st);
         lastAnswers.set(fav.id, a);

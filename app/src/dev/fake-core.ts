@@ -48,7 +48,7 @@ import { distanceM, gtfsTime, hhmm, localDate, localMinutes, walkMinutes } from 
 import type { AreaSummary, GeocodeResponse, GeocodeResult, HealthResponse, Mode, Names, Op } from '../../../shared/types';
 import { normalizeForSearch, prettyName } from '../../../shared/names';
 import { QuaiError } from '../core/errors';
-import { answerFavorite, orderFavorites, relocateAmong } from '../core/favorites';
+import { answerFavorite, orderFavorites, relocateAmong, type PlanMemo } from '../core/favorites';
 import { GeocodeClient, GeoError, type GeoTransport } from '../core/geocode';
 import { reasonText } from '../core/routing/reason';
 import { rankSearch } from '../core/search';
@@ -440,6 +440,8 @@ const RT_MEMORY_MS = 15 * MIN;
 export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
   const now = (): number => opts.now();
   let meta: Meta | null = null;
+  /** Plans des trajets favoris, comme le vrai cœur. */
+  const plans = new Map<string, PlanMemo>();
   // Navigateur : drapeaux des adresses lus dans l'adresse de la page ; objet exposé pour changer de scène.
   const g = globalThis as { location?: { search?: string }; __quaiFake?: FakeFlags };
   try {
@@ -1000,6 +1002,9 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
         board: (id, o) => core.board(id, o),
         route,
         relocate: async (f: FavoriteStop) => relocateAmong(f, AREAS.filter((a) => distanceM(f, a) <= 1_000)),
+        refresh: (js, s) => Promise.all(js.map((j) => core.refresh(j, s))),
+        generation: async () => meta?.generatedAt,
+        plans,
       });
     },
 

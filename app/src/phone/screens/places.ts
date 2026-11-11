@@ -170,6 +170,12 @@ export function placeEditScreen(ctx: PhoneCtx, id: string): HTMLElement {
     placeholder: T.addrPlaceholder,
     value: existing && !legacy ? (existing.src === 'stop' ? legacyQuery(existing) : existing.src === 'address' ? existing.address : undefined) : undefined,
     recent: true,
+    // Texte changé après un choix (« 25 » corrigé en « 52 ») : le choix ne vaut plus, il faut en refaire un.
+    onEdit: () => {
+      spot = null;
+      confirmSpot();
+      sync();
+    },
     onPick: (c) => {
       if (c.kind === 'address') spot = { lat: c.lat, lon: c.lon, src: 'address', address: c.label, approx: c.approx || undefined };
       else if (c.kind === 'stop') spot = { lat: c.item.lat, lon: c.item.lon, src: 'stop', address: `Près de ${c.label}`, areaId: c.item.id };

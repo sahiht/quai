@@ -1,14 +1,15 @@
 /**
  * Temps réel des trajets 1.1 (design-routing.md § 4.9) : bus et trams De Lijn et TEC par /api/rt (trip_id des
  * fichiers de ligne, arrêts `fromStop` / `toStop`), STIB par /api/stib sur le point de montée ; refresh() garde
- * l'étiquette et la raison ; correspondance rendue impossible par un retard : reste du trajet recalculé.
+ * l'étiquette et la raison ; correspondance rendue impossible par un retard : reste du trajet recalculé ; premier
+ * véhicule parti à l'heure prévue mais en retard : proposé tant qu'il reste attrapable sur l'heure estimée.
  */
 import { describe, expect, it } from 'vitest';
 import type { Endpoint } from '../../../src/core/api';
 import { hhmm } from '../../../src/core/util';
-import { makeEnv } from '../support/env';
+import { makeEnv, type Scene } from '../support/env';
 import { at } from '../support/network';
-import { legsOf } from './support';
+import { legsOf, plain, summary } from './support';
 
 const here: Endpoint = { type: 'here' };
 const S1 = { lat: 50.4655, lon: 4.859 };
@@ -75,7 +76,7 @@ describe('correspondance rendue impossible par un retard (§ 4.9, point 2)', () 
     env.server.relay.rt.tec.trips['W-0724'] = late;
     const r = await env.core.route(WATERLOO, ROGIER, at('2026-11-10T07:31'), env.preset);
     const w = r.journeys.find((j) => j.legs.some((l) => l.tripId === 'W-0724'));
-    expect(w && legsOf(w)).toBe('marche 2 | 07:44 W WATERLOO Eglise → BRUXELLES Midi 08:29 | marche 2 | 08:35 M2 Gare du Midi → Rogier 08:49 | marche 3');
+    expect(w && legsOf(w)).toBe('marche 2 | 07:44 W Waterloo Eglise → Bruxelles Midi 08:29 | marche 2 | 08:35 M2 Gare du Midi → Rogier 08:49 | marche 3');
     expect(w?.alerts[0]?.text).toBe('! Correspondance recalculée');
   });
 
@@ -88,8 +89,53 @@ describe('correspondance rendue impossible par un retard (§ 4.9, point 2)', () 
     env.clock.set('2026-11-10T07:40');
     const j1 = await env.core.refresh(j0, env.preset);
     expect([j1.id, j1.label, j1.reason]).toEqual([j0.id, j0.label, j0.reason]);
-    expect(legsOf(j1)).toBe('marche 2 | 07:44 W WATERLOO Eglise → BRUXELLES Midi 08:29 | marche 2 | 08:35 M2 Gare du Midi → Rogier 08:49 | marche 3');
+    expect(legsOf(j1)).toBe('marche 2 | 07:44 W Waterloo Eglise → Bruxelles Midi 08:29 | marche 2 | 08:35 M2 Gare du Midi → Rogier 08:49 | marche 3');
     expect(j1.alerts[0]).toMatchObject({ kind: 'delay', text: '! Correspondance recalculée' });
     expect(hhmm(j1.arr)).toBe('08:52');
+  });
+});
+
+describe('premier véhicule en retard mais encore attrapable (PRD § 4.2 et § 4.5)', () => {
+  // l'IC de 14:22 de Bruxelles-Central vers Gand-Saint-Pierre a 3 min de retard dans la scène base (estimé 14:25)
+  const gand = () => {
+    const f = makeEnv({ now: '2026-11-10T14:00' }).preset.favorites.find((x) => x.id === 'fav-gand');
+    if (f?.kind !== 'trip') throw new Error('fav-gand');
+    return f;
+  };
+  const NEAR = { lat: 50.8468, lon: 4.3592 }; // 4 min à pied de Bruxelles-Central
+  const route = async (now: string, scene: Scene, from?: Endpoint) => {
+    const env = makeEnv({ now, scene });
+    const f = gand();
+    return env.core.route(from ?? f.from, f.to, at(now), env.preset, NEAR);
+  };
+
+  it('14:23 à Bruxelles-Central : l’IC de 14:22 (+3 min) en tête, puis l’IC de 14:40', async () => {
+    const r = await route('2026-11-10T14:23', 'base');
+    expect(summary(r)).toEqual(['simple: 14:25 IC Bruxelles-Central → Gand-Saint-Pierre 14:56', 'next: 14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09']);
+    const ic = r.journeys[0].legs[0];
+    expect([hhmm(ic.schedDep), ic.rt, ic.delayMin]).toEqual(['14:22', true, 3]);
+    expect(plain(r.journeys[0].reason)).toBe('Le plus simple : direct');
+    expect(plain(r.journeys[1].reason)).toBe('Le suivant : même trajet, 18 min plus tard');
+  });
+
+  it('parti d’après l’heure estimée (14:26), ou sans temps réel : seulement l’IC de 14:40', async () => {
+    expect(summary(await route('2026-11-10T14:26', 'base'))).toEqual(['simple: 14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09']);
+    expect(summary(await route('2026-11-10T14:23', 'noRT'))).toEqual(['simple: 14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09']);
+  });
+
+  it('la marche jusqu’au train compte : 4 min à pied, encore attrapable à 14:21, plus à 14:22', async () => {
+    const r1 = await route('2026-11-10T14:21', 'base', here);
+    expect(legsOf(r1.journeys[0])).toBe('marche 4 | 14:25 IC Bruxelles-Central → Gand-Saint-Pierre 14:56');
+    const r2 = await route('2026-11-10T14:22', 'base', here);
+    expect(summary(r2)).toEqual(['simple: marche 4 | 14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09']);
+  });
+
+  it('favori « Gand » à 14:23, depuis la gare : l’IC de 14:22 (+3 min) en tête', async () => {
+    const env = makeEnv({ now: '2026-11-10T14:23' });
+    const a = await env.core.answer(gand(), { lat: 50.8454, lon: 4.3571 }, env.preset);
+    expect(a.plan?.journeys.map((j) => `${j.label}: ${legsOf(j)}`)).toEqual([
+      'simple: 14:25 IC Bruxelles-Central → Gand-Saint-Pierre 14:56',
+      'next: 14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09',
+    ]);
   });
 });

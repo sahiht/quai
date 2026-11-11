@@ -117,6 +117,10 @@ export interface SetupOptions {
   /** Stockage partagé entre deux ouvertures (réouverture de Quai). */
   kv?: ReturnType<typeof createKV>;
   web?: boolean;
+  /** Appelé avant start() (ex. __restoreState dans une nouvelle WebView). */
+  beforeStart?: (c: GlassesController) => void;
+  /** Ne pas attendre la fin du démarrage (cœur lent : état pendant « Chargement… »). */
+  noWait?: boolean;
 }
 
 /**
@@ -155,7 +159,9 @@ export async function setupController(o: SetupOptions = {}) {
       await settle();
     }
   };
-  await c.start();
+  o.beforeStart?.(c);
+  if (o.noWait) void c.start();
+  else await c.start();
   await settle();
   return { c, rec, logs, last, screens, settle, until, closeWebView, settings, advance, goTo, clock, kv, flags, location, core, gesture };
 }

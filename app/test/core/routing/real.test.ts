@@ -19,6 +19,7 @@ import type { Endpoint, Journey, PlanResult, Settings } from '../../../src/core/
 import { DEFAULT_SETTINGS } from '../../../src/core/api';
 import { computeRoute, type RouteDebug } from '../../../src/core/routing/engine';
 import { changesOf, itemOf } from '../../../src/core/routing/rank';
+import { dropNets, netMemory } from '../../../src/core/routing/repair';
 import { distanceM, gtfsTime, hhmm, lineLabel, localDate, walkMinutes } from '../../../src/core/util';
 import { DATA_BASE, makeEnv } from '../support/env';
 
@@ -156,9 +157,11 @@ describe.skipIf(!REAL)('données réelles (instantané du 10/11/2026)', () => {
     const lines: string[] = [];
     for (const q of QUERIES) {
       const env = makeEnv({ now: q.after, scene: 'noRT', dataDir: DIR });
+      dropNets();
       const t0 = performance.now();
       const r = await env.core.route(q.O(), q.D(), q.after, SETTINGS);
       const cold = performance.now() - t0;
+      const kept = netMemory().bytes;
       const b = bytes(env.server.calls);
       const trainsGz = bytes(env.server.calls.filter((u) => u.includes('/trains/') || u.endsWith('/lines/index.json'))).gz;
       const t1 = performance.now();
@@ -166,7 +169,7 @@ describe.skipIf(!REAL)('données réelles (instantané du 10/11/2026)', () => {
       const warm = performance.now() - t1;
       results.set(q.n, r);
       lines.push(
-        `=== ${q.n} (${hhmm(q.after)}) ===\n${show(r)}\n  ${b.files} fichiers, ${Math.round(b.gz / 1024)} Ko gzip à froid (${Math.round((b.gz - trainsGz) / 1024)} Ko sans trains ni index), ${Math.round(b.raw / 1024)} Ko bruts ; ${Math.round(cold)} ms à froid, ${Math.round(warm)} ms en mémoire`,
+        `=== ${q.n} (${hhmm(q.after)}) ===\n${show(r)}\n  ${b.files} fichiers, ${Math.round(b.gz / 1024)} Ko gzip à froid (${Math.round((b.gz - trainsGz) / 1024)} Ko sans trains ni index), ${Math.round(b.raw / 1024)} Ko bruts ; ${Math.round(cold)} ms à froid, ${Math.round(warm)} ms en mémoire ; réseau gardé pour refresh() : ${Math.round(kept / 1024)} Ko estimés`,
       );
       for (const j of r.journeys) {
         expect(maxWait(j)).toBeLessThanOrEqual(60);

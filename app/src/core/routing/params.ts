@@ -3,6 +3,7 @@
  * mètres sauf mention. Les seuils du PRD sont validés sur les vraies données (Q5, DECISIONS.md).
  */
 import type { Mode } from '../../../../shared/types';
+import type { Settings } from '../api';
 
 export const P = {
   /* ---------- réseau (design § 4.5) ---------- */
@@ -34,6 +35,10 @@ export const P = {
   nextDayFromMin: 4 * 60,
 
   /* ---------- garde-fous (PRD § 4.2, design § 4.7) ---------- */
+  /** Premier véhicule parti à l'heure prévue mais peut-être en retard : départs prévus jusqu'à 30 min avant l'heure
+   *  demandée, gardés seulement s'ils restent attrapables sur l'heure estimée ; au plus 8 trajets de ce genre. */
+  lateLookbackMin: 30,
+  lateMax: 8,
   maxWaitMin: 60,
   uselessTransferMin: 5,
   /** Jamais un véhicule plus lent que la marche directe, jusqu'à cette durée de marche. */
@@ -62,3 +67,6 @@ export const P = {
 
 /** Distance (m) parcourue en `min` minutes de marche (inverse de walkMinutes). */
 export const walkReachM = (min: number) => (min * 80) / 1.3;
+
+/** Marche maximale des réglages (« Mes lieux »), de 1 à 30 min, 10 par défaut. */
+export const maxWalkOf = (s: Pick<Settings, 'maxWalkMin'>) => Math.min(30, Math.max(1, Math.round(s.maxWalkMin || 10)));

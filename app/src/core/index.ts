@@ -32,7 +32,7 @@ import { naturalCompare, prepareArea, tileKeysAround, type PreparedArea } from '
 import { buildBoards } from './boards';
 import { DataClient, OPS } from './data';
 import { QuaiError } from './errors';
-import { answerFavorite, orderFavorites, relocateAmong } from './favorites';
+import { answerFavorite, orderFavorites, relocateAmong, type PlanMemo } from './favorites';
 import { addDays, isCovered } from './freshness';
 import { GeocodeClient, relayGeoTransport } from './geocode';
 import { brokenConnection, refreshJourney, refreshJourneys, skeleton, type RefreshEnv } from './journeys';
@@ -41,7 +41,7 @@ import { PersistentCache } from './persist';
 import { planCandidates, type NearArea } from './plan';
 import { RealtimeClient, stibPoint, type AlertItem } from './realtime';
 import { computeRoute } from './routing/engine';
-import { netOf, recalcAlert, repairLegs } from './routing/repair';
+import { recalcAlert, repairFollowed, touchFollowed } from './routing/repair';
 import { rankSearch, searchFileKeys } from './search';
 import { suggestOpening } from './suggest';
 import { indexDay, TrainEngine, trainLeg, type DayIndex } from './trains';
@@ -83,8 +83,8 @@ const stopBase = (s: string) => normalizeId(s).replace(/_[^_]+$/, '').replace(/^
 export function createCore(opts: CoreOptions): Core {
   const now = () => opts.now();
   const fetchFn = makeFetch(opts.fetch);
-  const persist = new PersistentCache(opts.storage);
-  const data = new DataClient(trimSlash(opts.dataBase), fetchFn, persist);
+  const persist = new PersistentCache(opts.storage, { now });
+  const data = new DataClient(trimSlash(opts.dataBase), fetchFn, persist, now);
   const rt = new RealtimeClient(trimSlash(opts.relayBase), fetchFn, now);
   const geo = new GeocodeClient(relayGeoTransport(trimSlash(opts.relayBase), fetchFn), now);
   const engine = new TrainEngine();
@@ -135,6 +135,13 @@ export function createCore(opts: CoreOptions): Core {
   /** M8.3 : ancien identifiant (`aka` d'une zone fusionnée, ou favori retrouvé) → zone actuelle ; résumés vus. */
   const aliasOf = new Map<string, string>();
   const summaryOf = new Map<string, AreaSummary>();
+  /** Plans des trajets favoris (core/favorites.ts) : temps réel seul tant qu'ils restent bons. */
+  const plans = new Map<string, PlanMemo>();
+  data.onGeneration(() => {
+    aliasOf.clear();
+    summaryOf.clear();
+    plans.clear();
+  });
 
   async function areasAround(lat: number, lon: number, radiusM: number): Promise<NearArea[]> {
     const meta = await ensure();
@@ -278,12 +285,16 @@ export function createCore(opts: CoreOptions): Core {
     },
 
     async refresh(j: Journey, settings: Settings): Promise<Journey> {
+      // trajet suivi : son réseau passe en tête de la mémoire des réseaux (routing/repair.ts)
+      touchFollowed(j.id);
       const out = await refreshJourney(j, settings, refreshEnv, false);
-      // correspondance devenue impossible : reste du trajet recalculé sur le réseau de la recherche (routing/repair.ts)
-      if (brokenConnection(out) < 0) return out;
-      const memo = netOf(data.meta?.generatedAt, j.id);
-      const legs = memo ? repairLegs(out, memo.net, memo.D, memo.maxWalk) : null;
-      if (!legs) return out;
+      // correspondance devenue impossible : reste du trajet recalculé sur le réseau de sa recherche, gardé par
+      // identifiant de trajet et refait au besoin avec les mêmes fichiers de la même génération (routing/repair.ts)
+      const meta = data.meta;
+      if (brokenConnection(out) < 0 || !meta) return out;
+      const source = { meta, tile: (k: string) => data.tile(k), json: <T>(p: string, v: (x: unknown) => x is T) => data.json(p, v), trains: (d: string) => data.trains(d) };
+      const legs = await repairFollowed(out, settings, source).catch(() => null);
+      if (!legs || data.meta?.generatedAt !== meta.generatedAt) return out;
       const [fixed] = await refreshJourneys([{ ...out, legs }], settings, refreshEnv, false);
       return { ...fixed, id: j.id, alerts: [recalcAlert(now()), ...fixed.alerts] };
     },
@@ -344,6 +355,9 @@ export function createCore(opts: CoreOptions): Core {
           if (found) aliasOf.set(f.areaId, found.id);
           return found;
         },
+        refresh: (js, s) => refreshJourneys(js, s, refreshEnv, false),
+        generation: async () => (await ensure()).generatedAt,
+        plans,
       });
     },
 

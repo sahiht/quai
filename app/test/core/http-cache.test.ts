@@ -2,7 +2,8 @@
  * Cache HTTP de la WebView : le relais répond « Cache-Control: public, s-maxage=20, stale-while-revalidate=40 »
  * (cache du CDN Vercel). Une WebView (WebKit, Chromium) ignore s-maxage mais applique stale-while-revalidate :
  * sans précaution, chaque rafraîchissement de 30 s recevait la réponse précédente (un cycle de retard ; passage
- * en « ~ » vu après 59 s dans le simulateur). Le cœur demande donc le temps réel avec cache: 'no-store'.
+ * en « ~ » vu après 59 s dans le simulateur). Le cœur demande donc le temps réel avec cache: 'no-store', et
+ * meta.json aussi (1.1 : une nouvelle publication doit être vue dans les 10 min).
  */
 import { describe, expect, it } from 'vitest';
 import { createCore } from '../../src/core/index';
@@ -32,8 +33,9 @@ describe('requêtes au relais sans cache HTTP de la WebView', () => {
     const relay = seen.filter((s) => s.url.startsWith(RELAY_BASE));
     expect(relay.map((s) => new URL(s.url).pathname).sort()).toEqual(['/api/alerts', '/api/health', '/api/rt', '/api/stib']);
     for (const s of relay) expect(s.cache, s.url).toBe('no-store');
+    // données statiques : cache HTTP permis, sauf meta.json (relue toutes les 10 min pour suivre les publications)
     const data = seen.filter((s) => s.url.startsWith(DATA_BASE));
-    expect(data.length).toBeGreaterThan(0);
-    for (const s of data) expect(s.cache, s.url).toBeUndefined();
+    expect(data.length).toBeGreaterThan(1);
+    for (const s of data) expect(s.cache, s.url).toBe(s.url.endsWith('/meta.json') ? 'no-store' : undefined);
   });
 });

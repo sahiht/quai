@@ -68,6 +68,16 @@ export function icon(name: keyof typeof ICON): HTMLSpanElement {
   return h('span', { class: 'ico', html: ICON[name] });
 }
 
+/**
+ * Icône SVG en élément, tirée d'une constante de ICON (jamais d'une donnée du réseau ni d'une saisie) : les textes
+ * voisins restent des nœuds texte (`h(…, svgNode(ICON.walk), h('span', null, texte))`).
+ */
+export function svgNode(markup: (typeof ICON)[keyof typeof ICON]): Element {
+  const t = document.createElement('template');
+  t.innerHTML = markup;
+  return t.content.firstElementChild!;
+}
+
 /** Ajuste l'échelle d'un écran 576 × 288 à la largeur de son conteneur. */
 export function fitScreen(wrap: HTMLElement, screen: HTMLElement): void {
   const apply = (): void => {

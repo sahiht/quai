@@ -6,7 +6,8 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { favoriteEditScreen, favoritesScreen, moveFavorite, PROPOSE_OPTIONS } from '../../src/phone/screens/favorites';
-import { button, harness, mount, options, plain, preset, settle, textOf, until } from './helpers';
+import type { SearchItem } from '../../src/core/api';
+import { button, harness, mount, options, plain, preset, settle, sleep, textOf, type, until } from './helpers';
 
 afterEach(() => document.body.replaceChildren());
 
@@ -104,6 +105,24 @@ describe('formulaire d’un favori (T4)', () => {
     button(el, 'Supprimer').click();
     await until(() => hz.went.length > 0);
     expect(hz.settings.get().favorites.map((f) => f.id)).not.toContain('fav-gand');
+  });
+
+  it('champ d’arrêt : la réponse d’une saisie dépassée, arrivée en retard, est ignorée (revue n° 3)', async () => {
+    const pending: { q: string; done: (v: SearchItem[]) => void }[] = [];
+    const item = (id: string, fr: string): SearchItem => ({ id, op: 'sncb', n: { fr, nl: fr }, modes: ['train'], lat: 50, lon: 4, kindLabel: 'gare SNCB' });
+    const hz = harness({ settings: preset(), core: (c) => ({ ...c, search: (q: string) => new Promise<SearchItem[]>((done) => pending.push({ q, done })) }) });
+    const el = mount(favoriteEditScreen(hz.ctx, 'nouveau'));
+    const input = el.querySelector<HTMLInputElement>('#fav-arret')!;
+    type(input, 'ga');
+    await sleep(260);
+    type(input, 'gand');
+    await sleep(260);
+    expect(pending.map((p) => p.q)).toEqual(['ga', 'gand']);
+    pending[1].done([item('sncb:8892007', 'Gand-Saint-Pierre'), item('sncb:8893120', 'Gand-Dampoort')]);
+    await settle();
+    pending[0].done([item('sncb:1', 'Gare du Nord'), item('sncb:2', 'Gastuche')]);
+    await settle();
+    expect(options(el.querySelector('#fav-arret-list')!).map(([l]) => l)).toEqual(['Gand-Saint-Pierre', 'Gand-Dampoort']);
   });
 
   it('arrêt disparu : « Arrêt introuvable : choisis-le à nouveau » (M8)', async () => {

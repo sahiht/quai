@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Departure, FavoriteAnswer, Journey, Leg } from '../../src/core/api';
 import {
+  MENU_RIGHT_PX,
   atLabel,
   atTitle,
+  departText,
   boardTitle,
   dayWord,
   distanceText,
@@ -179,6 +181,25 @@ describe('favoris « réponse directe » (L1)', () => {
     const walk: Journey = { id: 'w', legs: [bureau().legs[0]], dep: at(23, 46), arr: at(23, 55), leaveAt: at(23, 46), transfers: 0, rt: true, alerts: [] };
     const w = tripAnswerLine(ok(walk), at(23, 46), s);
     expect([nb(w.right), w.second]).toEqual(['à pied 9 min', 'à pied, arrivée 23:55']);
+  });
+
+  it('« départ … » d’un favori de gare à gare : sans « ~ », puis sans le retard, avant de couper (revue)', () => {
+    const late = at(23, 30);
+    const tomorrow = at(6, 15) + 86_400_000;
+    expect(textWidth('départ demain ~06:15')).toBeGreaterThan(MENU_RIGHT_PX);
+    expect(departText(tomorrow, late, true, '')).toBe('départ demain 06:15');
+    expect(nb(departText(tomorrow, late, false, ' (+5\u00a0min)'))).toBe('départ demain 06:15');
+    expect(nb(departText(at(14, 10), at(12, 10), false, ' (+3\u00a0min)'))).toBe('départ 14:10 (+3 min)');
+    expect(departText(at(14, 10), at(12, 10), true, '')).toBe('départ ~14:10');
+    for (const t of [departText(tomorrow, late, true, ' (+12\u00a0min)'), departText(at(23, 58), late, true, ' (+12\u00a0min)')]) {
+      expect(textWidth(t)).toBeLessThanOrEqual(MENU_RIGHT_PX);
+      expect(t.endsWith('…')).toBe(false);
+    }
+    // dans la réponse : le « ~ » retiré n'appelle plus la note
+    const train = bureau({ rt: false }).legs[1];
+    const station: Journey = { id: 'g', legs: [{ ...train, schedDep: tomorrow, dep: tomorrow, arr: tomorrow + 29 * 60_000 }], dep: tomorrow, arr: tomorrow + 29 * 60_000, leaveAt: tomorrow, transfers: 0, rt: false, alerts: [] };
+    const l = tripAnswerLine({ favoriteId: 'fav-gand', kind: 'trip', state: 'ok', fromStation: true, plan: { journeys: [station] }, updatedAt: late }, late, s);
+    expect([l.right, l.planned]).toEqual(['départ demain 06:15', false]);
   });
 
   it('réponse d’un arrêt favori : prochain départ et « vers …, puis … »', () => {

@@ -133,24 +133,30 @@ function stopPicker(ctx: PhoneCtx, opts: { id: string; label: string; value: str
   const list = h('ul', { class: 'suggest', id: `${opts.id}-list`, role: 'listbox', 'aria-label': `${opts.label} : propositions` });
   const option = (label: string, sub: string, pick: () => void): HTMLLIElement =>
     h('li', { role: 'none' }, h('button', { type: 'button', role: 'option', 'aria-selected': 'false', onclick: () => { pick(); list.replaceChildren(); input.setAttribute('aria-expanded', 'false'); } }, h('span', { class: 's1' }, label), h('span', { class: 's2' }, sub)));
+  // Numéro de requête : la réponse d'une saisie dépassée (arrivée en retard) est ignorée, jamais mélangée.
+  let seq = 0;
   const run = debounce(async () => {
+    const my = ++seq;
     const q = input.value.trim();
-    list.replaceChildren();
+    let items: SearchItem[] = [];
     if (q.length >= 2) {
       try {
         const core = await ctx.core();
-        const items: SearchItem[] = await core.search(q, ctx.location.last() ?? undefined);
-        for (const it of items.slice(0, 8)) {
-          const label = displayName(it.n, s.lang);
-          list.appendChild(option(label, it.kindLabel, () => {
-            input.value = label;
-            opts.onPick({ areaId: it.id, op: it.op, name: it.n, lat: it.lat, lon: it.lon, modes: it.modes, kindLabel: it.kindLabel });
-          }));
-        }
+        items = await core.search(q, ctx.location.last() ?? undefined);
       } catch {
-        /* recherche indisponible : la liste reste vide */
+        items = []; // recherche indisponible : la liste reste vide
       }
     }
+    if (my !== seq) return;
+    list.replaceChildren(
+      ...items.slice(0, 8).map((it) => {
+        const label = displayName(it.n, s.lang);
+        return option(label, it.kindLabel, () => {
+          input.value = label;
+          opts.onPick({ areaId: it.id, op: it.op, name: it.n, lat: it.lat, lon: it.lon, modes: it.modes, kindLabel: it.kindLabel });
+        });
+      }),
+    );
     input.setAttribute('aria-expanded', list.children.length ? 'true' : 'false');
   }, 220);
   input.addEventListener('input', run);

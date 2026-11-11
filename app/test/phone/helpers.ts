@@ -75,6 +75,8 @@ export function fakeGlasses(): FakeGlasses {
 }
 
 export interface Harness {
+  /** Avance l'horloge simulée (l'horloge ne bouge pas toute seule pendant un test). */
+  advance(ms: number): void;
   ctx: PhoneCtx;
   core: Core;
   settings: SettingsStore;
@@ -89,7 +91,8 @@ export interface Harness {
  * horloge simulée, lunettes factices. `go` note l'ancre demandée sans changer d'écran.
  */
 export function harness(opts: { settings?: Settings; now?: number; here?: { lat: number; lon: number } | null; flags?: FakeFlags; params?: string; core?: (c: Core) => Core; web?: boolean; glasses?: boolean } = {}): Harness {
-  const clock = createClock({ mockNow: opts.now ?? SCENARIO.s3.now });
+  let tick = 0;
+  const clock = createClock({ mockNow: opts.now ?? SCENARIO.s3.now, perfNow: () => tick });
   const kv = memoryBackend();
   const settings = new SettingsStore(createKV(kv), opts.settings ?? defaults());
   const base = createFakeCore({ dataBase: 'https://x.test/data', relayBase: 'https://r.test', now: clock.now, storage: { get: async () => null, set: async () => {} } }, opts.flags ?? {});
@@ -114,7 +117,7 @@ export function harness(opts: { settings?: Settings; now?: number; here?: { lat:
     go: (hash) => void went.push(hash),
     params: new URLSearchParams(opts.params ?? ''),
   };
-  return { ctx, core, settings, glasses, went, location, kv };
+  return { ctx, core, settings, glasses, went, location, kv, advance: (ms) => void (tick += ms) };
 }
 
 /** Monte un écran dans la page (les écrans sont faits pour être dans le document). */

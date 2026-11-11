@@ -4,10 +4,11 @@
  * « Réglages » (réponse courte, bouton « Lunettes », « Gérer mes favoris »), bannière après la mise à jour,
  * « Temps réel indisponible, horaires prévus » au lieu de « Tout est à jour ».
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FavoriteAnswer, Settings } from '../../src/core/api';
 import { newsState } from '../../src/phone/app';
-import { homeScreen, resetAnswers } from '../../src/phone/screens/home';
+import { ANSWER_MAX_AGE_MS, homeScreen, resetAnswers, reusable } from '../../src/phone/screens/home';
+import { catchable } from '../../src/glasses/format';
 import { shortAnswer } from '../../src/phone/text';
 import { at, button, defaults, harness, mount, preset11, SCENARIO, textOf, until } from './helpers';
 
@@ -71,6 +72,54 @@ describe('« Mes favoris » sur l’accueil (S8)', () => {
     expect(hz.glasses.trips[0]).toMatchObject({ title: 'Vers le bureau', favoriteId: 'fav-bureau', index: 0, from: { type: 'here' }, to: { type: 'place', placeId: 'bureau' } });
     expect(hz.glasses.trips[0].result.journeys.length).toBeGreaterThan(0);
     expect(textOf(row.querySelector('.msg'))).toMatch(/^Affiché dans les lunettes : IC 07:42\.$/);
+  });
+
+  it('retour sur l’accueil 39 min plus tard : « Lunettes » recalcule la réponse, jamais un train parti (revue n° 1)', async () => {
+    const hz = harness({ settings: preset11(), now: SCENARIO.s1.now, here: SCENARIO.s1, flags: { noRt: true } });
+    const first = mount(homeScreen(hz.ctx));
+    await until(() => favRows(first).every((r) => textOf(r.querySelector('.answer')) !== '…'));
+    expect(rowText(favRows(first)[0])).toBe('Vers le bureau | partir à 07:33');
+    document.body.replaceChildren();
+    hz.advance(39 * 60_000); // 08:10 : l'IC de 07:42 est parti
+    const answer = vi.spyOn(hz.core, 'answer');
+    const el = mount(homeScreen(hz.ctx));
+    const row = favRows(el)[0];
+    expect(textOf(row.querySelector('.t1'))).toBe('Vers le bureau');
+    // toucher tout de suite, avant le rafraîchissement de l'accueil
+    row.querySelector<HTMLButtonElement>('.btn-glasses')!.click();
+    await until(() => hz.glasses.trips.length === 1);
+    const now = hz.ctx.clock.now();
+    const j = hz.glasses.trips[0].result.journeys[0];
+    const ride = j.legs.find((l) => l.kind === 'ride')!;
+    expect(ride.dep).toBeGreaterThan(now);
+    expect(catchable(j, now)).toBe(true);
+    expect(answer.mock.calls.some(([f]) => f.id === 'fav-bureau')).toBe(true);
+  });
+
+  it('réponse récente et encore attrapable : envoyée telle quelle, sans nouveau calcul', async () => {
+    const hz = harness({ settings: preset11(), now: SCENARIO.s1.now, here: SCENARIO.s1, flags: { noRt: true } });
+    const el = mount(homeScreen(hz.ctx));
+    await until(() => favRows(el).every((r) => textOf(r.querySelector('.answer')) !== '…'));
+    hz.advance(30_000);
+    const answer = vi.spyOn(hz.core, 'answer');
+    favRows(el)[0].querySelector<HTMLButtonElement>('.btn-glasses')!.click();
+    await until(() => hz.glasses.trips.length === 1);
+    expect(answer).not.toHaveBeenCalled();
+  });
+
+  it('reusable : moins de 2 min et 1re proposition attrapable', async () => {
+    const hz = harness({ settings: preset11(), now: SCENARIO.s1.now, here: SCENARIO.s1, flags: { noRt: true } });
+    await hz.core.init();
+    const fav = preset11().favorites.find((f) => f.id === 'fav-bureau')!;
+    const a = await hz.core.answer(fav, SCENARIO.s1, preset11());
+    const t = a.updatedAt;
+    expect(reusable(undefined, t)).toBe(false);
+    expect(reusable(a, t + 60_000)).toBe(true);
+    expect(reusable(a, t + ANSWER_MAX_AGE_MS)).toBe(false);
+    // attrapable jusqu'au départ à pied (07:33 + 30 s), plus après même dans les 2 min
+    const late = { ...a, updatedAt: at(7, 40) };
+    expect(reusable(late, at(7, 41))).toBe(false);
+    expect(reusable({ ...a, plan: { journeys: [], empty: 'noPosition' } }, t + 1000)).toBe(true);
   });
 
   it('« Lunettes » d’un arrêt favori : ses départs (showBoard avec le filtre)', async () => {

@@ -6,9 +6,10 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { AreaSummary, TileFile } from '../../../shared/types';
-import type { Favorite, FavoriteAnswer, FavoriteStop, Settings } from '../../src/core/api';
-import { answerTime, favoriteTitle, isLastAnswer, orderFavorites, relocateAmong } from '../../src/core/favorites';
-import { hhmm } from '../../src/core/util';
+import type { Favorite, FavoriteAnswer, FavoriteStop, FavoriteTrip, Journey, Settings } from '../../src/core/api';
+import { answerFavorite, answerTime, favoriteTitle, isLastAnswer, orderFavorites, relocateAmong, type AnswerEnv, type PlanMemo } from '../../src/core/favorites';
+import { netOf } from '../../src/core/routing/repair';
+import { distanceM, hhmm, walkMinutes } from '../../src/core/util';
 import { validateSettings } from '../../src/settings';
 import { makeEnv, type Scene } from './support/env';
 import { CORE_DATA_DIR, readJson, REPO_DIR, at } from './support/network';
@@ -186,6 +187,216 @@ describe('réponses des favoris (M1.5)', () => {
     expect(relocateAmong(fav, [A('tec:far', 'La Hulpe Gare', 50.7330, 4.4848), A('tec:near', 'LA HULPE gare', 50.7305, 4.4848)])?.id).toBe('tec:near');
     expect(relocateAmong(fav, [A('tec:far', 'La Hulpe Gare', 50.7330, 4.4848)])).toBeNull(); // 300 m
     expect(relocateAmong(fav, [{ ...A('stib:x', 'La Hulpe Gare', 50.7303, 4.4848), op: 'stib' }])).toBeNull();
+  });
+
+  it('gare de départ → adresse : une seule marche jusqu’à l’arrêt de montée, le tram 1 de 14:36 attrapé (marges 2 et 0)', async () => {
+    const fav: FavoriteTrip = {
+      kind: 'trip',
+      id: 'f-gand',
+      propose: 'never',
+      from: { type: 'area', areaId: 'sncb:8892007', op: 'sncb', name: { fr: 'Gand-Saint-Pierre', nl: 'Gent-Sint-Pieters' }, lat: 51.0359, lon: 3.7107 },
+      to: { type: 'address', label: 'Veldstraat 1, 9000 Gent', lat: 51.0535, lon: 3.7225 },
+    };
+    const here = { lat: 51.04, lon: 3.7107 };
+    for (const margin of [2, 0]) {
+      const env = makeEnv({ now: '2026-11-10T14:20', scene: 'noRT' });
+      const s: Settings = { ...PRESET_11, alerts: { ...PRESET_11.alerts, leaveBeforeMin: margin } };
+      const a = await env.core.answer(fav, here, s);
+      expect(a.state).toBe('ok');
+      for (const j of a.plan!.journeys) {
+        const i = j.legs.findIndex((l) => l.kind === 'ride');
+        const ride = j.legs[i];
+        // avant le premier véhicule : une seule marche, de la position à l'arrêt de montée
+        expect(i).toBe(1);
+        expect(j.legs[0]).toMatchObject({ kind: 'walk', from: { name: { fr: 'Ma position' } }, to: { lat: ride.from.lat, lon: ride.from.lon } });
+        const w = j.legs[0].walkMin! * 60_000;
+        expect(j.leaveAt).toBe(ride.dep - w - margin * 60_000);
+        expect(j.legs[0].arr).toBeLessThanOrEqual(ride.dep);
+      }
+      const first = a.plan!.journeys[0];
+      expect(hhmm(first.legs[1].dep)).toBe('14:36');
+      expect(first.reason).toBe(`Le plus simple\u00a0: direct, à pied ${first.legs[0].walkMin} + 3\u00a0min`);
+    }
+  });
+
+  it('arrêt de départ → adresse proche : la proposition à pied est gardée (position → destination, maintenant)', async () => {
+    const env = makeEnv({ now: '2026-11-10T12:10', scene: 'noRT' });
+    const fav: FavoriteTrip = {
+      kind: 'trip',
+      id: 'f-sj',
+      propose: 'never',
+      from: { type: 'area', areaId: 'stib:6357F', op: 'stib', name: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86004, lon: 4.36017 },
+      to: { type: 'address', label: 'Rue X 1, 1210 Saint-Josse', lat: 50.8555, lon: 4.3602 },
+    };
+    const here = { lat: 50.8645, lon: 4.3602 };
+    const a = await env.core.answer(fav, here, PRESET_11);
+    expect(a.state).toBe('ok');
+    const walk = a.plan!.journeys.find((j) => !j.legs.some((l) => l.kind === 'ride'))!;
+    expect(walk.legs).toHaveLength(1);
+    expect(walk.legs[0]).toMatchObject({ kind: 'walk', from: { name: { fr: 'Ma position' } }, to: { lat: 50.8555, lon: 4.3602 }, walkMin: walkMinutes(distanceM(here, fav.to as { lat: number; lon: number })) });
+    expect(walk.dep).toBe(at('2026-11-10T12:10'));
+    expect(walk.leaveAt).toBe(walk.dep);
+  });
+
+  it('identifiants des propositions gardés (mémoire du réseau pour le recalcul d’une correspondance)', async () => {
+    const env = makeEnv({ now: '2026-11-10T07:31', scene: 'noRT' });
+    const meta = await env.core.init();
+    const gand = PRESET_11.favorites.find((f) => f.id === 'fav-gand') as FavoriteTrip;
+    const here = { lat: 50.848, lon: 4.3571 }; // à 300 m de Bruxelles-Central : marche ajoutée
+    const a = await env.core.answer(gand, here, PRESET_11);
+    expect(a.plan!.journeys[0].legs[0]).toMatchObject({ kind: 'walk', from: { name: { fr: 'Ma position' } } });
+    for (const j of a.plan!.journeys) {
+      expect(j.id).not.toContain('~');
+      expect(netOf(meta.generatedAt, j.id)).toBeTruthy();
+    }
+  });
+
+  it('plan mémorisé : temps réel seul pendant 5 min ; nouveau calcul après 5 min, à 100 m, à une nouvelle génération, quand la 1re proposition ne tient plus', async () => {
+    let t = at('2026-11-10T08:00');
+    let gen = 'G1';
+    let routes = 0;
+    let delayMin = 0;
+    let cancelled = false;
+    let none = false;
+    const Q = 15 * 60_000;
+    const W = 5 * 60_000;
+    const stop = { name: { fr: 'Arrêt', nl: 'Halte' }, lat: 50.8, lon: 4.3 };
+    const dest = { name: { fr: 'Bureau', nl: 'Bureau' }, lat: 50.9, lon: 4.4 };
+    const journey = (dep: number): Journey => ({
+      id: `j${dep}`,
+      legs: [
+        { kind: 'walk', from: stop, to: stop, dep: dep - W, arr: dep, schedDep: dep - W, schedArr: dep, walkMin: 5 },
+        { kind: 'ride', from: stop, to: dest, dep, arr: dep + Q, schedDep: dep, schedArr: dep + Q, op: 'stib', mode: 'tram', line: '3', tripId: `t${dep}` },
+      ],
+      dep: dep - W,
+      arr: dep + Q,
+      leaveAt: dep - W,
+      transfers: 0,
+      rt: false,
+      alerts: [],
+      label: 'simple',
+      reason: 'Le plus simple : direct, à pied 5 min',
+    });
+    const env: AnswerEnv = {
+      now: () => t,
+      board: () => Promise.reject(new Error('inutile')),
+      // tram toutes les 15 min ; le premier attrapable après 5 min de marche
+      route: async (_from, _to, after) => {
+        routes++;
+        return none ? { journeys: [], empty: 'noTrip' } : { journeys: [journey(Math.ceil((after + W) / Q) * Q)] };
+      },
+      relocate: async () => null,
+      // temps réel : retard ou suppression du tram
+      refresh: async (js) =>
+        js.map((j) => ({ ...j, legs: j.legs.map((l) => (l.kind === 'ride' ? { ...l, dep: l.schedDep + delayMin * 60_000, arr: l.schedArr + delayMin * 60_000, cancelled } : l)) })),
+      generation: async () => gen,
+      plans: new Map<string, PlanMemo>(),
+    };
+    const fav: FavoriteTrip = { kind: 'trip', id: 'f', propose: 'never', from: { type: 'here' }, to: { type: 'address', label: 'Bureau', lat: 50.9, lon: 4.4 } };
+    const here = { lat: 50.8, lon: 4.3 };
+    const near = { lat: 50.8004, lon: 4.3 }; // 45 m
+    const far = { lat: 50.8015, lon: 4.3 }; // 167 m
+    const ask = async (when: string | number, pos = here) => {
+      t = typeof when === 'number' ? when : at(when);
+      return answerFavorite(fav, pos, PRESET_11, env);
+    };
+    const firstRide = (a: FavoriteAnswer) => hhmm(a.plan!.journeys[0].legs[1].dep);
+    expect(firstRide(await ask('2026-11-10T08:00'))).toBe('08:15');
+    expect(routes).toBe(1);
+    // moins de 5 min, moins de 100 m : temps réel seul
+    expect(firstRide(await ask('2026-11-10T08:03', near))).toBe('08:15');
+    expect(routes).toBe(1);
+    // 5 min : nouveau calcul
+    await ask('2026-11-10T08:05');
+    expect(routes).toBe(2);
+    // nouvelle génération de données
+    gen = 'G2';
+    await ask('2026-11-10T08:06');
+    expect(routes).toBe(3);
+    // position déplacée de plus de 100 m
+    await ask('2026-11-10T08:07', far);
+    expect(routes).toBe(4);
+    await ask('2026-11-10T08:08', far);
+    expect(routes).toBe(4);
+    // tram de 08:15 plus attrapable (5 min de marche) : le suivant
+    expect(firstRide(await ask(at('2026-11-10T08:10') + 31_000, far))).toBe('08:30');
+    expect(routes).toBe(5);
+    await ask('2026-11-10T08:25', far);
+    expect(routes).toBe(6);
+    // à 08:26, le tram de 08:30 ne s'attrape plus à l'heure prévue (5 min de marche), mais il a 3 min de retard :
+    // toujours proposé, sans nouveau calcul
+    delayMin = 3;
+    const late = await ask('2026-11-10T08:26', far);
+    expect(routes).toBe(6);
+    expect(late.plan!.journeys[0].legs[1]).toMatchObject({ schedDep: at('2026-11-10T08:30'), dep: at('2026-11-10T08:33') });
+    expect(late.updatedAt).toBe(at('2026-11-10T08:26'));
+    // supprimé : nouveau calcul
+    cancelled = true;
+    await ask('2026-11-10T08:27', far);
+    expect(routes).toBe(7);
+    // rien trouvé : gardé 5 min aussi
+    cancelled = false;
+    none = true;
+    await ask('2026-11-10T08:40', far);
+    expect(routes).toBe(8);
+    expect((await ask('2026-11-10T08:43', far)).state).toBe('none');
+    expect(routes).toBe(8);
+  });
+
+  it('plan mémorisé : une 2e proposition supprimée impose un nouveau calcul (jamais affichée)', async () => {
+    let t = at('2026-11-10T08:00');
+    let routes = 0;
+    let cancelSecond = false;
+    const Q = 15 * 60_000;
+    const stop = { name: { fr: 'Arrêt', nl: 'Halte' }, lat: 50.8, lon: 4.3 };
+    const dest = { name: { fr: 'Bureau', nl: 'Bureau' }, lat: 50.9, lon: 4.4 };
+    const journey = (dep: number, label: Journey['label']): Journey => ({
+      id: `j${dep}`,
+      legs: [{ kind: 'ride', from: stop, to: dest, dep, arr: dep + Q, schedDep: dep, schedArr: dep + Q, op: 'stib', mode: 'tram', line: '3', tripId: `t${dep}` }],
+      dep, arr: dep + Q, leaveAt: dep, transfers: 0, rt: false, alerts: [], label, reason: 'Le plus simple : direct',
+    });
+    const second = at('2026-11-10T08:30');
+    const env: AnswerEnv = {
+      now: () => t,
+      board: () => Promise.reject(new Error('inutile')),
+      route: async () => {
+        routes++;
+        return { journeys: [journey(at('2026-11-10T08:15'), 'simple'), journey(second, 'next')] };
+      },
+      relocate: async () => null,
+      refresh: async (js) => js.map((j) => ({ ...j, legs: j.legs.map((l) => ({ ...l, cancelled: cancelSecond && l.schedDep === second })) })),
+      generation: async () => 'G1',
+      plans: new Map<string, PlanMemo>(),
+    };
+    const fav: FavoriteTrip = { kind: 'trip', id: 'f2', propose: 'never', from: { type: 'here' }, to: { type: 'address', label: 'Bureau', lat: 50.9, lon: 4.4 } };
+    const here = { lat: 50.8, lon: 4.3 };
+    await answerFavorite(fav, here, PRESET_11, env);
+    expect(routes).toBe(1);
+    t = at('2026-11-10T08:01');
+    await answerFavorite(fav, here, PRESET_11, env);
+    expect(routes).toBe(1);
+    cancelSecond = true;
+    t = at('2026-11-10T08:02');
+    await answerFavorite(fav, here, PRESET_11, env);
+    expect(routes).toBe(2);
+  });
+
+  it('plan mémorisé sur les fixtures : l’IC de 14:22 en retard (+3) reste proposé à 14:23, sans nouveau calcul ni téléchargement', async () => {
+    const env = makeEnv({ now: '2026-11-10T14:19', scene: 'base' });
+    const gand = PRESET_11.favorites.find((f) => f.id === 'fav-gand')!;
+    const here = POS.s3; // Bruxelles-Central
+    const a = await env.core.answer(gand, here, PRESET_11);
+    const ride = (x: FavoriteAnswer) => x.plan!.journeys[0].legs.find((l) => l.kind === 'ride')!;
+    expect(ride(a)).toMatchObject({ cat: 'IC', delayMin: 3 });
+    expect(hhmm(ride(a).schedDep)).toBe('14:22');
+    const data = () => env.server.count((u) => u.includes('/quai/data/'));
+    const before = data();
+    env.clock.set('2026-11-10T14:23');
+    const b = await env.core.answer(gand, here, PRESET_11);
+    expect(hhmm(ride(b).schedDep)).toBe('14:22');
+    expect(hhmm(ride(b).dep)).toBe('14:25');
+    expect(b.updatedAt).toBe(at('2026-11-10T14:23'));
+    expect(data()).toBe(before);
   });
 
   it('aucun trajet trouvé : state « none », en fin de liste', () => {

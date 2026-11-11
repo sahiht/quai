@@ -12,7 +12,7 @@ import type { AreaRef } from '../../glasses/types';
 import { vehicleOf } from '../../glasses/format';
 import { normalizeForSearch } from '../../../../shared/names';
 import { header, type PhoneCtx } from '../app';
-import { h, ICON } from '../dom';
+import { h, ICON, svgNode } from '../dom';
 import { placeField, privacyNote, type FieldChoice } from '../field';
 import { glassesButton, showTrip } from '../glasses-link';
 import {
@@ -95,11 +95,17 @@ export function rideDetail(j: Journey, lang: 'fr' | 'nl' | 'local'): string {
   return `${vehicleOf(first)} à ${where}, ${status}${first.last && !first.cancelled ? ', dernier passage' : ''}`;
 }
 
+/** Pastilles d'un trajet (« IC › 1 min › Tram 1 ») : noms des lignes en nœuds texte (données publiées, jamais du HTML). */
 function chips(j: Journey): HTMLElement {
   const list = j.legs.map((l) =>
     l.kind === 'walk'
-      ? h('span', { class: 'chip walk', html: `${ICON.walk}<span>${typo(`${l.walkMin ?? Math.max(1, Math.round((l.arr - l.dep) / 60_000))} min`)}</span>` })
-      : h('span', { class: 'chip', html: `${l.mode === 'train' ? ICON.trainSmall : l.mode === 'bus' ? ICON.busSmall : ICON.tramSmall}<span>${l.mode && l.mode !== 'train' ? `${MODE_TITLE[l.mode]} ${l.line ?? ''}` : vehicleOf(l)}</span>` }),
+      ? h('span', { class: 'chip walk' }, svgNode(ICON.walk), h('span', null, typo(`${l.walkMin ?? Math.max(1, Math.round((l.arr - l.dep) / 60_000))} min`)))
+      : h(
+          'span',
+          { class: 'chip' },
+          svgNode(l.mode === 'train' ? ICON.trainSmall : l.mode === 'bus' ? ICON.busSmall : ICON.tramSmall),
+          h('span', null, l.mode && l.mode !== 'train' ? `${MODE_TITLE[l.mode]} ${l.line ?? ''}` : vehicleOf(l)),
+        ),
   );
   return h('span', { class: 'chips' }, list.flatMap((c, k) => (k ? [h('span', { class: 'sep', 'aria-hidden': 'true' }, '›'), c] : [c])));
 }

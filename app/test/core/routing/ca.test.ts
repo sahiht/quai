@@ -109,7 +109,7 @@ describe('CA-M3 et CA-M2.5 : vers Gand-Saint-Pierre (S3, 13:55, scène base)', (
     const { core, preset } = makeEnv({ now: '2026-11-10T07:31', scene: 'noRT' });
     const r = check(await core.route(WATERLOO, ROGIER, atTime('2026-11-10T07:31'), preset));
     expect(labels(r)).toEqual(['simple', 'fast', 'next']);
-    expect(legsOf(r.journeys[0])).toBe('marche 2 | 07:36 W WATERLOO Eglise → BRUXELLES Midi 08:21 | marche 2 | 08:29 M2 Gare du Midi → Rogier 08:43 | marche 3');
+    expect(legsOf(r.journeys[0])).toBe('marche 2 | 07:36 W Waterloo Eglise → Bruxelles Midi 08:21 | marche 2 | 08:29 M2 Gare du Midi → Rogier 08:43 | marche 3');
     expect(legsOf(r.journeys[1])).toBe('marche 19 | 07:55 S1 Waterloo → Bruxelles-Nord 08:25 | marche 5');
     expect(plain(r.journeys[0].reason)).toBe('Le plus simple : 1 changement, à pied 2 + 2 + 3 min');
     expect(plain(r.journeys[1].reason)).toBe('Le plus rapide : 16 min plus tôt, direct');

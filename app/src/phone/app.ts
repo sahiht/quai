@@ -9,7 +9,7 @@ import type { Clock } from '../platform/clock';
 import type { LocationPort } from '../platform/types';
 import type { SettingsStore } from '../settings';
 import { APP_VERSION, compareVersions } from '../version';
-import { h, ICON } from './dom';
+import { h, ICON, svgNode } from './dom';
 import { alertsScreen } from './screens/alerts';
 import { dataScreen } from './screens/data';
 import { displayScreen } from './screens/display';
@@ -135,7 +135,7 @@ export function header(ctx: PhoneCtx, title: string, lead?: string, back?: { lab
     'header',
     { class: 'head' },
     back
-      ? h('button', { type: 'button', class: 'back', onclick: () => ctx.go(back.hash), html: `${ICON.back}<span>${back.label}</span>` })
+      ? h('button', { type: 'button', class: 'back', onclick: () => ctx.go(back.hash) }, svgNode(ICON.back), h('span', null, back.label))
       : h('span', { class: 'eyebrow' }, 'Quai'),
     h('h1', null, title),
     lead ? h('p', { class: 'lead' }, lead) : null,

@@ -1048,10 +1048,15 @@ export class GlassesController implements GlassesApi {
     void this.render();
   }
 
-  private boardFavorite(r: Extract<Route, { screen: 'board' }>): Favorite | undefined {
+  /**
+   * Favori des départs affichés (« ★ » du titre, toucher pour retirer) : sur la même zone, celui dont le filtre de
+   * lignes est celui de l'écran, sinon celui sans filtre. Deux favoris sur une même zone (Gare du Nord fusionnée) ne se
+   * confondent jamais.
+   */
+  private boardFavorite(r: Extract<Route, { screen: 'board' }>): FavoriteStop | undefined {
     const hit = this.cache.get(routeKey(r));
     const area = hit?.ok ? (hit.value as { board: { area: { id: string; aka?: string[] } } }).board.area : undefined;
-    return this.settings().favorites.find((f) => f.kind === 'stop' && (f.areaId === r.areaId || f.areaId === area?.id || !!area?.aka?.includes(f.areaId)));
+    return favoriteOfBoard(this.settings().favorites, r, area);
   }
 
   /**
@@ -1140,9 +1145,18 @@ export class GlassesController implements GlassesApi {
    * devient le trajet suivi, même de gare à gare. Rend le message affiché à côté du bouton.
    */
   async showTrip(req: TripRequest): Promise<string> {
-    const journeys = req.result.journeys;
-    const index = Math.min(Math.max(0, req.index), Math.max(0, journeys.length - 1));
-    const j = journeys[index];
+    let journeys = req.result.journeys;
+    let index = Math.min(Math.max(0, req.index), Math.max(0, journeys.length - 1));
+    let j = journeys[index];
+    if (j && !catchable(j, this.d.clock.now())) {
+      // Propositions trop anciennes (le premier véhicule est parti) : recalcul depuis les mêmes extrémités ; jamais
+      // « Dans le train » sur un trajet qu'on ne peut plus prendre.
+      const fresh = await this.freshPlan(req.from, req.to);
+      if (!fresh.length) return 'Aucun trajet trouvé pour l’instant.';
+      journeys = fresh;
+      index = 0;
+      j = fresh[0];
+    }
     const route: StepsRoute = { screen: 'steps', key: this.newKey(), label: '', title: req.title, from: req.from, to: req.to };
     if (req.favoriteId) route.favoriteId = req.favoriteId;
     if (j) {
@@ -1154,6 +1168,21 @@ export class GlassesController implements GlassesApi {
     }
     await this.showNav(reset([{ screen: 'home' }, route]), route);
     return j ? shownMessage(j, this.d.clock.now()) : 'Affiché dans les lunettes.';
+  }
+
+  /** Propositions recalculées maintenant, encore attrapables (vide si rien ou en cas d'erreur). */
+  private async freshPlan(from: Endpoint, to: Endpoint): Promise<Journey[]> {
+    const needsHere = from.type === 'here' || to.type === 'here';
+    const here = this.hereLL() ?? (needsHere ? await this.d.platform.location.current(6000) : null);
+    if (needsHere && !here) return [];
+    try {
+      const now = this.d.clock.now();
+      const res = await deadline(this.d.core.route(from, to, now, this.settings(), here), CORE_TIMEOUT_MS, 'calcul trop lent');
+      return res.journeys.filter((x) => catchable(x, this.d.clock.now()));
+    } catch (e) {
+      console.warn('[Quai] trajet recalculé', errText(e));
+      return [];
+    }
   }
 
   /** Bouton « Lunettes » d'un arrêt favori (S8) : ses départs. */
@@ -1568,8 +1597,7 @@ export class GlassesController implements GlassesApi {
         const waiting = r.name ? displayName(r.name, ctx.settings.lang) : 'Départs';
         if (!value) return loadingView(waiting, 'Chargement des départs…', ctx);
         const { board, works } = value as { board: Parameters<typeof boardView>[0]; works: string[] };
-        const s = ctx.settings;
-        const isFavorite = s.favorites.some((x) => x.kind === 'stop' && (x.areaId === r.areaId || x.areaId === board.area.id || !!board.area.aka?.includes(x.areaId)));
+        const isFavorite = !!favoriteOfBoard(ctx.settings.favorites, r, board.area);
         const v = boardView(board, ctx, { isFavorite });
         if (!v.top && works?.[0]) v.top = { text: `! ${works[0]}`, strong: true };
         return v;
@@ -1680,20 +1708,32 @@ export class GlassesController implements GlassesApi {
 
   /* ------------------------------ État d'arrière-plan ------------------------------ */
 
+  /**
+   * État pour la WebView suivante (__getStateSnapshot). Vide tant que le contrôleur n'est pas prêt : un instantané pris
+   * pendant « Chargement… » ne doit ni figer la nouvelle WebView sur cet écran, ni effacer le trajet suivi pas encore lu.
+   */
   snapshot(): Record<string, unknown> {
-    return { v: 2, nav: this.nav, clock: this.d.clock.snapshot(), here: this.here, trip: this.trip, savedAt: Date.now() };
+    if (!this.ready) return {};
+    const snap: Record<string, unknown> = { v: 2, nav: this.nav, clock: this.d.clock.snapshot(), here: this.here, autoDone: [...this.autoDone], savedAt: Date.now() };
+    // Le trajet suivi n'accompagne l'instantané que s'il a été lu (quai.trip) : sinon la nouvelle WebView le relit.
+    if (this.tripLoaded) {
+      snap.trip = this.trip;
+      snap.tripRead = true;
+    }
+    return snap;
   }
 
   restore(snap: unknown): void {
     try {
-      const s = (typeof snap === 'string' ? JSON.parse(snap) : snap) as { nav?: unknown; clock?: { now: number }; here?: Fix | null; trip?: unknown };
+      const s = (typeof snap === 'string' ? JSON.parse(snap) : snap) as { nav?: unknown; clock?: { now: number }; here?: Fix | null; trip?: unknown; tripRead?: unknown; autoDone?: unknown };
       if (!s || typeof s !== 'object') return;
-      const nav = parseNav(s.nav);
+      const nav = restorableNav(parseNav(s.nav));
       if (s.clock) this.d.clock.restore(s.clock);
       if (s.here && Number.isFinite(s.here.lat) && Number.isFinite(s.here.lon)) this.here = s.here;
-      const trip = s.trip === undefined ? undefined : parseTrip(s.trip);
-      if (trip !== undefined) {
-        this.trip = trip;
+      // Suivi automatique déjà fait (« Dans le train » ne revient pas après un retour volontaire aux étapes).
+      if (Array.isArray(s.autoDone)) for (const k of s.autoDone) if (typeof k === 'string') this.autoDone.add(k);
+      if (s.tripRead === true) {
+        this.trip = parseTrip(s.trip);
         this.tripLoaded = true;
         this.saveFollowed();
       }
@@ -1724,6 +1764,35 @@ export class GlassesController implements GlassesApi {
     this.nav = { stack: [...this.nav.stack.slice(0, -1), { route, sel: 0, top: 0, fresh: true }] };
     await this.onRouteChanged();
   }
+}
+
+/** Même filtre de lignes (absent ou vide : toutes les lignes), quel que soit l'ordre. */
+export function sameFilter(a: LineFilter[] | undefined, b: LineFilter[] | undefined): boolean {
+  const key = (f: LineFilter[] | undefined): string => (f ?? []).map((x) => `${x.line}|${x.head}`).sort().join('\n');
+  return key(a) === key(b);
+}
+
+/**
+ * Favori d'arrêt correspondant à un écran de départs : même zone (identifiant de l'écran, de la zone affichée ou un de
+ * ses anciens identifiants), puis même filtre que l'écran, sinon sans filtre.
+ */
+export function favoriteOfBoard(
+  favorites: readonly Favorite[],
+  r: { areaId: string; filter?: LineFilter[] },
+  area?: { id: string; aka?: string[] },
+): FavoriteStop | undefined {
+  const here = favorites.filter((f): f is FavoriteStop => f.kind === 'stop' && (f.areaId === r.areaId || f.areaId === area?.id || !!area?.aka?.includes(f.areaId)));
+  return here.find((f) => sameFilter(f.filter, r.filter)) ?? here.find((f) => !f.filter?.length);
+}
+
+/**
+ * Pile restaurable d'un instantané : jamais l'écran « Chargement… » ni une erreur (l'ouverture normale les remplace,
+ * « réessayer » relance le démarrage) ; null s'il ne reste rien.
+ */
+function restorableNav(nav: NavState | null): NavState | null {
+  if (!nav) return null;
+  const stack = nav.stack.filter((f) => !(f.route.screen === 'message' && (f.route.kind === 'loading' || f.route.kind === 'error')));
+  return stack.length ? { stack } : null;
 }
 
 /** Résultat d'un lieu de « Aller à… » : son résumé et ses propositions (réutilisées par le toucher). */

@@ -1,1 +1,1 @@
-{"v":1,"items":[{"id":"tec:Bwategl1","op":"tec","n":{"fr":"WATERLOO Eglise","nl":"WATERLOO Eglise"},"modes":["bus"],"lat":50.7174,"lon":4.3979},{"id":"tec:N530aaa","op":"tec","n":{"fr":"Bouge Église","nl":"Bouge Église"},"modes":["bus"],"lat":50.477,"lon":4.885}]}
+{"v":1,"items":[{"id":"tec:Bwategl1","op":"tec","n":{"fr":"Waterloo Eglise","nl":"Waterloo Eglise"},"modes":["bus"],"lat":50.7174,"lon":4.3979},{"id":"tec:N530aaa","op":"tec","n":{"fr":"Bouge Église","nl":"Bouge Église"},"modes":["bus"],"lat":50.477,"lon":4.885}]}

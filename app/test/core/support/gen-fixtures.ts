@@ -25,7 +25,7 @@ import type {
   TrainsDay,
 } from '../../../../shared/types';
 import { normalizeId, tileKey } from '../../../../shared/types';
-import { frName, lineName, prettyName, searchKey, searchWords } from '../../../../shared/names';
+import { frName, lineName, prettyName, searchKey, searchWords, tecName } from '../../../../shared/names';
 import type { Network, NetRoute, NetStop, NetTemplate, NetTrip } from './network';
 
 export const TILE = { lat: 0.02, lon: 0.03 };
@@ -124,7 +124,8 @@ export function buildTrips(net: Network): TripRec[] {
     sncb: sncbHead,
     stib: (h) => ({ fr: prettyName(h), nl: prettyName(net.ops.stib.headsigns[h] ?? h) }),
     delijn: (h) => ({ fr: frName(h), nl: h, l: 'nl' }),
-    tec: (h) => ({ fr: h, nl: h }),
+    // comme le pipeline (pipeline/src/naming.ts) : commune en capitales remise en casse
+    tec: (h) => ({ fr: tecName(h), nl: tecName(h) }),
   };
   const trips: TripRec[] = [];
   const fromTemplates = (op: Op, routes: NetRoute[], tpls: NetTemplate[]) => {
@@ -218,7 +219,7 @@ export function buildDataFiles(net: Network): Files {
   addGrouped(
     'tec',
     net.ops.tec.stops.map((s) => ({ id: s.id, ...splitSuffix(s.name, 'quai'), lat: s.lat, lon: s.lon })),
-    (g) => ({ fr: g[0].base, nl: g[0].base }),
+    (g) => ({ fr: tecName(g[0].base), nl: tecName(g[0].base) }),
     (id) => normalizeId(id),
   );
 

@@ -311,6 +311,18 @@ export function tripSecondLine(j: Journey, _now: number, markPlanned: boolean, m
   return { text: truncate(build(false, true), maxPx), planned };
 }
 
+/** Colonne de droite des menus (PRD § 6.0). */
+export const MENU_RIGHT_PX = 190;
+
+/**
+ * « départ 14:10 », « départ demain ~06:15 (+3 min) » (gare de départ hors de portée à pied). Trop long pour la colonne
+ * de droite : sans « ~ », puis sans le retard, avant de couper (comme la 2e ligne).
+ */
+export function departText(ms: number, now: number, planned: boolean, delay: string, maxPx = MENU_RIGHT_PX): string {
+  const tries = [`départ ${timeText(ms, now, planned)}${delay}`, `départ ${timeText(ms, now)}${delay}`, `départ ${timeText(ms, now)}`];
+  return tries.find((t) => textWidth(t) <= maxPx) ?? truncate(tries[tries.length - 1], maxPx);
+}
+
 /** Réponse d'un trajet favori (L1) : « partir dans 4 min » et sa 2e ligne, ou l'état (« tu y es », « … »). */
 export function tripAnswerLine(a: FavoriteAnswer | undefined, now: number, settings: Settings): FavoriteLine {
   if (!a) return { right: '…', planned: false, two: true };
@@ -330,7 +342,8 @@ export function tripAnswerLine(a: FavoriteAnswer | undefined, now: number, setti
     const station = displayName(r.from.name, settings.lang);
     let second = `${vehicleName(r)}${plat ? ' ' + plat : ''} à ${station}, arrivée ${hhmm(j.arr)}`;
     if (textWidth(second) > FULL_PX) second = truncate(second, FULL_PX);
-    return { right: `départ ${timeText(r.schedDep, now, planned)}${delay}`, second, planned };
+    const right = departText(r.schedDep, now, planned, delay);
+    return { right, second, planned: planned && right.includes('~') };
   }
   const line2 = tripSecondLine(j, now, mp);
   return { right: leaveText(j.leaveAt, now), second: line2.text, planned: line2.planned };

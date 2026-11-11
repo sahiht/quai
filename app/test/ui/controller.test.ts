@@ -8,7 +8,9 @@ import type { Core } from '../../src/core/api';
 import { QuaiError } from '../../src/core/errors';
 import { TRIP_KEY, parseTrip, tripPhase } from '../../src/glasses/controller';
 import type { ContainerSpec } from '../../src/glasses/types';
-import { at, defaults, preset, preset11, setupController, type Screen } from './helpers';
+import { at, defaults, fakeCore, preset, preset11, setupController, type Screen } from './helpers';
+
+const fakeCoreFor = (now: () => number) => fakeCore(now);
 
 const homeReady = (s: Screen) => s.screen === 'home' && !s.lines.some((l) => /   …$/.test(l)) && s.lines.some((l) => l.startsWith('Autour de moi   ') && !l.endsWith('…'));
 const stepsReady = (s: Screen) => s.screen === 'steps' && s.page !== undefined;
@@ -466,6 +468,36 @@ describe('M6 : sans mauvaise surprise', () => {
     c.stop();
   });
 
+  it('deux favoris sur la même zone : le toucher retire celui dont le filtre est celui de l’écran (revue)', async () => {
+    const s = preset11();
+    const gdn = s.favorites.find((f) => f.id === 'fav-gdn');
+    if (gdn?.kind !== 'stop') throw new Error('fav-gdn');
+    s.favorites.push({ ...structuredClone(gdn), id: 'fav-gdn-t4', filter: [{ line: '4', head: 'stalle p' }], propose: 'never' });
+    const { c, gesture, until, last, settings, advance } = await setupController({ scenario: 's2', settings: s });
+    await until((x) => x.screen === 'board');
+    await c.show({ screen: 'board', areaId: 'stib:6357F', filter: [{ line: '4', head: 'stalle p' }], name: gdn.name });
+    const b = await until((x) => x.screen === 'board' && x.lines[0]?.startsWith('T4'));
+    expect(b.title).toBe('Gare du Nord, tram (STIB) ★');
+    await gesture('tap');
+    expect(last().lines.at(-1)).toBe('★ Retiré. Toucher encore : annuler');
+    expect(settings.get().favorites.map((f) => f.id)).toEqual(['fav-bureau', 'fav-gdn', 'fav-gand', 'fav-namur', 'fav-dl-nord', 'fav-maison']);
+    advance(2_000);
+    await gesture('tap');
+    expect(settings.get().favorites.map((f) => f.id)).toEqual(['fav-bureau', 'fav-gdn', 'fav-gand', 'fav-namur', 'fav-dl-nord', 'fav-maison', 'fav-gdn-t4']);
+    // départs de toute la zone (Autour de moi) : aucun favori sans filtre, donc pas de « ★ » ; un toucher en ajoute un
+    await c.show({ screen: 'board', areaId: 'stib:6357F', name: gdn.name });
+    const all = await until((x) => x.screen === 'board' && x.lines.some((l) => l.startsWith('T3   Churchill')) && !x.lines.at(-1)!.startsWith('★'));
+    expect(all.title).toBe('Gare du Nord, tram (STIB)');
+    expect(all.lines.at(-1)).toBe('▲▼ départs   toucher : ★ favori   double : retour');
+    await gesture('tap');
+    expect(last().lines.at(-1)).toBe('★ Ajouté aux favoris');
+    const added = settings.get().favorites.at(-1);
+    expect(added).toMatchObject({ kind: 'stop', areaId: 'stib:6357F', propose: 'never' });
+    expect(added?.kind === 'stop' && added.filter).toBeFalsy();
+    expect(settings.get().favorites.filter((f) => f.kind === 'stop' && f.areaId === 'stib:6357F')).toHaveLength(3);
+    c.stop();
+  });
+
   it('le message de retrait ne suit pas sur l’écran suivant, et ne s’annule plus après un changement d’écran', async () => {
     const { c, gesture, until, last, settings } = await setupController({ scenario: 's2' });
     await until((s) => s.screen === 'board');
@@ -616,6 +648,89 @@ describe('M6 : sans mauvaise surprise', () => {
   });
 });
 
+describe('état d’arrière-plan : instantané pris au mauvais moment (revue)', () => {
+  it('instantané vide pendant « Chargement… » ; la nouvelle WebView lit quai.trip et reprend le trajet en cours', async () => {
+    const a = await setupController();
+    await a.until(homeReady);
+    await a.gesture('tap');
+    await a.until(stepsReady);
+    a.goTo(at(7, 38));
+    await a.c.refreshCurrent();
+    a.c.stop();
+    await a.settle();
+    // Réouverture à 07:50 près d'Ottignies ; le téléphone se verrouille pendant le démarrage (init lente).
+    let release!: () => void;
+    const slow = new Promise<void>((r) => (release = r));
+    const b = await setupController({
+      kv: a.kv,
+      now: at(7, 50),
+      pos: { lat: 50.6727, lon: 4.5694 },
+      wrap: (core) => Object.assign(Object.create(core) as Core, { init: async () => (await slow, core.init()) }),
+      noWait: true,
+    });
+    expect(b.last()).toMatchObject({ screen: 'message', lines: ['Chargement…'] });
+    expect(b.c.snapshot()).toEqual({});
+    const snap = JSON.stringify(b.c.snapshot());
+    b.c.stop();
+    release();
+    // restauration avant le démarrage, comme __restoreState dans la nouvelle WebView
+    const e = await setupController({ kv: a.kv, now: at(7, 50), pos: { lat: 50.6727, lon: 4.5694 }, beforeStart: (c) => c.restore(snap) });
+    const s = await e.until((x) => x.screen === 'train');
+    expect(s.lines.at(-1)).toBe('Trajet en cours : vers le bureau');
+    expect(e.c.followed?.title).toBe('Vers le bureau');
+    e.c.stop();
+  });
+
+  it('un écran de chargement ou d’erreur n’est jamais restauré ; trip: null ignoré si le trajet n’avait pas été lu', async () => {
+    const a = await setupController();
+    await a.until(homeReady);
+    await a.gesture('tap');
+    await a.until(stepsReady);
+    a.goTo(at(7, 38));
+    await a.c.refreshCurrent();
+    a.c.stop();
+    await a.settle();
+    const loading = { v: 2, nav: { stack: [{ route: { screen: 'message', kind: 'loading', title: 'Quai', lines: ['Chargement…'] }, sel: 0, top: 0 }] }, trip: null };
+    const error = { v: 2, nav: { stack: [{ route: { screen: 'message', kind: 'error', title: 'Quai', lines: ['Horaires injoignables'] }, sel: 0, top: 0 }] }, trip: null };
+    for (const snap of [loading, error]) {
+      const b = await setupController({ kv: a.kv, now: at(7, 50), pos: { lat: 50.6727, lon: 4.5694 }, beforeStart: (c) => c.restore(JSON.stringify(snap)) });
+      const s = await b.until((x) => x.screen === 'train');
+      expect(s.title).toBe('IC vers Bruxelles-Midi, +2 min');
+      expect(b.c.followed).not.toBeNull();
+      b.c.stop();
+    }
+    // erreur au lancement : l'instantané ne garde ni l'écran d'erreur ni un trajet non lu
+    const fail = (core: Core): Core => Object.assign(Object.create(core) as Core, { init: () => Promise.reject(new QuaiError('dataUnreachable')) });
+    const f = await setupController({ kv: a.kv, wrap: fail });
+    const snap = f.c.snapshot();
+    expect(snap.tripRead).toBeUndefined();
+    expect(snap.trip).toBeUndefined();
+    f.c.stop();
+  });
+
+  it('« Dans le train » ne revient pas après restauration quand on était revenu aux étapes (autoDone)', async () => {
+    const a = await setupController();
+    await a.until(homeReady);
+    await a.gesture('tap');
+    await a.until(stepsReady);
+    a.location.set({ lat: 50.6727, lon: 4.5694 });
+    a.goTo(at(8, 5));
+    await a.c.refreshCurrent();
+    await a.until((x) => x.screen === 'train');
+    await a.gesture('double');
+    expect((await a.until((x) => x.screen === 'steps')).followed).toBe(true);
+    const snap = JSON.stringify(a.c.snapshot());
+    a.c.stop();
+    const b = await setupController({ kv: a.kv, now: at(8, 5), pos: { lat: 50.6727, lon: 4.5694 }, beforeStart: (c) => c.restore(snap) });
+    await b.until((x) => x.screen === 'steps');
+    await b.c.refreshCurrent();
+    await b.settle(60);
+    expect(b.screens().some((x) => x.screen === 'train')).toBe(false);
+    expect(b.last().screen).toBe('steps');
+    b.c.stop();
+  });
+});
+
 describe('S2 : message « Quai 1.1 », GlassesApi', () => {
   it('CA-S2.2 et CA-M7.1 : « Quai 1.1 » une seule fois après la mise à jour ; T mène à l’accueil', async () => {
     const a = await setupController({ settings: preset() });
@@ -670,6 +785,43 @@ describe('S2 : message « Quai 1.1 », GlassesApi', () => {
     expect(await showBoard(ctx, 'stib:6357F', gdn?.kind === 'stop' ? gdn.filter : undefined)).toEqual({ text: 'Affiché dans les lunettes\u00a0: départs de Gare du Nord.', ok: true });
     expect((await h.until((x) => x.screen === 'board')).title).toBe('Gare du Nord, tram (STIB) ★');
     expect(shown).toBe(2);
+    h.c.stop();
+  });
+
+  it('showTrip avec des propositions anciennes : recalcul depuis les mêmes extrémités, jamais « Dans le train » d’un train parti', async () => {
+    const h = await setupController();
+    await h.until(homeReady);
+    const s = preset11();
+    const to = { type: 'place' as const, placeId: 'bureau' };
+    const old = await h.core.route({ type: 'here' }, to, h.clock.now(), s, { lat: 50.4655, lon: 4.859 });
+    // le téléphone envoie à 08:10 le plan calculé à 07:31 (IC de 07:42 parti)
+    h.goTo(at(8, 10));
+    const msg = await h.c.showTrip({ title: 'Vers le bureau', from: { type: 'here' }, to, favoriteId: 'fav-bureau', result: old, index: 0 });
+    expect(msg).toBe('Affiché dans les lunettes\u00a0: IC 08:42, voie 4.');
+    const st = await h.until(stepsReady);
+    expect(st).toMatchObject({ page: 1, followed: true, title: 'Vers le bureau : 08:33 → 09:58' });
+    expect(h.c.followed?.journey.legs.find((l) => l.kind === 'ride')?.schedDep).toBe(at(8, 42));
+    // le suivi automatique ne passe pas « dans le train » de l'IC de 07:42, parti
+    await h.c.refreshCurrent();
+    expect(h.last().screen).toBe('steps');
+    expect(h.screens().some((x) => x.screen === 'train')).toBe(false);
+    h.c.stop();
+  });
+
+  it('showTrip sans trajet attrapable ni recalcul possible : message court, rien n’est affiché ni suivi', async () => {
+    const empty = (core: Core): Core => Object.assign(Object.create(core) as Core, { route: async () => ({ journeys: [], empty: 'noTrip' as const }) });
+    const h = await setupController({ wrap: empty });
+    await h.until(homeReady);
+    const s = preset11();
+    const to = { type: 'place' as const, placeId: 'bureau' };
+    const old = await h.core.route({ type: 'here' }, to, h.clock.now(), s, { lat: 50.4655, lon: 4.859 });
+    expect(old.journeys).toHaveLength(0);
+    const plan = await fakeCoreFor(h.clock.now).route({ type: 'here' }, to, h.clock.now(), s, { lat: 50.4655, lon: 4.859 });
+    h.goTo(at(8, 10));
+    const before = h.last();
+    expect(await h.c.showTrip({ title: 'Vers le bureau', from: { type: 'here' }, to, result: plan, index: 0 })).toBe('Aucun trajet trouvé pour l’instant.');
+    expect(h.last().screen).toBe(before.screen);
+    expect(h.c.followed).toBeNull();
     h.c.stop();
   });
 

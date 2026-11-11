@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { LIMITS } from '../../src/settings';
 import { GEO_DELAY_MS } from '../../src/phone/field';
 import { searchScreen, withRecent } from '../../src/phone/screens/search';
+import { header } from '../../src/phone/app';
+import type { Journey } from '../../src/core/api';
 import { button, defaults, harness, mount, NB, options, preset, SCENARIO, settle, sleep, textOf, type, until } from './helpers';
 
 afterEach(() => document.body.replaceChildren());
@@ -239,5 +241,41 @@ describe('liens directs et champs', () => {
   it('mention de vie privée sous les champs (M4.9, § 6.2)', () => {
     const hz = open();
     expect(textOf(hz.el.querySelector('.privacy'))).toBe('Adresses : services officiels des Régions bruxelloise, flamande et wallonne. Seul le texte tapé leur est envoyé, ta position reste sur le téléphone.');
+  });
+});
+
+describe('données du réseau affichées en texte, jamais en HTML (revue n° 4)', () => {
+  it('noms de lignes et catégories de trains publiés : du texte dans les pastilles', async () => {
+    const t0 = SCENARIO.s3.now + 10 * 60_000;
+    const leg = (dep: number, arr: number, extra: object) => ({ kind: 'ride' as const, from: { name: { fr: 'A', nl: 'A' }, lat: 0, lon: 0 }, to: { name: { fr: 'B', nl: 'B' }, lat: 0, lon: 0 }, dep, arr, schedDep: dep, schedArr: arr, rt: true, ...extra });
+    const crafted: Journey = {
+      id: 'x',
+      legs: [leg(t0, t0 + 600_000, { op: 'stib', mode: 'tram', line: '<img src=x onerror="globalThis.__quaiXss=1">' }), leg(t0 + 900_000, t0 + 1_800_000, { op: 'sncb', mode: 'train', line: 'IC', cat: '<b>IC</b>' })],
+      dep: t0,
+      arr: t0 + 1_800_000,
+      leaveAt: t0,
+      transfers: 1,
+      rt: true,
+      alerts: [],
+      label: 'simple',
+    };
+    const hz = open({ params: 'de=sncb:8813003&vers=sncb:8892007', core: (c) => ({ ...c, route: async () => ({ journeys: [crafted] }) }) });
+    await results(hz.el);
+    const chips = hz.el.querySelector('.chips')!;
+    expect(chips.querySelector('img')).toBeNull();
+    expect(chips.querySelector('b')).toBeNull();
+    expect(chips.textContent).toContain('Tram <img src=x onerror="globalThis.__quaiXss=1">');
+    expect(chips.textContent).toContain('<b>IC</b>');
+    expect(chips.querySelectorAll('svg')).toHaveLength(2);
+    expect((globalThis as { __quaiXss?: number }).__quaiXss).toBeUndefined();
+  });
+
+  it('bouton retour de l’en-tête : son libellé est du texte', () => {
+    const hz = harness();
+    const el = mount(header(hz.ctx, 'Titre', undefined, { label: '<i>Accueil</i>', hash: '#/' }));
+    const back = el.querySelector('.back')!;
+    expect(back.querySelector('i')).toBeNull();
+    expect(textOf(back)).toBe('<i>Accueil</i>');
+    expect(back.querySelector('svg')).not.toBeNull();
   });
 });

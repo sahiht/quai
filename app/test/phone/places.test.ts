@@ -74,6 +74,24 @@ describe('nouveau lieu (M4.7, CA-M4.9)', () => {
     expect(hz.went[0]).toBe(`#/lieux?nouveau=${p.id}`);
   });
 
+  it('adresse choisie puis texte corrigé sans nouveau choix : plus rien à enregistrer (revue n° 2)', async () => {
+    const hz = harness({ settings: defaults() });
+    const el = mount(placeEditScreen(hz.ctx, 'nouveau'));
+    type(el.querySelector<HTMLInputElement>('#pl-name')!, 'Bureau');
+    const addr = el.querySelector<HTMLInputElement>('#pl-addr')!;
+    await pick(el, addr, 'rue de fer 25 namur', 'Rue de Fer 25, 5000 Namur');
+    const save = button(el, 'Enregistrer le lieu');
+    expect(save.disabled).toBe(false);
+    type(addr, 'rue de fer 52 namur');
+    expect(save.disabled).toBe(true);
+    expect(el.querySelector('.spot')!.childElementCount).toBe(0);
+    expect(textOf(el.querySelector('#pl-hint'))).toBe('Choisis une adresse ou un arrêt dans la liste.');
+    save.click();
+    await settle();
+    expect(hz.settings.get().places).toEqual([]);
+    expect(hz.went).toEqual([]);
+  });
+
   it('rue sans numéro : « Position approximative : la rue, sans numéro. » (F2-c)', async () => {
     const hz = harness({ settings: defaults() });
     const el = mount(placeEditScreen(hz.ctx, 'nouveau'));

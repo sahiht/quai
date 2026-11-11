@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Departure } from '../../src/core/api';
 import { applyMemory, uniqueDepartures } from '../../src/core/boards';
+import { FLUSH_DELAY_MS } from '../../src/core/persist';
 import { hhmm } from '../../src/core/util';
 import { FakeServer, makeEnv } from './support/env';
 
@@ -157,6 +158,7 @@ describe('M8.2 : départs uniques (garde-fou)', () => {
 
 describe('S7 : ouverture sobre en données (CA-S7.1)', () => {
   it('deuxième ouverture sans réseau : les réponses des favoris viennent du cache persistant (trains compris)', async () => {
+    vi.useFakeTimers();
     const { MemoryKV } = await import('./support/env');
     const kv = new MemoryKV();
     const first = makeEnv({ now: '2026-11-10T07:31', scene: 'noRT', kv });
@@ -164,14 +166,20 @@ describe('S7 : ouverture sobre en données (CA-S7.1)', () => {
     const a = await first.core.answer(fav, { lat: 50.4655, lon: 4.859 }, first.preset);
     expect(a.state).toBe('ok');
     expect(first.server.calls.some((u) => u.includes('/trains/2026-11-10.json'))).toBe(true);
-    // écritures du cache persistant (en arrière-plan) : attendre que l'index liste tous les fichiers lus
+    // écritures groupées du cache persistant (FLUSH_DELAY_MS) : l'index liste tous les fichiers lus ;
+    // les fichiers absents (404) y sont notés sans paquet
     const loaded = [...new Set(first.server.calls.filter((u) => u.includes('/quai/data/') && !u.endsWith('/meta.json')).map((u) => u.split('/quai/data/')[1]))];
+    const index = () => JSON.parse(kv.map.get('quai.core.v2.idx') ?? 'null') as { files: Record<string, { p: number[] }>; packs: Record<string, unknown>; absent: string[] } | null;
     const persisted = () => {
-      const idx = kv.map.get('quai.core.v1.idx');
-      return !!idx && loaded.every((p) => idx.includes(`"${p}"`)) && kv.map.has('quai.core.v1.meta');
+      const idx = index();
+      return !!idx && loaded.every((p) => p in idx.files || idx.absent.includes(p)) && kv.map.has('quai.core.v2.meta');
     };
-    for (let i = 0; i < 500 && !persisted(); i++) await new Promise((r) => setTimeout(r, 10));
+    for (let i = 0; i < 10 && !persisted(); i++) await vi.advanceTimersByTimeAsync(FLUSH_DELAY_MS + 100);
     expect(persisted()).toBe(true);
+    const idx = index()!;
+    expect(Object.keys(idx.files).length).toBeGreaterThan(Object.keys(idx.packs).length); // plusieurs fichiers par clé
+    for (const p of idx.absent) expect(idx.files[p]).toBeUndefined();
+    vi.useRealTimers();
     const server = new FakeServer();
     server.networkDown = true;
     const second = makeEnv({ now: '2026-11-10T07:40', kv, server });
