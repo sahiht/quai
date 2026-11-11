@@ -427,7 +427,10 @@ export function validateData(dirArg: string): ValidationReport {
     if (!isObj(f) || f.ok !== true) continue;
     const trips = new Set<string>();
     for (const a of areas.values()) if (a.op === op && Array.isArray(a.deps)) for (const d of a.deps) if (Array.isArray(d) && isStr(d[4])) trips.add(d[4]);
-    if (trips.size !== f.trips) err(`meta.json : feeds.${op}.trips = ${f.trips} mais ${trips.size} voyages distincts dans les départs`);
+    // 1.1 (M8.2) : un voyage retenu peut n'avoir plus aucun départ affiché (départ vers un terminus dans la même zone,
+    // doublon écarté) ; il reste dans les fichiers de ligne. Les départs ne citent donc jamais plus de voyages que meta.
+    if (trips.size > f.trips) err(`meta.json : feeds.${op}.trips = ${f.trips} mais ${trips.size} voyages distincts dans les départs`);
+    else if (trips.size < f.trips) warn(`meta.json : feeds.${op}.trips = ${f.trips}, dont ${f.trips - trips.size} sans départ affiché (règles M8.2)`);
   }
 
   /* ------------------------------ tuiles ------------------------------ */

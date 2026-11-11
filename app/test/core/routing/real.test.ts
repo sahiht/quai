@@ -26,12 +26,24 @@ import { DATA_BASE, makeEnv } from '../support/env';
 const REAL = process.env.QUAI_REAL ?? '';
 const PROTO = process.env.QUAI_REAL_LINES ?? '/home/claude/routing-proto/out';
 const PAIRS = Number(process.env.QUAI_REAL_PAIRS ?? 300);
+/** Jour des requêtes (QUAI_REAL_DAY, défaut 2026-11-10, l'instantané 1.0 du design). Les attentes datées (cas G,
+ *  CA-M8.1, CA-M8.4) ne valent que pour l'instantané du 10/11 ; sur un autre jour, seuls les contrôles génériques tournent. */
+const DAY = process.env.QUAI_REAL_DAY ?? '2026-11-10';
+const SNAP10 = DAY === '2026-11-10';
 const SETTINGS: Settings = { ...DEFAULT_SETTINGS, onboarded: true, maxWalkMin: 10 };
 
 let DIR = '';
 let trainsFiles: Record<string, TrainsDay> = {};
 
 function prepare(): void {
+  const published = JSON.parse(readFileSync(join(REAL, 'meta.json'), 'utf8')) as Meta;
+  if (published.lines && !process.env.QUAI_REAL_LINES) {
+    // Données publiées par le pipeline 1.1 : fichiers de ligne et montées ou descentes interdites (-1) déjà présents.
+    DIR = REAL;
+    for (const date of published.serviceDates) trainsFiles[date] = JSON.parse(readFileSync(join(REAL, 'trains', `${date}.json`), 'utf8')) as TrainsDay;
+    console.log(`données réelles 1.1 : ${DIR} (${published.lines.files} fichiers de ligne, jours ${published.serviceDates.join(', ')})`);
+    return;
+  }
   DIR = mkdtempSync(join(tmpdir(), 'quai-real-'));
   for (const d of ['areas', 'search', 'tiles']) symlinkSync(join(REAL, d), join(DIR, d));
   symlinkSync(join(PROTO, 'lines'), join(DIR, 'lines'));
@@ -66,10 +78,10 @@ function prepare(): void {
   console.log(`données réelles : ${DIR} (${forbidden} montées ou descentes interdites)`);
 }
 
-const T = (h: number, m: number, day = '2026-11-10') => gtfsTime(day, h * 60 + m);
+const T = (h: number, m: number, day = DAY) => gtfsTime(day, h * 60 + m);
 const pt = (lat: number, lon: number, label: string): Endpoint => ({ type: 'address', label, lat, lon });
 function st(id: string): Endpoint {
-  const s = trainsFiles['2026-11-10'].stations.find((x) => x.id === id);
+  const s = trainsFiles[DAY].stations.find((x) => x.id === id);
   if (!s) throw new Error(id);
   return { type: 'area', areaId: id, op: 'sncb', name: s.n, lat: s.lat, lon: s.lon };
 }
@@ -114,7 +126,7 @@ const legText = (j: Journey) =>
     .map((l) => (l.kind === 'walk' ? `à pied ${l.walkMin}` : `${l.cat ?? `${l.op} ${lineLabel(l.mode ?? 'bus', l.line ?? '')}`} ${hhmm(l.dep)} ${l.from.name.fr} → ${l.to.name.fr} ${hhmm(l.arr)}`))
     .join(' ; ');
 const show = (r: PlanResult) =>
-  r.journeys.map((j) => `  [${j.label}] ${hhmm(j.dep)} → ${hhmm(j.arr)}${localDate(j.dep) !== '2026-11-10' ? ` (${localDate(j.dep)})` : ''} « ${(j.reason ?? '').replace(/ /g, ' ')} »\n     ${legText(j)}`).join('\n') ||
+  r.journeys.map((j) => `  [${j.label}] ${hhmm(j.dep)} → ${hhmm(j.arr)}${localDate(j.dep) !== DAY ? ` (${localDate(j.dep)})` : ''} « ${(j.reason ?? '').replace(/ /g, ' ')} »\n     ${legText(j)}`).join('\n') ||
   `  ${r.empty}${r.station ? ` (${r.station.name.fr})` : ''}`;
 
 /** Attente la plus longue en correspondance (min). */
@@ -143,14 +155,14 @@ function bytes(urls: string[]): { files: number; raw: number; gz: number } {
   return { files, raw, gz: g };
 }
 
-describe.skipIf(!REAL)('données réelles (instantané du 10/11/2026)', () => {
+describe.skipIf(!REAL)(`données réelles (${DAY})`, () => {
   const results = new Map<string, PlanResult>();
 
   beforeAll(() => {
     prepare();
   });
   afterAll(() => {
-    if (DIR) rmSync(DIR, { recursive: true, force: true });
+    if (DIR && DIR !== REAL) rmSync(DIR, { recursive: true, force: true });
   });
 
   it('24 requêtes du design § 5.2 et cas de nuit : propositions, octets, temps', async () => {
@@ -180,7 +192,7 @@ describe.skipIf(!REAL)('données réelles (instantané du 10/11/2026)', () => {
     for (const q of QUERIES) if (!q.n.startsWith('A.3')) expect(results.get(q.n)?.journeys.length, q.n).toBeGreaterThan(0);
   }, 600_000);
 
-  it('CA-M8.1 : IC jusqu’à Bruxelles-Central puis 12 min à pied, jamais Bruxelles-Chapelle ; une proposition à 23:50 pour le lendemain', () => {
+  it.skipIf(!SNAP10)('CA-M8.1 : IC jusqu’à Bruxelles-Central puis 12 min à pied, jamais Bruxelles-Chapelle ; une proposition à 23:50 pour le lendemain', () => {
     const r = results.get('19 CA-M8.1 Maison → Bureau 07:31');
     const j = r?.journeys[0];
     expect(j?.label).toBe('simple');
@@ -193,7 +205,7 @@ describe.skipIf(!REAL)('données réelles (instantané du 10/11/2026)', () => {
     expect(localDate(night?.journeys[0].legs.find((l) => l.kind === 'ride')?.dep ?? 0)).toBe('2026-11-11');
   });
 
-  it('cas G : S1 06:20 direct d’abord, un trajet « Plus tôt »', () => {
+  it.skipIf(!SNAP10)('cas G : S1 06:20 direct d’abord, un trajet « Plus tôt »', () => {
     const r = results.get('21 cas G : Waterloo → Bruxelles-Midi 23:50');
     expect(r?.journeys[0]).toMatchObject({ label: 'simple', transfers: 0 });
     expect(hhmm(r?.journeys[0].legs[0].dep ?? 0)).toBe('06:20');
@@ -207,7 +219,7 @@ describe.skipIf(!REAL)('données réelles (instantané du 10/11/2026)', () => {
     expect(j?.legs.some((l) => /Lille/.test(`${l.to.name.fr} ${l.from.name.fr}`))).toBe(false);
   });
 
-  it('CA-M8.4 : Liège-Guillemins → Bruxelles-Nord le 11/11 à 09:10 : aucun train de nuit, IC 09:27', () => {
+  it.skipIf(!SNAP10)('CA-M8.4 : Liège-Guillemins → Bruxelles-Nord le 11/11 à 09:10 : aucun train de nuit, IC 09:27', () => {
     const r = results.get('23 CA-M8.4 Liège-Guillemins → Bruxelles-Nord 11/11');
     expect(r?.journeys.some((j) => j.legs.some((l) => l.cat === 'NJ' || l.cat === 'EN'))).toBe(false);
     expect(hhmm(r?.journeys[0].legs[0].dep ?? 0)).toBe('09:27');
@@ -267,7 +279,7 @@ describe.skipIf(!REAL)('données réelles (instantané du 10/11/2026)', () => {
       const o = jitter(c1[1], c1[2], c1[3]);
       const d = jitter(c2[1], c2[2], c2[3]);
       const hm = [7 * 60 + 30, 8 * 60 + 15, 12 * 60, 17 * 60 + 20, 20 * 60 + 40][Math.floor(rnd() * 5)];
-      const after = gtfsTime('2026-11-10', hm);
+      const after = gtfsTime(DAY, hm);
       const O = pt(o.lat, o.lon, 'O');
       const D = pt(d.lat, d.lon, 'D');
       const dbgS: RouteDebug = { cands: [], raw: [], files: 0, computeMs: 0, mode: 'lines' };
@@ -287,7 +299,7 @@ describe.skipIf(!REAL)('données réelles (instantané du 10/11/2026)', () => {
       }
       comparable++;
       const walkRef = walkMinutes(distanceM(o, d));
-      const afterMin = (after - gtfsTime('2026-11-10', 0)) / 60_000;
+      const afterMin = (after - gtfsTime(DAY, 0)) / 60_000;
       const usable = (x: RouteDebug['raw'][number]) => x.pass !== 2 && x.wait <= 60 && (walkRef > 60 || x.arr <= afterMin + walkRef);
       const best = (dbg: RouteDebug, k: number) => Math.min(...dbg.raw.filter((x) => usable(x) && x.k <= k).map((x) => x.arr));
       let ok = true;
