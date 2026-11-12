@@ -131,6 +131,14 @@ const MAX_WALK_SUB = 'D’abord les trajets dans cette limite ; au-delà, s’il
 /** Rubriques vides de l'accueil (PRD-1.2.2 § 1.3) : le toucher dit où les choisir. */
 const CHOOSE_STATIONS = 'Choisis tes gares dans Quai, sur le téléphone';
 const CHOOSE_LINES = 'Choisis tes lignes dans Quai, sur le téléphone';
+
+/**
+ * « Choisis tes gares… » sur l'accueil : à la place du titre « Quai », jamais une ligne de pied qui pousserait la dernière
+ * ligne hors de l'écran (revue indépendante) : autant de lignes qu'avant le toucher, la même en dernier.
+ */
+function sameRows(s: Screen, before: Screen): void {
+  check(s.lines.length === before.lines.length && s.lines.at(-1) === before.lines.at(-1), `lignes poussées par le message : ${JSON.stringify(s.lines)} au lieu de ${JSON.stringify(before.lines)}`);
+}
 /** Erreur au lancement (REVUE-USAGE n° 10). */
 const DATA_DOWN = 'Pas de connexion aux horaires : nouvel essai dans 30 s';
 /**
@@ -356,6 +364,8 @@ interface StepOut {
 async function step(name: string, fn: () => Promise<StepOut | void>): Promise<void> {
   const t0 = Date.now();
   const r: StepResult = { scenario, step: name, ok: true, ms: 0 };
+  const seen = sim?.entries ?? [];
+  const from = seen.length;
   try {
     const out = (await fn()) ?? {};
     if (out.screen) r.screen = out.screen;
@@ -405,6 +415,14 @@ async function step(name: string, fn: () => Promise<StepOut | void>): Promise<vo
     r.ok = false;
     r.error = (e as Error).message;
     r.screen = sim?.last;
+    // gestes écartés par l'anti-rebond ou sans effet pendant l'étape (journal QUAI_GESTURE du mode test)
+    try {
+      if (sim?.proc) await sim.drain();
+    } catch {
+      /* simulateur arrêté */
+    }
+    const gestures = (sim?.entries === seen ? seen.slice(from) : (sim?.entries ?? [])).filter((x) => x.message.startsWith('QUAI_GESTURE ')).map((x) => x.message.slice(13));
+    if (gestures.length) r.error += ` (gestes : ${gestures.join(' ; ')})`;
     console.log(`  ✗ ${scenario}-${name} : ${r.error}${r.screen ? `\n      dernier écran : ${show(r.screen as Screen & Record<string, unknown>)}` : ''}`);
     try {
       if (sim?.proc) await sim.shot(`${scenario}-${name}-ECHEC`);
@@ -543,7 +561,12 @@ async function follow(label = 'trajet suivi'): Promise<Screen> {
   await sim.input('click');
   const s = await sim.waitScreen(is('steps', (x) => field(x, 'followed') === true && /^Trajet suivi : /.test(hint(x) ?? '')), 8_000, label);
   check(s.title.endsWith(FOLLOWED) && s.title.slice(0, -FOLLOWED.length) === before.title.slice(0, -FOLLOW.length), `« Suivi » à la place de « Suivre ce trajet » : « ${s.title} »`);
-  return sim.waitScreen(is('steps', (x) => field(x, 'followed') === true && hint(x) === H.steps), 8_000, 'aide du trajet suivi revenue');
+  const back = await sim.waitScreen(is('steps', (x) => field(x, 'followed') === true && hint(x) === H.steps), 8_000, 'aide du trajet suivi revenue');
+  // La fin du message est un rendu : l'anti-rebond des lunettes écarte un glissement reçu moins de 80 ms après un
+  // rendu (DEBOUNCE.scrollAfterRenderMs, défilement parasite du G2). Un ▼ envoyé aussitôt serait perdu (journal
+  // QUAI_GESTURE « écarté : après un rendu ») ; une personne, elle, réagit plus lentement.
+  await sleep(300);
+  return back;
 }
 
 /* ------------------------------ Lunettes, scénario 1 : le matin à Namur ------------------------------ */
@@ -1094,7 +1117,8 @@ async function s3(): Promise<void> {
   await step('labels', async () => {
     const labels = [field<string>(sim.last!, 'label')];
     const list = await openOthers();
-    check(/^Le suivant {3}14:25 → 14:56$/.test(list.lines[0] ?? '') && /^Le suivant {3}/.test(list.lines[2] ?? ''), `entrées ${JSON.stringify(list.lines)}`);
+    // PRD-1.2.2 § 7 : un seul « Le suivant » ; le train d'après, de même structure, est « Plus tard »
+    check(sameList(list.lines.slice(0, 4), ['Le suivant   14:25 → 14:56', 'IC', 'Plus tard   14:40 → 15:09', 'IC']), `entrées ${JSON.stringify(list.lines)}`);
     for (let i = 0; i < 2; i++) {
       await sim.select(i);
       await sim.input('click');
@@ -1102,7 +1126,7 @@ async function s3(): Promise<void> {
       labels.push(field<string>(s, 'label'));
       await back(is('others'), 'retour à la liste');
     }
-    check(sameList(labels, ['short', 'next', 'next']), `étiquettes ${JSON.stringify(labels)} (CA-M3.3, CA-1.6)`);
+    check(sameList(labels, ['short', 'next', 'later']), `étiquettes ${JSON.stringify(labels)} (CA-M3.3, CA-1.6)`);
     await back(is('steps', (x) => field(x, 'page') === 1), 'page 1');
   });
   await step('followed-menu', async () => {
@@ -1289,7 +1313,8 @@ async function waterloo(): Promise<void> {
     const h = await back(homeReady, 'accueil');
     await sim.select(homeIndex(h, LINES_ROW));
     await sim.input('click');
-    const s = await sim.waitScreen(is('home', (x) => hint(x) === CHOOSE_LINES), 8_000, `« ${CHOOSE_LINES} » (PRD-1.2.2 § 1.3)`);
+    const s = await sim.waitScreen(is('home', (x) => x.title === CHOOSE_LINES), 8_000, `« ${CHOOSE_LINES} » à la place du titre (PRD-1.2.2 § 1.3)`);
+    sameRows(s, h);
     return { screen: s, pixels: false };
   });
 }
@@ -1446,10 +1471,12 @@ async function firstrun(): Promise<void> {
     const h = await backTo(is('home'), 'retour à l’accueil');
     await sim.select(homeIndex(h, STATIONS_ROW));
     await sim.input('click');
-    await sim.waitScreen(is('home', (x) => hint(x) === CHOOSE_STATIONS), 8_000, `« ${CHOOSE_STATIONS} »`);
+    const g = await sim.waitScreen(is('home', (x) => x.title === CHOOSE_STATIONS), 8_000, `« ${CHOOSE_STATIONS} » à la place du titre`);
+    sameRows(g, h);
     await sim.select(homeIndex(h, LINES_ROW));
     await sim.input('click');
-    const s = await sim.waitScreen(is('home', (x) => hint(x) === CHOOSE_LINES), 8_000, `« ${CHOOSE_LINES} »`);
+    const s = await sim.waitScreen(is('home', (x) => x.title === CHOOSE_LINES), 8_000, `« ${CHOOSE_LINES} » à la place du titre`);
+    sameRows(s, h);
     return { screen: s, pixels: false };
   });
   await step('exit', async () => {
@@ -2175,7 +2202,7 @@ async function phone(): Promise<void> {
         const cards = await cardsText(page);
         card(cards[0], 'Le plus court', '07:33 → 08:06', /^tram 3/, 'Arrive le plus tôt.');
         card(cards[1], 'Le suivant', '07:41 → 08:14', /^tram 3/);
-        card(cards[2], 'Le suivant', '07:49 → 08:22', /^tram 3/);
+        card(cards[2], 'Plus tard', '07:49 → 08:22', /^tram 3/); // 1.2.2 : un seul « Le suivant » (PRD-1.2.2 § 7)
         check(!cards.some((c) => c.startsWith('Sans changement')), `plus de carte « Sans changement » : ${JSON.stringify(cards)}`);
       });
     });

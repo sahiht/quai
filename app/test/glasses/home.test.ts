@@ -115,25 +115,36 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
     h.c.stop();
   });
 
-  it('§ 1.3 : rubriques vides, « à choisir » ; toucher : « Choisis tes gares dans Quai, sur le téléphone »', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith(FOUR, { seenVersion: '1.2.2' }), core: (now) => stubCore(now, { answers }) });
+  it('§ 1.3 : rubriques vides, « à choisir » ; toucher : « Choisis tes gares dans Quai, sur le téléphone » à la place du titre, sans pousser de ligne', async () => {
+    // aide des gestes passée : l'accueil n'a pas de ligne de pied ; une ligne ajoutée ferait sortir la dernière (revue)
+    const kv = createKV(memoryBackend());
+    await kv.set(FIRST_USE_KEY, String(NOW - 8 * 86_400_000));
+    const h = await setup({ now: NOW, kv, settings: settingsWith(FOUR, { seenVersion: '1.2.2' }), core: (now) => stubCore(now, { answers }) });
     const s = await h.until((x) => ready(x) && x.shown?.length === 3);
     expect(s.lines.slice(-2)).toEqual(['Gares   à choisir', 'Bus, tram, métro   à choisir']);
+    expect(s.title).toBe('Quai');
     await h.gesture('down', 'down', 'down', 'down', 'tap');
-    expect(h.last().lines.at(-1)).toBe('Choisis tes gares dans Quai, sur le téléphone');
-    expect(h.last().screen).toBe('home');
+    expect(h.last()).toMatchObject({ screen: 'home', title: 'Choisis tes gares dans Quai, sur le téléphone', lines: s.lines });
     await h.gesture('down', 'tap');
-    expect(h.last().lines.at(-1)).toBe('Choisis tes lignes dans Quai, sur le téléphone');
+    expect(h.last()).toMatchObject({ screen: 'home', title: 'Choisis tes lignes dans Quai, sur le téléphone', lines: s.lines });
+    // tient sur la ligne du titre, avec l'heure ; 2,6 s plus tard, « Quai » revient
+    expect(textWidth('Choisis tes lignes dans Quai, sur le téléphone')).toBeLessThanOrEqual(WIDTHS.title);
+    expect(nb(h.sent().find((c) => c.name === 'title')?.content ?? '')).toBe('Choisis tes lignes dans Quai, sur le téléphone');
+    expect(h.sent().find((c) => c.name === 'foot')?.content.trim()).toBe('');
+    h.advance(2_600);
+    await h.c.refreshCurrent();
+    expect(h.last()).toMatchObject({ title: 'Quai', lines: s.lines });
     h.c.stop();
   });
 
-  it('§ 1.3, Quai Web : le toucher ouvre la bonne section de l’onglet Réglages (#/gares, #/lignes)', async () => {
+  it('§ 1.3, Quai Web : le toucher ouvre directement l’ajout dans l’onglet Réglages (#/gares/ajouter, #/lignes/ajouter)', async () => {
     const opened: string[] = [];
     const h = await setup({ now: NOW, web: true, opened, settings: settingsWith(FOUR, { seenVersion: '1.2.2' }), core: (now) => stubCore(now, { answers }) });
     const s = await h.until((x) => ready(x) && x.shown?.length === 3);
     expect(s.lines.slice(-2)).toEqual(['Gares   à choisir', 'Bus, tram, métro   à choisir']);
     await h.gesture('down', 'down', 'down', 'down', 'tap', 'down', 'tap');
-    expect(opened).toEqual(['#/gares', '#/lignes']);
+    expect(opened).toEqual(['#/gares/ajouter', '#/lignes/ajouter']);
+    expect(h.last().title).toBe('Quai');
     h.c.stop();
   });
 

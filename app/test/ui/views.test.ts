@@ -700,18 +700,18 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     expect(plain.items[0].action).toEqual({ kind: 'open', route: { screen: 'favorites' } });
     // aide des gestes passée (7 premiers jours, contrôleur) : plus de pied du tout
     expect(check(homeView({ noFavorites: true, nearbyCount: 3, gestureHelp: false }, ctxOf(now, s))).at(-1)).toBe('Bus, tram, métro   …');
-    // rubriques vides : « à choisir » ; toucher : où les choisir (Quai Web : la section de l'onglet Réglages)
+    // rubriques vides : « à choisir » ; toucher : où les choisir (Quai Web : l'ajout de l'onglet Réglages, #/…/ajouter)
     const bare = { ...s, stations: [], lines: [] };
     const b = homeView({ favorites: [], nearbyCount: 3 }, ctxOf(now, bare));
     expect(check(b).slice(-3)).toEqual(['Gares   à choisir', 'Bus, tram, métro   à choisir', HINT_HOME]);
     expect(b.items.slice(-2).map((i) => i.action)).toEqual([
-      { kind: 'phone', hash: '#/gares', text: 'Choisis tes gares dans Quai, sur le téléphone' },
-      { kind: 'phone', hash: '#/lignes', text: 'Choisis tes lignes dans Quai, sur le téléphone' },
+      { kind: 'phone', hash: '#/gares/ajouter', text: 'Choisis tes gares dans Quai, sur le téléphone' },
+      { kind: 'phone', hash: '#/lignes/ajouter', text: 'Choisis tes lignes dans Quai, sur le téléphone' },
     ]);
     const bw = homeView({ favorites: [], nearbyCount: 3 }, ctxOf(now, bare, { web: true }));
     expect(bw.items.slice(-2).map((i) => i.action)).toEqual([
-      { kind: 'phone', hash: '#/gares', text: 'Choisis tes gares dans l’onglet Réglages' },
-      { kind: 'phone', hash: '#/lignes', text: 'Choisis tes lignes dans l’onglet Réglages' },
+      { kind: 'phone', hash: '#/gares/ajouter', text: 'Choisis tes gares dans l’onglet Réglages' },
+      { kind: 'phone', hash: '#/lignes/ajouter', text: 'Choisis tes lignes dans l’onglet Réglages' },
     ]);
     // « Gares » et « Bus, tram, métro » vides, ouverts quand même (retirés pendant qu'on les regarde) : où les choisir
     expect(check(stationsView([], ctxOf(now, bare)))).toEqual(['Choisis tes gares dans Quai, sur le téléphone.', 'double toucher : retour']);

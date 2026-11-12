@@ -180,7 +180,20 @@ export interface Board {
   anyPlanned: boolean;          // au moins un départ affiché sans temps réel
   rtErrors: Op[];               // sources temps réel injoignables (affichage ~)
   updatedAt: number;            // epoch ms
+  /** 1.2.2 : zone retrouvée sous un autre identifiant (`aka`, ou même nom à 150 m) : l'appelant met sa gare ou sa ligne à jour. */
+  movedTo?: string;
+  /**
+   * 1.2.2 (board avec `near`) : zone introuvable, aucun départ (au lieu d'une erreur « Arrêt introuvable »). Jamais quand
+   * les deux jours publiés sont samedi, dimanche ou fériés : une zone desservie en semaine seulement en est absente.
+   */
+  missing?: true;
 }
+
+/**
+ * 1.2.2 : où une gare ou une ligne a été choisie (StationPick, LinePick) ; board() et lineBoard() retrouvent ainsi une zone
+ * dont l'identifiant a changé (tuiles autour : `aka`, puis même réseau, même nom, 150 m au plus).
+ */
+export interface PickPlace { lat: number; lon: number; name?: Names }
 
 export interface NearbyItem { area: AreaSummary; distanceM: number; walkMin: number; next?: Departure }
 
@@ -199,11 +212,17 @@ export interface LineBoard {
   op: Op; mode: Mode; line: string;
   /** 1 sens (terminus, boucle) ou 2 ; 3 au plus si la ligne se sépare juste après l'arrêt. Ordre stable. */
   directions: LineDirection[];
-  /** missing : la ligne ne passe plus à cet arrêt ; none : aucun passage dans l'horizon des tableaux (23 h). */
+  /**
+   * missing : arrêt introuvable dans les données (« introuvable : modifie-la sur le téléphone ») ; none : aucun passage
+   * dans l'horizon des tableaux (23 h), y compris une ligne sans service les jours publiés (week-end, jour férié), ou
+   * un arrêt absent de données dont les deux jours sont samedi, dimanche ou fériés (desservi en semaine seulement).
+   */
   state: 'ok' | 'none' | 'missing';
   anyPlanned: boolean;          // au moins un passage sans temps réel
   rtErrors: Op[];
   updatedAt: number;
+  /** Zone retrouvée sous un autre identifiant (voir Board.movedTo) : l'appelant met sa ligne à jour. */
+  movedTo?: string;
 }
 
 /** 1.2.2 : ligne trouvée par son numéro (findLines), pour « Ajouter une ligne » sur le téléphone. */
@@ -385,8 +404,10 @@ export interface Core {
    * Prochains départs d'une zone à partir de maintenant, temps réel inclus. limit défaut 8.
    * 1.1 (M8.4, M8.5) : si le temps réel tarde, rend l'horaire prévu après 1,5 s au plus ; le temps réel arrivé
    * ensuite est fusionné au rafraîchissement suivant. Un identifiant de zone fusionnée (`aka`) est accepté.
+   * 1.2.2 : `near` (la gare ou la ligne choisie) : zone dont l'identifiant a changé retrouvée (`movedTo`) ; introuvable :
+   * `missing`, sans exception. Sans `near`, une zone introuvable lève QuaiError('areaUnknown') comme avant.
    */
-  board(areaId: string, opts?: { limit?: number; filter?: LineFilter[] }): Promise<Board>;
+  board(areaId: string, opts?: { limit?: number; filter?: LineFilter[]; near?: PickPlace | null }): Promise<Board>;
   /** Lignes et directions d'une zone, pour composer le filtre d'un favori. */
   linesAt(areaId: string): Promise<{ line: string; mode: Mode; head: Names; filter: LineFilter }[]>;
   /**
@@ -396,8 +417,11 @@ export interface Core {
   findLines(query: string, near?: LatLon | null): Promise<LineMatch[]>;
   /** 1.2.2 : arrêts d'une ligne (toutes ses variantes), les plus proches de `near` d'abord, sinon dans l'ordre de la ligne. */
   lineStops(line: Pick<LineMatch, 'op' | 'line' | 'routes'>, near?: LatLon | null): Promise<LineStop[]>;
-  /** 1.2.2 : prochains passages d'une ligne à un arrêt, par sens, temps réel inclus. `perDirection` défaut 2. */
-  lineBoard(areaId: string, line: string, opts?: { perDirection?: number }): Promise<LineBoard>;
+  /**
+   * 1.2.2 : prochains passages d'une ligne à un arrêt, par sens, temps réel inclus. `perDirection` défaut 2. `near` : zone
+   * dont l'identifiant a changé retrouvée (`movedTo`), comme board(). Jamais d'exception pour une zone introuvable.
+   */
+  lineBoard(areaId: string, line: string, opts?: { perDirection?: number; near?: PickPlace | null }): Promise<LineBoard>;
   /** Recherche par nom (≥ 2 caractères), 20 résultats max ; gares d'abord, puis les plus proches si `near`. */
   search(query: string, near?: { lat: number; lon: number }): Promise<SearchItem[]>;
   /** Trains entre deux gares (zones SNCB), direct ou une correspondance, à partir de `after`. limit défaut 3. */

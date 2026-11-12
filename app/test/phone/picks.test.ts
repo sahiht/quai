@@ -294,6 +294,15 @@ describe('« Ajouter une gare » (§ 4)', () => {
     expect(el.querySelector('.back')!.textContent).toContain('Accueil');
   });
 
+  it('revue 1.2.2 : « Accueil » des écrans d’ajout ramène à l’accueil, même sans gare ni ligne (pas de boucle)', () => {
+    for (const screen of [addStationScreen, addLineScreen]) {
+      const empty = harness({ settings: defaults() });
+      const el = mount(screen(empty.ctx));
+      (el.querySelector('.back') as HTMLButtonElement).click();
+      expect(empty.went).toEqual(['#/']);
+    }
+  });
+
   it('limite des gares : « … gares au plus : retires-en une. » ; aucune gare : texte clair ; recherche en panne : texte clair', async () => {
     const full = harness({ settings: defaults({ stations: manyStations(MAX_STATIONS) }), here: null });
     const el = mount(addStationScreen(full.ctx));

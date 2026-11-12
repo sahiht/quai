@@ -250,12 +250,34 @@ describe('faux cœur 1.2.2 : lignes par numéro et passages par sens (PRD-1.2.2 
     expect(view(t3)).toEqual(['Churchill : 07:32, 07:40', 'Esplanade : 07:36, 07:44']);
     expect(t3.anyPlanned).toBe(false);
     expect(view(await fake(at(7, 31)).lineBoard('stib:6357F', '4'))).toEqual(['Stalle (P) : 07:35, 07:43']);
-    // ligne qui ne passe pas à l'arrêt, arrêt inconnu : introuvable
-    expect(await fake(at(7, 31)).lineBoard('stib:6357F', 'W')).toMatchObject({ state: 'missing', directions: [] });
+    // ligne sans départ à l'arrêt : aucun passage (revue 1.2.2 : pas « introuvable ») ; arrêt inconnu : introuvable
+    expect(await fake(at(7, 31)).lineBoard('stib:6357F', 'W')).toMatchObject({ state: 'none', directions: [], area: { id: 'stib:6357F' } });
     expect(await fake(at(7, 31)).lineBoard('stib:404', '3')).toMatchObject({ state: 'missing', directions: [], area: { id: 'stib:404' } });
     // temps réel coupé : horaires prévus, réseau signalé
     const down = await fake(at(7, 31), { noRt: true }).lineBoard('tec:Bbrlmer1', 'W');
     expect(down).toMatchObject({ anyPlanned: true, rtErrors: ['tec'] });
     expect(view(down)).toEqual(['Bruxelles Midi : 07:48~, 08:08~', 'Braine-l’Alleud Gare : 07:42~, 08:02~']);
+  });
+
+  it('gare ou ligne choisie dont la zone a changé d’identifiant : movedTo (aka, ou même nom avec near) ; sinon missing', async () => {
+    const core = fake(at(7, 31));
+    const GDN = { lat: 50.86004, lon: 4.36017, name: { fr: 'Gare du Nord', nl: 'Noordstation' } };
+    // ancien identifiant (`aka` de Gare du Nord) : retrouvé, même sans near
+    expect(await core.lineBoard('stib:6358', '3')).toMatchObject({ state: 'ok', movedTo: 'stib:6357F', area: { id: 'stib:6357F' } });
+    expect(await core.board('stib:6358', { limit: 2 })).toMatchObject({ movedTo: 'stib:6357F', area: { id: 'stib:6357F' } });
+    // identifiant inconnu, même nom à 150 m au plus autour de near : retrouvé
+    const t3 = await core.lineBoard('stib:64', '3', { near: GDN });
+    expect(t3).toMatchObject({ state: 'ok', movedTo: 'stib:6357F' });
+    expect(view(t3)).toEqual(['Churchill : 07:32, 07:40', 'Esplanade : 07:36, 07:44']);
+    expect((await core.board('stib:64', { limit: 2, near: GDN })).movedTo).toBe('stib:6357F');
+    // identifiant actuel : ni movedTo ni missing
+    const same = await core.board('stib:6357F', { limit: 2, near: GDN });
+    expect([same.movedTo, same.missing]).toEqual([undefined, undefined]);
+    expect(Object.keys(await core.lineBoard('stib:6357F', '3', { near: GDN }))).not.toContain('movedTo');
+    // rien de ce nom : board missing avec near (sans exception), exception sans near ; lineBoard missing
+    const gone = { ...GDN, name: { fr: 'Arrêt disparu', nl: 'Weg' } };
+    expect(await core.board('stib:999999', { near: gone })).toMatchObject({ missing: true, departures: [], area: { id: 'stib:999999' } });
+    await expect(core.board('stib:999999')).rejects.toMatchObject({ code: 'areaUnknown' });
+    expect(await core.lineBoard('stib:999999', '3', { near: gone })).toMatchObject({ state: 'missing', directions: [] });
   });
 });

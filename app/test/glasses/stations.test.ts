@@ -39,6 +39,26 @@ describe('CA-122.3 : « Gares »', () => {
     h.c.stop();
   });
 
+  it('revue : gare introuvable : « introuvable » (accueil, « Gares »), jamais « … » ; retrouvée sous un autre identifiant : le choix suit', async () => {
+    // identifiant inconnu sans zone de ce nom autour (faux cœur : missing) ; identifiant inconnu, même nom à 150 m : movedTo
+    const lost = { ...STATIONS.nord, id: 'st-lost', areaId: 'sncb:0000001', name: { fr: 'Gare supprimée', nl: 'Gare supprimée' } };
+    const moved = { ...STATIONS.nord, areaId: 'sncb:0000002' };
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.2', stations: [lost, moved] }), core: (now) => stubCore(now) });
+    const home = await h.until((x) => x.screen === 'home' && x.lines.some((l) => /^Gares {3}[^…]+$/.test(l)));
+    expect(home.lines.find((l) => l.startsWith('Gares'))).toBe('Gares   introuvable');
+    await h.c.replaceRoute({ screen: 'stations' });
+    const s = await h.until(stationsReady);
+    expect(s.lines[0]).toBe('Gare supprimée   introuvable');
+    expect(s.lines[1]).toMatch(/^Bruxelles-Nord {3}\S/);
+    expect(s.lines[1]).not.toMatch(/introuvable|…/);
+    await h.until(() => h.settings.get().stations[1]?.areaId === STATIONS.nord.areaId);
+    expect(h.settings.get().stations.map((p) => [p.id, p.areaId])).toEqual([
+      ['st-lost', 'sncb:0000001'],
+      ['st-nord', STATIONS.nord.areaId],
+    ]);
+    h.c.stop();
+  });
+
   it('rafraîchi toutes les 30 s comme les tableaux : les heures suivent, sans « … » qui revient', async () => {
     let late = 0;
     const h = await setup({
@@ -64,7 +84,7 @@ describe('CA-122.3 : « Gares »', () => {
     expect(lines(stationsView([], ctx()))).toEqual(['Choisis tes gares dans Quai, sur le téléphone.', 'double toucher : retour']);
     const web = stationsView([], { ...ctx(), web: true });
     expect(lines(web)[0]).toBe('Choisis tes gares dans l’onglet Réglages.');
-    expect(web.tap).toEqual({ kind: 'phone', hash: '#/gares', text: 'Choisis tes gares dans l’onglet Réglages' });
+    expect(web.tap).toEqual({ kind: 'phone', hash: '#/gares/ajouter', text: 'Choisis tes gares dans l’onglet Réglages' });
   });
 });
 

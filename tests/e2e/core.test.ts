@@ -402,12 +402,17 @@ describe('fonctions transversales', () => {
       'Esplanade : 12:16, 12:24',
     ]);
     checkTexts(...b.directions.map((d) => d.head.fr));
-    // bus W à Waterloo Eglise : deux sens ; ligne absente et arrêt inconnu : introuvable
+    // bus W à Waterloo Eglise : deux sens ; ligne sans départ à l'arrêt : aucun passage ; arrêt inconnu : introuvable
     const wb = await coreAt(T('07:31')).lineBoard('tec:Bwategl1', 'W');
     expect(wb.directions.map((d) => d.head.fr)).toEqual(['Bruxelles Midi', 'Braine-l’Alleud Gare']);
     expect(wb.directions.every((d) => d.departures.length === 2)).toBe(true);
-    expect((await core.lineBoard('stib:6357F', 'W')).state).toBe('missing');
+    expect((await core.lineBoard('stib:6357F', 'W')).state).toBe('none');
     expect((await core.lineBoard('stib:404', '3')).state).toBe('missing');
+    // choix sur un identifiant disparu : retrouvé par nom et position (`near`), dit par movedTo
+    const gdn = { lat: 50.86004, lon: 4.36017, name: { fr: 'Gare du Nord', nl: 'Noordstation' } };
+    expect(await core.lineBoard('stib:64', '3', { near: gdn })).toMatchObject({ state: 'ok', movedTo: 'stib:6357F' });
+    expect(await core.board('stib:64', { limit: 2, near: gdn })).toMatchObject({ movedTo: 'stib:6357F', area: { id: 'stib:6357F' } });
+    expect(await core.board('stib:404', { near: { ...gdn, name: { fr: 'Arrêt disparu', nl: 'Weg' } } })).toMatchObject({ missing: true, departures: [] });
   });
 
   it('trains Namur → Gand-Saint-Pierre : une correspondance, au moins 4 min en gare', async () => {

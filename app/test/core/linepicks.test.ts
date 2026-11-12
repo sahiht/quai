@@ -5,8 +5,8 @@
  */
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { AreaFile } from '../../../shared/types';
-import type { Departure, LineBoard } from '../../src/core/api';
+import type { AreaFile, AreaSummary, Meta, TileFile } from '../../../shared/types';
+import type { Departure, LineBoard, PickPlace } from '../../src/core/api';
 import { QuaiError } from '../../src/core/errors';
 import {
   directionGroups,
@@ -14,6 +14,7 @@ import {
   groupDirections,
   lineKey,
   mainEnds,
+  noWeekdayIn,
   orderStops,
   partialIn,
   sameWay,
@@ -153,6 +154,17 @@ describe('règles (core/linepicks.ts)', () => {
       ['a', 4600],
     ]);
   });
+
+  it('noWeekdayIn : les deux jours publiés sont samedi, dimanche ou fériés (zone absente : pas « introuvable »)', () => {
+    expect(noWeekdayIn(['2026-11-14', '2026-11-15'])).toBe(true); // samedi, dimanche
+    expect(noWeekdayIn(['2026-12-25', '2026-12-26'])).toBe(true); // Noël (vendredi), samedi
+    expect(noWeekdayIn(['2026-11-13', '2026-11-14'])).toBe(false); // vendredi, samedi
+    expect(noWeekdayIn(['2026-11-11', '2026-11-12'])).toBe(false); // 11 novembre, jeudi
+    expect(noWeekdayIn(['2026-11-15', '2026-11-16'])).toBe(false); // dimanche, lundi
+    expect(noWeekdayIn(['2026-11-14'])).toBe(true);
+    expect(noWeekdayIn([])).toBe(false);
+    expect(noWeekdayIn(['inconnu', '2026-11-15'])).toBe(false);
+  });
 });
 
 describe('vrai cœur sur les fixtures : findLines et lineStops', () => {
@@ -212,9 +224,11 @@ describe('vrai cœur sur les fixtures : lineBoard', () => {
     expect(view(await core.lineBoard('tec:Bbrlgar1', 'W'))).toEqual(['Bruxelles Midi : 07:44~, 08:04~']);
   });
 
-  it('introuvable : ligne absente de l’arrêt, zone inconnue ; aucun passage : horaires périmés ; réseau coupé : erreur', async () => {
+  it('introuvable : zone inconnue seulement ; aucun passage : ligne sans départ à l’arrêt, horaires périmés ; réseau coupé : erreur', async () => {
     const { core, server, clock } = makeEnv({ now: '2026-11-10T12:10' });
-    expect(await core.lineBoard('stib:6357F', '71')).toMatchObject({ state: 'missing', directions: [], line: '71' });
+    // revue 1.2.2 : la zone existe, la ligne n'y part pas les deux jours publiés (week-end, jour férié) : none, pas
+    // « introuvable : modifie-la sur le téléphone »
+    expect(await core.lineBoard('stib:6357F', '71')).toMatchObject({ state: 'none', directions: [], line: '71', area: { id: 'stib:6357F' } });
     expect(await core.lineBoard('stib:404', '3')).toMatchObject({ state: 'missing', directions: [], area: { id: 'stib:404' } });
     expect(await core.lineBoard('autre:1', '3')).toMatchObject({ state: 'missing' });
     // jour non couvert par les horaires : sens connus, aucun passage
@@ -230,7 +244,7 @@ describe('vrai cœur sur les fixtures : lineBoard', () => {
     await expect(core.lineBoard('stib:6362', '3')).rejects.toBeInstanceOf(QuaiError);
   });
 
-  it('passage partiel : un W qui s’arrête à Waterloo Eglise, temps réel TEC fusionné ; zone fusionnée (aka) acceptée', async () => {
+  it('passage partiel : un W qui s’arrête à Waterloo Eglise, temps réel TEC fusionné', async () => {
     const env = makeEnv({ now: '2026-11-10T07:40' });
     // fichier de zone de Braine-l'Alleud Gare complété d'un motif « Waterloo Eglise » (07:50) et d'un voyage en temps réel
     const file = readJson<AreaFile>(join(CORE_DATA_DIR, 'areas', 'tec', 'Bbrlgar1.json'));
@@ -245,5 +259,97 @@ describe('vrai cœur sur les fixtures : lineBoard', () => {
     expect(b.directions[0].departures[0].partial).toBeUndefined();
     // la clé interne du motif ne sort pas
     expect(Object.keys(b.directions[0].departures[1])).not.toContain('pi');
+  });
+});
+
+/**
+ * Revue 1.2.2 : une gare ou une ligne choisie dont la zone a changé d'identifiant d'une publication à l'autre se répare
+ * seule, comme un arrêt favori de la 1.2.1 : board() et lineBoard() avec `near` (le choix lui-même) lisent les tuiles
+ * autour, retrouvent la zone (`aka`, puis même réseau, même nom, 150 m au plus) et la disent par `movedTo`.
+ */
+describe('vrai cœur sur les fixtures : gare ou ligne choisie dont la zone a changé d’identifiant', () => {
+  const GDN: PickPlace = { lat: 50.86004, lon: 4.36017, name: { fr: 'Gare du Nord', nl: 'Noordstation' } };
+  /** Tuile de Gare du Nord où stib:6357F a absorbé stib:1082 (fusion du pipeline). */
+  const withAka = (env: ReturnType<typeof makeEnv>): void => {
+    const key = '2543_145';
+    const tile = readJson<TileFile>(join(CORE_DATA_DIR, 'tiles', `${key}.json`));
+    const areas = tile.areas.map((a): AreaSummary => (a.id === 'stib:6357F' ? { ...a, aka: ['stib:1082'] } : a));
+    env.server.memFiles.set(`tiles/${key}.json`, JSON.stringify({ ...tile, areas }));
+  };
+
+  it('ancien identifiant (`aka`) : retrouvé avec `near` même tuiles non lues, movedTo ; puis connu sans `near`', async () => {
+    const env = makeEnv({ now: '2026-11-10T12:10' });
+    withAka(env);
+    // sans `near` ni tuile lue : rien ne dit où chercher (comportement 1.2.1 de board, missing pour lineBoard)
+    await expect(env.core.board('stib:1082', { limit: 2 })).rejects.toMatchObject({ code: 'areaUnknown' });
+    expect((await env.core.lineBoard('stib:1082', '3')).state).toBe('missing');
+
+    const lb = await env.core.lineBoard('stib:1082', '3', { near: GDN });
+    expect(lb).toMatchObject({ state: 'ok', movedTo: 'stib:6357F', area: { id: 'stib:6357F', aka: ['stib:1082'] } });
+    expect(view(lb)).toEqual(['Esplanade : 12:16, 12:24', 'Churchill : 12:12, 12:20']);
+    const b = await env.core.board('stib:1082', { limit: 2, near: GDN });
+    expect(b).toMatchObject({ movedTo: 'stib:6357F', area: { id: 'stib:6357F' } });
+    expect(b.departures.map((d) => d.line)).toEqual(['3', '4']);
+    expect(b.missing).toBeUndefined();
+    // l'alias est connu désormais : même sans `near`
+    expect(await env.core.board('stib:1082', { limit: 2 })).toMatchObject({ movedTo: 'stib:6357F' });
+    expect(await env.core.lineBoard('stib:1082', '4')).toMatchObject({ state: 'ok', movedTo: 'stib:6357F' });
+    // identifiant actuel : ni movedTo ni missing
+    const same = await env.core.board('stib:6357F', { limit: 2, near: GDN });
+    expect(same.movedTo).toBeUndefined();
+    expect(same.missing).toBeUndefined();
+    expect(Object.keys(await env.core.lineBoard('stib:6357F', '3', { near: GDN }))).not.toContain('movedTo');
+  });
+
+  it('même réseau, même nom à 150 m au plus : movedTo ; sinon board missing et lineBoard missing, sans exception', async () => {
+    const env = makeEnv({ now: '2026-11-10T12:10' });
+    expect(await env.core.lineBoard('stib:64', '3', { near: GDN })).toMatchObject({ state: 'ok', movedTo: 'stib:6357F' });
+    expect(await env.core.board('stib:65', { near: GDN })).toMatchObject({ movedTo: 'stib:6357F', area: { id: 'stib:6357F' } });
+    // même nom, autre réseau : pas la même zone
+    expect(await env.core.lineBoard('tec:64', '3', { near: GDN })).toMatchObject({ state: 'missing', directions: [] });
+    // aucun arrêt de ce nom : introuvable
+    const gone: PickPlace = { ...GDN, name: { fr: 'Arrêt disparu', nl: 'Weg' } };
+    const b = await env.core.board('stib:999999', { limit: 2, near: gone });
+    expect(b).toMatchObject({ missing: true, departures: [], area: { id: 'stib:999999' } });
+    expect(b.movedTo).toBeUndefined();
+    expect(await env.core.lineBoard('stib:999999', '3', { near: gone })).toMatchObject({ state: 'missing', directions: [], line: '3' });
+    // sans nom : seul `aka` compte
+    expect((await env.core.lineBoard('stib:66', '3', { near: { lat: GDN.lat, lon: GDN.lon } })).state).toBe('missing');
+    // serveur injoignable : l'erreur remonte (pas un faux « introuvable »)
+    env.server.networkDown = true;
+    await expect(env.core.board('stib:999998', { near: gone })).rejects.toBeInstanceOf(QuaiError);
+    await expect(env.core.lineBoard('stib:999998', '3', { near: gone })).rejects.toBeInstanceOf(QuaiError);
+  });
+
+  it('horaires périmés : zone retrouvée (movedTo) ou introuvable (missing), sans départ ni exception', async () => {
+    const env = makeEnv({ now: '2026-11-14T12:10' });
+    withAka(env);
+    expect(await env.core.board('stib:1082', { near: GDN })).toMatchObject({ movedTo: 'stib:6357F', departures: [], area: { id: 'stib:6357F' } });
+    const gone: PickPlace = { ...GDN, name: { fr: 'Arrêt disparu', nl: 'Weg' } };
+    expect(await env.core.board('stib:999999', { near: gone })).toMatchObject({ missing: true, departures: [] });
+    // sans `near` : comme avant, résumé minimal sans exception
+    const plain = await env.core.board('stib:999999');
+    expect(plain).toMatchObject({ departures: [], area: { id: 'stib:999999' } });
+    expect(plain.missing).toBeUndefined();
+    // réseau coupé : rien ne permet de dire la zone introuvable
+    env.server.networkDown = true;
+    const down = await env.core.board('stib:999997', { near: gone });
+    expect(down.departures).toEqual([]);
+    expect(down.missing).toBeUndefined();
+  });
+
+  it('données d’un samedi et d’un dimanche : zone absente (desservie en semaine seulement), aucun passage, pas « introuvable »', async () => {
+    const env = makeEnv({ now: '2026-11-14T12:10' });
+    const meta = readJson<Meta>(join(CORE_DATA_DIR, 'meta.json'));
+    env.server.memFiles.set('meta.json', JSON.stringify({ ...meta, serviceDates: ['2026-11-14', '2026-11-15'] }));
+    const gone: PickPlace = { ...GDN, name: { fr: 'Arrêt de semaine', nl: 'Weekhalte' } };
+    expect(await env.core.lineBoard('stib:999999', '3', { near: gone })).toMatchObject({ state: 'none', directions: [], line: '3' });
+    expect(await env.core.lineBoard('stib:999999', '3')).toMatchObject({ state: 'none' });
+    const b = await env.core.board('stib:999999', { limit: 2, near: gone });
+    expect(b).toMatchObject({ departures: [], area: { id: 'stib:999999' } });
+    expect(b.missing).toBeUndefined();
+    // la zone qui existe et celle retrouvée par son nom restent servies comme les autres jours
+    expect((await env.core.lineBoard('stib:6357F', '3')).state).toBe('ok');
+    expect(await env.core.lineBoard('stib:64', '3', { near: GDN })).toMatchObject({ state: 'ok', movedTo: 'stib:6357F' });
   });
 });

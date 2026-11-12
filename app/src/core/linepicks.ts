@@ -20,6 +20,7 @@ import type { Departure, LatLon, LineBoard, LineDeparture, LineDirection, LineMa
 import { lowerBound, naturalCompare, tileKeysAround, type PreparedArea } from './areas';
 import { BOARD_HORIZON_MS, buildBoards, patternOfDeparture, type BoardRequest } from './boards';
 import { QuaiError } from './errors';
+import { holidayName } from './means';
 import { mapPool } from './net';
 import type { RealtimeClient } from './realtime';
 import { headKey, headScore } from './rtmerge';
@@ -269,6 +270,34 @@ export function missingArea(id: string): AreaSummary {
   return { id, op: (OP_ORDER as readonly string[]).includes(op) ? (op as Op) : 'tec', n: { fr: id, nl: id }, lat: 0, lon: 0, modes: [], lines: [] };
 }
 
+/**
+ * Tableau d'une ligne à une zone introuvable (ni elle, ni une zone qui l'a absorbée) : missing, « introuvable » ; none
+ * quand l'absence ne prouve rien (noWeekdayIn).
+ */
+export function missingLineBoard(areaId: string, line: string, now: number, state: 'missing' | 'none' = 'missing'): LineBoard {
+  const area = missingArea(areaId);
+  return { area, op: area.op, mode: 'bus', line, directions: [], state, anyPlanned: false, rtErrors: [], updatedAt: now };
+}
+
+/**
+ * Revue 1.2.2 : jours publiés (meta.serviceDates) sans jour ouvrable, samedi, dimanche ou jour férié. Le pipeline ne
+ * garde que les voyages des deux jours publiés : une zone desservie seulement en semaine manque alors aux données
+ * (le samedi 14/11, 40 % des zones TEC et 32 % des zones De Lijn n'ont aucun départ) ; son absence ne la dit pas
+ * disparue, elle revient avec le prochain jour ouvrable publié.
+ */
+export function noWeekdayIn(dates: readonly string[]): boolean {
+  const two = dates.slice(0, 2);
+  return (
+    two.length > 0 &&
+    two.every((d) => {
+      const noon = Date.parse(`${d}T12:00:00Z`);
+      if (!Number.isFinite(noon)) return false;
+      const wd = new Date(noon).getUTCDay();
+      return wd === 0 || wd === 6 || holidayName(noon) !== null;
+    })
+  );
+}
+
 /** Sens d'une ligne : ceux des motifs qui partent dans l'horizon ; s'il n'y en a aucun, ceux de tous les motifs. */
 export function directionGroups(pats: readonly DirPattern[]): DirGroup[] {
   const active = pats.filter((p) => p.total > 0);
@@ -280,7 +309,7 @@ export interface LineBoardInput {
   op: Op;
   mode: Mode;
   line: string;
-  /** Motifs de la ligne au départ de la zone (vide : la ligne n'y passe plus). */
+  /** Motifs de la ligne au départ de la zone (vide : aucun départ de la ligne les jours publiés). */
   pats: readonly DirPattern[];
   /** Sens déjà calculés (directionGroups(pats)), sinon calculés ici. */
   groups?: readonly DirGroup[];
@@ -291,10 +320,13 @@ export interface LineBoardInput {
   now: number;
 }
 
-/** Tableau d'une ligne à un arrêt : missing sans motif de la ligne à cette zone ; none sans aucun passage. */
+/**
+ * Tableau d'une ligne à une zone qui existe : none sans aucun passage, y compris sans motif de la ligne (les motifs ne
+ * viennent que des deux jours publiés : une ligne sans service le week-end ou un jour férié n'a pas « disparu »).
+ */
 export function lineBoardOf(x: LineBoardInput): LineBoard {
   const base = { area: x.area, op: x.op, mode: x.mode, line: x.line, rtErrors: x.rtErrors, updatedAt: x.now };
-  if (!x.pats.length) return { ...base, directions: [], state: 'missing', anyPlanned: false };
+  if (!x.pats.length) return { ...base, directions: [], state: 'none', anyPlanned: false };
   const directions = directionsOf(x.groups ?? directionGroups(x.pats), x.deps, Math.max(1, x.per));
   const shown = directions.flatMap((d) => d.departures);
   return { ...base, directions, state: shown.length ? 'ok' : 'none', anyPlanned: shown.some((d) => !d.rt) };

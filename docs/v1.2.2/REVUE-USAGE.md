@@ -3,9 +3,9 @@
 Revue UX de la 1.2.1 publiée, le 12/11/2026, pour la 1.2.2. Lecteurs : équipes lunettes, téléphone et cœur de la 1.2.2.
 
 Méthode : chaque parcours relu dans le code de la 1.2.1 (`app/src/glasses`, `app/src/phone`, `app/src/web`) et sur les
-captures réelles (`/home/claude/quai-1.2.1-shots`, `tests/e2e/screens`, `app/test/screens`). Place à l'écran et
+captures réelles (`tests/e2e/screens`, `app/test/screens`). Place à l'écran et
 largeurs mesurées avec les fonctions mêmes de la 1.2.1 (`homeView`, `geometry`, `textWidth`), dans une copie isolée du
-dépôt (`/tmp/qr`), où les 385 tests d'interface passent. Chaque texte proposé a été mesuré au pixel : il tient dans sa
+dépôt, où les 385 tests d'interface passent. Chaque texte proposé a été mesuré au pixel : il tient dans sa
 colonne. Rien n'a été modifié dans le dépôt.
 
 Étiquettes : « Indispensable » (à livrer avec la 1.2.2), « Utile », « Plus tard ». Effort S, M, L. Les textes des

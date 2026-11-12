@@ -27,6 +27,7 @@ import {
   type Mode,
   type Names,
   type NearbyItem,
+  type PickPlace,
   type SearchItem,
   type Settings,
   type Suggestion,
@@ -49,7 +50,7 @@ import { recalcAlert, repairFollowed, touchFollowed } from './routing/repair';
 import { rankSearch, searchFileKeys } from './search';
 import { suggestOpening } from './suggest';
 import { indexDay, TrainEngine, trainLeg, type DayIndex } from './trains';
-import { findLinesIn, lineBoardAt, lineStopsIn } from './linepicks';
+import { findLinesIn, lineBoardAt, lineStopsIn, missingLineBoard, noWeekdayIn } from './linepicks';
 import { brusselsParts, distanceM, localDate, walkMinutes } from './util';
 import { DAY_START_HOUR } from './text';
 
@@ -168,6 +169,31 @@ export function createCore(opts: CoreOptions): Core {
     return out.sort((x, y) => x.d - y.d || (x.a.id < y.a.id ? -1 : 1));
   }
 
+  /**
+   * 1.2.2 : zone d'un identifiant, ou celle qui l'a remplacée : `aka` des tuiles déjà lues ; puis, avec `near` (où la gare
+   * ou la ligne a été choisie), les tuiles autour : `aka`, puis même réseau, même nom, 150 m au plus (comme un arrêt
+   * favori, relocateAmong). null : introuvable. Serveur injoignable : l'erreur remonte.
+   */
+  async function resolveArea(areaId: string, near?: PickPlace | null): Promise<{ id: string; prep: PreparedArea } | null> {
+    const load = async (id: string) => {
+      try {
+        return { id, prep: await prepared(id) };
+      } catch (e) {
+        if (e instanceof QuaiError && e.code === 'areaUnknown') return null;
+        throw e;
+      }
+    };
+    const direct = await load(aliasOf.get(areaId) ?? areaId);
+    if (direct || !near) return direct;
+    const list = await areasAround(near.lat, near.lon, RELOCATE_M);
+    const op = areaId.slice(0, Math.max(0, areaId.indexOf(':'))) as Op;
+    const found = relocateAmong({ areaId, op, name: near.name ?? { fr: '', nl: '' }, lat: near.lat, lon: near.lon }, list.map((x) => x.a));
+    if (!found || found.id === areaId) return null;
+    const r = await load(found.id);
+    if (r) aliasOf.set(areaId, found.id);
+    return r;
+  }
+
   async function works(op: Op, routes: string[], stops: string[]): Promise<string[]> {
     const t = now();
     if (op === 'stib') {
@@ -229,21 +255,30 @@ export function createCore(opts: CoreOptions): Core {
       return items;
     },
 
-    async board(areaId: string, o?: { limit?: number; filter?: LineFilter[] }): Promise<Board> {
+    async board(areaId: string, o?: { limit?: number; filter?: LineFilter[]; near?: PickPlace | null }): Promise<Board> {
       const meta = await ensure();
       const t = now();
       const limit = Math.max(1, Math.round(o?.limit ?? 8));
-      // M8.3 : identifiant d'une zone fusionnée (`aka`) accepté, une fois la zone connue (tuiles chargées).
-      const id = aliasOf.get(areaId) ?? areaId;
+      // M8.3 : identifiant d'une zone fusionnée (`aka`) accepté ; 1.2.2 : retrouvé aussi autour de `near` (gare ou ligne
+      // choisie), la nouvelle zone dite par `movedTo` ; introuvable avec `near` : `missing`, sans exception (sauf si les
+      // jours publiés n'ont aucun jour ouvrable : aucun départ, noWeekdayIn)
+      const empty = { departures: [], anyPlanned: false, rtErrors: [], updatedAt: t };
+      const lost = o?.near && !noWeekdayIn(meta.serviceDates) ? { missing: true as const } : {};
       if (!isCovered(meta, t)) {
-        const prep = await preparedOrNull(id);
-        return { area: prep?.summary ?? minimalSummary(areaId), departures: [], anyPlanned: false, rtErrors: [], updatedAt: t };
+        // données périmées : jamais d'exception ; serveur injoignable (undefined) : pas de quoi dire la zone introuvable
+        const r = await resolveArea(areaId, o?.near).catch(() => undefined);
+        if (!r) return { area: minimalSummary(areaId), ...empty, ...(r === null ? lost : {}) };
+        return r.id === areaId ? { area: r.prep.summary, ...empty } : { area: summaryOf.get(r.id) ?? r.prep.summary, ...empty, movedTo: r.id };
       }
-      const prep = await prepared(id);
-      const [b] = await buildBoards([{ prep, limit, filter: o?.filter }], rt, t);
-      if (id === areaId) return b;
+      const r = await resolveArea(areaId, o?.near);
+      if (!r) {
+        if (!o?.near) throw new QuaiError('areaUnknown');
+        return { area: minimalSummary(areaId), ...empty, ...lost };
+      }
+      const [b] = await buildBoards([{ prep: r.prep, limit, filter: o?.filter }], rt, t);
+      if (r.id === areaId) return b;
       // zone fusionnée : le résumé publié (avec `aka`) de préférence au résumé tiré du fichier de zone
-      return { ...b, area: summaryOf.get(id) ?? b.area };
+      return { ...b, area: summaryOf.get(r.id) ?? b.area, movedTo: r.id };
     },
 
     async linesAt(areaId: string): Promise<{ line: string; mode: Mode; head: Names; filter: LineFilter }[]> {
@@ -271,24 +306,20 @@ export function createCore(opts: CoreOptions): Core {
     },
 
     /**
-     * 1.2.2 (PRD-1.2.2 § 3) : passages d'une ligne à un arrêt, par sens. Zone absente des données → missing (jamais
-     * d'exception : « introuvable ») ; serveur injoignable → QuaiError comme board().
+     * 1.2.2 (PRD-1.2.2 § 3) : passages d'une ligne à un arrêt, par sens. Zone retrouvée comme board() (`aka`, `near`,
+     * `movedTo`) ; zone introuvable → missing, jamais d'exception (« introuvable »), sauf jours publiés sans jour ouvrable
+     * (noWeekdayIn) → none ; ligne sans départ à cette zone les jours publiés → none ; serveur injoignable → QuaiError
+     * comme board().
      */
-    async lineBoard(areaId: string, line: string, o?: { perDirection?: number }): Promise<LineBoard> {
+    async lineBoard(areaId: string, line: string, o?: { perDirection?: number; near?: PickPlace | null }): Promise<LineBoard> {
       const meta = await ensure();
       const t = now();
       const per = Math.max(1, Math.round(o?.perDirection ?? 2));
-      const id = aliasOf.get(areaId) ?? areaId;
-      let prep: PreparedArea;
-      try {
-        prep = await prepared(id);
-      } catch (e) {
-        if (!(e instanceof QuaiError && e.code === 'areaUnknown')) throw e;
-        const area = minimalSummary(areaId);
-        return { area, op: area.op, mode: 'bus', line, directions: [], state: 'missing', anyPlanned: false, rtErrors: [], updatedAt: t };
-      }
-      const area = id === areaId ? prep.summary : (summaryOf.get(id) ?? prep.summary);
-      return lineBoardAt(prep, area, line ?? '', per, t, isCovered(meta, t) ? rt : null, meta.serviceDates);
+      const r = await resolveArea(areaId, o?.near);
+      if (!r) return missingLineBoard(areaId, line ?? '', t, noWeekdayIn(meta.serviceDates) ? 'none' : 'missing');
+      const area = r.id === areaId ? r.prep.summary : (summaryOf.get(r.id) ?? r.prep.summary);
+      const b = await lineBoardAt(r.prep, area, line ?? '', per, t, isCovered(meta, t) ? rt : null, meta.serviceDates);
+      return r.id === areaId ? b : { ...b, movedTo: r.id };
     },
 
     async search(query: string, near?: { lat: number; lon: number }): Promise<SearchItem[]> {

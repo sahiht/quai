@@ -11,8 +11,8 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { AreaFile, Meta } from '../../../shared/types';
-import type { Core, LineBoard } from '../../src/core/api';
+import type { AreaFile, AreaSummary, Meta, TileFile } from '../../../shared/types';
+import type { Core, LineBoard, PickPlace } from '../../src/core/api';
 import { gtfsTime, hhmm } from '../../src/core/util';
 import { makeEnv, type TestEnv } from './support/env';
 
@@ -153,6 +153,105 @@ describe.skipIf(!has('2026-11-13', '2026-11-14'))('données réelles des 13/11 e
     console.log(`14/11 07:32, W à Merbraine :\n  ${view(w).join('\n  ')}`);
     expect(w.directions.map((d) => d.head.fr)).toEqual(['Bruxelles Midi', "Braine-l'Alleud, Gare"]);
   });
+});
+
+/**
+ * Fichier de zone tel que le publierait un instantané dont les deux jours n'ont que le service du jour `idx` (week-end,
+ * jour férié) : les motifs ne viennent que des départs publiés (pipeline/src/feed.ts), ceux des autres lignes disparaissent.
+ */
+function onlyDay(file: AreaFile, idx: number): AreaFile {
+  const deps = file.deps.filter((d) => d[0] === idx);
+  const used = [...new Set(deps.map((d) => d[2]))].sort((a, b) => a - b);
+  const to = new Map(used.map((pi, i) => [pi, i]));
+  return { ...file, patterns: used.map((pi) => file.patterns[pi]), deps: deps.map((d) => d.map((x, i) => (i === 2 ? to.get(d[2])! : x)) as typeof d) };
+}
+
+describe('revue 1.2.2 : ligne sans service les jours publiés (11/11 férié, samedi 14/11)', () => {
+  for (const day of ['2026-11-11', '2026-11-14']) {
+    it.skipIf(!has(day))(`${day} : 39, 57 et 58 à Côté du Collège : aucun passage (none), jamais « introuvable »`, async () => {
+      const dir = snapFor(day)!;
+      const idx = metaOf(dir).serviceDates.indexOf(day);
+      const file = areaFile(dir, COLLEGE);
+      const env = envAt(day, 7, 32);
+      // fichier publié : les motifs viennent aussi de l'autre jour publié
+      for (const line of ['39', '57', '58']) expect((await env.core.lineBoard(COLLEGE, line)).state).not.toBe('missing');
+      // publication de deux jours sans ces lignes : la zone existe, aucun motif de la ligne
+      const only = onlyDay(file, idx);
+      const lines = new Set(only.patterns.map((p) => p.line));
+      expect(['39', '57', '58'].filter((l) => lines.has(l))).toEqual([]);
+      const key = `areas/tec/${COLLEGE.slice(4).replace(/[^A-Za-z0-9_-]/g, '_')}.json`;
+      const weekend = envAt(day, 7, 32);
+      weekend.server.memFiles.set(key, JSON.stringify(only));
+      const states: string[] = [];
+      for (const line of ['39', '57', '58', '36']) {
+        const b = await weekend.core.lineBoard(COLLEGE, line);
+        states.push(`${line} ${b.state}`);
+        checkBoard(b, 2);
+      }
+      console.log(`${day} 07:32, Côté du Collège, deux jours sans 39, 57, 58 : ${states.join(', ')}`);
+      expect(states).toEqual(['39 none', '57 none', '58 none', '36 ok']);
+      expect(await weekend.core.lineBoard(COLLEGE, '39')).toMatchObject({ directions: [], area: { id: COLLEGE }, line: '39' });
+    });
+  }
+});
+
+/** Résumés des zones d'un instantané (tuiles). */
+function summaries(dir: string): Map<string, AreaSummary> {
+  const out = new Map<string, AreaSummary>();
+  for (const f of readdirSync(join(dir, 'tiles'))) for (const a of (JSON.parse(readFileSync(join(dir, 'tiles', f), 'utf8')) as TileFile).areas) out.set(a.id, a);
+  return out;
+}
+
+describe.skipIf(!has('2026-11-12', '2026-11-13'))('revue 1.2.2 : gares et lignes choisies sur l’instantané du 11, lues sur celui du 13', () => {
+  it('identifiants disparus : retrouvés par `aka` (movedTo) avec la position du choix ; les autres, missing sans exception', async () => {
+    const before = summaries(snapFor('2026-11-12')!);
+    const after = summaries(snapFor('2026-11-13')!);
+    const gone = [...before.values()].filter((a) => !after.has(a.id));
+    const akaOf = new Map<string, string>();
+    for (const a of after.values()) for (const old of a.aka ?? []) akaOf.set(old, a.id);
+    const dir13 = snapFor('2026-11-13')!;
+    const fileOf = (id: string) => join(dir13, 'areas', id.slice(0, id.indexOf(':')), `${id.slice(id.indexOf(':') + 1).replace(/[^A-Za-z0-9_-]/g, '_')}.json`);
+    const env = envAt('2026-11-13', 8, 0);
+    const out = { idle: 0, aka: 0, name: 0, missing: 0 };
+    for (const a of gone) {
+      const near: PickPlace = { lat: a.lat, lon: a.lon, name: a.n };
+      const line = a.lines[0] ?? '';
+      const lb = await env.core.lineBoard(a.id, line, { near });
+      const b = await env.core.board(a.id, { limit: 2, near });
+      if (existsSync(fileOf(a.id))) {
+        // zone toujours publiée, sans départ les deux jours (absente des tuiles) : la même, aucun passage
+        expect(lb).toMatchObject({ state: 'none', area: { id: a.id } });
+        expect([lb.movedTo, b.movedTo, b.missing]).toEqual([undefined, undefined, undefined]);
+        out.idle++;
+      } else if (akaOf.has(a.id)) {
+        expect(lb).toMatchObject({ movedTo: akaOf.get(a.id), area: { id: akaOf.get(a.id) } });
+        expect(lb.state).not.toBe('missing');
+        expect(b.movedTo).toBe(akaOf.get(a.id));
+        out.aka++;
+      } else if (lb.movedTo) {
+        // même réseau, même nom, 150 m au plus
+        const to = after.get(lb.movedTo)!;
+        expect(to.op).toBe(a.op);
+        expect(b.movedTo).toBe(lb.movedTo);
+        out.name++;
+      } else {
+        expect(lb).toMatchObject({ state: 'missing', directions: [] });
+        expect(b).toMatchObject({ missing: true, departures: [] });
+        out.missing++;
+      }
+    }
+    console.log(
+      `11 → 13 : ${gone.length} zones absentes des tuiles du 13 ; sans départ ces deux jours ${out.idle} ; retrouvées par aka ${out.aka}, par nom et position ${out.name} ; introuvables ${out.missing}`,
+    );
+    expect(out.aka).toBe(gone.filter((a) => akaOf.has(a.id) && !existsSync(fileOf(a.id))).length);
+    // Louise (STIB) : stib:52 du 11 est devenu stib:1087 le 13
+    const louise = before.get('stib:52');
+    if (louise && akaOf.get('stib:52') === 'stib:1087') {
+      const lb = await envAt('2026-11-13', 8, 0).core.lineBoard('stib:52', '2', { near: { lat: louise.lat, lon: louise.lon, name: louise.n } });
+      console.log(`13/11 08:00, métro 2 à Louise (choisi sur stib:52) : movedTo ${lb.movedTo}, ${view(lb).join(' | ')}`);
+      expect(lb).toMatchObject({ state: 'ok', movedTo: 'stib:1087' });
+    }
+  }, 300_000);
 });
 
 /** Toutes les lignes d'un échantillon de zones : jamais d'exception, invariants tenus, sens comptés. */

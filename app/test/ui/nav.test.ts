@@ -132,15 +132,21 @@ describe('événements du SDK (formats relevés dans le simulateur)', () => {
     const f = new GestureFilter();
     expect(f.accept('tap', 1000)).toBe(true);
     expect(f.accept('tap', 1050)).toBe(false);
+    expect(f.rejected).toBe('doublon');
     expect(f.accept('double', 1100)).toBe(false);
+    expect(f.rejected).toBe('après un toucher');
     expect(f.accept('double', 1300)).toBe(true);
     expect(f.accept('down', 1350)).toBe(false);
+    expect(f.rejected).toBe('après un toucher');
     expect(f.accept('down', 2000)).toBe(true);
     expect(f.accept('down', 2000 + DEBOUNCE.scrollSameDirMs - 1)).toBe(false);
+    expect(f.rejected).toBe('défilement trop rapproché');
     expect(f.accept('down', 2000 + DEBOUNCE.scrollSameDirMs)).toBe(true);
     expect(f.accept('up', 2000 + DEBOUNCE.scrollSameDirMs + DEBOUNCE.scrollDirChangeMs)).toBe(true);
+    // glissement parasite du G2 après une mise à jour de l'affichage (raison écrite au journal du mode test)
     f.notifyRender(5000);
     expect(f.accept('up', 5040)).toBe(false);
+    expect(f.rejected).toBe('après un rendu');
     expect(f.accept('up', 5100)).toBe(true);
   });
 });

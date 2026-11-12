@@ -13,6 +13,7 @@
  * `explicit` dans quai.trip) ; ouverture d'office à moins de 300 m des gares et lignes `near`.
  */
 import type {
+  AreaSummary,
   Board,
   Core,
   Departure,
@@ -31,6 +32,7 @@ import type {
   Meta,
   NameLang,
   NearbyItem,
+  PickPlace,
   PlanResult,
   Settings,
   StationPick,
@@ -680,7 +682,11 @@ export class GlassesController implements GlassesApi {
     if (this.stopped) return;
     switch (s.kind) {
       case 'gesture':
-        if (!this.filter.accept(s.gesture, performanceNow())) return;
+        if (!this.filter.accept(s.gesture, performanceNow())) {
+          // Mode test : geste écarté par l'anti-rebond (diagnostic d'un geste « perdu » dans le simulateur).
+          this.log(`QUAI_GESTURE ${s.gesture} écarté : ${this.filter.rejected}`);
+          return;
+        }
         this.onGesture(s.gesture);
         return;
       case 'background':
@@ -706,6 +712,7 @@ export class GlassesController implements GlassesApi {
     if (!view) return;
     const { state, effect } = handleGesture(this.nav, g, view, this.capacity);
     this.nav = state;
+    if (effect.kind === 'none') this.log(`QUAI_GESTURE ${g} sans effet sur ${view.layout}`);
     switch (effect.kind) {
       case 'render':
         void this.render();
@@ -1000,35 +1007,59 @@ export class GlassesController implements GlassesApi {
     return this.sectionsLoading;
   }
 
-  /** Prochain départ d'une gare (tableau) ou d'une ligne à son arrêt (le plus tôt de ses sens). */
+  /**
+   * Prochain départ d'une gare (tableau) ou d'une ligne à son arrêt (le plus tôt de ses sens). La zone dont
+   * l'identifiant a changé est retrouvée autour du choix (`near`, le choix suit : pickMoved) ; introuvable :
+   * « introuvable », jamais « … » pour toujours (revue indépendante, PRD-1.2.2 § 1.1).
+   */
   private async sectionOf(p: StationPick | LinePick, station: boolean): Promise<SectionData> {
     const at = this.d.clock.now();
     const prev = (station ? this.sections.stations : this.sections.lines)?.id === p.id ? (station ? this.sections.stations : this.sections.lines) : undefined;
+    const kind = station ? 'stations' : 'lines';
     try {
       const line = !station ? (p as LinePick).line : undefined;
       if (line) {
-        const b = await deadline(this.d.core.lineBoard(p.areaId, line, { perDirection: 1 }), CORE_TIMEOUT_MS, 'ligne trop lente');
+        const b = await deadline(this.d.core.lineBoard(p.areaId, line, { perDirection: 1, near: pickPlace(p) }), CORE_TIMEOUT_MS, 'ligne trop lente');
+        this.pickMoved(kind, p, b.movedTo, b.area);
         if (b.state === 'missing') return { id: p.id, at, state: 'missing' };
         const next = b.directions.flatMap((d) => d.departures).filter((d) => d.est >= at - 30_000).sort((x, y) => x.est - y.est)[0];
         return next ? { id: p.id, at, state: 'ok', next } : { id: p.id, at, state: 'none' };
       }
-      const b = await deadline(this.d.core.board(p.areaId, { limit: 3 }), CORE_TIMEOUT_MS, 'départs trop lents');
+      const b = await deadline(this.d.core.board(p.areaId, { limit: 3, near: pickPlace(p) }), CORE_TIMEOUT_MS, 'départs trop lents');
+      this.pickMoved(kind, p, b.movedTo, b.area);
+      if (b.missing) return { id: p.id, at, state: 'missing' };
       const next = upcoming(b.departures, at)[0];
       return next ? { id: p.id, at, state: 'ok', next } : { id: p.id, at, state: 'none' };
     } catch (e) {
+      if (areaUnknown(e)) return { id: p.id, at, state: 'missing' };
       // la valeur déjà montrée reste (« … » sinon), nouvel essai au prochain rafraîchissement
       console.warn('[Quai] prochain départ', p.areaId, errText(e));
       return prev ? { ...prev, at: 0 } : { id: p.id, at: 0, state: 'unknown' };
     }
   }
 
-  /** Texte de droite d'une rubrique de l'accueil (sans « ~ », comme l'accueil 1.2.1). */
+  /**
+   * 1.2.2 : gare ou ligne choisie dont la zone a changé d'identifiant (`movedTo` de board et lineBoard : zone fusionnée,
+   * ou retrouvée par son nom à 150 m) : le choix suit la zone retrouvée (identifiant, nom, position), comme un arrêt
+   * favori (setAnswer, M8.3).
+   */
+  private pickMoved(kind: 'stations' | 'lines', p: StationPick | LinePick, to: string | undefined, area: AreaSummary): void {
+    if (!to || to === p.areaId) return;
+    const found = area.id === to ? { name: area.n, lat: area.lat, lon: area.lon } : {};
+    const move = <T extends StationPick | LinePick>(x: T): T => (x.id === p.id && x.areaId === p.areaId ? { ...x, areaId: to, ...found } : x);
+    void this.d.settings.update((s) => (kind === 'stations' ? { ...s, stations: s.stations.map(move) } : { ...s, lines: s.lines.map(move) }));
+  }
+
+  /**
+   * Texte de droite d'une rubrique de l'accueil (sans « ~ », comme l'accueil 1.2.1) ; une ligne sans passage : « aucun
+   * passage », jamais « introuvable » (lineBoard `none`, même sans service les jours publiés).
+   */
   private sectionNext(kind: 'stations' | 'lines'): SectionNext | undefined {
     const x = this.sections[kind];
     const now = this.d.clock.now();
     if (!x || x.state === 'unknown') return undefined;
     if (x.state === 'missing') return { text: SECTION.missingStation };
-    if (x.state === 'none' || !x.next) return { text: SECTION.noDeparture };
+    if (x.state === 'none' || !x.next) return { text: kind === 'lines' ? SECTION.noPassage : SECTION.noDeparture };
     if (x.next.est < now - 30_000) return undefined;
     return departureRightText(x.next, now);
   }
@@ -1412,9 +1443,10 @@ export class GlassesController implements GlassesApi {
   }
 
   /**
-   * 1.2.2 (REVUE-USAGE n° 3) : ★ des départs d'une gare : elle rejoint « Gares » (« ★ Ajoutée à tes gares », 8 au plus)
-   * ou en sort avec « ★ Retirée. Toucher encore : annuler » (5 s) ; un toucher pendant ces 5 s la rétablit à
-   * l'identique (même identifiant, même place, `near` compris : « ★ Gare rétablie »). Plus jamais d'arrêt favori.
+   * 1.2.2 (REVUE-USAGE n° 3) : ★ des départs d'une gare : elle rejoint « Gares » (« ★ Ajoutée à tes gares », dans la
+   * limite des réglages, LIMITS : 32 gares) ou en sort avec « ★ Retirée. Toucher encore : annuler » (5 s) ; un toucher
+   * pendant ces 5 s la rétablit à l'identique (même identifiant, même place, `near` compris : « ★ Gare rétablie »). Plus
+   * jamais d'arrêt favori.
    */
   private async toggleStation(): Promise<void> {
     const r = current(this.nav).route;
@@ -1453,7 +1485,8 @@ export class GlassesController implements GlassesApi {
 
   /**
    * 1.2.2 (REVUE-USAGE n° 3) : « garder une ligne » : la ligne rejoint « Bus, tram, métro » à cet arrêt, ses deux sens
-   * (« ★ Ajoutée à Bus, tram, métro », 12 au plus), ou en sort, annulable 5 s comme une gare (« ★ Ligne rétablie »).
+   * (« ★ Ajoutée à Bus, tram, métro », dans la limite des réglages, LIMITS : 32 lignes), ou en sort, annulable 5 s comme
+   * une gare (« ★ Ligne rétablie »).
    */
   private async toggleLine(line: string, mode: Mode): Promise<void> {
     const r = current(this.nav).route;
@@ -1793,7 +1826,10 @@ export class GlassesController implements GlassesApi {
       case 'lines':
         return this.fetchLines(r);
       case 'line': {
-        const board = await core.lineBoard(r.areaId, r.line, { perDirection: LINE_DETAIL_PER_DIRECTION });
+        // la ligne choisie ouverte : sa zone retrouvée si son identifiant a changé (le choix suit, pickMoved)
+        const pick = r.pick ? s.lines.find((p) => p.id === r.pick && p.line === r.line) : undefined;
+        const board = await core.lineBoard(pick?.areaId ?? r.areaId, r.line, { perDirection: LINE_DETAIL_PER_DIRECTION, near: pick ? pickPlace(pick) : null });
+        if (pick) this.pickMoved('lines', pick, board.movedTo, board.area);
         const works = s.alerts.works && board.state !== 'missing' ? await this.worksOf(board.op, [board.line], board.area.id) : [];
         return { board, works };
       }
@@ -1838,17 +1874,19 @@ export class GlassesController implements GlassesApi {
 
   /**
    * 1.2.2 : « Gares » (PRD-1.2.2 § 2) : le prochain train de chaque gare choisie, 3 gares à la fois, affiché au fur et à
-   * mesure ; une gare en erreur garde sa dernière valeur (« … » sinon).
+   * mesure ; une gare en erreur garde sa dernière valeur (« … » sinon) ; introuvable : « introuvable » ; retrouvée sous
+   * un autre identifiant : le choix suit (pickMoved).
    */
   private async fetchStations(r: Route): Promise<Record<string, StationData>> {
     const out: Record<string, StationData> = {};
     await this.progressive(r, this.settings().stations, async (p) => {
       try {
-        const b = await this.d.core.board(p.areaId, { limit: 3 });
+        const b = await this.d.core.board(p.areaId, { limit: 3, near: pickPlace(p) });
+        this.pickMoved('stations', p, b.movedTo, b.area);
         const next = upcoming(b.departures, this.d.clock.now())[0];
-        out[p.id] = next ? { state: 'ok', next } : { state: 'none' };
+        out[p.id] = b.missing ? { state: 'missing' } : next ? { state: 'ok', next } : { state: 'none' };
       } catch (e) {
-        if (e instanceof QuaiError && e.code === 'areaUnknown') out[p.id] = { state: 'missing' };
+        if (areaUnknown(e)) out[p.id] = { state: 'missing' };
         else console.warn('[Quai] gare', p.areaId, errText(e));
       }
       return { ...out };
@@ -1858,15 +1896,26 @@ export class GlassesController implements GlassesApi {
 
   /**
    * 1.2.2 : « Bus, tram, métro » (§ 3) : les sens de chaque ligne choisie (lineBoard), ou les départs d'un arrêt
-   * « toutes les lignes » (board), 3 à la fois, affichés au fur et à mesure.
+   * « toutes les lignes » (board), 3 à la fois, affichés au fur et à mesure. Arrêt introuvable : « introuvable »
+   * (jamais « … » pour toujours) ; retrouvé sous un autre identifiant : le choix suit (pickMoved).
    */
   private async fetchLines(r: Route): Promise<Record<string, LineData>> {
     const out: Record<string, LineData> = {};
     await this.progressive(r, this.settings().lines, async (p) => {
       try {
-        out[p.id] = p.line ? { board: await this.d.core.lineBoard(p.areaId, p.line, { perDirection: LINES_PER_DIRECTION }) } : { stop: await this.d.core.board(p.areaId, { limit: 3 }) };
+        const near = pickPlace(p);
+        if (p.line) {
+          const board = await this.d.core.lineBoard(p.areaId, p.line, { perDirection: LINES_PER_DIRECTION, near });
+          this.pickMoved('lines', p, board.movedTo, board.area);
+          out[p.id] = { board };
+        } else {
+          const stop = await this.d.core.board(p.areaId, { limit: 3, near });
+          this.pickMoved('lines', p, stop.movedTo, stop.area);
+          out[p.id] = { stop };
+        }
       } catch (e) {
-        console.warn('[Quai] ligne', p.areaId, p.line, errText(e));
+        if (areaUnknown(e)) out[p.id] = { missing: true };
+        else console.warn('[Quai] ligne', p.areaId, p.line, errText(e));
       }
       return { ...out };
     });
@@ -2176,10 +2225,16 @@ export class GlassesController implements GlassesApi {
   private async renderOnce(force: boolean): Promise<void> {
     const view = this.buildView();
     const now = this.d.clock.now();
-    const toast = this.toast && this.toast.until > now && this.toast.route === routeKey(current(this.nav).route) ? this.toast.text : undefined;
-    const g = geometry(view, !!toast);
+    const message = this.toast && this.toast.until > now && this.toast.route === routeKey(current(this.nav).route) ? this.toast.text : undefined;
+    // 1.2.2 (revue indépendante) : sur l'accueil, le message (« Choisis tes gares dans Quai, sur le téléphone ») prend la
+    // ligne du titre, à la place de « Quai » : une ligne de pied ajoutée pousserait la dernière ligne hors de l'écran
+    // (« En cours » et 3 favoris, sans aide des gestes).
+    const inTitle = !!message && view.screen === 'home';
+    const toast = inTitle ? undefined : message;
+    const shown = inTitle ? { ...view, title: message } : view;
+    const g = geometry(shown, !!toast);
     const frame = effectiveFrame(current(this.nav), view, g.capacity);
-    const page = layoutPage(view, frame, { toast });
+    const page = layoutPage(shown, frame, { toast });
     this.view = view;
     this.capacity = g.capacity;
     const glasses = this.d.platform.glasses;
@@ -2298,6 +2353,12 @@ export function boardKept(s: Pick<Settings, 'stations' | 'lines'>, routeAreaId: 
 /** Identifiants déjà pris par les gares et les lignes (newId). */
 const pickIds = (s: Pick<Settings, 'stations' | 'lines'>): string[] => [...s.stations.map((p) => p.id), ...s.lines.map((p) => p.id)];
 
+/** 1.2.2 : où une gare ou une ligne a été choisie (board, lineBoard : zone dont l'identifiant a changé retrouvée). */
+const pickPlace = (p: StationPick | LinePick): PickPlace => ({ lat: p.lat, lon: p.lon, name: p.name });
+
+/** Zone inconnue du cœur (board sans `near`, cœur plus ancien) : « introuvable ». */
+const areaUnknown = (e: unknown): boolean => e instanceof QuaiError && e.code === 'areaUnknown';
+
 /** 1.2.2 : la gare ou la ligne choisie la plus proche (REVUE-USAGE n° 6) ; sans position, la première de la liste. */
 export function nearestPick<T extends { lat: number; lon: number }>(picks: readonly T[], here: LatLon | null): T | undefined {
   if (!here) return picks[0];
@@ -2325,8 +2386,8 @@ interface SectionData {
 
 /** 1.2.2 : « Gares » : prochain train d'une gare. */
 type StationData = Pick<StationRow, 'next' | 'state'>;
-/** 1.2.2 : « Bus, tram, métro » : sens d'une ligne ou départs d'un arrêt. */
-type LineData = Pick<LineRow, 'board' | 'stop'>;
+/** 1.2.2 : « Bus, tram, métro » : sens d'une ligne ou départs d'un arrêt (ou arrêt introuvable). */
+type LineData = Pick<LineRow, 'board' | 'stop' | 'missing'>;
 
 /** 1.2.2 : signature des gares et lignes choisies (les rubriques de l'accueil se recalculent quand elle change). */
 function picksSignature(s: Settings): string {

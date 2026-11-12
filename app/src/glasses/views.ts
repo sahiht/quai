@@ -294,16 +294,23 @@ export function homeFavoriteItem(e: FavoriteEntry, ctx: ViewCtx): Item {
 }
 
 /**
+ * 1.2.2 : où choisir ses gares ou ses lignes (« à choisir ») : l'appli Even le dit (« Choisis tes gares dans Quai, sur
+ * le téléphone ») ; Quai Web ouvre directement l'ajout de l'onglet Réglages (#/gares/ajouter, #/lignes/ajouter : son
+ * bouton retour ramène à #/).
+ */
+function chooseIntent(kind: 'stations' | 'lines', ctx: ViewCtx): Extract<Intent, { kind: 'phone' }> {
+  const text = kind === 'stations' ? (ctx.web ? SECTION.chooseStationsWeb : SECTION.chooseStations) : ctx.web ? SECTION.chooseLinesWeb : SECTION.chooseLines;
+  return { kind: 'phone', hash: kind === 'stations' ? '#/gares/ajouter' : '#/lignes/ajouter', text };
+}
+
+/**
  * 1.2.2 : ligne « Gares » ou « Bus, tram, métro » de l'accueil. À droite, le prochain départ de l'élément le plus proche
  * (REVUE-USAGE n° 6), « … » pendant le calcul ; vide : « à choisir », et le toucher dit où les choisir (PRD-1.2.2
- * § 1.3 ; Quai Web : la section de l'onglet Réglages, ancres #/gares et #/lignes).
+ * § 1.3 ; Quai Web : l'ajout de l'onglet Réglages, chooseIntent).
  */
 export function sectionItem(kind: 'stations' | 'lines', count: number, next: SectionNext | undefined, ctx: ViewCtx): Item {
   const a = SECTION[kind];
-  if (!count) {
-    const text = kind === 'stations' ? (ctx.web ? SECTION.chooseStationsWeb : SECTION.chooseStations) : ctx.web ? SECTION.chooseLinesWeb : SECTION.chooseLines;
-    return { a, c: SECTION.empty, action: { kind: 'phone', hash: kind === 'stations' ? '#/gares' : '#/lignes', text } };
-  }
+  if (!count) return { a, c: SECTION.empty, action: chooseIntent(kind, ctx) };
   const item: Item = { a, c: next?.text ?? '…', action: { kind: 'open', route: { screen: kind } } };
   if (next?.tail) item.cTail = next.tail;
   return item;
@@ -435,11 +442,10 @@ export interface StationRow {
   state?: 'ok' | 'none' | 'missing';
 }
 
-/** Rubrique vide (gares ou lignes retirées pendant qu'on la regarde) : où les choisir. */
+/** Rubrique vide (gares ou lignes retirées pendant qu'on la regarde) : où les choisir (Quai Web : toucher, l'ajout). */
 function chooseView(kind: 'stations' | 'lines', ctx: ViewCtx): GlassesView {
-  const text = kind === 'stations' ? (ctx.web ? SECTION.chooseStationsWeb : SECTION.chooseStations) : ctx.web ? SECTION.chooseLinesWeb : SECTION.chooseLines;
-  const tap: Intent | undefined = ctx.web ? { kind: 'phone', hash: kind === 'stations' ? '#/gares' : '#/lignes', text } : undefined;
-  return messageView(SECTION[kind], [`${text}.`], ctx, { hints: HINTS.message, screen: kind, ...(tap ? { tap } : {}) });
+  const tap = chooseIntent(kind, ctx);
+  return messageView(SECTION[kind], [`${tap.text}.`], ctx, { hints: HINTS.message, screen: kind, ...(ctx.web ? { tap } : {}) });
 }
 
 /**
@@ -478,8 +484,10 @@ export interface LineRow {
   pick: LinePick;
   /** Ligne à son arrêt (`pick.line`) : ses sens. */
   board?: LineBoard;
-  /** Arrêt « toutes les lignes » (`pick.line` absent) : ses départs. */
+  /** Arrêt « toutes les lignes » (`pick.line` absent) : ses départs (`missing` : arrêt introuvable). */
   stop?: Board;
+  /** Arrêt introuvable dans les données (cœur sans `near` : erreur areaUnknown) : « introuvable », jamais « … ». */
+  missing?: true;
 }
 
 /** Ce que les passages montrés demandent dans la ligne du bas : « ~ », passage partiel « * », temps réel absent. */
@@ -509,6 +517,16 @@ export function linePickTitle(pick: LinePick, l: NameLang, mode?: Mode): string 
   return pick.line ? lineTitle(mode ?? pick.mode, pick.line, stop) : allLinesTitle(stop);
 }
 
+/**
+ * Mode d'une ligne choisie pour son titre (« Bus W », « Tram 3 ») : celui du cœur quand elle passe ; sinon (`none`,
+ * `missing`) celui du cœur n'est qu'une supposition (le mode de l'arrêt) : celui du réglage d'abord, puis celui du cœur
+ * s'il connaît ses sens, sinon aucun (« Ligne W »).
+ */
+function lineMode(b: LineBoard | undefined, picked: Mode | undefined): Mode | undefined {
+  if (b?.state === 'ok') return b.mode;
+  return picked ?? (b?.directions.length ? b.mode : undefined);
+}
+
 /** Un sens : « vers Bruxelles Midi », et à droite les 2 prochains passages (passagesText). */
 function directionRow(dir: LineBoard['directions'][number], b: Pick<LineBoard, 'op'>, ctx: ViewCtx, f: PassageFlags): SubRow {
   const deps = ahead(dir.departures, ctx.now).slice(0, 2);
@@ -520,14 +538,27 @@ function directionRow(dir: LineBoard['directions'][number], b: Pick<LineBoard, '
 }
 
 /**
+ * Ligne choisie dont l'arrêt est introuvable : « introuvable : modifie-la sur le téléphone » ; Quai Web : toucher ouvre
+ * « Bus, tram, métro » dans l'onglet Réglages.
+ */
+function missingLine(item: Item, ctx: ViewCtx): Item {
+  item.sub = [{ b: ctx.web ? SECTION.missingWeb : SECTION.missing }];
+  if (ctx.web) item.action = { kind: 'phone', hash: '#/lignes', text: SECTION.chooseLinesWeb };
+  else delete item.action;
+  return item;
+}
+
+/**
  * Une ligne choisie (§ 3) : titre au plus clair, puis un sens par ligne en retrait et plus pâle ; arrêt « toutes les
- * lignes » : une ligne avec les 2 prochains départs, toucher : le tableau de l'arrêt ; ligne qui ne passe plus à son
- * arrêt : « introuvable : modifie-la sur le téléphone ».
+ * lignes » : une ligne avec les 2 prochains départs, toucher : le tableau de l'arrêt ; arrêt introuvable (ligne ou
+ * « toutes les lignes ») : « introuvable : modifie-la sur le téléphone ». Une ligne sans passage, même aucun les jours
+ * publiés (week-end, jour férié : `none`), dit « aucun passage dans les prochaines heures », jamais « introuvable ».
  */
 function lineItem(r: LineRow, ctx: ViewCtx, f: PassageFlags): Item {
   const p = r.pick;
   const l = lang(ctx);
   if (!p.line) {
+    if (r.missing || r.stop?.missing) return missingLine({ a: linePickTitle(p, l) }, ctx);
     const deps = r.stop ? upcoming(r.stop.departures, ctx.now) : undefined;
     if (r.stop?.rtErrors.length) f.rtDown = true;
     for (const d of deps?.slice(0, 2) ?? []) if (!d.rt && !d.cancelled) f.planned = true;
@@ -536,16 +567,12 @@ function lineItem(r: LineRow, ctx: ViewCtx, f: PassageFlags): Item {
   }
   const b = r.board;
   const open: LineRoute = { screen: 'line', pick: p.id, areaId: p.areaId, op: p.op, line: p.line, name: p.name };
-  // le mode d'une ligne introuvable n'est pas connu du cœur (celui de l'arrêt) : celui du réglage, sinon « Ligne W »
-  const mode = b && b.state !== 'missing' ? b.mode : p.mode;
+  const mode = lineMode(b, p.mode);
   if (mode) open.mode = mode;
   const item: Item = { a: linePickTitle(p, l, mode), action: { kind: 'open', route: open } };
+  if (r.missing || b?.state === 'missing') return missingLine(item, ctx);
   if (!b) item.sub = [{ b: '…' }];
-  else if (b.state === 'missing') {
-    item.sub = [{ b: ctx.web ? SECTION.missingWeb : SECTION.missing }];
-    if (ctx.web) item.action = { kind: 'phone', hash: '#/lignes', text: SECTION.chooseLinesWeb };
-    else delete item.action;
-  } else {
+  else {
     if (b.rtErrors.length) f.rtDown = true;
     item.sub = b.directions.length ? b.directions.map((dir) => directionRow(dir, b, ctx, f)) : [{ b: SECTION.noPassageAll }];
   }
@@ -580,7 +607,7 @@ export function linesView(rows: LineRow[], ctx: ViewCtx, focus?: string): Glasse
  */
 export function lineView(r: LineRoute, b: LineBoard, ctx: ViewCtx, works?: string): GlassesView {
   const l = lang(ctx);
-  const title = lineTitle(b.state === 'missing' ? r.mode : b.mode ?? r.mode, r.line, displayName(r.name, l));
+  const title = lineTitle(lineMode(b, r.mode), r.line, displayName(r.name, l));
   if (b.state === 'missing') return messageView(title, [`${upperFirst(ctx.web ? SECTION.missingWeb : SECTION.missing)}.`], ctx, { hints: HINTS.message, screen: 'line' });
   const v = base('line', 'line', title, ctx);
   const f: PassageFlags = { planned: false, partial: false, rtDown: b.rtErrors.length > 0 };

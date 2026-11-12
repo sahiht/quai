@@ -73,6 +73,8 @@ export class GestureFilter {
   private lastScroll = -Infinity;
   private lastScrollDir: 'up' | 'down' | null = null;
   private renderUntil = -Infinity;
+  /** Raison du dernier geste écarté, pour le journal du mode test (geste « perdu » dans le simulateur). */
+  rejected: 'doublon' | 'après un toucher' | 'après un rendu' | 'défilement trop rapproché' | '' = '';
 
   constructor(private cfg = DEBOUNCE) {}
 
@@ -85,19 +87,24 @@ export class GestureFilter {
     if (g === 'tap' || g === 'double') {
       const elapsed = t - this.lastTap;
       const dup = g === 'double' ? this.cfg.doubleDuplicateMs : this.cfg.tapDuplicateMs;
-      if (g === this.lastTapKind && elapsed < dup) return false;
-      if (this.lastTapKind !== null && elapsed < this.cfg.tapCooldownMs) return false;
+      if (g === this.lastTapKind && elapsed < dup) return this.reject('doublon');
+      if (this.lastTapKind !== null && elapsed < this.cfg.tapCooldownMs) return this.reject('après un toucher');
       this.lastTap = t;
       this.lastTapKind = g;
       return true;
     }
-    if (t - this.lastTap < this.cfg.scrollAfterTapMs) return false;
-    if (t < this.renderUntil) return false;
+    if (t - this.lastTap < this.cfg.scrollAfterTapMs) return this.reject('après un toucher');
+    if (t < this.renderUntil) return this.reject('après un rendu');
     const elapsed = t - this.lastScroll;
     const limit = g === this.lastScrollDir ? this.cfg.scrollSameDirMs : this.cfg.scrollDirChangeMs;
-    if (elapsed < limit) return false;
+    if (elapsed < limit) return this.reject('défilement trop rapproché');
     this.lastScroll = t;
     this.lastScrollDir = g;
     return true;
+  }
+
+  private reject(why: Exclude<GestureFilter['rejected'], ''>): false {
+    this.rejected = why;
+    return false;
   }
 }

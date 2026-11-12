@@ -74,17 +74,21 @@ export const SECTION = {
   chooseLines: 'Choisis tes lignes dans Quai, sur le téléphone',
   chooseStationsWeb: 'Choisis tes gares dans l’onglet Réglages',
   chooseLinesWeb: 'Choisis tes lignes dans l’onglet Réglages',
-  /** Accueil : rien dans l'horizon des tableaux pour l'élément le plus proche. */
+  /** Accueil, « Gares » : rien dans l'horizon des tableaux pour la gare la plus proche. */
   noDeparture: 'aucun départ',
   /** « Gares » : gare sans train dans l'horizon des tableaux (§ 2). */
   noTrain: 'aucun train',
-  /** Un sens sans passage ; une ligne sans aucun passage. */
+  /**
+   * Un sens sans passage ; accueil, « Bus, tram, métro » : la ligne la plus proche sans passage, même aucun les jours
+   * publiés (lineBoard `none` : week-end, jour férié), jamais « introuvable ».
+   */
   noPassage: 'aucun passage',
+  /** Une ligne sans aucun passage (« Bus, tram, métro », détail d'une ligne). */
   noPassageAll: 'aucun passage dans les prochaines heures',
-  /** Ligne qui ne passe plus à son arrêt (§ 3) ; Quai Web : dans l'onglet Réglages. */
+  /** Arrêt d'une ligne choisie introuvable dans les données (§ 3, lineBoard `missing`) ; Quai Web : dans l'onglet Réglages. */
   missing: `introuvable${NB}: modifie-la sur le téléphone`,
   missingWeb: `introuvable${NB}: modifie-la dans Réglages`,
-  /** Gare introuvable dans les données du jour. */
+  /** Accueil, « Gares » : gare ou arrêt introuvable dans les données du jour (zone ni retrouvée ni déplacée). */
   missingStation: 'introuvable',
   /** Arrêt sans filtre (arrêt favori de la 1.2.1 migré) : « Gare du Nord · toutes les lignes ». */
   allLines: 'toutes les lignes',

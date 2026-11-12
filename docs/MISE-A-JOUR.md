@@ -5,7 +5,7 @@ Ce guide sert à chaque nouvelle version de Quai. La dernière est la 1.2.2. Il 
 ## Ce qui change avec la 1.2.2
 
 - Trajets plus cohérents : le premier est celui qui arrive le plus tôt, et au-delà de ta marche maximale, chaque minute à pied compte triple. Puis jusqu'à deux autres choix, chacun avec un vrai avantage : plus tôt, moins de marche ou moins de changements. Vérifié sur 250 trajets réels, sans aucune proposition incohérente.
-- Deux rubriques sur l'accueil des lunettes : « Gares » (tes gares, leur prochain train, puis tout le tableau des départs) et « Bus, tram, métro » (tes lignes à ton arrêt, dans les deux sens). Tu les choisis sur le téléphone : une gare, ou une ligne puis son arrêt. Tes arrêts favoris y sont rangés tout seuls, rien n'est perdu.
+- Deux rubriques sur l'accueil des lunettes : « Gares » (tes gares, leur prochain train, puis tout le tableau des départs) et « Bus, tram, métro » (tes lignes à ton arrêt, dans les deux sens). Tu les choisis sur le téléphone : une gare, ou une ligne puis son arrêt. Tes arrêts favoris y sont rangés tout seuls, rien n'est perdu ; leur ouverture d'office à moins de 300 m est gardée, mais plus leur créneau du matin ou du soir : l'accueil montre la gare et la ligne les plus proches.
 - « Aller à… » rejoint « Favoris » : tes adresses récentes et « Autre adresse » sont au bas de la liste.
 - Un trajet n'est suivi que si tu le demandes : « Suivre ce trajet » sur son écran, ou le bouton « Lunettes » du téléphone.
 - Sur le téléphone, l'écran « Trajets » réunit la marche maximale et la marge avant de partir.

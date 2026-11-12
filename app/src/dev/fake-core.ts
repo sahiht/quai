@@ -34,7 +34,9 @@
  *  - W à Braine-l’Alleud Gare (tec:Bbrlgar1, terminus) : un seul sens, avec les passages partiels ;
  *  - tram 3 STIB à Gare du Nord (stib:6357F) : deux sens (Churchill, Esplanade), temps réel dans les 30 min ;
  *  - tram 4 STIB à Gare du Nord : un seul sens (Stalle (P)) ;
- *  - ligne absente de l'arrêt (ex. W à Gare du Nord) ou arrêt inconnu : state 'missing'.
+ *  - ligne sans départ à l'arrêt (ex. W à Gare du Nord) : state 'none' ; arrêt inconnu : state 'missing' ;
+ *  - gare ou ligne choisie sur « stib:6358 » (`aka`), ou sur un identifiant inconnu avec `near` nommé « Gare du Nord » :
+ *    board() et lineBoard() donnent movedTo 'stib:6357F' ; inconnu avec `near` sans zone de même nom : board() missing.
  * findLines('1') : tram 1 De Lijn (Gand) et bus 1 TEC (Mons).
  */
 import { DEFAULT_SETTINGS } from '../core/api';
@@ -56,6 +58,7 @@ import type {
   LineStop,
   Meta,
   NearbyItem,
+  PickPlace,
   PlanResult,
   Settings,
   Stopover,
@@ -67,7 +70,7 @@ import { normalizeForSearch, prettyName } from '../../../shared/names';
 import { QuaiError } from '../core/errors';
 import { answerFavorite, asTrip, orderFavorites, placeOf, relocateAmong, type PlanMemo } from '../core/favorites';
 import { GeocodeClient, GeoError, type GeoTransport } from '../core/geocode';
-import { lineBoardOf, lineKey, LINES_MAX, mainEnds, missingArea, orderStops, sortMatches, type DirPattern, type EndPattern, type PatDeparture } from '../core/linepicks';
+import { lineBoardOf, lineKey, LINES_MAX, mainEnds, missingArea, missingLineBoard, orderStops, sortMatches, type DirPattern, type EndPattern, type PatDeparture } from '../core/linepicks';
 import { maxWalkOf, P } from '../core/routing/params';
 import { itemOf, rank as rankJourneys } from '../core/routing/rank';
 import { reasonsOf } from '../core/routing/reason';
@@ -144,6 +147,17 @@ function area(id: string): AreaSummary {
   const a = AREA.get(id) ?? AREAS.find((x) => x.aka?.includes(id));
   if (!a) throw new QuaiError('areaUnknown');
   return a;
+}
+
+/**
+ * 1.2.2 : zone d'un identifiant, ou celle qui l'a remplacée (`aka`) ; avec `near` (gare ou ligne choisie), aussi même
+ * réseau, même nom, 150 m au plus (comme le vrai cœur, relocateAmong) ; null si introuvable.
+ */
+function resolveArea(id: string, near?: PickPlace | null): AreaSummary | null {
+  const a = AREA.get(id) ?? AREAS.find((x) => x.aka?.includes(id));
+  if (a || !near) return a ?? null;
+  const op = id.slice(0, Math.max(0, id.indexOf(':'))) as Op;
+  return relocateAmong({ areaId: id, op, name: near.name ?? { fr: '', nl: '' }, lat: near.lat, lon: near.lon }, AREAS.filter((x) => distanceM(near, x) <= 300));
 }
 
 /** Trains : gabarits avec heures de départ (min depuis minuit) et arrêts [gare, décalage arr, décalage dép, voie]. */
@@ -910,9 +924,15 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
     },
     async board(areaId, o = {}) {
       touchRt();
-      const a = area(areaId);
+      // 1.2.2 : zone retrouvée (aka, ou autour de `near`) dite par movedTo ; introuvable avec `near` : missing
+      const a = resolveArea(areaId, o.near);
+      if (!a) {
+        if (!o.near) throw new QuaiError('areaUnknown');
+        return { area: missingArea(areaId), departures: [], anyPlanned: false, rtErrors: [], updatedAt: now(), missing: true } satisfies Board;
+      }
       const deps = departuresAt(a.id, now(), o.limit ?? 8, o.filter);
-      return { area: a, departures: deps, anyPlanned: deps.some((d) => !d.rt), rtErrors: live() ? [] : [a.op], updatedAt: now() } satisfies Board;
+      const b: Board = { area: a, departures: deps, anyPlanned: deps.some((d) => !d.rt), rtErrors: live() ? [] : [a.op], updatedAt: now() };
+      return a.id === areaId ? b : { ...b, movedTo: a.id };
     },
     async linesAt(areaId) {
       const a = area(areaId);
@@ -947,9 +967,9 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
       touchRt();
       const t = now();
       const per = Math.max(1, Math.round(o.perDirection ?? 2));
-      const a = AREA.get(areaId) ?? AREAS.find((x) => x.aka?.includes(areaId));
-      const rtErrors: Op[] = live() || !a ? [] : [a.op];
-      if (!a) return lineBoardOf({ area: missingArea(areaId), op: missingArea(areaId).op, mode: 'bus', line, pats: [], deps: [], per, rtErrors, now: t });
+      const a = resolveArea(areaId, o.near);
+      if (!a) return missingLineBoard(areaId, line, t);
+      const rtErrors: Op[] = live() ? [] : [a.op];
       const want = lineKey(line ?? '');
       const tpls = LINES.filter((l) => l.op === a.op && lineKey(l.line) === want);
       // motifs au départ de la zone : un par gabarit (rang du gabarit = ordre stable des sens) ; même service chaque
@@ -969,7 +989,8 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
         deps.push({ d, pi: p.pi });
       }
       deps.sort((x, y) => x.d.est - y.d.est || x.d.sched - y.d.sched);
-      return lineBoardOf({ area: a, op: a.op, mode: tpls[0]?.mode ?? a.modes[0] ?? 'bus', line: tpls[0]?.line ?? line, pats: [...pats.values()], deps, per, rtErrors, now: t });
+      const b = lineBoardOf({ area: a, op: a.op, mode: tpls[0]?.mode ?? a.modes[0] ?? 'bus', line: tpls[0]?.line ?? line, pats: [...pats.values()], deps, per, rtErrors, now: t });
+      return a.id === areaId ? b : { ...b, movedTo: a.id };
     },
     async search(query, near) {
       // Même classement que le vrai cœur (core/search.ts : noms usuels, mot exact, mode, homonymes).

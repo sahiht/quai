@@ -2,7 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_SETTINGS, type Favorite, type FavoriteStop, type LinePick, type Settings, type StationPick } from '../../src/core/api';
-import { clampInt, CURRENT_VERSION, LIMITS, loadSettings, migrateSettings, moveStops, newId, parseSettings, saveSettings, SETTINGS_KEY, SettingsStore, validateSettings, versionOf } from '../../src/settings';
+import {
+  clampInt,
+  CURRENT_VERSION,
+  LIMITS,
+  loadSettings,
+  migrateSettings,
+  moveStops,
+  newId,
+  parseSettings,
+  saveSettings,
+  SETTINGS_BACKUP_KEY,
+  SETTINGS_KEY,
+  SettingsStore,
+  validateSettings,
+  versionOf,
+} from '../../src/settings';
 import { createKV, memoryBackend } from '../../src/platform/kv';
 import { REPO_DIR } from '../core/support/network';
 
@@ -446,6 +461,54 @@ describe('persistance (KV du SDK)', () => {
   it('identifiants uniques', () => {
     const a = newId('fav', [], 123);
     expect(newId('fav', [a], 123)).not.toBe(a);
+  });
+
+  it('revue 1.2.2 : réglages d’avant la v4 copiés tels quels sous quai.settings.v3 à la 1re migration, jamais réécrits', async () => {
+    expect(SETTINGS_BACKUP_KEY).toBe('quai.settings.v3');
+    const v3 = JSON.stringify({
+      v: 3,
+      onboarded: true,
+      favorites: [{ kind: 'stop', id: 'gdn', areaId: 'stib:6357F', op: 'stib', name: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86004, lon: 4.36017, filter: [{ line: '3', head: 'churchill' }], propose: 'never' }],
+    });
+    const backend = memoryBackend();
+    backend.data.set(SETTINGS_KEY, v3);
+    const kv = createKV(backend);
+    const store = new SettingsStore(kv, await loadSettings(kv));
+    expect(store.get()).toMatchObject({ v: 4, favorites: [], lines: [{ id: 'gdn', areaId: 'stib:6357F', line: '3' }] });
+    // copie exacte du JSON lu, la clé des réglages inchangée tant que rien n'est enregistré
+    expect(backend.data.get(SETTINGS_BACKUP_KEY)).toBe(v3);
+    expect(backend.data.get(SETTINGS_KEY)).toBe(v3);
+    // réglages enregistrés en v4 : la copie reste celle de la v3
+    await store.update((s) => ({ ...s, display: { ...s.display, depsPerStop: 6 } }));
+    expect(versionOf(JSON.parse(backend.data.get(SETTINGS_KEY)!))).toBe(4);
+    await loadSettings(createKV(backend));
+    expect(backend.data.get(SETTINGS_BACKUP_KEY)).toBe(v3);
+    // retour à la 1.2.1, autres réglages v3, puis 1.2.2 de nouveau : la première copie n'est pas remplacée
+    backend.data.set(SETTINGS_KEY, JSON.stringify({ ...JSON.parse(v3), lang: 'nl' }));
+    expect((await loadSettings(createKV(backend))).lang).toBe('nl');
+    expect(backend.data.get(SETTINGS_BACKUP_KEY)).toBe(v3);
+    // la 1.2.1 relit la copie : ses arrêts favoris y sont
+    expect(JSON.parse(backend.data.get(SETTINGS_BACKUP_KEY)!).favorites[0]).toMatchObject({ kind: 'stop', id: 'gdn' });
+  });
+
+  it('revue 1.2.2 : aucune copie pour des réglages déjà en v4, absents ou illisibles ; une copie impossible n’empêche pas la lecture', async () => {
+    for (const raw of [JSON.stringify(validateSettings({})), '', '{pas du json', JSON.stringify([1, 2])]) {
+      const backend = memoryBackend();
+      if (raw) backend.data.set(SETTINGS_KEY, raw);
+      expect((await loadSettings(createKV(backend))).v).toBe(4);
+      expect(backend.data.has(SETTINGS_BACKUP_KEY)).toBe(false);
+    }
+    // 1.1 (v2) : copiée aussi, avant toute migration
+    const v2 = readFileSync(PRESET_11_PATH, 'utf8');
+    const b2 = memoryBackend();
+    b2.data.set(SETTINGS_KEY, v2);
+    await loadSettings(createKV(b2));
+    expect(b2.data.get(SETTINGS_BACKUP_KEY)).toBe(v2);
+    // stockage qui refuse l'écriture : réglages lus quand même
+    const ro = memoryBackend();
+    ro.data.set(SETTINGS_KEY, JSON.stringify({ v: 3, favorites: [] }));
+    const refuse = { get: ro.get, set: async () => Promise.reject(new Error('quota')) };
+    expect((await loadSettings(createKV(refuse))).v).toBe(4);
   });
 });
 

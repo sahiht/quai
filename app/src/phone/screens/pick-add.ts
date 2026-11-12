@@ -161,7 +161,7 @@ export function addStationScreen(ctx: PhoneCtx): HTMLElement {
     list.querySelector<HTMLButtonElement>('button')?.focus();
   });
   void run();
-  return h('div', { class: 'screen' }, header(ctx, T.addStation, T.stationLead, { label: 'Accueil', hash: '#/gares' }), field.el, msg, done, list);
+  return h('div', { class: 'screen' }, header(ctx, T.addStation, T.stationLead, { label: 'Accueil', hash: '#/' }), field.el, msg, done, list);
 }
 
 /* ------------------------------ Ajouter une ligne ------------------------------ */
@@ -372,5 +372,5 @@ export function addLineScreen(ctx: PhoneCtx): HTMLElement {
       quick.hidden = false;
     })();
   }
-  return h('div', { class: 'screen' }, header(ctx, T.addLine, T.lineLead, { label: 'Accueil', hash: '#/lignes' }), step1, step2);
+  return h('div', { class: 'screen' }, header(ctx, T.addLine, T.lineLead, { label: 'Accueil', hash: '#/' }), step1, step2);
 }

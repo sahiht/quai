@@ -13,6 +13,11 @@ import { displayName } from './core/util';
 import type { Mode, Names, Op } from '../../shared/types';
 
 export const SETTINGS_KEY = 'quai.settings';
+/**
+ * 1.2.2 : réglages tels qu'ils étaient avant leur première migration en v4 (v3 de la 1.2.1, ou antérieurs), gardés une
+ * seule fois et jamais réécrits : un retour à la 1.2.1 peut les reprendre.
+ */
+export const SETTINGS_BACKUP_KEY = 'quai.settings.v3';
 export const CURRENT_VERSION = 4;
 
 const OPS: readonly Op[] = ['sncb', 'stib', 'delijn', 'tec'];
@@ -505,10 +510,33 @@ export function parseSettings(raw: string | null | undefined): Settings {
 }
 
 export async function loadSettings(kv: KV): Promise<Settings> {
+  let raw: string | null;
   try {
-    return parseSettings(await kv.get(SETTINGS_KEY));
+    raw = await kv.get(SETTINGS_KEY);
   } catch {
     return validateSettings({});
+  }
+  await backupBeforeMigration(kv, raw);
+  return parseSettings(raw);
+}
+
+/**
+ * 1.2.2 : copie des réglages d'une version antérieure (v < 4) avant leur migration, sous SETTINGS_BACKUP_KEY, la
+ * première fois seulement (une copie déjà là n'est jamais remplacée). Au mieux : un échec n'empêche pas la lecture.
+ */
+async function backupBeforeMigration(kv: KV, raw: string | null): Promise<void> {
+  if (!raw) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (!isObj(parsed) || versionOf(parsed) >= CURRENT_VERSION) return;
+  try {
+    if (!(await kv.get(SETTINGS_BACKUP_KEY))) await kv.set(SETTINGS_BACKUP_KEY, raw);
+  } catch {
+    /* au mieux */
   }
 }
 
