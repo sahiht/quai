@@ -23,7 +23,7 @@ Les retards, voies et suppressions viennent de ton propre relais, hébergé sur 
 
 Quand tu tapes une adresse sur le téléphone (3 caractères au moins), l’appli envoie à ton relais seulement le texte tapé et la langue des noms : jamais la position, jamais un identifiant. Le relais transmet ce texte aux services officiels et gratuits des Régions : Paradigm (UrbIS) pour Bruxelles, Digitaal Vlaanderen pour la Flandre, le SPW (ICAR) pour la Wallonie. Ces services reçoivent la requête du relais, pas de ton téléphone. La position sert seulement, sur le téléphone, à classer les adresses trouvées.
 
-Les adresses que tu choisis restent sur le téléphone : tes lieux, et les 5 dernières adresses choisies (« Effacer les adresses récentes », dans « Mes lieux », les retire).
+Les adresses que tu choisis restent sur le téléphone : tes favoris, et les 5 dernières adresses choisies (« Effacer les adresses récentes », dans « Mes favoris », les retire).
 
 ## Ce que voient les hébergeurs
 
@@ -31,7 +31,7 @@ Comme pour toute page web, GitHub et Vercel reçoivent les données techniques d
 
 ## Ce qui reste sur le téléphone
 
-Tes réglages, tes lieux, tes favoris, tes adresses récentes et une copie des horaires déjà consultés sont enregistrés dans le stockage de l’appli Even Realities, sur ton téléphone. Rien n’est envoyé ailleurs.
+Tes réglages, tes favoris, tes gares et tes lignes, tes adresses récentes et une copie des horaires déjà consultés sont enregistrés dans le stockage de l’appli Even Realities, sur ton téléphone. Rien n’est envoyé ailleurs.
 
 ## Serveurs contactés
 

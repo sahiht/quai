@@ -2,7 +2,7 @@
   "package_id": "com.quai.transports",
   "edition": "202601",
   "name": "Quai",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "min_sdk_version": "0.0.16",
   "entrypoint": "index.html",
   "permissions": [

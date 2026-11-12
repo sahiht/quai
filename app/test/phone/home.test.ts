@@ -1,18 +1,16 @@
 // @vitest-environment happy-dom
 /**
  * Accueil du téléphone (T1, S8, M8 ; PRD-1.2 § 2.2) : « Où vas-tu ? » ouvre la recherche, section « Mes favoris »
- * (lieux compris) au-dessus de « Réglages » (réponse courte, bouton « Lunettes », « Gérer mes favoris »), « Réglages »
- * sans « Mes lieux », bannière après la mise à jour, « Temps réel indisponible, horaires prévus » au lieu de « Tout est
- * à jour ».
+ * (endroits et trajets) au-dessus de « Réglages » (réponse courte, bouton « Lunettes », « Gérer mes favoris »),
+ * « Réglages » sans « Mes lieux », avec « Trajets » (revue d'usage n° 9), bannière « Quai 1.2.2 » après la mise à
+ * jour, « Temps réel indisponible, horaires prévus » au lieu de « Tout est à jour ». Gares et lignes : picks.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FavoriteAnswer, Settings } from '../../src/core/api';
 import { NEWS_SINCE, newsState } from '../../src/phone/app';
-import { newsLines as glassesNewsLines } from '../../src/glasses/views';
-import { APP_VERSION } from '../../src/version';
 import { ANSWER_MAX_AGE_MS, homeScreen, resetAnswers, reusable } from '../../src/phone/screens/home';
 import { catchable } from '../../src/glasses/format';
-import { shortAnswer } from '../../src/phone/text';
+import { NEWS_122, shortAnswer } from '../../src/phone/text';
 import { at, button, defaults, harness, mount, preset11, SCENARIO, textOf, until } from './helpers';
 
 beforeEach(() => resetAnswers());
@@ -28,7 +26,7 @@ describe('« Où vas-tu ? » (M4.1, T1)', () => {
     expect(el.textContent).not.toContain('Rechercher un trajet');
     const where = el.querySelector<HTMLButtonElement>('.where')!;
     expect(textOf(where.querySelector('.where-label'))).toBe('Où vas-tu ?');
-    expect(textOf(where.querySelector('.where-box'))).toBe('Adresse, gare, arrêt ou lieu');
+    expect(textOf(where.querySelector('.where-box'))).toBe('Adresse, gare, arrêt ou favori');
     where.click();
     expect(hz.went).toEqual(['#/recherche']);
   });
@@ -44,7 +42,8 @@ describe('« Mes favoris » sur l’accueil (S8)', () => {
     expect(h2s.indexOf('Mes favoris')).toBeLessThan(h2s.indexOf('Réglages'));
     await until(() => favRows(el).every((r) => textOf(r.querySelector('.answer')) !== '…'));
     expect(rowText(favRows(el)[0])).toBe('Vers le bureau | partir à 07:33');
-    expect(favRows(el)).toHaveLength(6);
+    // 1.2.2 : les arrêts favoris du préréglage sont dans « Gares » et « Bus, tram, métro », plus dans « Mes favoris »
+    expect(favRows(el)).toHaveLength(3);
     expect(textOf(section.querySelector('.more-link'))).toBe('Gérer mes favoris');
     expect(section.querySelector('.more-link')!.getAttribute('href')).toBe('#/favoris');
   });
@@ -126,26 +125,14 @@ describe('« Mes favoris » sur l’accueil (S8)', () => {
     expect(reusable({ ...a, plan: { journeys: [], empty: 'noPosition' } }, t + 1000)).toBe(true);
   });
 
-  it('« Lunettes » d’un arrêt favori : ses départs (showBoard avec le filtre)', async () => {
-    const hz = harness({ settings: preset11(), now: SCENARIO.s2.now, here: SCENARIO.s2 });
-    const el = mount(homeScreen(hz.ctx));
-    await until(() => favRows(el).every((r) => textOf(r.querySelector('.answer')) !== '…'));
-    const gdn = favRows(el).find((r) => textOf(r.querySelector('.t1')).startsWith('Gare du Nord'))!;
-    expect(textOf(gdn.querySelector('.answer'))).toMatch(/^T3 (\d+ min|imminent)/);
-    gdn.querySelector<HTMLButtonElement>('.btn-glasses')!.click();
-    await until(() => hz.glasses.boards.length === 1);
-    expect(hz.glasses.boards[0].areaId).toBe('stib:6357F');
-    expect(hz.glasses.boards[0].filter?.length).toBe(3);
-  });
-
-  it('lieux compris (préréglage 1.1 migré) ; « Réglages » : plus de « Mes lieux », « Mes favoris   6 favoris »', async () => {
+  it('lieux compris (préréglage 1.1 migré) ; « Réglages » : plus de « Mes lieux », « Trajets », « Mes favoris   3 favoris »', async () => {
     const hz = harness({ settings: preset11(), now: SCENARIO.s1.now, here: SCENARIO.s1, flags: { noRt: true } });
     const el = mount(homeScreen(hz.ctx));
-    expect(favRows(el).map((r) => textOf(r.querySelector('.t1')))).toContain('Vers la maison');
-    const settingsRows = [...el.querySelectorAll('.list.box:not(.fav-list) .row')].map((r) => textOf(r.querySelector('.t1')));
-    expect(settingsRows).toEqual(['Position et langue', 'Mes favoris', 'Affichage', 'Alertes', 'Données']);
+    expect(favRows(el).map((r) => textOf(r.querySelector('.t1')))).toEqual(['Vers le bureau', 'Vers Gand-Saint-Pierre', 'Vers la maison']);
+    const settingsRows = [...el.querySelectorAll('.list.box:not(.fav-list):not(.pick-list) .row')].map((r) => textOf(r.querySelector('.t1')));
+    expect(settingsRows).toEqual(['Position et langue', 'Trajets', 'Mes favoris', 'Affichage', 'Alertes', 'Données']);
     const favs = [...el.querySelectorAll('.row')].find((r) => textOf(r.querySelector('.t1')) === 'Mes favoris')!;
-    expect(textOf(favs.querySelector('.t2'))).toBe('6 favoris');
+    expect(textOf(favs.querySelector('.t2'))).toBe('3 favoris');
     (favs as HTMLButtonElement).click();
     expect(hz.went).toEqual(['#/favoris']);
     const one = mount(homeScreen(harness({ settings: defaults({ favorites: [preset11().favorites[0]] }) }).ctx));
@@ -173,43 +160,34 @@ describe('réponses courtes (S8, mêmes règles que les lunettes)', () => {
 });
 
 describe('bannière après la mise à jour (T1) et état des données (M8)', () => {
-  it('« Quai 1.2.1 » : une fois après une mise à jour depuis la 1.0, la 1.1 ou la 1.2.0, jusqu’à « OK » ; jamais après une nouvelle installation', () => {
-    expect(NEWS_SINCE).toBe('1.2.1');
-    expect(APP_VERSION).toBe('1.2.1');
-    for (const seen of ['1.0.0', '1.1.0', '1.2.0']) expect(newsState(seen).visible(), seen).toBe(true);
-    for (const seen of ['', '1.2.1', '1.3.0']) expect(newsState(seen).visible(), seen || 'installation neuve').toBe(false);
+  it('« Quai 1.2.2 » (PRD-1.2.2 § 9, revue d’usage n° 4) : une fois depuis la 1.1, la 1.2.0 ou la 1.2.1, jusqu’à « OK » ; jamais après une nouvelle installation', () => {
+    expect(NEWS_SINCE).toBe('1.2.2');
+    // l'appli en 1.2.2 (la version est montée à l'intégration) : la bannière se montre une fois
+    for (const seen of ['1.1.0', '1.2.0', '1.2.1']) expect(newsState(seen, NEWS_SINCE, '1.2.2').visible(), seen).toBe(true);
+    for (const seen of ['', '1.2.2', '1.3.0']) expect(newsState(seen, NEWS_SINCE, '1.2.2').visible(), seen || 'installation neuve').toBe(false);
     // une appli plus ancienne que ces nouveautés ne les annonce pas
-    expect(newsState('1.1.0', NEWS_SINCE, '1.2.0').visible()).toBe(false);
+    expect(newsState('1.2.0', NEWS_SINCE, '1.2.1').visible()).toBe(false);
     const hz = harness({ settings: defaults() });
-    hz.ctx.news = newsState('1.1.0');
+    hz.ctx.news = newsState('1.2.1', NEWS_SINCE, '1.2.2');
     const el = mount(homeScreen(hz.ctx));
-    // les nouveautés du message « Quai 1.2.1 » des lunettes, dites depuis le téléphone ; depuis la 1.1, les lieux en plus
-    expect([...el.querySelectorAll('.news p')].map((p) => textOf(p))).toEqual([
-      'Nouveau : le moins de marche d’abord.',
-      'Dans les lunettes, sur un trajet, ▼ : la suite, puis les autres trajets.',
-      'Accueil des lunettes plus simple : tes favoris en tête.',
-      'Tes lieux sont maintenant dans tes favoris.',
-    ]);
+    // mêmes lignes depuis la 1.1, la 1.2.0 ou la 1.2.1 (un seul texte, NEWS_122)
+    const lines = [
+      'Nouveau : tes gares et tes lignes de bus, tram et métro sur l’accueil des lunettes.',
+      'Tes arrêts favoris y sont rangés, rien n’est perdu.',
+      'Dans les lunettes, Aller à… a rejoint Favoris.',
+      'Un trajet n’est suivi que si tu le demandes.',
+    ];
+    expect([...el.querySelectorAll('.news p')].map((p) => textOf(p))).toEqual(lines);
+    expect(NEWS_122).toEqual(lines);
+    for (const seen of ['1.1.0', '1.2.0']) expect(newsState(seen, NEWS_SINCE, '1.2.2').lines, seen).toEqual(lines);
     expect(el.querySelector('.news p')!.textContent).toContain('Nouveau\u00a0:');
+    for (const l of lines) expect(l).not.toMatch(/[—–]|tes lieux/);
     button(el, 'OK').click();
     expect(el.querySelector('.news')).toBeNull();
     expect(hz.ctx.news.visible()).toBe(false);
     expect(mount(homeScreen(hz.ctx)).querySelector('.news')).toBeNull();
-    // le téléphone n'écrit pas la version vue (les lunettes s'en servent pour « Quai 1.2.1 »)
+    // le téléphone n'écrit pas la version vue (les lunettes s'en servent pour « Quai 1.2.2 »)
     expect(hz.settings.get().seenVersion).toBe('');
-  });
-
-  it('mêmes nouveautés que les lunettes, dans le même ordre : 3 lignes depuis la 1.2.0, 4 depuis la 1.0 ou la 1.1', () => {
-    const plain = (l: string) => l.replace(/\u00a0/g, ' ');
-    for (const seen of ['1.0.0', '1.1.0', '1.2.0']) {
-      const phone = newsState(seen).lines;
-      const glasses = glassesNewsLines(seen).map(plain);
-      expect(phone, seen).toHaveLength(glasses.length);
-      expect(phone[0], seen).toBe(glasses[0]);
-      expect(phone.at(-1), seen).toBe(glasses.at(-1)!.replace('Accueil plus simple', 'Accueil des lunettes plus simple'));
-    }
-    expect(newsState('1.2.0').lines).toHaveLength(3);
-    for (const l of newsState('1.0.0').lines) expect(l).not.toMatch(/[—–]/);
   });
 
   it('« Données » : « Temps réel indisponible, horaires prévus » pendant une panne, sinon « Tout est à jour »', async () => {

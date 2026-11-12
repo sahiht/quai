@@ -18,7 +18,7 @@ import { stibPoint } from './realtime';
 import { delayMinutes, headKey, headScore, platformOfStopId, RT_MAX_SHIFT_MS, rtAtStop, rtOccurrence, sameStop, type TripContext } from './rtmerge';
 import { locateTrip, type DayIndex } from './trains';
 import { hhmm, fit } from './util';
-import { cancelAlert, delayAlert, leaveAlert, platformAlert, vehicleLabel, worksAlert } from './text';
+import { cancelAlert, delayAlert, leaveAlert, platformAlert, vehicleLabel, vehicleLabelStart, worksAlert } from './text';
 
 export interface RefreshEnv {
   rt: RealtimeClient;
@@ -406,12 +406,12 @@ export function buildAlerts(j: Journey, settings: Settings, now: number, works: 
   }
   if (A.delay) {
     for (const l of rides) {
-      if (!l.cancelled && (l.delayMin ?? 0) >= Math.max(1, A.delayMin) && now < l.arr) push('delay', delayAlert(vehicleLabel(l), hhmm(l.schedDep), l.delayMin ?? 0));
+      if (!l.cancelled && (l.delayMin ?? 0) >= Math.max(1, A.delayMin) && now < l.arr) push('delay', delayAlert(vehicleLabelStart(l), hhmm(l.schedDep), l.delayMin ?? 0));
     }
   }
   if (A.cancel) {
     for (const l of rides) {
-      if (l.cancelled && now < l.schedArr) push('cancel', cancelAlert(vehicleLabel(l), hhmm(l.schedDep)));
+      if (l.cancelled && now < l.schedArr) push('cancel', cancelAlert(vehicleLabelStart(l), hhmm(l.schedDep)));
     }
   }
   const firstWalk = j.legs[0]?.kind === 'walk' ? j.legs[0] : undefined;

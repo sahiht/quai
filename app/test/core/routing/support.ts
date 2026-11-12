@@ -36,6 +36,8 @@ export function network(m: MiniNet): Network {
           { id: 'IC', short: 'IC', long: 'Intercity', type: 2 },
           { id: 'S1', short: 'S1', long: 'S1', type: 109 },
           { id: 'NJ', short: 'NJ', long: 'Nightjet', type: 2 },
+          // bus de remplacement de la SNCB (samedi 14/11 sur les vraies données) : catégorie « BUS »
+          { id: 'BUS', short: 'BUS', long: 'Bus de remplacement', type: 3 },
         ],
         trips: m.trains ?? [],
       },

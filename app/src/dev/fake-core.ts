@@ -5,7 +5,10 @@
  * Sensible à l'heure via now() : horaires générés pour le jour et le lendemain, temps réel selon l'heure.
  *
  * 1.1 : ordre intelligent et réponses des favoris (fonctions communes avec le vrai cœur, core/favorites.ts),
- * trajets étiquetés et expliqués (route : classement simplifié du PRD § 4, raisons de core/routing/reason.ts),
+ * trajets étiquetés et expliqués (route : classement du vrai cœur, 1.2.2 : core/routing/rank.ts, PRD-1.2.2 § 7 ;
+ * raisons de core/routing/reason.ts ; temps de correspondance de core/routing/params.ts ; candidats : véhicules des
+ * 3 heures qui suivent, au moins les 6 premiers de chaque ligne, une correspondance au plus : un trajet demandé bien
+ * avant son départ, le matin pour le soir, peut donc différer de celui du vrai cœur),
  * adresses (geocode : tableau de l'annexe A.2), état du temps réel (status), « Autour de moi » léger.
  *
  * Drapeaux (lus à chaque appel : modifier l'objet passé à createFakeCore change la scène, CA-M1.6 et CA-M8.6) :
@@ -21,6 +24,18 @@
  * Cas utiles : favori d'arrêt sur « stib:6358 » (ancien identifiant, `aka` de Gare du Nord) ou sur un identifiant
  * inconnu nommé « Gare du Nord » à moins de 150 m → movedTo stib:6357F ; identifiant inconnu sans zone de même nom
  * → 'missing'. « Rue de Nimy 50, 7000 Mons » (adresse propre au faux cœur) → noTrip avec la gare de Mons.
+ *
+ * 1.2.2 (PRD-1.2.2 § 3, § 4) : findLines, lineStops et lineBoard (règles communes avec le vrai cœur, core/linepicks.ts).
+ * Lignes utiles :
+ *  - bus W TEC (« Braine-l’Alleud Gare ↔ Bruxelles Midi ») à Merbraine (tec:Bbrlmer1) ou à Waterloo Eglise
+ *    (tec:Bwategl1) : deux sens ; vers Bruxelles Midi, un W par heure (hh:14 à Braine-l’Alleud Gare) s'arrête à
+ *    Waterloo Eglise (`partial`) ; à Merbraine, temps réel dans les 30 min : le W de hh:48 vers Bruxelles Midi a
+ *    3 min de retard, le W partiel de 08:18 est supprimé ;
+ *  - W à Braine-l’Alleud Gare (tec:Bbrlgar1, terminus) : un seul sens, avec les passages partiels ;
+ *  - tram 3 STIB à Gare du Nord (stib:6357F) : deux sens (Churchill, Esplanade), temps réel dans les 30 min ;
+ *  - tram 4 STIB à Gare du Nord : un seul sens (Stalle (P)) ;
+ *  - ligne absente de l'arrêt (ex. W à Gare du Nord) ou arrêt inconnu : state 'missing'.
+ * findLines('1') : tram 1 De Lijn (Gand) et bus 1 TEC (Mons).
  */
 import { DEFAULT_SETTINGS } from '../core/api';
 import type {
@@ -33,10 +48,12 @@ import type {
   Endpoint,
   FavoriteStop,
   Journey,
-  JourneyLabel,
   LatLon,
   Leg,
+  LineBoard,
   LineFilter,
+  LineMatch,
+  LineStop,
   Meta,
   NearbyItem,
   PlanResult,
@@ -50,9 +67,9 @@ import { normalizeForSearch, prettyName } from '../../../shared/names';
 import { QuaiError } from '../core/errors';
 import { answerFavorite, asTrip, orderFavorites, placeOf, relocateAmong, type PlanMemo } from '../core/favorites';
 import { GeocodeClient, GeoError, type GeoTransport } from '../core/geocode';
-import { longestWalk } from '../core/means';
-import { maxWalkOf } from '../core/routing/params';
-import { walkTier } from '../core/routing/rank';
+import { lineBoardOf, lineKey, LINES_MAX, mainEnds, missingArea, orderStops, sortMatches, type DirPattern, type EndPattern, type PatDeparture } from '../core/linepicks';
+import { maxWalkOf, P } from '../core/routing/params';
+import { itemOf, rank as rankJourneys } from '../core/routing/rank';
 import { reasonsOf } from '../core/routing/reason';
 import { rankSearch } from '../core/search';
 import { tripLabel } from '../core/suggest';
@@ -112,6 +129,8 @@ const AREAS: AreaSummary[] = [
   A('tec:N530aaa', 'tec', N('Bouge Église'), 50.477, 4.885, ['bus'], ['5']),
   A('tec:N540aaa', 'tec', N('Salzinnes Ronet'), 50.457, 4.842, ['bus'], ['51']),
   A('tec:Bbrlgar1', 'tec', N('Braine-l’Alleud Gare'), 50.6838, 4.3715, ['bus'], ['W']),
+  // 1.2.2 : arrêt du bus W de l'exemple « Bus W · Merbraine » (PRD-1.2.2 § 3)
+  A('tec:Bbrlmer1', 'tec', N('Braine-l’Alleud Merbraine'), 50.6833, 4.3891, ['bus'], ['W']),
   A('tec:Bwategl1', 'tec', N('Waterloo Eglise'), 50.7174, 4.3979, ['bus'], ['W']),
   A('tec:Bbxlmid1', 'tec', N('Bruxelles Midi'), 50.8361, 4.3352, ['bus'], ['W']),
   A('tec:Hmogpl1', 'tec', N('Mons Grand-Place'), 50.4545, 3.952, ['bus'], ['1']),
@@ -194,7 +213,7 @@ function trainRtLive(t: TrainTpl, start: number, now: number): TrainRt {
 }
 
 /** Bus, trams, métros : lignes (motif de zones avec décalages, premier départ, fréquence, dernier départ). */
-type RtFn = (sched: number, now: number) => { rt: boolean; delay: number } | null;
+type RtFn = (sched: number, now: number) => { rt: boolean; delay: number; cancelled?: boolean } | null;
 interface LineTpl {
   key: string;
   op: Exclude<Op, 'sncb'>;
@@ -215,6 +234,15 @@ interface LineTpl {
   stib?: boolean;
 }
 const exact = (table: Record<number, number>): RtFn => (sched) => (sched in table ? { rt: true, delay: table[sched] } : null);
+/** 1.2.2 : temps réel des 30 prochaines minutes (comme la STIB) : retard selon l'horaire prévu, voyages supprimés. */
+const soon =
+  (delayOf: (sched: number) => number, cancelled: number[] = []): RtFn =>
+  (sched, now) => {
+    const ahead = sched - localMinutes(now);
+    if (ahead > 30 || ahead < -2) return null;
+    return cancelled.includes(sched) ? { rt: true, delay: 0, cancelled: true } : { rt: true, delay: delayOf(sched) };
+  };
+const MERBRAINE_RT: Record<string, RtFn> = { 'tec:Bbrlmer1': soon((s) => (s % 60 === 48 ? 3 : 0), [hm(8, 18)]) };
 const LINES: LineTpl[] = [
   { key: 'T3-CHURCHILL', op: 'stib', mode: 'tram', line: '3', head: N('Churchill'), stops: [['stib:6380', 0], ['stib:6357F', 12], ['stib:6359', 14], ['stib:6361', 16], ['stib:6362', 17], ['stib:6364', 22], ['stib:6366', 37]], first: hm(5, 52), every: 8, last: hm(22, 44), stib: true },
   { key: 'T3-ESPLANADE', op: 'stib', mode: 'tram', line: '3', head: N('Esplanade'), stops: [['stib:6366', 0], ['stib:6359', 21], ['stib:6357F', 23], ['stib:6380', 35]], first: hm(5, 45), every: 8, last: hm(22, 37), stib: true },
@@ -231,8 +259,10 @@ const LINES: LineTpl[] = [
   { key: 'TEC-5', op: 'tec', mode: 'bus', line: '5', head: N('Bouge'), stops: [['tec:N509aaa', 0], ['tec:N508aga', 4], ['tec:N530aaa', 15]], first: hm(6, 10), every: 20, last: hm(22, 50), platform: { 'tec:N508aga': 'B' }, rt: { 'tec:N509aaa': exact({ [hm(7, 50)]: 3 }) } },
   { key: 'TEC-51', op: 'tec', mode: 'bus', line: '51', head: N('Salzinnes'), stops: [['tec:N508aga', 0], ['tec:N540aaa', 12]], first: hm(6, 5), every: 30, last: hm(21, 35), platform: { 'tec:N508aga': 'A' } },
   // Extension Waterloo (fixtures 1.1) : bus W vers « Bruxelles Midi », 45 min depuis Waterloo Eglise, à côté du métro.
-  { key: 'TEC-W', op: 'tec', mode: 'bus', line: 'W', head: N('Bruxelles Midi'), stops: [['tec:Bbrlgar1', 0], ['tec:Bwategl1', 12], ['tec:Bbxlmid1', 57]], first: hm(6, 4), every: 20, last: hm(21, 44) },
-  { key: 'TEC-WR', op: 'tec', mode: 'bus', line: 'W', head: N('Braine-l’Alleud Gare'), stops: [['tec:Bbxlmid1', 0], ['tec:Bwategl1', 45], ['tec:Bbrlgar1', 57]], first: hm(6, 10), every: 20, last: hm(21, 50) },
+  // 1.2.2 : arrêt Merbraine ; un W par heure s'arrête à Waterloo Eglise (passage partiel) ; temps réel à Merbraine.
+  { key: 'TEC-W', op: 'tec', mode: 'bus', line: 'W', head: N('Bruxelles Midi'), stops: [['tec:Bbrlgar1', 0], ['tec:Bbrlmer1', 4], ['tec:Bwategl1', 12], ['tec:Bbxlmid1', 57]], first: hm(6, 4), every: 20, last: hm(21, 44), rt: MERBRAINE_RT },
+  { key: 'TEC-WR', op: 'tec', mode: 'bus', line: 'W', head: N('Braine-l’Alleud Gare'), stops: [['tec:Bbxlmid1', 0], ['tec:Bwategl1', 45], ['tec:Bbrlmer1', 52], ['tec:Bbrlgar1', 57]], first: hm(6, 10), every: 20, last: hm(21, 50), rt: MERBRAINE_RT },
+  { key: 'TEC-W-WAT', op: 'tec', mode: 'bus', line: 'W', head: N('Waterloo Eglise'), stops: [['tec:Bbrlgar1', 0], ['tec:Bbrlmer1', 4], ['tec:Bwategl1', 12]], first: hm(6, 14), every: 60, last: hm(20, 14), rt: MERBRAINE_RT },
   // Propre au faux cœur : bus de Mons qui ne mène pas à la gare (cas « Pas de trajet complet »).
   { key: 'TEC-MONS-1', op: 'tec', mode: 'bus', line: '1', head: N('Jemappes'), stops: [['tec:Hmogpl1', 0], ['tec:Hmojem1', 14]], first: hm(6, 3), every: 20, last: hm(21, 43) },
 ];
@@ -425,6 +455,41 @@ function runsFrom(areaId: string, from: number, to: number, perTpl = Infinity): 
   return out.sort((a, b) => a.t - b.t).map(({ run, k }) => ({ run, k }));
 }
 
+/* ------------------------------ 1.2.2 : lignes par numéro ------------------------------ */
+
+/** Identifiant de « variante » d'un gabarit (LineMatch.routes), à la manière de LineFile.id. */
+const routeOf = (l: LineTpl): string => `${l.op}:${l.key}`;
+const tripsOf = (l: LineTpl): number => LINE_STARTS.get(l.key)?.length ?? 0;
+
+/** Gabarits de lignes d'un numéro, regroupés par réseau, nom et mode (une LineMatch chacun). */
+function lineGroups(q: string): LineTpl[][] {
+  const groups = new Map<string, LineTpl[]>();
+  for (const l of LINES) {
+    if (lineKey(l.line) !== q) continue;
+    const k = `${l.op}|${l.line}|${l.mode}`;
+    groups.set(k, [...(groups.get(k) ?? []), l]);
+  }
+  return [...groups.values()];
+}
+
+/** Arrêts où l'on peut monter dans une des variantes, la variante la plus servie d'abord, dans l'ordre de la ligne. */
+function stopsOfTpls(ls: readonly LineTpl[]): LineStop[] {
+  const boarding = new Set(ls.flatMap((l) => l.stops.slice(0, -1).map((s) => s[0])));
+  const out: LineStop[] = [];
+  const seen = new Set<string>();
+  for (const l of [...ls].sort((x, y) => tripsOf(y) - tripsOf(x))) {
+    for (const [id] of l.stops) {
+      if (seen.has(id) || !boarding.has(id)) continue;
+      seen.add(id);
+      const a = area(id);
+      out.push({ areaId: a.id, name: a.n, lat: a.lat, lon: a.lon });
+    }
+  }
+  return out;
+}
+
+const endOf = (l: LineTpl): EndPattern => ({ head: l.head, from: area(l.stops[0][0]), to: area(l.stops[l.stops.length - 1][0]), trips: tripsOf(l) });
+
 /* ------------------------------ Cœur factice ------------------------------ */
 
 interface Pt {
@@ -434,8 +499,6 @@ interface Pt {
   areaId?: string;
 }
 
-/** Marge d'une correspondance, en plus de la marche entre les deux zones. */
-const TRANSFER_MS = 2 * MIN;
 const MAX_WAIT_MS = 60 * MIN;
 /** À 50 m au plus d'un arrêt, on y est : pas d'étape à pied. */
 const AT_STOP_M = 50;
@@ -484,7 +547,7 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
     return { rt: false, delay: 0 };
   }
 
-  function lineRt(l: LineTpl, areaId: string, schedMs: number): { rt: boolean; delay: number } | null {
+  function lineRt(l: LineTpl, areaId: string, schedMs: number): { rt: boolean; delay: number; cancelled?: boolean } | null {
     if (!live()) return null;
     const t = now();
     if (l.stib) return schedMs - t <= 30 * MIN && schedMs >= t - MIN ? { rt: true, delay: 0 } : null;
@@ -500,7 +563,7 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
     if (Math.abs(run.stops[k].dep - now()) > 6 * 3_600_000) return { rt: false, delay: 0 };
     if (run.train) return trainRt(run.train, run.start);
     const r = run.line ? lineRt(run.line, run.stops[k].areaId, run.stops[k].dep) : null;
-    return r ? { rt: true, delay: r.delay } : { rt: false, delay: 0 };
+    return r ? { rt: true, delay: r.delay, ...(r.cancelled ? { cancelled: true } : {}) } : { rt: false, delay: 0 };
   }
 
   function departure(run: Run, k: number): Departure {
@@ -515,7 +578,7 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
       return d;
     }
     const l = run.line!;
-    const d: Departure = { op: l.op, mode: l.mode, line: l.line, head: l.head, sched: st.dep, est: st.dep + rt.delay * MIN, rt: rt.rt, delayMin: rt.delay, cancelled: false, tripId: run.id, stopSeq: k + 1 };
+    const d: Departure = { op: l.op, mode: l.mode, line: l.line, head: l.head, sched: st.dep, est: st.dep + rt.delay * MIN, rt: rt.rt, delayMin: rt.delay, cancelled: !!rt.cancelled, tripId: run.id, stopSeq: k + 1 };
     if (st.platform) d.platform = st.platform;
     const msg = l.msg?.[a.id];
     if (msg && rt.rt) d.msg = msg;
@@ -664,31 +727,18 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
     return out;
   }
 
-  interface Cand {
-    j: Journey;
-    changes: number; // changements de véhicule
-    tier: number; // palier de marche (PRD-1.2.1 § 1.1) : 0 jusqu'à la marche maximale, puis un par tranche de 5 min
-    walk: number;
-    rides: number;
-    firstDep: number;
-    sig: string;
-    keyRides: string;
-  }
-
-  function score(j: Journey, settings: Settings): Cand {
-    const walks = j.legs.filter((l) => l.kind === 'walk').map((l) => l.walkMin ?? 0);
-    const rides = j.legs.filter((l) => l.kind === 'ride');
-    const sigOf = (l: Leg) => (l.kind === 'walk' ? 'w' : `${l.op}/${l.cat ?? l.line}/${l.from.areaId}/${l.to.areaId}`);
-    return {
-      j,
-      changes: j.transfers,
-      tier: walkTier(longestWalk(j), maxWalkOf(settings)),
-      walk: walks.reduce((s, w) => s + w, 0),
-      rides: rides.length,
-      firstDep: rides[0]?.dep ?? j.dep,
-      sig: j.legs.map(sigOf).join('|'),
-      keyRides: rides.map((l) => `${l.tripId}:${l.fromSeq}:${l.toSeq}`).join('+') || `walk:${j.dep}`,
-    };
+  /**
+   * Premiers véhicules d'une zone : ceux des 3 heures qui suivent (24 par ligne au plus : « Le suivant », et le soir le
+   * dernier tram qui attrape le train), au moins les 6 premiers de chaque ligne dans l'horizon (la nuit, ceux du matin).
+   */
+  function firstRuns(areaId: string, t0: number): { run: Run; k: number }[] {
+    const seen = new Map<string, number>();
+    return runsFrom(areaId, t0, t0 + HORIZON_MS, 24).filter(({ run, k }) => {
+      const key = run.train?.key ?? run.line!.key;
+      const n = (seen.get(key) ?? 0) + 1;
+      seen.set(key, n);
+      return n <= 6 || run.stops[k].dep <= t0 + 3 * 3_600_000;
+    });
   }
 
   /** Candidats : marche seule, un véhicule, ou deux avec une correspondance (attente de 60 min au plus). */
@@ -706,7 +756,7 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
     const ptOf = (z: AreaSummary): Pt => ({ lat: z.lat, lon: z.lon, name: z.n, areaId: z.id });
     for (const acc of access) {
       const t0 = after + acc.walk * MIN;
-      for (const { run, k } of runsFrom(acc.a.id, t0, after + HORIZON_MS, 6)) {
+      for (const { run, k } of firstRuns(acc.a.id, t0)) {
         const tplKey = run.train?.key ?? run.line!.key;
         const first0 = acc.walk ? [walkLeg(a, ptOf(acc.a), acc.walk)] : [];
         for (let k2 = k + 1; k2 < run.stops.length; k2++) {
@@ -721,8 +771,12 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
             const dxy = same ? 0 : distanceM(y, x);
             if (!same && dxy > 400) continue;
             const tw = same ? 0 : walkMinutes(dxy);
-            const ready = ride1.arr + tw * MIN + TRANSFER_MS;
-            for (const s of runsFrom(x.id, ready, ride1.arr + MAX_WAIT_MS, 1)) {
+            // comme le vrai cœur : correspondance cherchée sur les horaires prévus, avec ses temps (core/routing/params.ts :
+            // dans la même zone 2 min, gare 4 ; à pied, la marche plus 1 min, vers une gare 3), puis gardée tant que le
+            // temps réel la laisse possible (core/journeys.ts, brokenConnection : arrivée et marche avant le départ)
+            const station = x.op === 'sncb';
+            const ready = ride1.schedArr + (same ? (station ? P.mctStation : P.mctUrban) : tw + (station ? P.footBufStation : P.footBufUrban)) * MIN;
+            for (const s of runsFrom(x.id, ready, ride1.schedArr + MAX_WAIT_MS, 1)) {
               const key2 = s.run.train?.key ?? s.run.line!.key;
               if (key2 === tplKey) continue;
               const head1 = run.train?.head.fr ?? run.line!.head.fr;
@@ -734,7 +788,8 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
                 const ev = egress.get(v.id);
                 if (ev === undefined) continue;
                 const ride2 = rideLeg(s.run, s.k, j2);
-                const between = same ? (run.train && s.run.train ? [] : [walkLeg(ptOf(y), ptOf(x), 1)]) : [walkLeg(ptOf(y), ptOf(x), tw)];
+                if (ride2.dep < ride1.arr + tw * MIN) continue;
+                const between = same ? [] : [walkLeg(ptOf(y), ptOf(x), tw)];
                 push([...first0, ride1, ...between, ride2, ...(ev ? [walkLeg(ptOf(v), b, ev)] : [])]);
               }
             }
@@ -746,118 +801,18 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
   }
 
   /**
-   * Classement simplifié de la 1.2.1 (docs/v1.2.1/PRD-1.2.1.md § 1, sur les heures estimées) : la proposition 1 est,
-   * palier de marche par palier, la plus rapide (celle que rien ne devance de 5 min à l'arrivée ; puis durée,
-   * changements, marche à 5 min près, arrivée, départ) si elle arrive au plus 30 min après la plus tôt de toutes ;
-   * puis « Plus tôt », « Moins de marche », « Sans changement » ou « Moins de changements », « À pied », « Le
-   * suivant », « Plus tard » ; 3 au plus, avec les raisons (core/routing/reason.ts, reasonsOf).
+   * Classement de la 1.2.2 (PRD-1.2.2 § 7), celui du vrai cœur (core/routing/rank.ts, sur les heures estimées) :
+   * candidats supprimés, inattrapables ou à plus de 60 min d'attente écartés comme dans core/routing/engine.ts, la
+   * marche seule (30 min au plus) en concurrence ; étiquettes du classement, raisons de core/routing/reason.ts.
    */
   function rank(all: Journey[], walkOnly: Journey | null, settings: Settings, after: number): Journey[] {
-    const t = now();
-    const ok = all.filter((j) => {
-      const first = j.legs.find((l) => l.kind === 'ride');
-      const w0 = j.legs[0]?.kind === 'walk' ? (j.legs[0].walkMin ?? 0) * MIN : 0;
-      if (j.legs.some((l) => l.kind === 'ride' && l.cancelled)) return false;
-      if (first && first.dep - w0 < t - 30_000) return false;
-      // Règle 1.0 : jamais plus lent que la marche seule quand elle dure moins que la marche maximale plus 5 min (cas
-      // E du PRD).
-      if (walkOnly && (walkOnly.legs[0].walkMin ?? 0) < settings.maxWalkMin + 5 && j.arr > walkOnly.arr) return false;
-      return true;
-    });
-    const scored = [...ok, ...(walkOnly ? [walkOnly] : [])].map((j) => score(j, settings));
-    // Trajets dominés retirés : un autre part au plus tôt en même temps, arrive au plus tard en même temps, avec
-    // autant de changements et de marche au plus ; jamais au profit d'un trajet de palier plus haut (§ 1.3).
-    const dominated = (c: Cand) =>
-      scored.some(
-        (d) =>
-          d !== c &&
-          d.tier <= c.tier &&
-          d.j.dep >= c.j.dep &&
-          d.j.arr <= c.j.arr &&
-          d.changes <= c.changes &&
-          d.walk <= c.walk &&
-          (d.j.dep > c.j.dep || d.j.arr < c.j.arr || d.changes < c.changes || d.walk < c.walk),
-      );
-    const pool = scored.filter((c) => !dominated(c));
-    if (!pool.length) return [];
-    // Départs dans l'heure demandée ; la nuit (rien dans l'heure), jusqu'à 90 min après le premier départ possible.
-    const earliest = Math.min(...pool.map((c) => c.j.dep));
-    const windowEnd = earliest <= after + 60 * MIN ? after + 60 * MIN : earliest + 90 * MIN;
-    const win = pool.filter((c) => c.j.dep <= windowEnd);
-    const night = earliest > after + 60 * MIN;
-    const M5 = 5 * MIN;
-    const isWalk = (c: Cand) => c.rides === 0;
-    // § 1.1 : un trajet en devance un autre s'il arrive au moins 5 min plus tôt (la nuit, sans partir plus de 30 min
-    // avant lui) ; parmi ceux que rien ne devance : durée, changements, marche (à 5 min près), arrivée, départ.
-    const beats = (d: Cand, c: Cand) => d.j.arr <= c.j.arr - M5 && (!night || d.j.dep >= c.j.dep - 30 * MIN);
-    const order = (x: Cand, y: Cand) => {
-      const dx = x.j.arr - x.j.dep;
-      const dy = y.j.arr - y.j.dep;
-      if (Math.abs(dx - dy) >= M5) return dx - dy;
-      if (x.changes !== y.changes) return x.changes - y.changes;
-      if (Math.abs(x.walk - y.walk) >= 5) return x.walk - y.walk;
-      return x.j.arr - y.j.arr || y.j.dep - x.j.dep;
-    };
-    const shortest = (list: Cand[]): Cand | undefined => list.filter((c) => !list.some((d) => d !== c && beats(d, c))).sort(order)[0];
-    // § 1.2 : palier par palier, le plus rapide s'il arrive au plus 30 min après le plus tôt (garde-fou contre les
-    // détours) ; repli : le plus rapide de tous
-    const pick = (list: Cand[]): Cand | undefined => {
-      if (!list.length) return undefined;
-      const E = Math.min(...list.map((c) => c.j.arr));
-      for (const k of [...new Set(list.map((c) => c.tier))].sort((x, y) => x - y)) {
-        const b = shortest(list.filter((c) => c.tier <= k))!;
-        if (b.j.arr <= E + 30 * MIN) return b;
-      }
-      return shortest(list);
-    };
-    const simple = pick(win)!;
-    const props: { c: Cand; label: JourneyLabel }[] = [{ c: simple, label: 'short' }];
-    const used = new Set([simple.keyRides]);
-    const add = (c: Cand | undefined, label: JourneyLabel) => {
-      if (!c || props.length >= 3 || used.has(c.keyRides)) return;
-      used.add(c.keyRides);
-      props.push({ c, label });
-    };
-    // § 1.4, dans l'ordre : Plus tôt, Moins de marche, Sans changement ou Moins de changements, À pied, Le suivant, Plus tard
-    // à même arrivée, le palier le plus bas d'abord
-    const first = win.filter((c) => !isWalk(c)).sort((x, y) => x.j.arr - y.j.arr || x.tier - y.tier || order(x, y))[0];
-    if (first && first.j.arr <= simple.j.arr - M5) add(first, 'earlier');
-    if (simple.tier > 0) {
-      add(shortest(win.filter((c) => c.tier < simple.tier && !isWalk(c) && c !== simple && c.j.arr <= simple.j.arr + 20 * MIN)), 'lesswalk');
-    }
-    // jamais de palier plus haut que la proposition 1, sauf s'il n'arrive pas plus tard
-    const fewer = pick(
-      win.filter((c) => !isWalk(c) && c.changes < simple.changes && c.j.arr <= simple.j.arr + 20 * MIN && (c.tier <= simple.tier || c.j.arr <= simple.j.arr)),
-    );
-    if (fewer) add(fewer, fewer.changes === 0 ? 'none' : 'fewer');
-    if (walkOnly && !isWalk(simple)) {
-      const w = pool.find(isWalk);
-      if (w && w.walk <= 30 && w.j.arr <= simple.j.arr + 5 * MIN) add(w, 'walk');
-    }
-    let ref = simple;
-    while (props.length < 3 && !isWalk(simple)) {
-      const nx = pool.filter((c) => c.sig === ref.sig && c.firstDep > ref.firstDep && c.firstDep <= simple.firstDep + 2 * 3_600_000 && !used.has(c.keyRides)).sort((x, y) => x.firstDep - y.firstDep)[0];
-      if (!nx) break;
-      add(nx, 'next');
-      ref = nx;
-    }
-    if (props.length < 3) {
-      // « Plus tard » : un autre trajet, sans reprendre un véhicule déjà proposé.
-      const trips = (c: Cand) => c.keyRides.split('+').map((r) => r.split(':')[0]);
-      const rides = new Set(props.flatMap((p) => trips(p.c)));
-      // jamais un trajet devancé de plus de 30 min par un trajet parti au plus 30 min avant (1.1) ; 1.2.1 : chacun choisi
-      // comme la proposition 1 parmi le reste (palier par palier, garde-fou sur l'arrivée la plus tôt de ce reste)
-      const outrun = (c: Cand) => pool.some((d) => d.j.arr <= c.j.arr - 30 * MIN && d.j.dep >= c.j.dep - 30 * MIN);
-      let later = pool.filter(
-        (c) => !isWalk(c) && !used.has(c.keyRides) && !trips(c).some((r) => rides.has(r)) && c.firstDep > simple.firstDep && c.j.arr > simple.j.arr && c.firstDep <= simple.firstDep + 2 * 3_600_000 && !outrun(c),
-      );
-      while (later.length && props.length < 3) {
-        const c = pick(later)!;
-        add(c, 'later');
-        later = later.filter((x) => x !== c);
-      }
-    }
-    const out: Journey[] = props.map(({ c, label }) => ({ ...c.j, label }));
+    const T = after / MIN;
+    const items = all
+      .filter((j) => !j.legs.some((l) => l.kind === 'ride' && l.cancelled))
+      .map(itemOf)
+      .filter((x) => x.dep >= T && x.maxWait <= P.maxWaitMin);
+    if (walkOnly && (walkOnly.legs[0].walkMin ?? 0) <= P.walkOnlyMaxMin) items.push(itemOf(walkOnly));
+    const out: Journey[] = rankJourneys(items, T, maxWalkOf(settings), P.proposals).map(({ item, label }) => ({ ...item.j, label }));
     reasonsOf(out).forEach((reason, i) => {
       out[i].reason = reason;
     });
@@ -969,6 +924,52 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
       for (const t of TRAINS) if (t.stops.some((s, i) => s[0] === a.id && i < t.stops.length - 1)) add(t.cat, 'train', t.head);
       for (const l of LINES) if (l.stops.some((s, i) => s[0] === a.id && i < l.stops.length - 1)) add(l.line, l.mode, l.head);
       return [...seen.values()].sort((x, y) => x.line.localeCompare(y.line, 'fr', { numeric: true }) || x.head.fr.localeCompare(y.head.fr));
+    },
+    // 1.2.2 (PRD-1.2.2 § 3, § 4) : mêmes règles que le vrai cœur (core/linepicks.ts).
+    async findLines(query, near) {
+      const q = lineKey(query ?? '');
+      if (!q) return [];
+      const out = lineGroups(q).map((ls): LineMatch => {
+        const m: LineMatch = { op: ls[0].op, mode: ls[0].mode, line: ls[0].line, ends: mainEnds(ls.map(endOf)), routes: ls.map(routeOf) };
+        const st = near ? orderStops(stopsOfTpls(ls), near)[0] : undefined;
+        if (st) m.nearest = { areaId: st.areaId, name: st.name, distanceM: st.distanceM ?? 0 };
+        return m;
+      });
+      return sortMatches(out).slice(0, LINES_MAX);
+    },
+    async lineStops(m, near) {
+      const routes = new Set(m.routes ?? []);
+      let ls = LINES.filter((l) => routes.has(routeOf(l)));
+      if (!ls.length) ls = LINES.filter((l) => l.op === m.op && lineKey(l.line) === lineKey(m.line));
+      return orderStops(stopsOfTpls(ls), near);
+    },
+    async lineBoard(areaId, line, o = {}): Promise<LineBoard> {
+      touchRt();
+      const t = now();
+      const per = Math.max(1, Math.round(o.perDirection ?? 2));
+      const a = AREA.get(areaId) ?? AREAS.find((x) => x.aka?.includes(areaId));
+      const rtErrors: Op[] = live() || !a ? [] : [a.op];
+      if (!a) return lineBoardOf({ area: missingArea(areaId), op: missingArea(areaId).op, mode: 'bus', line, pats: [], deps: [], per, rtErrors, now: t });
+      const want = lineKey(line ?? '');
+      const tpls = LINES.filter((l) => l.op === a.op && lineKey(l.line) === want);
+      // motifs au départ de la zone : un par gabarit (rang du gabarit = ordre stable des sens) ; même service chaque
+      // jour : les voyages du gabarit font la journée de service (nom du sens)
+      const pats = new Map<LineTpl, DirPattern>();
+      for (const l of tpls) {
+        const k = l.stops.findIndex((s, i) => s[0] === a.id && i < l.stops.length - 1);
+        if (k >= 0) pats.set(l, { pi: LINES.indexOf(l), head: l.head, next: l.stops.slice(k + 1).map((s) => s[0]), day: tripsOf(l), total: 0 });
+      }
+      const deps: PatDeparture[] = [];
+      for (const { run, k } of runsFrom(a.id, t - 2 * 3_600_000, t + HORIZON_MS)) {
+        const p = run.line ? pats.get(run.line) : undefined;
+        if (!p) continue;
+        const d = departure(run, k);
+        if (d.est < t - 30_000 && !(d.cancelled && d.sched >= t - 30_000)) continue;
+        p.total++;
+        deps.push({ d, pi: p.pi });
+      }
+      deps.sort((x, y) => x.d.est - y.d.est || x.d.sched - y.d.sched);
+      return lineBoardOf({ area: a, op: a.op, mode: tpls[0]?.mode ?? a.modes[0] ?? 'bus', line: tpls[0]?.line ?? line, pats: [...pats.values()], deps, per, rtErrors, now: t });
     },
     async search(query, near) {
       // Même classement que le vrai cœur (core/search.ts : noms usuels, mot exact, mode, homonymes).

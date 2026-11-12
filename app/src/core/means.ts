@@ -1,7 +1,9 @@
 /**
  * 1.2.1 : textes partagés par les lunettes, le téléphone et Quai Web (docs/v1.2.1/PRD-1.2.1.md § 3 et § 5).
  *
- * - rideName / meansText : comment on voyage (« bus W + S1 », « IC + métro 2 »).
+ * - rideName / meansText : comment on voyage (« bus W + S1 », « IC + métro 2 ») ; 1.2.2 : bus de remplacement de la
+ *   SNCB (op sncb, ligne ou catégorie « BUS ») : « bus SNCB » dans les phrases (« bus SNCB + IC »), jamais « BUS » seul
+ *   (les colonnes étroites, aux lunettes, gardent leur code court).
  * - longestWalk : la plus longue marche d'un trajet (paliers de marche, § 1.1).
  * - walksMore : un trajet marche plus qu'un autre (plus longue marche plus longue, et de plus de 5 min).
  * - displayLabel : nom affiché d'une proposition. La première s'appelle « Moins de marche » quand une proposition
@@ -17,8 +19,17 @@ import { brusselsParts } from './util';
 const NB = ' ';
 const MODE_WORD: Record<string, string> = { bus: 'bus', tram: 'tram', metro: 'métro' };
 
-/** Nom court d'un véhicule : « IC », « S1 » (trains : la catégorie), « bus W », « tram 92 », « métro 2 ». */
+/** Bus de la SNCB (remplacement d'un train, numéroté d'après lui) : op sncb, mode bus ou ligne / catégorie « BUS ». */
+export function isSncbBus(l: Partial<Pick<Leg, 'op' | 'mode' | 'line' | 'cat'>>): boolean {
+  return l.op === 'sncb' && (l.mode === 'bus' || /^bus$/i.test(l.cat || l.line || ''));
+}
+
+/** Bus de remplacement de la SNCB dans une phrase (1.2.2). */
+export const SNCB_BUS_TEXT = 'bus SNCB';
+
+/** Nom court d'un véhicule : « IC », « S1 » (trains : la catégorie), « bus W », « tram 92 », « métro 2 », « bus SNCB ». */
 export function rideName(l: Pick<Leg, 'op' | 'mode' | 'line' | 'cat'>): string {
+  if (isSncbBus(l)) return SNCB_BUS_TEXT;
   if (l.op === 'sncb' || l.mode === 'train') return l.cat || l.line || 'train';
   const word = MODE_WORD[l.mode ?? 'bus'] ?? 'bus';
   return l.line ? `${word} ${l.line}` : word;

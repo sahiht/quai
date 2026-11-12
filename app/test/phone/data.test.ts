@@ -5,6 +5,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { dataScreen } from '../../src/phone/screens/data';
+import { APP_VERSION } from '../../src/version';
 import { defaults, harness, mount, SCENARIO, textOf, until } from './helpers';
 
 afterEach(() => document.body.replaceChildren());
@@ -13,10 +14,11 @@ const kv = (el: HTMLElement) => Object.fromEntries([...el.querySelectorAll('.kv'
 const addressCard = (el: HTMLElement) => [...el.querySelectorAll('section')].find((s) => textOf(s.querySelector('h2')) === 'Adresses')!;
 
 describe('écran Données', () => {
-  it('« Mises à jour » : ligne « Version de Quai   1.2.1 » (CA-M7.3, PRD-1.2.1 § 8)', async () => {
+  it('« Mises à jour » : « Version de Quai » (CA-M7.3) ; « Trajets vers tes favoris » (revue d’usage n° 5)', async () => {
     const hz = harness({ settings: defaults() });
     const el = mount(dataScreen(hz.ctx));
-    expect(kv(el)['Version de Quai']).toBe('1.2.1');
+    expect(kv(el)['Version de Quai']).toBe(APP_VERSION);
+    expect(Object.keys(kv(el))).toEqual(['Horaires officiels', 'Trajets vers tes favoris', 'Temps réel', 'Version de Quai']);
   });
 
   it('carte « Adresses » : services des trois Régions, « Disponible » puis « Indisponible » quand ils tombent', async () => {

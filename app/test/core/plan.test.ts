@@ -27,14 +27,14 @@ export function steps(j: Journey): string[] {
 }
 
 describe('plan : scénario 1, Maison → Bureau à 07:31', () => {
-  it('sans temps réel : marche 7, IC 07:42 voie 4, Bruxelles-Nord 08:40, T3, marche 9, arrivée 08:58 ; le direct ensuite', async () => {
+  it('sans temps réel : marche 7, IC 07:42 voie 4, Bruxelles-Nord 08:40, T3, marche 9, arrivée 08:58 ; puis le suivant', async () => {
     const { core, preset } = makeEnv({ now: '2026-11-10T07:31', scene: 'noRT' });
     const js = await core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, at('2026-11-10T07:31'), preset, MAISON);
     expect(js.length).toBeGreaterThanOrEqual(1);
     expect(js.length).toBeLessThanOrEqual(3);
     const j = js[0];
-    // 1.2.1 (le moins de marche d'abord) : même IC et même arrivée que le direct, mais le T3 depuis Bruxelles-Nord
-    // garde chaque marche sous les 10 min réglées (palier 0) ; le direct (12 min à pied, palier 1) suit
+    // 1.2.2 (PRD-1.2.2 § 7) : même IC et même arrivée que le direct ; le T3 depuis Bruxelles-Nord garde chaque marche
+    // sous les 10 min réglées (coût 08:59), le direct marche 12 min (2 min de trop, coût 09:04)
     expect(steps(j)).toEqual([
       '07:33 marche 7 min → Namur',
       '07:42 IC Namur → Bruxelles-Nord 08:40 voie 4',
@@ -49,11 +49,20 @@ describe('plan : scénario 1, Maison → Bureau à 07:31', () => {
     expect(j.rt).toBe(false);
     expect(j.legs[1]).toMatchObject({ cat: 'IC', num: '2112', head: { fr: 'Bruxelles-Midi' } });
     expect(j.legs[0].from.name.fr).toBe('Ma position');
-    // propositions étiquetées : la proposition 1, le direct « Sans changement » (même arrivée), puis le suivant
-    expect(js.map((x) => x.label)).toEqual(['short', 'none', 'next']);
-    expect(steps(js[1])).toEqual(['07:33 marche 7 min → Namur', '07:42 IC Namur → Bruxelles-Central 08:46 voie 4', '08:46 marche 12 min → Bureau']);
-    expect(hhmm(js[1].arr)).toBe('08:58');
-    expect(js[2].dep).toBeGreaterThan(js[0].dep);
+    // propositions étiquetées : la proposition 1 puis le suivant ; le direct marche plus au-delà de la marche maximale
+    // que la proposition 1 : jamais « Sans changement » (PRD-1.2.2 § 7.3)
+    expect(js.map((x) => x.label)).toEqual(['short', 'next']);
+    // le suivant : l'IC de 08:42 puis un tram jusqu'à la Bourse (lequel : garde-fous de core/routing/rank.ts)
+    expect(steps(js[1]).slice(0, 3)).toEqual([
+      '08:33 marche 7 min → Namur',
+      '08:42 IC Namur → Bruxelles-Nord 09:40 voie 5',
+      '09:40 marche 2 min → Gare du Nord',
+    ]);
+    expect(steps(js[1])[3]).toMatch(/^09:\d\d T[34] Gare du Nord → Bourse 09:\d\d$/);
+    expect(steps(js[1]).slice(4)).toEqual([
+      expect.stringMatching(/^09:\d\d marche 9 min → Bureau$/),
+    ]);
+    expect(js[1].dep).toBeGreaterThan(js[0].dep);
   });
 
   it('avec temps réel : IC 07:44 voie 6, Bruxelles-Nord 08:42, T3 08:44, arrivée 08:58, alerte de voie en tête', async () => {
@@ -100,7 +109,8 @@ describe('plan : scénario 1, Maison → Bureau à 07:31', () => {
       '14:25 IC Bruxelles-Central → Gand-Saint-Pierre 14:56 voie 6 +3',
       '14:40 IC Bruxelles-Central → Gand-Saint-Pierre 15:09 voie 4',
     ]);
-    expect(js.map((j) => j.label)).toEqual(['short', 'next', 'next']);
+    // « Le suivant » une seule fois (PRD-1.2.2 § 7.3) : le départ d'après est « Plus tard »
+    expect(js.map((j) => j.label)).toEqual(['short', 'next', 'later']);
     expect(hhmm(js[0].leaveAt)).toBe('14:08');
   });
 });
@@ -144,17 +154,22 @@ describe('plan : lignes urbaines', () => {
   });
 
   it('ligne urbaine pour rejoindre une gare trop loin à pied, puis le train', async () => {
-    // Depuis la Bourse, marche maximale 5 min : Bruxelles-Central est à 10 min (palier 1 : 5 min de plus que la
-    // préférence), le T4 rejoint Bruxelles-Midi pour le même IC vers Gand : même arrivée, il passe d'abord.
+    // Depuis la Bourse, marche maximale 5 min : Bruxelles-Central est à 10 min (5 min de trop, coût 14:54), le T4
+    // rejoint Bruxelles-Midi pour le même IC vers Gand (coût 14:40) : même arrivée, il passe d'abord.
     const { core, preset } = makeEnv({ now: '2026-11-10T13:30', scene: 'noRT' });
     const settings = withPlace({ ...preset, maxWalkMin: 5 }, 'gand', 'Gand', 51.0359, 3.7107);
     const bourse = { lat: 50.8483, lon: 4.3497 };
     const js = await core.plan({ type: 'here' }, { type: 'place', placeId: 'gand' }, at('2026-11-10T13:30'), settings, bourse);
     expect(steps(js[0])).toEqual(['14:04 T4 Bourse → Gare du Midi 14:09', '14:09 marche 1 min → Bruxelles-Midi', '14:14 IC Bruxelles-Midi → Gand-Saint-Pierre 14:39 voie 12']);
     expect(js[0]).toMatchObject({ label: 'short', transfers: 1 });
-    // la marche de 10 min jusqu'à Bruxelles-Central pour le même IC : sans changement, même arrivée (PRD-1.2 § 1.3)
-    expect(js[1]).toMatchObject({ label: 'none', reason: 'Sans changement\u00A0: à pied 10\u00A0min' });
-    expect(steps(js[1])).toEqual(['13:58 marche 10 min → Bruxelles-Central', '14:10 IC Bruxelles-Central → Gand-Saint-Pierre 14:39 voie 4']);
+    // 1.2.2 : la marche de 10 min jusqu'à Bruxelles-Central pour le même IC marche plus au-delà de la marche maximale
+    // que la proposition 1 : jamais « Sans changement » (PRD-1.2.2 § 7.3) ; puis le suivant
+    // le suivant : partir et arriver plus tard, par Bruxelles-Midi et l'IC vers Gand (garde-fous : core/routing/rank.ts)
+    expect(js[1]).toMatchObject({ label: 'next' });
+    expect(js[1].reason).toMatch(/^Le suivant\u00A0: /);
+    expect(js[1].dep).toBeGreaterThan(js[0].dep);
+    expect(js[1].arr).toBeGreaterThan(js[0].arr);
+    expect(steps(js[1]).at(-1)).toMatch(/^\d\d:\d\d IC Bruxelles-Midi → Gand-Saint-Pierre \d\d:\d\d voie 12$/);
   });
 });
 
@@ -172,13 +187,10 @@ describe('plan : régression « propositions en double »', () => {
       const js = await core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, at('2026-11-10T07:31'), preset, MAISON);
       expect(new Set(js.map(identity)).size).toBe(js.length);
       expect(js.every((j) => j.dep < at('2026-11-10T07:31') + 23 * 3_600_000)).toBe(true);
-      // 1.2.1 : un même train peut servir deux propositions distinctes (avec le T3 et direct), jamais deux fois le même
-      // trajet ; noRT : le direct « Sans changement » ; base : il arrive 2 min plus tard, l'IC 08:42 direct « Plus tard »
-      expect(js.map((j) => `${localDate(j.dep)} ${hhmm(j.legs[1].schedDep)} ${j.label}`)).toEqual(
-        scene === 'noRT'
-          ? ['2026-11-10 07:42 short', '2026-11-10 07:42 none', '2026-11-10 08:42 next']
-          : ['2026-11-10 07:42 short', '2026-11-10 08:42 next', '2026-11-10 08:42 later'],
-      );
+      // 1.2.2 : jamais deux fois le même trajet ; le direct (12 min à pied, au-delà de la marche maximale) n'est plus
+      // proposé et « Plus tard » ne part jamais avec « Le suivant » (PRD-1.2.2 § 7.3) : dans les deux scènes, la
+      // proposition 1 et le suivant
+      expect(js.map((j) => `${localDate(j.dep)} ${hhmm(j.legs[1].schedDep)} ${j.label}`)).toEqual(['2026-11-10 07:42 short', '2026-11-10 08:42 next']);
     }
   });
 });
@@ -221,7 +233,7 @@ describe('plan : régression « train pour aller à pied »', () => {
     expect([nb(s?.title), nb(s?.subtitle)]).toEqual(['Pour le bureau : à pied, 12 min', 'arrivée à 14:07']);
   });
 
-  it('jamais un véhicule plus lent que la marche directe', async () => {
+  it('plus lent que la marche directe : seulement pour marcher moins (PRD-1.2.2 § 7)', async () => {
     const { core, preset } = makeEnv({ now: '2026-11-10T12:10' });
     const cases: [number, number, number, number][] = [
       [50.86, 4.359, 50.8483, 4.3497], // gare du Nord → Bourse (19 min à pied)
@@ -235,8 +247,11 @@ describe('plan : régression « train pour aller à pied »', () => {
       const walk = walkMinutes(distanceM({ lat: a, lon: b }, { lat: c, lon: d }));
       const js = await core.plan({ type: 'here' }, { type: 'place', placeId: 'x' }, after, s, { lat: a, lon: b });
       expect(js.length, `${a},${b} → ${c},${d}`).toBeGreaterThan(0);
+      // 1.2.2 : plus de filtre « jamais plus lent que la marche seule » ; un trajet en véhicule qui arrive après la
+      // marche directe a une plus longue marche plus courte qu'elle
       for (const j of js) {
-        if (j.legs.some((l) => l.kind === 'ride')) expect(j.legs[j.legs.length - 1].schedArr, steps(j).join(' | ')).toBeLessThanOrEqual(after + walk * 60_000);
+        if (!j.legs.some((l) => l.kind === 'ride') || j.legs[j.legs.length - 1].schedArr <= after + walk * 60_000) continue;
+        expect(Math.max(...j.legs.map((l) => (l.kind === 'walk' ? (l.walkMin ?? 0) : 0))), steps(j).join(' | ')).toBeLessThan(walk);
       }
     }
   });

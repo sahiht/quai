@@ -6,6 +6,7 @@
  */
 import type { Names } from '../../../../shared/types';
 import type { Leg, Stopover } from '../api';
+import { isSncbBus } from '../means';
 import { indexDay, trainLeg } from '../trains';
 import type { Net, RRoute } from './network';
 import { trainTripOf } from './network';
@@ -77,13 +78,19 @@ function lineLeg(net: Net, r: RRoute, ride: RideRef): Leg | null {
   return leg;
 }
 
-/** Étape en véhicule d'un trajet trouvé. */
+/**
+ * Étape en véhicule d'un trajet trouvé. Bus de remplacement de la SNCB (fichier trains/, catégorie « BUS ») : un
+ * véhicule comme un autre pour le calcul (gares, correspondances de gare) ; l'étape dit mode « bus », comme les
+ * départs des gares (op sncb, ligne « BUS ») : « bus SNCB » dans les phrases (core/means.ts).
+ */
 export function rideLeg(net: Net, ride: RideRef): Leg | null {
   const r = net.routes[ride.route];
   if (r.src.kind === 'line') return lineLeg(net, r, ride);
   const t = trainTripOf(r, ride.trip);
   if (!t) return null;
-  return trainLeg({ day: indexDay(t.day.file), trip: t.ti, i: ride.bpos, k: ride.apos });
+  const leg = trainLeg({ day: indexDay(t.day.file), trip: t.ti, i: ride.bpos, k: ride.apos });
+  if (isSncbBus(leg)) leg.mode = 'bus';
+  return leg;
 }
 
 /** Étapes complètes (marches comprises) d'un trajet trouvé, aux horaires prévus. */

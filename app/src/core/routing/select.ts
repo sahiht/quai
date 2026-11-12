@@ -7,7 +7,9 @@
  * Rayons (PRD-1.2 § 1.2) : arrêts urbains jusqu'à 15 min à pied, gares jusqu'à 25 min, quel que soit le réglage.
  * Vague 3 : lignes du milieu (10 au plus) choisies par une estimation : lignes qui relient une zone en aval de L_O
  *           (ou en amont de L_D) à une gare d'où part un train direct vers le côté D (ou qui arrive du côté O),
- *           durées réelles des trains directs du fichier trains/.
+ *           durées réelles des trains directs du fichier trains/ ; en plus (PRD-1.2.2 § 7, correctif 2), les lignes
+ *           de métro dont une gare desservie est à 10 km au plus d'une extrémité (backboneLines : à Bruxelles, les
+ *           métros 1, 2, 5 et 6 de la STIB ; à Charleroi, celui du TEC), que les estimations ne prennent pas toujours.
  * Une génération à la fois : l'index doit être celui de meta.generatedAt (quand il le dit) et chaque fichier de
  * ligne celui que l'index annonce.
  */
@@ -199,6 +201,28 @@ export interface MiddleInput {
   day: TrainsDay | null;
   K?: number;
   urbanUrbanMax?: number;
+  /** Lignes déjà chargées par ailleurs (métros, backboneLines) : jamais comptées parmi les K. */
+  skip?: ReadonlySet<number>;
+}
+
+/**
+ * Lignes de métro (P.backboneModes) dont une gare desservie (LineIndex.stations : à 400 m au plus de la ligne) est à
+ * `radiusM` au plus d'une extrémité (PRD-1.2.2 § 7, correctif 2). Ceria → Braine-l'Alleud le samedi : le métro 5
+ * (ligne de Ceria) puis le métro 6 jusqu'à Bruxelles-Midi et le bus de la SNCB ; le métro 6 n'était chargé ni comme
+ * ligne d'une extrémité ni comme ligne du milieu.
+ */
+export function backboneLines(index: LineIndex, day: TrainsDay | null, ends: readonly Point[], radiusM: number = P.backboneKm * 1000): number[] {
+  if (!day) return [];
+  const backbone = index.lines.map((l) => P.backboneModes.includes(l?.[2]));
+  const at = new Map(day.stations.map((s) => [s.id, s]));
+  const out = new Set<number>();
+  for (const [id, lines] of Object.entries(index.stations)) {
+    if (!Array.isArray(lines) || !lines.some((li) => backbone[li])) continue;
+    const st = at.get(id);
+    if (!st || !ends.some((e) => distanceM(e, st) <= radiusM)) continue;
+    for (const li of lines) if (backbone[li]) out.add(li);
+  }
+  return [...out].sort((a, b) => a - b);
 }
 
 /**
@@ -259,7 +283,7 @@ export function middleLines(m: MiddleInput): number[] {
       }
     }
   }
-  const have = new Set(m.files.keys());
+  const have = new Set([...m.files.keys(), ...(m.skip ?? [])]);
   const candO = new Map<number, Est[]>();
   const candD = new Map<number, Est[]>();
   for (const v of eO.values()) for (const li of v.conn) if (!have.has(li)) (candO.get(li) ?? candO.set(li, []).get(li)!).push(v);

@@ -2,18 +2,33 @@
  * Textes en français affichés dans les lunettes (≤ 48 caractères après fit()).
  * Jamais de tiret cadratin.
  */
-import type { Mode, Names } from '../../../shared/types';
+import type { Mode, Names, Op } from '../../../shared/types';
 import type { Departure, Leg, NameLang } from './api';
+import { isSncbBus, SNCB_BUS_TEXT } from './means';
 import { brusselsParts, displayName, hhmm, lineLabel, localDate, minutesUntil } from './util';
 
 /** Espace insécable (devant « : ; ! ? » et entre un nombre et son unité). */
 export const NB = ' ';
 
-/** Libellé court d'un véhicule : catégorie du train (« IC ») ou ligne (« T3 », « M2 », « 232 »). */
-export function vehicleLabel(x: { mode?: Mode; line?: string; cat?: string }): string {
+/**
+ * Libellé d'un véhicule dans une phrase : catégorie du train (« IC ») ou ligne (« T3 », « M2 », « 232 ») ; 1.2.2 : bus
+ * de remplacement de la SNCB (core/means.ts) : « bus SNCB », jamais « BUS » seul. Les colonnes étroites des départs
+ * gardent le code court des données (Departure.line « BUS »).
+ */
+export function vehicleLabel(x: { op?: Op; mode?: Mode; line?: string; cat?: string }): string {
+  if (isSncbBus(x)) return SNCB_BUS_TEXT;
   if (x.cat) return x.cat;
   return lineLabel(x.mode ?? 'bus', x.line ?? '');
 }
+
+/** Le même en tête de phrase (alertes « ! Bus SNCB 07:42 supprimé ») : seul « bus SNCB » prend la majuscule. */
+export function vehicleLabelStart(x: { op?: Op; mode?: Mode; line?: string; cat?: string }): string {
+  const s = vehicleLabel(x);
+  return s === SNCB_BUS_TEXT ? `B${s.slice(1)}` : s;
+}
+
+/** Un véhicule de la SNCB qui roule sur des rails (pas un bus de remplacement) : heures prévues et voies. */
+const isTrain = (x: { op?: Op; mode?: Mode; line?: string; cat?: string }): boolean => x.mode === 'train' && !isSncbBus(x);
 
 /** Avant cette heure, un horaire du lendemain appartient encore à la nuit en cours : jamais « demain » (S6). */
 export const DAY_START_HOUR = 4;
@@ -158,23 +173,29 @@ export function shortAddress(label: string): string {
 /** Marque du dernier passage annoncé d'une ligne (STIB « Dernier passage »). */
 export const LAST_MARK = ', dernier';
 
-/** « IC 07:42, voie 4 », « IC 07:42 +2, voie 6 », « IC 07:42 supprimé », « T3 12:14 », « T3 23:58, dernier », « IC demain 07:42, voie 4 ». */
+/**
+ * « IC 07:42, voie 4 », « IC 07:42 +2, voie 6 », « IC 07:42 supprimé », « T3 12:14 », « T3 23:58, dernier », « IC demain
+ * 07:42, voie 4 » ; bus de remplacement de la SNCB : « bus SNCB 07:44 », comme un bus.
+ */
 export function rideSummary(l: Leg, now?: number): string {
   const label = vehicleLabel(l);
   const time = atDay(l.schedDep, now);
   if (l.cancelled) return `${label} ${time} supprimé`;
   const delay = (l.delayMin ?? 0) > 0 ? ` +${l.delayMin}` : '';
-  if (l.mode === 'train') {
+  if (isTrain(l)) {
     const p = l.newPlatform ?? l.platform;
     return `${label} ${time}${delay}${p ? `, voie ${p}` : ''}`;
   }
   return `${label} ${atDay(l.dep, now)}${l.last ? LAST_MARK : ''}`;
 }
 
-/** Départ en une ligne : « T3 Churchill 2 min », « 232 Vilvorde ~5 min », « T3 Churchill 4 min, dernier », « IC 12:22 +2, voie 9 ». */
+/**
+ * Départ en une ligne : « T3 Churchill 2 min », « 232 Vilvorde ~5 min », « T3 Churchill 4 min, dernier », « IC 12:22 +2,
+ * voie 9 » ; bus de remplacement de la SNCB : « bus SNCB Landen 5 min ».
+ */
 export function departureSummary(d: Departure, now: number, lang: NameLang, markPlanned: boolean): string {
-  const label = lineLabel(d.mode, d.line);
-  if (d.mode === 'train') {
+  const label = isSncbBus(d) ? SNCB_BUS_TEXT : lineLabel(d.mode, d.line);
+  if (isTrain(d)) {
     if (d.cancelled) return `${label} ${atDay(d.sched, now)} supprimé`;
     const p = d.newPlatform ?? d.platform;
     return `${label} ${atDay(d.sched, now)}${d.delayMin > 0 ? ` +${d.delayMin}` : ''}${p ? `, voie ${p}` : ''}`;

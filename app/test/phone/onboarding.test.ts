@@ -50,7 +50,8 @@ describe('étape 2 « Tes favoris » (S1, PRD-1.2 § 2.2)', () => {
     expect(el.querySelector<HTMLInputElement>('#s1-bureau')!.placeholder).toBe('Adresse de ton travail ou de ton école');
     const box = el.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
     expect(box.checked).toBe(true);
-    expect(textOf(box.closest('label'))).toBe('Me proposer le trajet vers le bureau le matin, et vers la maison le soir');
+    // revue d'usage n° 11 : plus de « proposer », le même créneau (Bureau le matin, Maison le soir)
+    expect(textOf(box.closest('label'))).toBe('Mettre le bureau en tête le matin, et la maison le soir');
     expect(() => button(el, 'Terminer')).not.toThrow();
     expect(() => button(el, 'Plus tard')).not.toThrow();
   });
@@ -72,8 +73,8 @@ describe('étape 2 « Tes favoris » (S1, PRD-1.2 § 2.2)', () => {
     // « Mes favoris » : les deux lieux, avec leur créneau
     const favs = mount(favoritesScreen(hz.ctx));
     expect([...favs.querySelectorAll('.list .row')].map((r) => `${textOf(r.querySelector('.t1'))} | ${textOf(r.querySelector('.t2'))} | ${textOf(r.querySelector('.t4'))}`)).toEqual([
-      'Bureau | Rue Neuve 1, 1000 Bruxelles | proposé le matin',
-      'Maison | Rue de Fer 25, 5000 Namur | proposé le soir',
+      'Bureau | Rue Neuve 1, 1000 Bruxelles | en tête le matin',
+      'Maison | Rue de Fer 25, 5000 Namur | en tête le soir',
     ]);
   });
 

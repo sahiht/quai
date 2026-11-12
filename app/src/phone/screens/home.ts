@@ -1,15 +1,18 @@
 /**
- * Accueil du téléphone (T1) : champ « Où vas-tu ? » qui ouvre la recherche, « Mes favoris » (lieux compris) avec
- * leur réponse courte et un bouton « Lunettes » (S8), réglages, état des données.
+ * Accueil du téléphone (T1) : champ « Où vas-tu ? » qui ouvre la recherche, « Mes favoris » (endroits et trajets) avec
+ * leur réponse courte et un bouton « Lunettes » (S8), puis « Gares » et « Bus, tram, métro » (PRD-1.2.2 § 4),
+ * réglages (« Trajets » sous « Position et langue », revue d'usage n° 9), état des données.
  */
-import type { Core, Favorite, FavoriteAnswer, Settings } from '../../core/api';
+import type { Core, FavoriteAnswer, Settings } from '../../core/api';
 import { asTrip, favoriteTitle } from '../../core/favorites';
 import type { PhoneCtx } from '../app';
 import { h, icon, ICON } from '../dom';
-import { glassesButton, showBoard, showTrip } from '../glasses-link';
+import { glassesButton, showTrip } from '../glasses-link';
 import { catchable } from '../../glasses/format';
-import { favoriteName, shortAnswer, T, typo } from '../text';
+import { shortAnswer, T, tripsSummary, typo } from '../text';
 import { listRow, messageHub } from '../ui';
+import { shownFavorites, type ShownFavorite } from './favorites';
+import { linesSection, stationsSection, type PickKind } from './picks';
 
 const LANG_TEXT = { fr: 'Noms en français', nl: 'Noms en néerlandais', local: 'Noms comme sur place' } as const;
 
@@ -43,17 +46,18 @@ export function dataSubtitle(ctx: PhoneCtx): string {
   return 'Tout est à jour';
 }
 
-/** Favoris dans l'ordre des lunettes (ordre intelligent du cœur, ou « Dans mon ordre »). */
-export function orderedFavorites(core: Core | null, settings: Settings, here: { lat: number; lon: number } | null): Favorite[] {
-  if (!core) return settings.favorites;
+/** Favoris dans l'ordre des lunettes (ordre intelligent du cœur, ou « Dans mon ordre ») : endroits et trajets. */
+export function orderedFavorites(core: Core | null, settings: Settings, here: { lat: number; lon: number } | null): ShownFavorite[] {
+  const all = shownFavorites(settings.favorites);
+  if (!core) return all;
   try {
     const ranks = core.orderFavorites(here, settings, lastAnswers);
-    const byId = new Map(settings.favorites.map((f) => [f.id, f]));
-    const out = ranks.map((r) => byId.get(r.favoriteId)).filter((f): f is Favorite => !!f);
-    for (const f of settings.favorites) if (!out.includes(f)) out.push(f);
+    const byId = new Map(all.map((f) => [f.id, f]));
+    const out = ranks.map((r) => byId.get(r.favoriteId)).filter((f): f is ShownFavorite => !!f);
+    for (const f of all) if (!out.includes(f)) out.push(f);
     return out;
   } catch {
-    return settings.favorites;
+    return all;
   }
 }
 
@@ -68,7 +72,7 @@ function favoritesSection(ctx: PhoneCtx, answered?: () => void): HTMLElement {
   const here = fix ? { lat: fix.lat, lon: fix.lon } : null;
   const list = h('ul', { class: 'list box fav-list' });
   const section = h('section', { class: 'home-favs', 'aria-labelledby': 'h-favs' }, h('h2', { id: 'h-favs' }, T.myFavs), list, h('a', { class: 'more-link', href: '#/favoris' }, T.manageFavs));
-  if (!s.favorites.length) {
+  if (!shownFavorites(s.favorites).length) {
     list.appendChild(h('li', { class: 'small empty-row' }, T.noFav));
     return section;
   }
@@ -76,13 +80,12 @@ function favoritesSection(ctx: PhoneCtx, answered?: () => void): HTMLElement {
   const order = orderedFavorites(ctx.coreNow(), s, here);
   const rows = new Map<string, { name: HTMLElement; answer: HTMLElement }>();
   for (const f of order) {
-    const name = h('span', { class: 't1' }, favoriteName(f, s, lastAnswers.get(f.id)));
+    const name = h('span', { class: 't1' }, favoriteTitle(f, s));
     const answer = h('span', { class: 't2 answer' }, typo(shortAnswer(lastAnswers.get(f.id), ctx.clock.now(), s)));
     rows.set(f.id, { name, answer });
-    const { button, message } = glassesButton(hub, `Afficher ${favoriteName(f, s, lastAnswers.get(f.id))} dans les lunettes`, async () => {
+    const { button, message } = glassesButton(hub, `Afficher ${favoriteTitle(f, s)} dans les lunettes`, async () => {
       const st = ctx.settings.get();
-      const fav = st.favorites.find((x) => x.id === f.id) ?? f;
-      if (fav.kind === 'stop') return showBoard(ctx, fav.areaId, fav.filter);
+      const fav = shownFavorites(st.favorites).find((x) => x.id === f.id) ?? f;
       // Jamais une réponse ancienne (retour sur l'accueil plus tard) : les lunettes suivraient un train parti.
       let a = lastAnswers.get(fav.id);
       if (!reusable(a, ctx.clock.now())) {
@@ -112,7 +115,7 @@ function favoritesSection(ctx: PhoneCtx, answered?: () => void): HTMLElement {
       await Promise.all(
         order.map(async (f) => {
           const st = ctx.settings.get();
-          const fav = st.favorites.find((x) => x.id === f.id);
+          const fav = shownFavorites(st.favorites).find((x) => x.id === f.id);
           if (!fav) return;
           let a: FavoriteAnswer;
           try {
@@ -121,14 +124,9 @@ function favoritesSection(ctx: PhoneCtx, answered?: () => void): HTMLElement {
             return;
           }
           lastAnswers.set(fav.id, a);
-          // Zone fusionnée (M8) : le favori suit la zone retrouvée.
-          if (fav.kind === 'stop' && a.movedTo && a.movedTo.id !== fav.areaId) {
-            const m = a.movedTo;
-            void ctx.settings.update((x) => ({ ...x, favorites: x.favorites.map((g) => (g.id === fav.id && g.kind === 'stop' ? { ...g, areaId: m.id, name: m.n, lat: m.lat, lon: m.lon } : g)) }));
-          }
           const row = rows.get(fav.id);
           if (!row) return;
-          row.name.textContent = favoriteName(fav, st, a);
+          row.name.textContent = favoriteTitle(fav, st);
           row.answer.textContent = typo(shortAnswer(a, ctx.clock.now(), st));
         }),
       );
@@ -147,10 +145,14 @@ function favoritesSection(ctx: PhoneCtx, answered?: () => void): HTMLElement {
   return section;
 }
 
-export function homeScreen(ctx: PhoneCtx): HTMLElement {
+/**
+ * Accueil. `focus` (#/gares, #/lignes, PRD-1.2.2 § 1.3 et § 4) : le titre de cette section reçoit le curseur et la
+ * page la montre.
+ */
+export function homeScreen(ctx: PhoneCtx, _sub: string[] = [], opts: { focus?: PickKind } = {}): HTMLElement {
   const s = ctx.settings.get();
   const fresh = ctx.freshness();
-  const n = s.favorites.length;
+  const n = shownFavorites(s.favorites).length;
   const dataRow = listRow({ icon: icon('data'), title: 'Données', sub: dataSubtitle(ctx), onClick: () => ctx.go('#/donnees') });
   // Bannière « Nouveau » (PRD-1.2.1 § 6) : une ligne par nouveauté, « OK » dessous.
   const banner = ctx.news?.visible()
@@ -190,11 +192,14 @@ export function homeScreen(ctx: PhoneCtx): HTMLElement {
       const sub = dataRow.querySelector('.t2');
       if (sub) sub.textContent = dataSubtitle(ctx);
     }),
+    stationsSection(ctx, opts.focus === 'stations'),
+    linesSection(ctx, opts.focus === 'lines'),
     h('h2', null, 'Réglages'),
     h(
       'ul',
       { class: 'list box', style: 'background:#fff' },
       listRow({ icon: icon('lang'), title: 'Position et langue', sub: LANG_TEXT[s.lang], onClick: () => ctx.go('#/bienvenue') }),
+      listRow({ icon: icon('walker'), title: T.trips, sub: typo(tripsSummary(s.maxWalkMin, s.alerts.leaveBeforeMin)), onClick: () => ctx.go('#/trajets') }),
       listRow({ icon: icon('trip'), title: T.myFavs, sub: n ? `${n} favori${n > 1 ? 's' : ''}` : 'Aucun favori', onClick: () => ctx.go('#/favoris') }),
       listRow({ icon: icon('display'), title: 'Affichage', sub: `${s.display.depsPerStop} départs par arrêt, rayon ${typo(`${s.display.radiusM} m`)}`, onClick: () => ctx.go('#/affichage') }),
       listRow({ icon: icon('alert'), title: 'Alertes', sub: alertsSummary(s.alerts), onClick: () => ctx.go('#/alertes') }),

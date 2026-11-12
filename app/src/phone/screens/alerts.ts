@@ -1,9 +1,14 @@
-/** Réglage 5 sur 6 : alertes, avec exemple dans les lunettes. Maquette Config5. */
+/**
+ * Réglage 5 sur 6 : alertes, avec exemple dans les lunettes. Maquette Config5. 1.2.2 (revue d'usage n° 9) : les
+ * alertes seulement ; la marge avant de partir est dans « Trajets » (#/trajets). Travaux et déviations : sur les
+ * gares et les lignes choisies (revue d'usage n° 4).
+ */
 import type { Settings } from '../../core/api';
 import { LIMITS } from '../../settings';
 import { header, type PhoneCtx } from '../app';
 import { h } from '../dom';
 import { alertsPreview } from '../samples';
+import { T } from '../text';
 import { glassesPreview, stepper, switchRow } from '../ui';
 
 export function alertsScreen(ctx: PhoneCtx): HTMLElement {
@@ -16,9 +21,8 @@ export function alertsScreen(ctx: PhoneCtx): HTMLElement {
     void ctx.settings.update((x) => ({ ...x, alerts: fn({ ...x.alerts }) })).then(refresh);
   };
   const delaySub = (v: number): string => `à partir de ${v} min`;
-  const leaveSub = (v: number): string => `${v} min avant l’heure conseillée`;
   const delayRow = switchRow({ label: 'Retard', sub: delaySub(s.alerts.delayMin), checked: s.alerts.delay, onChange: (v) => set((a) => ({ ...a, delay: v })) });
-  const leaveRow = switchRow({ label: 'Heure de partir à pied', sub: leaveSub(s.alerts.leaveBeforeMin), checked: s.alerts.leave, onChange: (v) => set((a) => ({ ...a, leave: v })) });
+  const leaveRow = switchRow({ label: T.leaveAlert, sub: T.leaveAlertSub, checked: s.alerts.leave, onChange: (v) => set((a) => ({ ...a, leave: v })) });
   const subOf = (row: HTMLElement): HTMLElement | null => row.querySelector('.c2');
   refresh();
   return h(
@@ -46,21 +50,7 @@ export function alertsScreen(ctx: PhoneCtx): HTMLElement {
       }),
       h('div', { class: 'bordered' }, switchRow({ label: 'Train, tram ou bus supprimé', checked: s.alerts.cancel, onChange: (v) => set((a) => ({ ...a, cancel: v })) })),
       h('div', { class: 'bordered' }, leaveRow),
-      stepper({
-        label: 'Marge avant de partir',
-        value: s.alerts.leaveBeforeMin,
-        min: LIMITS.leaveBeforeMin[0],
-        max: LIMITS.leaveBeforeMin[1],
-        format: (v) => `${v} min`,
-        less: 'Marge plus courte',
-        more: 'Marge plus longue',
-        onChange: (v) => {
-          const el = subOf(leaveRow);
-          if (el) el.textContent = leaveSub(v);
-          set((a) => ({ ...a, leaveBeforeMin: v }));
-        },
-      }),
-      h('div', { class: 'bordered' }, switchRow({ label: 'Travaux et déviations', sub: 'sur tes lignes favorites', checked: s.alerts.works, onChange: (v) => set((a) => ({ ...a, works: v })) })),
+      h('div', { class: 'bordered' }, switchRow({ label: T.works, sub: T.worksSub, checked: s.alerts.works, onChange: (v) => set((a) => ({ ...a, works: v })) })),
     ),
     previewSlot,
   );

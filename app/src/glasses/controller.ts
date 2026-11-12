@@ -6,8 +6,14 @@
  * 1.1 (PRD M1, M2, M6) : favoris « réponse directe » (ordre intelligent calculé à chaque ouverture et figé pendant
  * l'affichage, réponses rafraîchies toutes les 30 s) ; « Trajet proposé » page par page ; trajet suivi et trajet en
  * cours (clé KV quai.trip, reprise à la réouverture) ; retrait de favori annulable ; GlassesApi pour le téléphone.
+ *
+ * 1.2.2 (docs/v1.2.2/PRD-1.2.2.md, REVUE-USAGE.md) : rubriques « Gares » et « Bus, tram, métro » (accueil, écrans,
+ * détail d'une ligne) ; « Aller à… » rejoint « Favoris » ; ★ des départs : une gare dans « Gares », une ligne de
+ * l'arrêt dans « Bus, tram, métro » (plus aucun arrêt favori créé) ; un trajet n'est suivi que sur demande (marque
+ * `explicit` dans quai.trip) ; ouverture d'office à moins de 300 m des gares et lignes `near`.
  */
 import type {
+  Board,
   Core,
   Departure,
   Endpoint,
@@ -16,33 +22,36 @@ import type {
   FavoritePlace,
   FavoriteRank,
   FavoriteStop,
-  FavoriteTrip,
   GlassesApi,
   Journey,
   LatLon,
+  LineBoard,
   LineFilter,
+  LinePick,
   Meta,
   NameLang,
   NearbyItem,
   PlanResult,
   Settings,
+  StationPick,
   TripRequest,
 } from '../core/api';
 import { LABEL_TEXT, labelOf } from '../core/api';
 import { MESSAGES, QuaiError } from '../core/errors';
-import { asTrip, endpointPoint, favoriteTitle, placeOf, placesOf } from '../core/favorites';
+import { asTrip, endpointPoint, favoriteTitle, placeOf } from '../core/favorites';
 import { shortAddress } from '../core/text';
 import { displayName, distanceM, mainMode } from '../core/util';
+import type { Mode } from '../../../shared/types';
 import type { Clock } from '../platform/clock';
 import { deadline } from '../platform/queue';
 import type { Fix, Platform } from '../platform/types';
 import { LIMITS, newId, type SettingsStore } from '../settings';
 import { APP_VERSION, compareVersions } from '../version';
-import { HINTS, NB, atTitle, catchable, lowerFirst, runningNext, shownMessage, towards, tripShort } from './format';
+import { HINTS, NB, SECTION, atTitle, catchable, departureRightText, lowerFirst, planHomeText, runningNext, shownMessage, towards, tripShort, upcoming } from './format';
 import { DEBOUNCE, GestureFilter, type HubSignal } from './gestures';
 import { geometry, layoutPage, shapeKey } from './layout';
-import { current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replaceAt, reset, setSelection, type Gesture, type NavFrame, type NavState } from './nav';
-import type { AreaRef, GlassesView, Intent, Item, OthersRoute, PageSpec, Route, StepsRoute } from './types';
+import { current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replace, replaceAt, reset, setSelection, type Gesture, type NavFrame, type NavState } from './nav';
+import type { AreaRef, GlassesView, Intent, Item, KeepLineRoute, LineRoute, OthersRoute, PageSpec, Route, StepsRoute } from './types';
 import {
   alreadyThereView,
   arrivalView,
@@ -51,8 +60,15 @@ import {
   favoriteStopRoute,
   favoritesView,
   firstRunView,
+  followedView,
   HOME_FAVORITES,
   homeView,
+  isStationBoard,
+  keepLineTitle,
+  keepLineView,
+  linePickTitle,
+  linesView,
+  lineView,
   loadingView,
   messageView,
   NEWS_TITLE,
@@ -63,15 +79,18 @@ import {
   nearbyView,
   othersTitle,
   othersView,
-  placeSummary,
-  placesView,
   recentKey,
   recentShown,
+  stationsView,
   stepsMessageView,
   stepsPage,
   trainView,
   type FavoriteEntry,
   type HomeData,
+  type LineRow,
+  type SectionNext,
+  type StationRow,
+  type StopLine,
   type ViewCtx,
 } from './views';
 
@@ -116,8 +135,11 @@ export const WEB_DEBOUNCE: typeof DEBOUNCE = {
 /** Trajet suivi et en cours (DECISIONS Q7) : clé du stockage de l'appli, écrite par les lunettes. */
 export const TRIP_KEY = 'quai.trip';
 
-/** Message de nouveautés « Quai 1.2.1 » : montré une fois à qui avait vu une version antérieure (PRD-1.2.1 § 6). */
-export const NEWS_SINCE = '1.2.1';
+/**
+ * Message de nouveautés « Quai 1.2.2 » : montré une fois à qui avait vu une version antérieure (PRD-1.2.2 § 9 ; 1.2.1,
+ * 1.2.0 ou 1.1), jamais après une installation neuve. Ses lignes : NEWS_LINES (views.ts).
+ */
+export const NEWS_SINCE = '1.2.2';
 
 /**
  * Date du premier lancement (PRD-1.2.1 § 4.6), en ms : clé du stockage de l'appli sur le téléphone, hors du schéma des
@@ -129,12 +151,22 @@ export const HOME_HELP_MS = 7 * 86_400_000;
 
 const REFRESH_MS = 30_000;
 const LOCATION_MS = 30_000;
-/** Déjà sur place pour un lieu de « Aller à… » (1.0 : « ici », « Tu es déjà à la maison. »). */
+/** Déjà sur place pour une adresse récente (1.0 : « ici », « Tu es déjà à la maison. »). */
 const SAME_PLACE_M = 100;
+/** 1.2.2 (REVUE-USAGE n° 4) : gare ou ligne `near` ouverte d'office à moins de 300 m, comme un arrêt favori de la 1.2.1. */
+const NEAR_OPEN_M = 300;
+/** 1.2.2 (REVUE-USAGE n° 10) : « Autour de moi » vide : l'arrêt le plus proche, cherché jusqu'à 3 km. */
+const NEAREST_M = 3000;
+/** 1.2.2 (PRD-1.2.2 § 4) : la même limite que le téléphone, celle des réglages (LIMITS de settings.ts). */
+const PICK_MAX = { stations: LIMITS.stations, lines: LIMITS.lines } as const;
+/** 1.2.2 : passages demandés par sens dans « Bus, tram, métro » (2 montrés, un de réserve entre deux rafraîchissements). */
+const LINES_PER_DIRECTION = 3;
+/** 1.2.2 : passages par sens dans le détail d'une ligne (4 montrés, PRD-1.2.2 § 3). */
+const LINE_DETAIL_PER_DIRECTION = 5;
 /** « ★ garder ce trajet » : un lieu à 50 m au plus d'un lieu déjà gardé est le même. */
 const SAME_SPOT_M = 50;
 const TOAST_MS = 2_600;
-/** Retrait d'un favori : « Toucher encore : annuler » pendant 5 s (M6.1). */
+/** Retrait d'une gare ou d'une ligne (1.2.1 : d'un favori) : « Toucher encore : annuler » pendant 5 s (M6.1). */
 const UNDO_MS = 5_000;
 /** Message de reprise d'un trajet en cours (M6.5). */
 const RESUME_MS = 3_000;
@@ -162,6 +194,11 @@ type Loaded = { ok: true; value: unknown; at: number } | { ok: false; error: str
 /** Trajet suivi (M2), persistant (clé quai.trip) et inclus dans l'état d'arrière-plan. */
 export interface FollowedTrip {
   v: 1;
+  /**
+   * 1.2.2 (PRD-1.2.2 § 6) : suivi sur demande (toucher « Suivre ce trajet », bouton « Lunettes » du téléphone). Un
+   * trajet gardé par la 1.2.1 n'a pas cette marque : il peut venir d'un favori seulement ouvert, il n'est pas repris.
+   */
+  explicit: true;
   /** Trajet suivi, dernière version rafraîchie. */
   journey: Journey;
   /** « Vers le bureau ». */
@@ -219,14 +256,17 @@ function relabel(j: Journey): Journey {
   return out;
 }
 
-/** Lecture défensive de quai.trip (gardé par la 1.1 : étiquettes relues par labelOf). */
+/**
+ * Lecture défensive de quai.trip (gardé par la 1.1 : étiquettes relues par labelOf). 1.2.2 : sans la marque `explicit`
+ * (trajet gardé par la 1.2.1 ou avant), rien n'est repris.
+ */
 export function parseTrip(raw: unknown): FollowedTrip | null {
   try {
     const x = typeof raw === 'string' ? (raw ? JSON.parse(raw) : null) : raw;
     if (!x || typeof x !== 'object') return null;
     const t = x as FollowedTrip;
     const okJourney = (j: unknown): j is Journey => !!j && typeof j === 'object' && Array.isArray((j as Journey).legs) && (j as Journey).legs.length > 0 && Number.isFinite((j as Journey).arr) && typeof (j as Journey).id === 'string';
-    if (t.v !== 1 || !okJourney(t.journey) || typeof t.title !== 'string' || !Number.isFinite(t.leaveAt0)) return null;
+    if (t.v !== 1 || t.explicit !== true || !okJourney(t.journey) || typeof t.title !== 'string' || !Number.isFinite(t.leaveAt0)) return null;
     const journeys = (Array.isArray(t.journeys) ? t.journeys.filter(okJourney) : []).map(relabel);
     const index = journeys.findIndex((j) => j.id === t.journey.id);
     return {
@@ -283,8 +323,10 @@ export function routeKey(r: Route): string {
   switch (r.screen) {
     case 'board':
       return `board:${r.areaId}:${JSON.stringify(r.filter ?? [])}`;
-    case 'favorites':
-      return `favorites:${(r.exclude ?? []).join(',')}`;
+    case 'line':
+      return `line:${r.areaId}:${r.line}`;
+    case 'keepLine':
+      return `keepLine:${r.areaId}`;
     case 'steps': {
       // 1.2.1 : une proposition ouverte depuis « Autres trajets » a sa propre clé (temps réel, messages).
       const i = r.index ?? 0;
@@ -303,12 +345,12 @@ export function routeKey(r: Route): string {
   }
 }
 
-const LIVE: ReadonlySet<Route['screen']> = new Set(['home', 'nearby', 'board', 'favorites', 'steps', 'others', 'train', 'arrival']);
-const USES_POSITION: ReadonlySet<string> = new Set(['nearby', 'places']);
+const LIVE: ReadonlySet<Route['screen']> = new Set(['home', 'nearby', 'board', 'favorites', 'stations', 'lines', 'line', 'steps', 'others', 'train', 'arrival']);
+const USES_POSITION: ReadonlySet<string> = new Set(['nearby']);
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e)) || 'Erreur inconnue';
 
-/** Erreur au lancement (M8.6) : « Horaires injoignables : nouvel essai dans 30 s », sauf message précis du cœur. */
+/** Erreur au lancement (M8.6) : « Pas de connexion aux horaires : nouvel essai dans 30 s », sauf message précis du cœur. */
 function initErrorText(e: unknown): string {
   return e instanceof QuaiError ? e.message : MESSAGES.dataUnreachable;
 }
@@ -368,14 +410,28 @@ export class GlassesController implements GlassesApi {
   private trip: FollowedTrip | null = null;
   private tripLoaded = false;
   private tripSaved = '';
-  /** Favori retiré depuis les départs, rétablissable pendant 5 s (M6.1). */
-  private undo: { fav: Favorite; index: number; until: number; key: string } | null = null;
+  /**
+   * 1.2.2 : gare ou ligne retirée par ★ (départs, « garder une ligne »), rétablissable à l'identique pendant 5 s (M6.1).
+   * `key` : écran où elle a été retirée ; `line` : la ligne touchée (« garder une ligne »).
+   */
+  private undo: { key: string; until: number; index: number; station?: StationPick; pick?: LinePick; line?: string } | null = null;
   /** Route pour laquelle l'entrée dans l'écran a été traitée (ordre figé, annulation). */
   private entered: Route | null = null;
+  /** 1.2.2 : réponses des adresses récentes de « Favoris » (clé recentKey), et heure du calcul. */
+  private recents = new Map<string, { result: PlanResult | null; at: number }>();
+  private recentsLoading: Promise<void> | null = null;
+  /**
+   * 1.2.2 (REVUE-USAGE n° 6) : prochain départ de la gare et de la ligne choisies les plus proches (droite de l'accueil) ;
+   * `id` : élément choisi ; une requête par rubrique et par rafraîchissement.
+   */
+  private sections: { stations?: SectionData; lines?: SectionData } = {};
+  private sectionsLoading: Promise<void> | null = null;
+  private picksSig = '';
 
   constructor(private d: ControllerDeps) {
     this.filter = new GestureFilter(d.web ? WEB_DEBOUNCE : DEBOUNCE);
     this.favSig = favSignature(d.settings.get());
+    this.picksSig = picksSignature(d.settings.get());
     d.settings.subscribe(() => this.onSettingsChanged());
   }
 
@@ -434,9 +490,9 @@ export class GlassesController implements GlassesApi {
   }
 
   /**
-   * Écran d'erreur du lancement encore affiché (« Horaires injoignables… »). Le téléphone appelle aussi ensureInit() :
-   * s'il réussit le premier, initError est effacé mais les lunettes restent sur l'erreur ; le nouvel essai (30 s,
-   * toucher) doit alors quand même terminer le démarrage.
+   * Écran d'erreur du lancement encore affiché (« Pas de connexion aux horaires… »). Le téléphone appelle aussi
+   * ensureInit() : s'il réussit le premier, initError est effacé mais les lunettes restent sur l'erreur ; le nouvel
+   * essai (30 s, toucher) doit alors quand même terminer le démarrage.
    */
   private atLaunchError(): boolean {
     const r = current(this.nav).route;
@@ -480,9 +536,9 @@ export class GlassesController implements GlassesApi {
   }
 
   /**
-   * Écran d'ouverture : bienvenue (premier lancement), message « Quai 1.2.1 » (une fois après la mise à jour depuis une
-   * version antérieure, jamais après une installation neuve ; ligne des lieux en plus depuis la 1.0 ou la 1.1), trajet
-   * en cours repris (M6.5), sinon l'accueil (et le favori ouvert d'office selon les réglages).
+   * Écran d'ouverture : bienvenue (premier lancement), message « Quai 1.2.2 » (une fois après la mise à jour depuis une
+   * version antérieure, jamais après une installation neuve), trajet en cours repris (M6.5), sinon l'accueil (et le
+   * favori, la gare ou la ligne ouverts d'office selon les réglages).
    */
   private async openingNav(): Promise<{ nav: NavState; resumed: boolean }> {
     const s = this.settings();
@@ -498,7 +554,7 @@ export class GlassesController implements GlassesApi {
     return { nav: this.homeNav(), resumed: false };
   }
 
-  /** Écrit la version vue (« Quai 1.2.1 » affiché une seule fois ; nouvelle installation : sans rien afficher). */
+  /** Écrit la version vue (« Quai 1.2.2 » affiché une seule fois ; nouvelle installation : sans rien afficher). */
   private async markSeen(): Promise<void> {
     if (this.settings().seenVersion === APP_VERSION) return;
     await this.d.settings.update((x) => ({ ...x, seenVersion: APP_VERSION }));
@@ -532,7 +588,14 @@ export class GlassesController implements GlassesApi {
     return this.firstUse === null || this.d.clock.now() - this.firstUse < HOME_HELP_MS;
   }
 
-  /** Accueil, avec le favori ouvert d'office : « à moins de 300 m » (M1.7) ou « Toujours ouvrir le favori en tête ». */
+  /**
+   * Accueil, avec un écran ouvert d'office : « Toujours ouvrir le favori en tête », ou ce qui est réglé « à moins de
+   * 300 m » (M1.7) : un trajet fixe dont le départ est là, et (1.2.2, REVUE-USAGE n° 4) une gare ou une ligne `near`
+   * (créneau « près » d'un arrêt favori de la 1.2.1, migré) : les départs de la gare ; « Bus, tram, métro », le curseur
+   * sur la ligne (les autres lignes gardées à cet arrêt juste à côté : le tram 3 et le tram 4 d'un même favori de la
+   * 1.2.1) ; les départs d'un arrêt « toutes les lignes ». Le plus proche l'emporte (à égalité : favoris, gares, puis
+   * lignes, dans leur ordre). Rien n'est suivi (PRD-1.2.2 § 6).
+   */
   private homeNav(): NavState {
     const s = this.settings();
     const home: Route = { screen: 'home' };
@@ -542,29 +605,34 @@ export class GlassesController implements GlassesApi {
       const f = order.map((id) => byId.get(id)).find(Boolean);
       if (f) return reset([home, this.favoriteRoute(f)]);
     }
-    if (s.display.opening === 'suggest') {
-      const here = this.hereLL();
-      const near = here
-        ? order
-            .map((id) => byId.get(id))
-            .find((f): f is Favorite => {
-              if (!f || f.propose !== 'near') return false;
-              // Un lieu part de « Ma position » : jamais « à moins de 300 m » de son départ.
-              const p = f.kind === 'stop' ? { lat: f.lat, lon: f.lon } : endpointPoint(asTrip(f).from, s);
-              return !!p && distanceM(here, p) <= 300;
-            })
-        : undefined;
-      if (near) return reset([home, this.favoriteRoute(near)]);
+    const here = s.display.opening === 'suggest' ? this.hereLL() : null;
+    if (here) {
+      let best: { d: number; route: () => Route } | null = null;
+      const offer = (p: LatLon | null | undefined, route: () => Route): void => {
+        const d = p ? distanceM(here, p) : Infinity;
+        if (d <= NEAR_OPEN_M && (!best || d < best.d)) best = { d, route };
+      };
+      for (const f of order.map((id) => byId.get(id))) {
+        // Un lieu part de « Ma position » : jamais « à moins de 300 m » de son départ.
+        if (f?.propose === 'near') offer(f.kind === 'stop' ? f : endpointPoint(asTrip(f).from, s), () => this.favoriteRoute(f));
+      }
+      for (const p of s.stations) if (p.near) offer(p, () => ({ screen: 'board', areaId: p.areaId, name: p.name }));
+      for (const p of s.lines) if (p.near) offer(p, (): Route => (p.line ? { screen: 'lines', focus: p.id } : { screen: 'board', areaId: p.areaId, name: p.name }));
+      const chosen = best as { d: number; route: () => Route } | null;
+      if (chosen) return reset([home, chosen.route()]);
     }
     return initNav(home);
   }
 
-  /** Écran d'un favori ouvert d'office : départs de l'arrêt, ou étapes du trajet ou du lieu (calculées sur place). */
+  /**
+   * Écran d'un favori ouvert d'office : étapes du trajet ou du lieu (calculées sur place, pas suivies : PRD-1.2.2 § 6),
+   * ou départs d'un arrêt favori (réglages d'avant la 1.2.2).
+   */
   private favoriteRoute(f: Favorite): Route {
     if (f.kind === 'stop') return favoriteStopRoute(f);
     const s = this.settings();
     const { from, to } = asTrip(f);
-    return { screen: 'steps', key: this.newKey(), label: '', title: favoriteTitle(f, s), from, to, favoriteId: f.id, follow: 'open' };
+    return { screen: 'steps', key: this.newKey(), label: '', title: favoriteTitle(f, s), from, to, favoriteId: f.id };
   }
 
   stop(): void {
@@ -665,7 +733,8 @@ export class GlassesController implements GlassesApi {
   private async runIntent(i: Intent): Promise<void> {
     switch (i.kind) {
       case 'open':
-        this.nav = push(this.nav, i.route);
+        // 1.2.2 : le détail du véhicule ouvert depuis « Ne plus suivre » prend sa place (double toucher : les étapes).
+        this.nav = current(this.nav).route.screen === 'followed' ? replace(this.nav, i.route) : push(this.nav, i.route);
         await this.onRouteChanged();
         return;
       case 'openFavorite':
@@ -685,6 +754,9 @@ export class GlassesController implements GlassesApi {
       case 'follow':
         this.followShown();
         return;
+      case 'unfollow':
+        await this.unfollow();
+        return;
       case 'toast':
         this.showToast(i.text);
         return;
@@ -692,8 +764,11 @@ export class GlassesController implements GlassesApi {
         if (this.d.openPhone) this.d.openPhone(i.hash);
         else this.showToast(i.text);
         return;
-      case 'toggleFavoriteStop':
-        await this.toggleFavoriteStop();
+      case 'toggleStation':
+        await this.toggleStation();
+        return;
+      case 'toggleLine':
+        await this.toggleLine(i.line, i.mode);
         return;
       case 'saveTrip':
         await this.saveTrip();
@@ -767,9 +842,16 @@ export class GlassesController implements GlassesApi {
     const f = current(this.nav);
     if (this.homeOrder && f.route.screen === 'home' && f.fresh) this.homeLast = this.computeRanking().last;
     const { order, last } = this.homeOrder ? { order: this.homeOrder, last: this.homeLast } : this.computeRanking();
+    // 1.2.2 (REVUE-USAGE n° 1) : le favori du trajet en cours n'est pas répété sous « En cours ».
+    const run = this.runningFavoriteId();
     return this.validOrder(order)
-      .filter((id) => !last.has(id))
+      .filter((id) => !last.has(id) && id !== run)
       .slice(0, HOME_FAVORITES);
+  }
+
+  /** Favori du trajet suivi quand il est en cours (« En cours » sur l'accueil). */
+  private runningFavoriteId(): string | undefined {
+    return this.trip?.favoriteId && this.tripState() === 'running' ? this.trip.favoriteId : undefined;
   }
 
   private validOrder(order: string[]): string[] {
@@ -779,10 +861,9 @@ export class GlassesController implements GlassesApi {
     return out;
   }
 
-  /** Ordre de la liste : recalculé à son ouverture, sans les favoris déjà montrés sur l'accueil. */
-  private computeListOrder(r: Extract<Route, { screen: 'favorites' }>): string[] {
-    const exclude = new Set(r.exclude ?? []);
-    return this.computeOrder().filter((id) => !exclude.has(id));
+  /** Ordre de « Favoris » : recalculé à son ouverture, tous les favoris (1.2.1). */
+  private computeListOrder(): string[] {
+    return this.computeOrder();
   }
 
   private entry(id: string): FavoriteEntry | null {
@@ -842,7 +923,7 @@ export class GlassesController implements GlassesApi {
    */
   private refreshHome(force: boolean): Promise<void> {
     const shown = this.homeShown();
-    const p = Promise.all([this.refreshAnswers(shown, force), this.refreshNearby(force)]).then(() => undefined);
+    const p = Promise.all([this.refreshAnswers(shown, force), this.refreshNearby(force), this.refreshSections(force)]).then(() => undefined);
     void p.then(() => {
       const others = this.settings().favorites.map((f) => f.id).filter((id) => !shown.includes(id));
       return this.refreshAnswers(others, false, WARM_MS);
@@ -850,8 +931,106 @@ export class GlassesController implements GlassesApi {
     return p;
   }
 
+  /** « Favoris » : réponses des favoris, puis celles des adresses récentes (1.2.2). */
   private refreshList(force: boolean): Promise<void> {
-    return this.refreshAnswers(this.listOrder ?? [], force);
+    return Promise.all([this.refreshAnswers(this.listOrder ?? [], force), this.refreshRecents(force)]).then(() => undefined);
+  }
+
+  /**
+   * 1.2.2 : adresses récentes de « Favoris » (PRD-1.2.2 § 1.2) : un trajet depuis la position pour chacune (3 au plus),
+   * comme l'ancien « Aller à… » ; chaque réponse s'affiche dès qu'elle arrive. Sur place : « tu y es ».
+   */
+  private refreshRecents(force: boolean): Promise<void> {
+    if (this.recentsLoading) return this.recentsLoading;
+    const s = this.settings();
+    const now = this.d.clock.now();
+    const todo = recentShown(s).filter((r) => {
+      const hit = this.recents.get(recentKey(r.label));
+      return force || !hit || now - hit.at >= REFRESH_MS;
+    });
+    if (!todo.length) return Promise.resolve();
+    this.recentsLoading = (async () => {
+      try {
+        const here = this.hereLL() ?? (await this.d.platform.location.current(6000));
+        for (const r of todo) {
+          const key = recentKey(r.label);
+          let result: PlanResult | null;
+          if (!here) result = { journeys: [], empty: 'noPosition' };
+          else if (distanceM(here, r) <= SAME_PLACE_M) result = { journeys: [], empty: 'here' }; // le cœur ne propose rien sur place
+          else {
+            const to: Endpoint = r.approx ? { type: 'address', label: r.label, lat: r.lat, lon: r.lon, approx: true } : { type: 'address', label: r.label, lat: r.lat, lon: r.lon };
+            result = await deadline(this.d.core.route({ type: 'here' }, to, this.d.clock.now(), s, here), CORE_TIMEOUT_MS, 'adresse trop lente').catch(() => this.recents.get(key)?.result ?? null);
+          }
+          this.recents.set(key, { result, at: this.d.clock.now() });
+          if (this.ready && current(this.nav).route.screen === 'favorites') void this.render();
+        }
+      } finally {
+        this.recentsLoading = null;
+      }
+    })();
+    return this.recentsLoading;
+  }
+
+  /* ------------------------------ 1.2.2 : rubriques de l'accueil ------------------------------ */
+
+  /**
+   * Prochain départ de la gare et de la ligne choisies les plus proches (REVUE-USAGE n° 6) : une requête par rubrique
+   * et par rafraîchissement (30 s), seulement pour l'élément montré ; sans position, le premier de la liste.
+   */
+  private refreshSections(force: boolean): Promise<void> {
+    if (this.sectionsLoading) return this.sectionsLoading;
+    const s = this.settings();
+    const here = this.hereLL();
+    const now = this.d.clock.now();
+    const stale = (x: SectionData | undefined, id: string | undefined): boolean => !!id && (force || !x || x.id !== id || now - x.at >= REFRESH_MS);
+    const station = nearestPick(s.stations, here);
+    const line = nearestPick(s.lines, here);
+    if (!station) delete this.sections.stations;
+    if (!line) delete this.sections.lines;
+    const jobs: Promise<void>[] = [];
+    if (station && stale(this.sections.stations, station.id)) jobs.push(this.sectionOf(station, true).then((x) => void (this.sections.stations = x)));
+    if (line && stale(this.sections.lines, line.id)) jobs.push(this.sectionOf(line, false).then((x) => void (this.sections.lines = x)));
+    if (!jobs.length) return Promise.resolve();
+    this.sectionsLoading = Promise.all(jobs)
+      .catch((e: unknown) => console.warn('[Quai] rubriques de l’accueil', errText(e)))
+      .then(() => {
+        this.sectionsLoading = null;
+        if (this.ready && current(this.nav).route.screen === 'home') void this.render();
+      });
+    return this.sectionsLoading;
+  }
+
+  /** Prochain départ d'une gare (tableau) ou d'une ligne à son arrêt (le plus tôt de ses sens). */
+  private async sectionOf(p: StationPick | LinePick, station: boolean): Promise<SectionData> {
+    const at = this.d.clock.now();
+    const prev = (station ? this.sections.stations : this.sections.lines)?.id === p.id ? (station ? this.sections.stations : this.sections.lines) : undefined;
+    try {
+      const line = !station ? (p as LinePick).line : undefined;
+      if (line) {
+        const b = await deadline(this.d.core.lineBoard(p.areaId, line, { perDirection: 1 }), CORE_TIMEOUT_MS, 'ligne trop lente');
+        if (b.state === 'missing') return { id: p.id, at, state: 'missing' };
+        const next = b.directions.flatMap((d) => d.departures).filter((d) => d.est >= at - 30_000).sort((x, y) => x.est - y.est)[0];
+        return next ? { id: p.id, at, state: 'ok', next } : { id: p.id, at, state: 'none' };
+      }
+      const b = await deadline(this.d.core.board(p.areaId, { limit: 3 }), CORE_TIMEOUT_MS, 'départs trop lents');
+      const next = upcoming(b.departures, at)[0];
+      return next ? { id: p.id, at, state: 'ok', next } : { id: p.id, at, state: 'none' };
+    } catch (e) {
+      // la valeur déjà montrée reste (« … » sinon), nouvel essai au prochain rafraîchissement
+      console.warn('[Quai] prochain départ', p.areaId, errText(e));
+      return prev ? { ...prev, at: 0 } : { id: p.id, at: 0, state: 'unknown' };
+    }
+  }
+
+  /** Texte de droite d'une rubrique de l'accueil (sans « ~ », comme l'accueil 1.2.1). */
+  private sectionNext(kind: 'stations' | 'lines'): SectionNext | undefined {
+    const x = this.sections[kind];
+    const now = this.d.clock.now();
+    if (!x || x.state === 'unknown') return undefined;
+    if (x.state === 'missing') return { text: SECTION.missingStation };
+    if (x.state === 'none' || !x.next) return { text: SECTION.noDeparture };
+    if (x.next.est < now - 30_000) return undefined;
+    return departureRightText(x.next, now);
   }
 
   /** Nombre d'arrêts « Autour de moi » sans charger les départs (M8.7) et lieu proche (« Près de … »). */
@@ -895,7 +1074,14 @@ export class GlassesController implements GlassesApi {
       if (this.nearbyLight.near) data.near = this.nearbyLight.near;
     }
     const t = this.trip;
-    if (t && this.tripState() === 'running') data.running = { title: t.title, next: runningNext(this.journeyOf(t.journey), this.d.clock.now()) };
+    if (t && this.tripState() === 'running') {
+      data.running = { title: t.title, next: runningNext(this.journeyOf(t.journey), this.d.clock.now()) };
+      if (t.favoriteId) data.running.favoriteId = t.favoriteId;
+    }
+    const st = this.sectionNext('stations');
+    const li = this.sectionNext('lines');
+    if (st) data.stationsNext = st;
+    if (li) data.linesNext = li;
     return data;
   }
 
@@ -937,17 +1123,16 @@ export class GlassesController implements GlassesApi {
   }
 
   /**
-   * Fait d'un trajet le trajet suivi. `explicit` (téléphone, « suivre ce trajet ») remplace toujours ; sinon
-   * (toucher sur un favori ou un lieu) un autre trajet déjà en cours reste suivi (un ▼ machinal ou une consultation
-   * ne change jamais le train suivi, R2).
+   * Fait d'un trajet le trajet suivi, toujours sur demande (1.2.2, PRD-1.2.2 § 6 : toucher « Suivre ce trajet »,
+   * bouton « Lunettes » du téléphone) : il remplace le trajet suivi d'avant. Ouvrir un trajet ne le fait jamais suivre.
    */
-  private follow(j: Journey, s: { key: string; title: string; journeys: Journey[]; from?: Endpoint; to?: Endpoint; favoriteId?: string }, explicit: boolean): boolean {
-    if (!explicit && this.trip && this.trip.journey.id !== j.id && this.tripState() === 'running') return false;
+  private follow(j: Journey, s: { key: string; title: string; journeys: Journey[]; from?: Endpoint; to?: Endpoint; favoriteId?: string }): void {
     const here = this.hereLL();
     const start = j.legs[0]?.from;
     const index = Math.max(0, s.journeys.findIndex((x) => x.id === j.id));
     this.trip = {
       v: 1,
+      explicit: true,
       journey: j,
       title: s.title,
       ...(s.from ? { from: s.from } : {}),
@@ -961,10 +1146,9 @@ export class GlassesController implements GlassesApi {
       key: s.key,
     };
     this.saveFollowed();
-    return true;
   }
 
-  /** « Trajet suivi : IC 08:42 » : la proposition affichée devient le trajet suivi (M2.4). */
+  /** « Suivre ce trajet » : la proposition affichée devient le trajet suivi, « Trajet suivi : IC 08:42 » (M2.4). */
   private followShown(): void {
     const r = current(this.nav).route;
     if (r.screen !== 'steps') return;
@@ -972,8 +1156,20 @@ export class GlassesController implements GlassesApi {
     if (!list?.length) return;
     const j = this.journeyOf(list[Math.min(r.index ?? 0, list.length - 1)]);
     if (!j.legs.some(isRide)) return;
-    this.follow(j, { key: r.key ?? routeKey(r), title: this.stepsTitle(r), journeys: list, from: r.from, to: r.to, favoriteId: r.favoriteId }, true);
+    this.follow(j, { key: r.key ?? routeKey(r), title: this.stepsTitle(r), journeys: list, from: r.from, to: r.to, favoriteId: r.favoriteId });
     this.showToast(`Trajet suivi${NB}: ${tripShort(j, this.d.clock.now())}`);
+  }
+
+  /**
+   * « Ne plus suivre » (PRD-1.2.2 § 6) : le trajet n'est plus suivi (plus de « En cours », de « ▶ » ni de suivi
+   * automatique) ; retour aux étapes, qui proposent de nouveau « Suivre ce trajet ».
+   */
+  private async unfollow(): Promise<void> {
+    this.trip = null;
+    this.saveFollowed();
+    if (current(this.nav).route.screen === 'followed' && this.nav.stack.length > 1) this.nav = pop(this.nav);
+    await this.onRouteChanged();
+    this.showToast('Suivi arrêté');
   }
 
   /**
@@ -1097,7 +1293,10 @@ export class GlassesController implements GlassesApi {
     return true;
   }
 
-  /** Toucher sur un favori : départs de l'arrêt, ou étapes du trajet ou du lieu (sa réponse, si elle est prête). */
+  /**
+   * Toucher sur un favori : étapes du trajet ou du lieu (sa réponse, si elle est prête), sans le suivre (1.2.2, PRD-1.2.2
+   * § 6) ; son trajet en cours est repris ; un arrêt favori (réglages d'avant la 1.2.2) : ses départs.
+   */
   private async openFavorite(id: string): Promise<void> {
     const s = this.settings();
     const f = s.favorites.find((x) => x.id === id);
@@ -1118,12 +1317,12 @@ export class GlassesController implements GlassesApi {
     const j0 = a?.state === 'ok' ? a.plan?.journeys[0] : undefined;
     const ready = !!j0 && this.d.clock.now() - (this.answerAt.get(id) ?? 0) < 2 * REFRESH_MS && catchable(j0, this.d.clock.now());
     const { from, to } = asTrip(f);
-    await this.openSteps({ title, from, to, favoriteId: f.id, journeys: ready && a?.plan ? a.plan.journeys : undefined, follow: 'open' });
+    await this.openSteps({ title, from, to, favoriteId: f.id, journeys: ready && a?.plan ? a.plan.journeys : undefined });
   }
 
   /**
-   * Toucher sur un lieu ou une adresse récente de « Aller à… » : étapes directement (CA-M2.4). Un lieu est un favori
-   * (1.2) : son titre (« Vers le bureau »), son trajet en cours repris, et le trajet suivi lui est rattaché.
+   * Toucher sur une adresse récente de « Favoris » (1.2.1 : lieu ou adresse de « Aller à… ») : étapes directement
+   * (CA-M2.4), sans les suivre. Un lieu (Endpoint 'place', 1.2) : son titre, son trajet en cours repris.
    */
   private async goTo(key: string, to: Endpoint, label: string): Promise<void> {
     const s = this.settings();
@@ -1137,22 +1336,20 @@ export class GlassesController implements GlassesApi {
       await this.onRouteChanged();
       return;
     }
-    const hit = this.cache.get('places');
-    const res = hit?.ok ? (hit.value as Record<string, PlaceData>)[key]?.result : undefined;
-    const fresh = hit?.ok && this.d.clock.now() - hit.at < 2 * REFRESH_MS;
+    const hit = this.recents.get(key);
+    const res = hit?.result;
+    const fresh = !!hit && this.d.clock.now() - hit.at < 2 * REFRESH_MS;
     const journeys = fresh && res?.journeys.length && catchable(res.journeys[0], this.d.clock.now()) ? res.journeys : undefined;
-    await this.openSteps({ title, from: { type: 'here' }, to, ...(fav ? { favoriteId: fav.id } : {}), journeys, follow: 'open' });
+    await this.openSteps({ title, from: { type: 'here' }, to, ...(fav ? { favoriteId: fav.id } : {}), journeys });
   }
 
-  /** Ouvre « Trajet proposé » sur la proposition 1 (calculée sur place si besoin), qui devient le trajet suivi. */
-  private async openSteps(o: { title: string; from: Endpoint; to: Endpoint; favoriteId?: string; journeys?: Journey[]; follow: 'open' | 'phone' }): Promise<void> {
-    const route: StepsRoute = { screen: 'steps', key: this.newKey(), label: '', title: o.title, from: o.from, to: o.to, follow: o.follow };
+  /** Ouvre « Trajet proposé » sur la proposition 1 (calculée sur place si besoin), sans la suivre (PRD-1.2.2 § 6). */
+  private async openSteps(o: { title: string; from: Endpoint; to: Endpoint; favoriteId?: string; journeys?: Journey[] }): Promise<void> {
+    const route: StepsRoute = { screen: 'steps', key: this.newKey(), label: '', title: o.title, from: o.from, to: o.to };
     if (o.favoriteId) route.favoriteId = o.favoriteId;
     if (o.journeys?.length) {
       route.journeys = o.journeys;
       route.index = 0;
-      delete route.follow;
-      this.follow(o.journeys[0], { key: route.key!, title: o.title, journeys: o.journeys, from: o.from, to: o.to, favoriteId: o.favoriteId }, o.follow === 'phone');
     }
     this.nav = push(this.nav, route);
     await this.onRouteChanged();
@@ -1186,7 +1383,7 @@ export class GlassesController implements GlassesApi {
     void this.onRouteChanged();
   }
 
-  /* ------------------------------ Départs : favori annulable ------------------------------ */
+  /* ------------------------------ Départs : gare ou ligne gardée, annulable ------------------------------ */
 
   private clearToast(): void {
     this.toast = null;
@@ -1203,65 +1400,92 @@ export class GlassesController implements GlassesApi {
     void this.render();
   }
 
-  /**
-   * Favori des départs affichés (« ★ » du titre, toucher pour retirer) : sur la même zone, celui dont le filtre de
-   * lignes est celui de l'écran, sinon celui sans filtre. Deux favoris sur une même zone (Gare du Nord fusionnée) ne se
-   * confondent jamais.
-   */
-  private boardFavorite(r: Extract<Route, { screen: 'board' }>): FavoriteStop | undefined {
+  /** Zone des départs affichés (tableau chargé), pour ★. */
+  private boardArea(r: Extract<Route, { screen: 'board' }>): Board['area'] | undefined {
     const hit = this.cache.get(routeKey(r));
-    const area = hit?.ok ? (hit.value as { board: { area: { id: string; aka?: string[] } } }).board.area : undefined;
-    return favoriteOfBoard(this.settings().favorites, r, area);
+    return hit?.ok ? (hit.value as { board: Board }).board.area : undefined;
+  }
+
+  /** Message quand une rubrique est pleine (LIMITS) : où en retirer. */
+  private full(what: string): void {
+    this.showToast(`Déjà ${what}${NB}: retires-en une ${this.d.web ? 'dans l’onglet Réglages' : 'sur le téléphone'}`);
   }
 
   /**
-   * Toucher sur les départs (M6.1, M6.2) : favori retiré avec « ★ Retiré. Toucher encore : annuler » (5 s) ; un toucher
-   * pendant ces 5 s le rétablit à l'identique (même identifiant, filtre, réglage, place) ; sinon ajout (1.0).
+   * 1.2.2 (REVUE-USAGE n° 3) : ★ des départs d'une gare : elle rejoint « Gares » (« ★ Ajoutée à tes gares », 8 au plus)
+   * ou en sort avec « ★ Retirée. Toucher encore : annuler » (5 s) ; un toucher pendant ces 5 s la rétablit à
+   * l'identique (même identifiant, même place, `near` compris : « ★ Gare rétablie »). Plus jamais d'arrêt favori.
    */
-  private async toggleFavoriteStop(): Promise<void> {
+  private async toggleStation(): Promise<void> {
     const r = current(this.nav).route;
     if (r.screen !== 'board') return;
     const key = routeKey(r);
-    const now = this.d.clock.now();
     const u = this.undo;
-    if (u && u.key === key && now < u.until) {
+    if (u?.station && u.key === key && this.d.clock.now() < u.until) {
+      const st = u.station;
       this.undo = null;
       await this.d.settings.update((x) => {
-        if (x.favorites.some((f) => f.id === u.fav.id)) return x;
-        const favorites = [...x.favorites];
-        favorites.splice(Math.min(u.index, favorites.length), 0, u.fav);
-        return { ...x, favorites };
+        if (x.stations.some((p) => p.id === st.id || p.areaId === st.areaId)) return x;
+        const stations = [...x.stations];
+        stations.splice(Math.min(u.index, stations.length), 0, st);
+        return { ...x, stations };
       });
-      this.showToast('★ Favori rétabli');
+      this.showToast('★ Gare rétablie');
       return;
     }
-    const existing = this.boardFavorite(r);
-    if (existing) {
-      const s = this.settings();
-      const index = s.favorites.findIndex((f) => f.id === existing.id);
-      await this.d.settings.update((x) => ({ ...x, favorites: x.favorites.filter((f) => f.id !== existing.id) }));
-      this.undo = { fav: structuredClone(existing), index, until: this.d.clock.now() + UNDO_MS, key };
-      this.showToast(`★ Retiré. Toucher encore${NB}: annuler`, UNDO_MS);
+    const area = this.boardArea(r);
+    if (!area) return;
+    const s = this.settings();
+    const kept = stationOfArea(s.stations, r.areaId, area);
+    if (kept) {
+      const index = s.stations.findIndex((p) => p.id === kept.id);
+      await this.d.settings.update((x) => ({ ...x, stations: x.stations.filter((p) => p.id !== kept.id) }));
+      this.undo = { key, until: this.d.clock.now() + UNDO_MS, index, station: structuredClone(kept) };
+      this.showToast(`★ Retirée. Toucher encore${NB}: annuler`, UNDO_MS);
       return;
     }
     this.undo = null;
-    const hit = this.cache.get(key);
-    const board = hit?.ok ? (hit.value as { board: { area: { id: string; op: FavoriteStop['op']; n: FavoriteStop['name']; lat: number; lon: number } } }).board : null;
-    if (!board) return;
+    if (s.stations.length >= PICK_MAX.stations) return this.full(`${PICK_MAX.stations} gares`);
+    const pick: StationPick = { id: newId('st', pickIds(s)), areaId: area.id, name: area.n, lat: area.lat, lon: area.lon };
+    await this.d.settings.update((x) => ({ ...x, stations: [...x.stations, pick] }));
+    this.showToast('★ Ajoutée à tes gares');
+  }
+
+  /**
+   * 1.2.2 (REVUE-USAGE n° 3) : « garder une ligne » : la ligne rejoint « Bus, tram, métro » à cet arrêt, ses deux sens
+   * (« ★ Ajoutée à Bus, tram, métro », 12 au plus), ou en sort, annulable 5 s comme une gare (« ★ Ligne rétablie »).
+   */
+  private async toggleLine(line: string, mode: Mode): Promise<void> {
+    const r = current(this.nav).route;
+    if (r.screen !== 'keepLine') return;
+    const key = routeKey(r);
+    const u = this.undo;
+    if (u?.pick && u.key === key && u.line === line && this.d.clock.now() < u.until) {
+      const pick = u.pick;
+      this.undo = null;
+      await this.d.settings.update((x) => {
+        if (x.lines.some((p) => p.id === pick.id || (p.areaId === pick.areaId && p.line === pick.line))) return x;
+        const lines = [...x.lines];
+        lines.splice(Math.min(u.index, lines.length), 0, pick);
+        return { ...x, lines };
+      });
+      this.showToast('★ Ligne rétablie');
+      return;
+    }
     const s = this.settings();
-    const fav: FavoriteStop = {
-      kind: 'stop',
-      id: newId('fav', s.favorites.map((f) => f.id)),
-      areaId: board.area.id,
-      op: board.area.op,
-      name: board.area.n,
-      lat: board.area.lat,
-      lon: board.area.lon,
-      propose: 'never',
-    };
-    if (r.filter?.length) fav.filter = r.filter;
-    await this.d.settings.update((x) => ({ ...x, favorites: [...x.favorites, fav] }));
-    this.showToast('★ Ajouté aux favoris');
+    const kept = s.lines.find((p) => p.areaId === r.areaId && p.line === line);
+    if (kept) {
+      const index = s.lines.findIndex((p) => p.id === kept.id);
+      await this.d.settings.update((x) => ({ ...x, lines: x.lines.filter((p) => p.id !== kept.id) }));
+      this.undo = { key, until: this.d.clock.now() + UNDO_MS, index, pick: structuredClone(kept), line };
+      this.showToast(`★ Retirée. Toucher encore${NB}: annuler`, UNDO_MS);
+      return;
+    }
+    this.undo = null;
+    if (s.lines.length >= PICK_MAX.lines) return this.full(`${PICK_MAX.lines} lignes`);
+    const pick: LinePick = { id: newId('ln', pickIds(s)), areaId: r.areaId, op: r.op, name: r.name, lat: r.lat, lon: r.lon, line, mode };
+    await this.d.settings.update((x) => ({ ...x, lines: [...x.lines, pick] }));
+    this.showToast('★ Ajoutée à Bus, tram, métro');
   }
 
   /**
@@ -1321,7 +1545,7 @@ export class GlassesController implements GlassesApi {
     if (j) {
       route.journeys = journeys;
       route.index = index;
-      this.follow(j, { key: route.key!, title: req.title, journeys, from: req.from, to: req.to, favoriteId: req.favoriteId }, true);
+      this.follow(j, { key: route.key!, title: req.title, journeys, from: req.from, to: req.to, favoriteId: req.favoriteId });
     } else {
       route.follow = 'phone';
     }
@@ -1347,12 +1571,13 @@ export class GlassesController implements GlassesApi {
   /** Bouton « Lunettes » d'un arrêt favori (S8) : ses départs. */
   async showBoard(areaId: string, filter?: LineFilter[]): Promise<string> {
     const s = this.settings();
-    const fav = s.favorites.find((f): f is FavoriteStop => f.kind === 'stop' && f.areaId === areaId);
+    // 1.2.2 : le nom d'une gare ou d'une ligne choisie (réglages v4), sinon celui d'un arrêt favori d'avant.
+    const known = [...s.stations, ...s.lines, ...s.favorites.filter((f): f is FavoriteStop => f.kind === 'stop')].find((x) => x.areaId === areaId);
     const route: Route = { screen: 'board', areaId };
     if (filter?.length) route.filter = filter;
-    if (fav) route.name = fav.name;
+    if (known) route.name = known.name;
     await this.showNav(reset([{ screen: 'home' }, route]), route);
-    let name = fav ? displayName(fav.name, s.lang) : '';
+    let name = known ? displayName(known.name, s.lang) : '';
     if (!name && this.ready) {
       await deadline(this.load(route), 3000, 'départs trop lents').catch(() => undefined);
       const hit = this.cache.get(routeKey(route));
@@ -1367,7 +1592,7 @@ export class GlassesController implements GlassesApi {
       const j = route.journey;
       const steps: StepsRoute = { ...route, key: route.key ?? this.newKey(), title: this.stepsTitle(route), journeys: [j], index: 0 };
       delete steps.journey;
-      this.follow(j, { key: steps.key!, title: steps.title!, journeys: [j] }, true);
+      this.follow(j, { key: steps.key!, title: steps.title!, journeys: [j] });
       await this.showNav(reset([{ screen: 'home' }, steps]), steps);
       return;
     }
@@ -1392,18 +1617,25 @@ export class GlassesController implements GlassesApi {
     // Les réponses dépendent des favoris et des réglages (filtres, marche maximale) : à recalculer.
     this.answerAt.clear();
     for (const id of [...this.answers.keys()]) if (!s.favorites.some((f) => f.id === id)) this.answers.delete(id);
-    // Les données dépendent du nombre de départs, du rayon, des favoris : on recharge. L'écran courant
-    // garde ses données pendant le rechargement (pas d'écran d'attente), les autres sont oubliés.
+    // Les données dépendent du nombre de départs, du rayon, des favoris : on recharge. Les écrans de la pile gardent
+    // leurs données pendant le rechargement (pas d'écran d'attente : 1.2.2, les départs sous « garder une ligne »),
+    // les autres sont oubliés.
     const r = current(this.nav).route;
-    const keep = routeKey(r);
-    for (const k of [...this.cache.keys()]) if (k !== keep && !k.startsWith('steps:') && !k.startsWith('train:')) this.cache.delete(k);
+    const keep = new Set(this.nav.stack.map((f) => routeKey(f.route)));
+    for (const k of [...this.cache.keys()]) if (!keep.has(k) && !k.startsWith('steps:') && !k.startsWith('train:')) this.cache.delete(k);
     this.nearbyLight = null;
+    const picks = picksSignature(s);
+    if (picks !== this.picksSig) {
+      // 1.2.2 : gares ou lignes ajoutées, retirées ou réordonnées : les rubriques de l'accueil suivent.
+      this.picksSig = picks;
+      this.sections = {};
+    }
     const sig = favSignature(s);
     if (sig !== this.favSig) {
       this.favSig = sig;
       // Favoris ajoutés, retirés ou réordonnés sur le téléphone : l'ordre affiché suit.
       if (r.screen === 'home') this.freezeHome();
-      if (r.screen === 'favorites') this.listOrder = this.computeListOrder(r);
+      if (r.screen === 'favorites') this.listOrder = this.computeListOrder();
     }
     if (r.screen === 'message' && r.kind === 'firstRun' && s.onboarded && this.ready) {
       this.nav = this.homeNav();
@@ -1413,7 +1645,7 @@ export class GlassesController implements GlassesApi {
     if (!this.ready) return;
     if (r.screen === 'home') void this.refreshHome(true);
     else if (r.screen === 'favorites') void this.refreshList(true);
-    else if (LIVE.has(r.screen) || r.screen === 'places') void this.load(r, true);
+    else if (LIVE.has(r.screen)) void this.load(r, true);
     void this.render();
   }
 
@@ -1477,6 +1709,8 @@ export class GlassesController implements GlassesApi {
     for (const k of [...this.cache.keys()]) if (USES_POSITION.has(k.split(':')[0])) this.cache.delete(k);
     this.nearbyLight = null;
     this.answerAt.clear();
+    // 1.2.2 : adresses récentes (trajets depuis la position) à recalculer ; la réponse montrée reste en attendant.
+    for (const [k, v] of this.recents) this.recents.set(k, { ...v, at: 0 });
   }
 
   private async updateLocation(): Promise<void> {
@@ -1542,23 +1776,38 @@ export class GlassesController implements GlassesApi {
       case 'nearby': {
         const here = this.hereLL() ?? (await this.d.platform.location.current(6000));
         if (!here) return { noLocation: true };
-        return { list: await core.nearby(here.lat, here.lon, s.display.radiusM) };
+        const list = await core.nearby(here.lat, here.lon, s.display.radiusM);
+        if (list.length) return { list };
+        // 1.2.2 (REVUE-USAGE n° 10) : rien dans le rayon : l'arrêt le plus proche jusqu'à 3 km (recherche légère).
+        const far = await core.nearby(here.lat, here.lon, NEAREST_M, { light: true }).catch(() => [] as NearbyItem[]);
+        return { list, nearest: far[0] ?? null };
       }
       case 'board': {
         const board = await core.board(r.areaId, { limit: s.display.depsPerStop, filter: r.filter });
-        let works: string[] = [];
-        const isFav = s.favorites.some((f) => f.kind === 'stop' && (f.areaId === r.areaId || f.areaId === board.area.id));
-        if (s.alerts.works && isFav) {
-          try {
-            works = await core.works(board.area.op, board.area.lines, [board.area.id]);
-          } catch {
-            works = [];
-          }
-        }
+        // 1.2.2 (REVUE-USAGE n° 4) : « Travaux et déviations » sur les gares et les lignes gardées (1.2.1 : arrêts favoris).
+        const works = s.alerts.works && boardKept(s, r.areaId, board.area) ? await this.worksOf(board.area.op, board.area.lines, board.area.id) : [];
         return { board, works };
       }
-      case 'places':
-        return this.fetchPlaces(r);
+      case 'stations':
+        return this.fetchStations(r);
+      case 'lines':
+        return this.fetchLines(r);
+      case 'line': {
+        const board = await core.lineBoard(r.areaId, r.line, { perDirection: LINE_DETAIL_PER_DIRECTION });
+        const works = s.alerts.works && board.state !== 'missing' ? await this.worksOf(board.op, [board.line], board.area.id) : [];
+        return { board, works };
+      }
+      case 'keepLine': {
+        // une entrée par ligne (les deux sens), dans l'ordre du cœur ; jamais de train (une gare a sa propre ★)
+        const seen = new Set<string>();
+        const lines: StopLine[] = [];
+        for (const x of await core.linesAt(r.areaId)) {
+          if (x.mode === 'train' || seen.has(x.line)) continue;
+          seen.add(x.line);
+          lines.push({ line: x.line, mode: x.mode });
+        }
+        return { lines };
+      }
       case 'steps':
         return this.fetchSteps(r);
       case 'others':
@@ -1578,36 +1827,47 @@ export class GlassesController implements GlassesApi {
     }
   }
 
+  /** Alertes travaux d'un arrêt (vide si aucune ou source en erreur). */
+  private async worksOf(op: Board['area']['op'], lines: string[], areaId: string): Promise<string[]> {
+    try {
+      return await this.d.core.works(op, lines, [areaId]);
+    } catch {
+      return [];
+    }
+  }
+
   /**
-   * « Aller à… » : un trajet par lieu et par adresse récente (S4), affichés au fur et à mesure. Un lieu est un favori
-   * (1.2) : sa réponse est celle de l'accueil et des favoris (même calcul, gardée pour l'ordre et le toucher).
+   * 1.2.2 : « Gares » (PRD-1.2.2 § 2) : le prochain train de chaque gare choisie, 3 gares à la fois, affiché au fur et à
+   * mesure ; une gare en erreur garde sa dernière valeur (« … » sinon).
    */
-  private async fetchPlaces(r: Route): Promise<Record<string, PlaceData>> {
-    const s = this.settings();
-    const now = this.d.clock.now();
-    const here = this.hereLL();
-    const targets: { key: string; to: Endpoint; lat: number; lon: number; fav?: FavoritePlace }[] = [
-      ...placesOf(s).map((p) => ({ key: p.id, to: { type: 'place', placeId: p.id } as Endpoint, lat: p.lat, lon: p.lon, fav: p })),
-      ...recentShown(s).map((a) => ({ key: recentKey(a.label), to: { type: 'address', label: a.label, lat: a.lat, lon: a.lon } as Endpoint, lat: a.lat, lon: a.lon })),
-    ];
-    const out: Record<string, PlaceData> = {};
-    await this.progressive(r, targets, async (t) => {
-      if (here && distanceM(here, t) <= SAME_PLACE_M) {
-        out[t.key] = { summary: 'ici', result: { journeys: [], empty: 'here' } }; // le cœur ne propose rien sur place
-        return { ...out };
+  private async fetchStations(r: Route): Promise<Record<string, StationData>> {
+    const out: Record<string, StationData> = {};
+    await this.progressive(r, this.settings().stations, async (p) => {
+      try {
+        const b = await this.d.core.board(p.areaId, { limit: 3 });
+        const next = upcoming(b.departures, this.d.clock.now())[0];
+        out[p.id] = next ? { state: 'ok', next } : { state: 'none' };
+      } catch (e) {
+        if (e instanceof QuaiError && e.code === 'areaUnknown') out[p.id] = { state: 'missing' };
+        else console.warn('[Quai] gare', p.areaId, errText(e));
       }
-      if (!here) {
-        out[t.key] = { summary: '' };
-        return { ...out };
+      return { ...out };
+    });
+    return out;
+  }
+
+  /**
+   * 1.2.2 : « Bus, tram, métro » (§ 3) : les sens de chaque ligne choisie (lineBoard), ou les départs d'un arrêt
+   * « toutes les lignes » (board), 3 à la fois, affichés au fur et à mesure.
+   */
+  private async fetchLines(r: Route): Promise<Record<string, LineData>> {
+    const out: Record<string, LineData> = {};
+    await this.progressive(r, this.settings().lines, async (p) => {
+      try {
+        out[p.id] = p.line ? { board: await this.d.core.lineBoard(p.areaId, p.line, { perDirection: LINES_PER_DIRECTION }) } : { stop: await this.d.core.board(p.areaId, { limit: 3 }) };
+      } catch (e) {
+        console.warn('[Quai] ligne', p.areaId, p.line, errText(e));
       }
-      if (t.fav) {
-        await this.refreshAnswers([t.fav.id], false, REFRESH_MS / 2);
-        const a = this.answers.get(t.fav.id);
-        out[t.key] = placeOfAnswer(a, now);
-        return { ...out };
-      }
-      const result = await this.d.core.route({ type: 'here' }, t.to, now, s, here).catch(() => null);
-      out[t.key] = { summary: result ? (result.empty === 'here' ? 'ici' : placeSummary(result.journeys, now)) : '', ...(result ? { result } : {}) };
       return { ...out };
     });
     return out;
@@ -1670,13 +1930,16 @@ export class GlassesController implements GlassesApi {
     return { ok: true };
   }
 
-  /** Propositions calculées : elles s'inscrivent dans la route (même si l'on regarde ailleurs) ; la 1re est suivie. */
+  /**
+   * Propositions calculées : elles s'inscrivent dans la route (même si l'on regarde ailleurs). La 1re n'est suivie que
+   * sur demande du téléphone (`follow: 'phone'`) ; 1.2.2 : la valeur 'open' d'un état de la 1.2.1 ne fait plus suivre.
+   */
   private attachJourneys(r: StepsRoute, journeys: Journey[]): void {
     const key = r.key;
     this.nav = mapRoutes(this.nav, (x) => (x.screen === 'steps' && x.key === key && !x.journeys ? { ...x, journeys, index: 0, follow: undefined } : x));
-    if (r.follow) {
+    if (r.follow === 'phone') {
       const j = journeys[0];
-      this.follow(j, { key: key ?? routeKey(r), title: this.stepsTitle(r), journeys, from: r.from, to: r.to, favoriteId: r.favoriteId }, r.follow === 'phone');
+      this.follow(j, { key: key ?? routeKey(r), title: this.stepsTitle(r), journeys, from: r.from, to: r.to, favoriteId: r.favoriteId });
     }
   }
 
@@ -1734,7 +1997,7 @@ export class GlassesController implements GlassesApi {
       this.checkTrip();
       if (this.ready) void this.refreshHome(false);
     } else if (r.screen === 'favorites') {
-      this.listOrder = this.computeListOrder(r);
+      this.listOrder = this.computeListOrder();
       if (this.ready) void this.refreshList(false);
     }
   }
@@ -1746,7 +2009,8 @@ export class GlassesController implements GlassesApi {
    *  - Retour à l'accueil (`entering`) avec un trajet commencé entre-temps : le curseur sur « En cours », comme en 1.2.0
    *    (un toucher reprend le trajet) et comme à l'ouverture.
    *  - Sinon (accueil affiché : « En cours » qui paraît au départ ou disparaît à la fin, favoris recalculés), le
-   *    curseur garde son élément (même action) ; élément disparu : le rang, comme avant.
+   *    curseur garde son élément (même action) ; élément disparu : 1.2.2, la ligne qui l'a remplacé (« En cours »
+   *    prend la place de son favori, REVUE-USAGE n° 1, et le lui rend à la fin du trajet), sinon le rang, comme avant.
    * Cadre neuf (ouverture) : la règle d'ouverture (initialSel).
    */
   private keepHomeCursor(items: Item[], entering: boolean): void {
@@ -1763,7 +2027,12 @@ export class GlassesController implements GlassesApi {
     const was = id(prev[Math.min(Math.max(0, f.sel), prev.length - 1)]);
     if (!was || id(items[f.sel]) === was) return;
     const at = items.findIndex((it) => id(it) === was);
-    if (at >= 0) this.nav = setSelection(this.nav, at, f.top);
+    if (at >= 0) {
+      this.nav = setSelection(this.nav, at, f.top);
+      return;
+    }
+    const added = items.findIndex((it) => !!it.action && !prev.some((p) => id(p) === id(it)));
+    if (added >= 0) this.nav = setSelection(this.nav, added, f.top);
   }
 
   /** Vue de l'écran courant ; lance le chargement si besoin. */
@@ -1795,8 +2064,14 @@ export class GlassesController implements GlassesApi {
       return v;
     }
     if (r.screen === 'favorites') {
-      const entries = (this.listOrder ?? this.computeListOrder(r)).map((id) => this.entry(id)).filter((e): e is FavoriteEntry => !!e);
-      return favoritesView({ entries, title: r.exclude?.length ? 'Autres favoris' : 'Mes favoris' }, ctx);
+      const entries = (this.listOrder ?? this.computeListOrder()).map((id) => this.entry(id)).filter((e): e is FavoriteEntry => !!e);
+      const recents: Record<string, string> = {};
+      for (const [k, v] of this.recents) recents[k] = planHomeText(v.result, ctx.now);
+      return favoritesView({ entries, recents }, ctx);
+    }
+    if (r.screen === 'followed') {
+      const t = this.trip;
+      return followedView(t ? { title: t.title, journey: this.journeyOf(t.journey) } : null, ctx);
     }
     if (r.screen === 'steps' && routeJourneys(r)) return this.stepsViewOf(r, f, ctx);
     if (r.screen === 'others') {
@@ -1811,21 +2086,36 @@ export class GlassesController implements GlassesApi {
     switch (r.screen) {
       case 'nearby': {
         if (!value) return loadingView('Autour de moi', 'Recherche des arrêts…', ctx);
-        const v = value as { list?: NearbyItem[]; noLocation?: boolean };
+        const v = value as { list?: NearbyItem[]; noLocation?: boolean; nearest?: NearbyItem | null };
         if (v.noLocation) return noLocationView('Autour de moi', ctx);
-        return nearbyView(v.list ?? [], ctx);
+        return nearbyView(v.list ?? [], ctx, v.nearest);
       }
       case 'board': {
         const waiting = r.name ? displayName(r.name, ctx.settings.lang) : 'Départs';
         if (!value) return loadingView(waiting, 'Chargement des départs…', ctx);
-        const { board, works } = value as { board: Parameters<typeof boardView>[0]; works: string[] };
-        const isFavorite = !!favoriteOfBoard(ctx.settings.favorites, r, board.area);
-        const v = boardView(board, ctx, { isFavorite });
+        const { board, works } = value as { board: Board; works: string[] };
+        const v = boardView(board, ctx, { kept: boardKept(ctx.settings, r.areaId, board.area) });
         if (!v.top && works?.[0]) v.top = { text: `! ${works[0]}`, strong: true };
         return v;
       }
-      case 'places':
-        return placesView(Object.fromEntries(Object.entries((value as Record<string, PlaceData>) ?? {}).map(([k, p]) => [k, p.summary])), ctx);
+      case 'stations': {
+        const data = (value as Record<string, StationData> | undefined) ?? {};
+        return stationsView(ctx.settings.stations.map((pick): StationRow => ({ pick, ...data[pick.id] })), ctx);
+      }
+      case 'lines': {
+        const data = (value as Record<string, LineData> | undefined) ?? {};
+        return linesView(ctx.settings.lines.map((pick): LineRow => ({ pick, ...data[pick.id] })), ctx, r.focus);
+      }
+      case 'line': {
+        const title = linePickTitle({ ...r, id: r.pick ?? '', lat: 0, lon: 0 }, ctx.settings.lang);
+        if (!value) return loadingView(title, 'Chargement des passages…', ctx, 'line');
+        const { board, works } = value as { board: LineBoard; works: string[] };
+        return lineView(r, board, ctx, works?.[0]);
+      }
+      case 'keepLine': {
+        if (!value) return loadingView(keepLineTitle(displayName(r.name, ctx.settings.lang)), 'Chargement des lignes…', ctx, 'keepLine');
+        return keepLineView(r, (value as { lines: StopLine[] }).lines ?? [], ctx);
+      }
       case 'steps': {
         const title = this.stepsTitle(r);
         const v = value as { empty?: PlanResult['empty'] } | undefined;
@@ -1988,23 +2278,59 @@ export class GlassesController implements GlassesApi {
   }
 }
 
-/** Même filtre de lignes (absent ou vide : toutes les lignes), quel que soit l'ordre. */
-export function sameFilter(a: LineFilter[] | undefined, b: LineFilter[] | undefined): boolean {
-  const key = (f: LineFilter[] | undefined): string => (f ?? []).map((x) => `${x.line}|${x.head}`).sort().join('\n');
-  return key(a) === key(b);
+/** 1.2.2 : la zone d'une gare ou d'une ligne choisie est celle des départs (identifiant de l'écran, de la zone, `aka`). */
+const sameArea = (id: string, routeAreaId: string, area?: { id: string; aka?: string[] }): boolean => id === routeAreaId || id === area?.id || !!area?.aka?.includes(id);
+
+/** 1.2.2 : la gare de « Gares » qui correspond à des départs (★ du titre, toucher pour la retirer). */
+export function stationOfArea(stations: readonly StationPick[], routeAreaId: string, area?: { id: string; aka?: string[] }): StationPick | undefined {
+  return stations.find((p) => sameArea(p.areaId, routeAreaId, area));
 }
 
 /**
- * Favori d'arrêt correspondant à un écran de départs : même zone (identifiant de l'écran, de la zone affichée ou un de
- * ses anciens identifiants), puis même filtre que l'écran, sinon sans filtre.
+ * 1.2.2 : départs gardés : la gare est dans « Gares », ou (arrêt de bus, tram, métro) une de ses lignes est dans « Bus,
+ * tram, métro » (« ★ » en fin de titre, REVUE-USAGE n° 3 ; alerte travaux, n° 4).
  */
-export function favoriteOfBoard(
-  favorites: readonly Favorite[],
-  r: { areaId: string; filter?: LineFilter[] },
-  area?: { id: string; aka?: string[] },
-): FavoriteStop | undefined {
-  const here = favorites.filter((f): f is FavoriteStop => f.kind === 'stop' && (f.areaId === r.areaId || f.areaId === area?.id || !!area?.aka?.includes(f.areaId)));
-  return here.find((f) => sameFilter(f.filter, r.filter)) ?? here.find((f) => !f.filter?.length);
+export function boardKept(s: Pick<Settings, 'stations' | 'lines'>, routeAreaId: string, area: Pick<Board['area'], 'id' | 'aka' | 'op' | 'modes'>): boolean {
+  if (isStationBoard({ area: area as Board['area'] })) return !!stationOfArea(s.stations, routeAreaId, area);
+  return s.lines.some((p) => sameArea(p.areaId, routeAreaId, area));
+}
+
+/** Identifiants déjà pris par les gares et les lignes (newId). */
+const pickIds = (s: Pick<Settings, 'stations' | 'lines'>): string[] => [...s.stations.map((p) => p.id), ...s.lines.map((p) => p.id)];
+
+/** 1.2.2 : la gare ou la ligne choisie la plus proche (REVUE-USAGE n° 6) ; sans position, la première de la liste. */
+export function nearestPick<T extends { lat: number; lon: number }>(picks: readonly T[], here: LatLon | null): T | undefined {
+  if (!here) return picks[0];
+  let best: T | undefined;
+  let d = Infinity;
+  for (const p of picks) {
+    const x = distanceM(here, p);
+    if (x < d) {
+      d = x;
+      best = p;
+    }
+  }
+  return best;
+}
+
+/** 1.2.2 : prochain départ d'une rubrique de l'accueil (gare ou ligne choisie la plus proche). */
+interface SectionData {
+  /** Gare ou ligne choisie. */
+  id: string;
+  at: number;
+  /** unknown : pas encore obtenu (erreur) ; none : rien dans l'horizon des tableaux ; missing : introuvable. */
+  state: 'ok' | 'none' | 'missing' | 'unknown';
+  next?: Departure;
+}
+
+/** 1.2.2 : « Gares » : prochain train d'une gare. */
+type StationData = Pick<StationRow, 'next' | 'state'>;
+/** 1.2.2 : « Bus, tram, métro » : sens d'une ligne ou départs d'un arrêt. */
+type LineData = Pick<LineRow, 'board' | 'stop'>;
+
+/** 1.2.2 : signature des gares et lignes choisies (les rubriques de l'accueil se recalculent quand elle change). */
+function picksSignature(s: Settings): string {
+  return JSON.stringify([s.stations.map((p) => p.id + p.areaId), s.lines.map((p) => `${p.id}${p.areaId}${p.line ?? ''}`)]);
 }
 
 /**
@@ -2015,23 +2341,6 @@ function restorableNav(nav: NavState | null): NavState | null {
   if (!nav) return null;
   const stack = nav.stack.filter((f) => !(f.route.screen === 'message' && (f.route.kind === 'loading' || f.route.kind === 'error')));
   return stack.length ? { stack } : null;
-}
-
-/** Résultat d'un lieu de « Aller à… » : son résumé et ses propositions (réutilisées par le toucher). */
-interface PlaceData {
-  summary: string;
-  result?: PlanResult;
-}
-
-/** Lieu de « Aller à… » d'après la réponse de son favori : « arrivée 08:58 », « ici », « aucun trajet ». */
-function placeOfAnswer(a: FavoriteAnswer | undefined, now: number): PlaceData {
-  if (!a) return { summary: '' };
-  if (a.state === 'here') return { summary: 'ici', result: { journeys: [], empty: 'here' } };
-  if (a.state === 'ok' || a.state === 'none') {
-    const result: PlanResult = a.plan ?? { journeys: [], empty: 'noTrip' };
-    return { summary: placeSummary(result.journeys, now), result };
-  }
-  return { summary: '' };
 }
 
 /**
@@ -2098,9 +2407,15 @@ function titleFor(r: Route, ctx: ViewCtx): string {
     case 'nearby':
       return 'Autour de moi';
     case 'favorites':
-      return 'Mes favoris';
-    case 'places':
-      return 'Aller à…';
+      return 'Favoris';
+    case 'stations':
+      return SECTION.stations;
+    case 'lines':
+      return SECTION.lines;
+    case 'line':
+      return linePickTitle({ ...r, id: r.pick ?? '', lat: 0, lon: 0 }, ctx.settings.lang);
+    case 'keepLine':
+      return keepLineTitle(displayName(r.name, ctx.settings.lang));
     case 'board':
       return r.name ? displayName(r.name, ctx.settings.lang) : 'Départs';
     case 'steps':

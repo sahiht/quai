@@ -7,18 +7,25 @@
  * l'ouverture, le curseur est sur le premier favori montré (sur « En cours » s'il y est) : un toucher l'ouvre, ▲ mène
  * à « Favoris ». L'aide des gestes de l'accueil ne se montre que les 7 premiers jours : les réglages de
  * démonstration (version déjà vue) sont ceux d'un utilisateur de longue date, sans aide sur l'accueil. Sur un trajet,
- * ▼ fait défiler les étapes, puis ouvre « Autres trajets ». Le faux cœur classe « le moins de marche d'abord » : à S1,
- * la proposition 1 vers le bureau est l'IC jusqu'à Bruxelles-Nord puis le T4 (arrivée 09:01).
+ * ▼ fait défiler les étapes, puis ouvre « Autres trajets ». Classement du faux cœur (PRD-1.2.2 § 7) : à S1, la
+ * proposition 1 vers le bureau est l'IC jusqu'à Bruxelles-Nord puis le tram 3 (arrivée 08:58), puis deux « Le suivant ».
+ *
+ * 1.2.2 (docs/v1.2.2/PRD-1.2.2.md, REVUE-USAGE.md) : réglages de la 1.1 migrés en v4 (favoris Bureau, Vers
+ * Gand-Saint-Pierre et Maison ; « Gares » : Namur ; « Bus, tram, métro » : tram 3 et tram 4 à Gare du Nord, « près »,
+ * et Bruxelles-Nord De Lijn, toutes les lignes) ; l'accueil finit par « Autour de moi », « Gares » et « Bus, tram,
+ * métro » (§ 1.1), « Aller à… » a rejoint « Favoris » (§ 1.2) ; ouvrir un trajet ne le fait plus suivre : « Suivre ce
+ * trajet » d'un toucher, ou le bouton « Lunettes » du téléphone (§ 6) ; à Gare du Nord (S2), « Bus, tram, métro »
+ * s'ouvre d'office sur le tram 3 (ligne « près », REVUE-USAGE n° 4).
  */
 import { describe, expect, it, vi } from 'vitest';
 
-// Message « Quai 1.2.1 » (PRD-1.2.1 § 6) : la version de l'appli est fixée à 1.2.1 (main la passe à 1.2.1 avec la release).
-vi.mock('../../src/version', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../src/version')>()), APP_VERSION: '1.2.1' }));
+// Message « Quai 1.2.2 » (PRD-1.2.2 § 9) : la version de l'appli est fixée à 1.2.2 (main la passe à 1.2.2 avec la release).
+vi.mock('../../src/version', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../src/version')>()), APP_VERSION: '1.2.2' }));
 import type { Core, Journey, JourneyLabel, Leg } from '../../src/core/api';
 import { textWidth } from '../../src/glasses/font';
 import { layoutPage, geometry, WIDTHS } from '../../src/glasses/layout';
 import { effectiveFrame, initNav } from '../../src/glasses/nav';
-import { stepsPage, type StepsData } from '../../src/glasses/views';
+import { NEWS_LINES, stepsPage, type StepsData } from '../../src/glasses/views';
 import { QuaiError } from '../../src/core/errors';
 import { TRIP_KEY, parseTrip, tripPhase } from '../../src/glasses/controller';
 import type { ContainerSpec } from '../../src/glasses/types';
@@ -27,9 +34,29 @@ import { at, defaults, fakeCore, nb, overflowing, preset, preset11, setupControl
 
 const fakeCoreFor = (now: () => number) => fakeCore(now);
 
+/** Accueil prêt : réponses des favoris, nombre d'arrêts et prochains départs des rubriques arrivés (plus de « … »). */
 const homeReady = (s: Screen) => s.screen === 'home' && !s.lines.some((l) => /   …$/.test(l)) && s.lines.some((l) => l.startsWith('Autour de moi   ') && !l.endsWith('…'));
 const stepsReady = (s: Screen) => s.screen === 'steps' && s.page !== undefined;
 const listReady = (s: Screen) => s.screen === 'favorites' && !s.lines.some((l) => /   …$/.test(l));
+/** « Bus, tram, métro » prête : les passages de chaque ligne arrivés. */
+const linesReady = (s: Screen) => s.screen === 'lines' && s.lines.length > 2 && !s.lines.some((l) => l.endsWith('…'));
+
+/** Titre logué d'un trajet : la ligne du titre, puis son état à droite (PRD-1.2.2 § 6). */
+const FOLLOW = '   Suivre ce trajet';
+const FOLLOWED = '   Suivi';
+const HINT_FOLLOWED = '▲▼ étapes   toucher : ne plus suivre   double : retour';
+const HINT_FOLLOW = '▲▼ étapes   toucher : suivre ce trajet   double : retour';
+
+/** Ouvre le favori sous le curseur et le fait suivre (« Suivre ce trajet »), puis laisse passer le message. */
+async function openAndFollow(h: Awaited<ReturnType<typeof setupController>>): Promise<Screen> {
+  await h.gesture('tap');
+  await h.until(stepsReady);
+  await h.gesture('tap');
+  expect(h.last().followed).toBe(true);
+  h.advance(3_000);
+  await h.c.render();
+  return h.last();
+}
 
 describe('contrôleur des lunettes : démarrage, rendu, sortie', () => {
   it('démarre par une page de chargement puis l’accueil (jamais d’écran noir)', async () => {
@@ -61,7 +88,7 @@ describe('contrôleur des lunettes : démarrage, rendu, sortie', () => {
     const { c, last, gesture, until, rec, closeWebView } = await setupController({ settings: { ...preset11(), seenVersion: '' } });
     expect((await until(homeReady)).lines.at(-1)).toBe('▲▼ choisir   toucher : ouvrir   double : quitter');
     await gesture('tap');
-    expect((await until(stepsReady)).title).toBe('Vers le bureau : 07:35 → 09:01');
+    expect(nb((await until(stepsReady)).title)).toBe(`Vers le bureau : 07:35 → 08:58${FOLLOW}`);
     await gesture('double');
     expect(last().screen).toBe('home');
     await gesture('double');
@@ -85,9 +112,10 @@ describe('contrôleur des lunettes : démarrage, rendu, sortie', () => {
     let fail = true;
     const flaky = (core: Core): Core => Object.assign(Object.create(core) as Core, { init: () => (fail ? Promise.reject(new QuaiError('dataUnreachable')) : core.init()) });
     const { c, last, until, gesture } = await setupController({ wrap: flaky });
-    expect(last()).toMatchObject({ screen: 'message', lines: ['Horaires injoignables : nouvel essai dans 30 s', 'toucher : réessayer   double : quitter'] });
+    // 1.2.2 (REVUE-USAGE n° 10) : « Pas de connexion aux horaires », une ligne des lunettes
+    expect(last()).toMatchObject({ screen: 'message', lines: ['Pas de connexion aux horaires : nouvel essai dans 30 s', 'toucher : réessayer   double : quitter'] });
     await c.refreshCurrent();
-    expect(last().lines[0]).toBe('Horaires injoignables : nouvel essai dans 30 s');
+    expect(last().lines[0]).toBe('Pas de connexion aux horaires : nouvel essai dans 30 s');
     fail = false;
     await gesture('tap');
     expect((await until(homeReady)).screen).toBe('home');
@@ -117,11 +145,11 @@ describe('contrôleur des lunettes : démarrage, rendu, sortie', () => {
 
   it('réglages modifiés sur le téléphone : l’écran suit tout de suite', async () => {
     const { c, last, gesture, until, settings, settle } = await setupController({ scenario: 's2' });
-    await until((s) => s.screen === 'board');
+    await until(linesReady);
     await gesture('double');
     await until(homeReady);
-    // du premier favori : les deux suivants, puis « Autour de moi »
-    await gesture('down', 'down', 'down', 'tap');
+    // du premier favori : le suivant, puis « Autour de moi »
+    await gesture('down', 'down', 'tap');
     await until((s) => s.screen === 'nearby' && s.lines.length > 2);
     expect(last().lines).toContain('~ horaire prévu, sans temps réel');
     expect(last().lines.at(-1)).toBe('▲▼ arrêt   toucher : départs   double : retour');
@@ -134,63 +162,67 @@ describe('contrôleur des lunettes : démarrage, rendu, sortie', () => {
   });
 });
 
-describe('M1 : favoris « réponse directe »', () => {
-  it('CA-M1.1 et CA-121.5 : S1 sans temps réel : « Favoris », 3 favoris sur une ligne, ordre, ligne du haut, aucun pied', async () => {
+describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
+  it('CA-M1.1, CA-121.5 et CA-122.1 : S1 sans temps réel : « Favoris », favoris sur une ligne, « Gares », « Bus, tram, métro », aucun pied', async () => {
     const { c, until } = await setupController({ flags: { noRt: true } });
     const s = await until(homeReady);
     expect(s.lines).toEqual([
-      // sans « ~ » sur l'accueil, qui n'en affiche plus
+      // sans « ~ » sur l'accueil, qui n'en affiche pas
       'Temps réel indisponible : horaires prévus',
-      'Favoris   6',
+      'Favoris   3',
       'Bureau   dans 2 min → 08:58',
-      'Namur, train   IC 07:42 voie 4',
-      'Gare du Nord, tram   T3 1 min',
+      'Vers Gand-Saint-Pierre   07:40 → 08:09',
       '',
       'Autour de moi   3 arrêts',
-      'Aller à…',
+      'Gares   IC 07:42 voie 4',
+      'Bus, tram, métro   T3 1 min',
     ]);
     // ordre intelligent, Maison (tu y es) en fin de liste et jamais sur l'accueil
-    expect(s.order).toEqual(['fav-bureau', 'fav-namur', 'fav-gdn', 'fav-gand', 'fav-dl-nord', 'fav-maison']);
+    expect(s.order).toEqual(['fav-bureau', 'fav-gand', 'fav-maison']);
+    expect(s.lines.join(' ')).not.toMatch(/Aller à/);
     c.stop();
   });
 
-  it('CA-M1.2 et CA-M1.9 : S1 temps réel ; « Aller à… » toujours à l’écran, même avec la ligne du haut', async () => {
+  it('CA-M1.2 et CA-M1.9 : S1 temps réel ; « Gares » et « Bus, tram, métro » toujours à l’écran, même avec la ligne du haut', async () => {
     const a = await setupController();
     const s = await a.until(homeReady);
-    expect(s.lines.slice(0, 4)).toEqual(['Favoris   6', 'Bureau   dans 4 min → 09:01', 'Namur, train   IC 07:42 +2 voie 6 !', 'Gare du Nord, tram   T3 1 min']);
-    expect(s.lines.at(-1)).toBe('Aller à…');
+    expect(s.lines).toEqual(['Favoris   3', 'Bureau   dans 4 min → 08:58', 'Vers Gand-Saint-Pierre   07:40 → 08:09', '', 'Autour de moi   3 arrêts', 'Gares   IC 07:42 +2 voie 6 !', 'Bus, tram, métro   T3 1 min']);
     a.c.stop();
-    // horaires périmés : la ligne du haut prend une ligne, plus de note en bas ; rien ne passe sous le bord
+    // horaires périmés : la ligne du haut prend une ligne ; rien ne passe sous le bord
     const b = await setupController({ flags: { stale: true, noRt: true } });
     const st = await b.until(homeReady);
     expect(st.lines[0]).toMatch(/^Horaires périmés : mise à jour arrêtée le /);
-    expect(st.lines[1]).toBe('Favoris   6');
-    expect(st.lines.slice(-3)).toEqual(['', 'Autour de moi   3 arrêts', 'Aller à…']);
-    // du premier favori (curseur à l'ouverture) jusqu'à « Aller à… »
+    expect(st.lines[1]).toBe('Favoris   3');
+    expect(st.lines.slice(-4)).toEqual(['', 'Autour de moi   3 arrêts', 'Gares   IC 07:42 voie 4', 'Bus, tram, métro   T3 1 min']);
+    // du premier favori (curseur à l'ouverture) jusqu'à « Bus, tram, métro »
     expect(st.sel).toBe(1);
     await b.gesture('down', 'down', 'down', 'down');
     expect(b.last().sel).toBe(5);
-    expect(b.last().lines.at(-1)).toBe('Aller à…');
+    expect(b.last().lines.at(-1)).toBe('Bus, tram, métro   T3 1 min');
     b.c.stop();
   });
 
-  it('CA-M1.3 : S2, l’arrêt favori s’ouvre seul ; TT : l’accueil ; T sur « Favoris » : la liste de tous', async () => {
+  it('CA-M1.3 et REVUE-USAGE n° 4 : S2, à Gare du Nord, « Bus, tram, métro » s’ouvre seul sur le tram 3 ; TT : l’accueil ; T sur « Favoris » : la liste', async () => {
     const { c, last, gesture, until } = await setupController({ scenario: 's2' });
-    const board = await until((s) => s.screen === 'board');
-    expect(board.title).toBe('Gare du Nord, tram (STIB) ★');
-    expect(board.lines[0]).toBe('T3   Churchill   2 min');
+    const lines = await until(linesReady);
+    expect(lines.title).toBe('Bus, tram, métro');
+    expect(lines.sel).toBe(0);
+    expect(lines.lines[0]).toBe('Tram 3 · Gare du Nord');
+    expect(lines.lines.slice(1, 3).sort()).toEqual(['vers Churchill   2 · 10 min', 'vers Esplanade   6 · 14 min']);
+    expect(lines.lines.slice(3, 5)).toEqual(['Tram 4 · Gare du Nord', 'vers Stalle   5 · 13 min']);
+    // le tram 4, le même arrêt : à l'écran aussi (arrêt favori de la 1.2.1 rangé en deux lignes)
     await gesture('double');
     const home = await until(homeReady);
-    expect(home.lines.slice(0, 4)).toEqual(['Favoris   6', 'Gare du Nord, tram   T3 2 min', 'Bruxelles-Nord, bus De Lijn   232 5 min', 'Bureau   maintenant → 12:26']);
+    expect(home.lines).toEqual(['Favoris   3', 'Bureau   maintenant → 12:26', 'Vers Gand-Saint-Pierre   14:10 → 14:39', '', 'Autour de moi   4 arrêts', 'Gares   IC 12:42 voie 4', 'Bus, tram, métro   T3 2 min']);
     expect(home.lines.some((l) => l.startsWith('Près de'))).toBe(false);
     // curseur sur le premier favori ; ▲ : « Favoris »
     expect(home.sel).toBe(1);
     await gesture('up', 'tap');
     const list = await until(listReady);
-    expect(list.title).toBe('Mes favoris');
-    expect(list.order).toEqual(['fav-gdn', 'fav-dl-nord', 'fav-bureau', 'fav-gand', 'fav-namur', 'fav-maison']);
-    // la liste garde le détail de chaque favori, sur deux lignes
-    expect(list.lines.slice(0, 2)).toEqual(['Gare du Nord, tram   T3 2 min', 'vers Churchill, puis T4 Stalle 5 min']);
+    expect(list.title).toBe('Favoris');
+    expect(list.order).toEqual(['fav-bureau', 'fav-gand', 'fav-maison']);
+    // la ligne de l'accueil, puis le détail
+    expect(list.lines.slice(0, 2)).toEqual(['Bureau   maintenant → 12:26', 'tram 3 12:12, direct']);
     expect(last().lines.at(-1)).toBe('▲▼ choisir   toucher : ouvrir   double : retour');
     c.stop();
   });
@@ -198,7 +230,7 @@ describe('M1 : favoris « réponse directe »', () => {
   it('CA-M1.4 : S3, « Vers Gand-Saint-Pierre » en tête', async () => {
     const { c, until } = await setupController({ scenario: 's3' });
     const s = await until(homeReady);
-    expect(s.lines.slice(0, 3)).toEqual(['Favoris   6', 'Vers Gand-Saint-Pierre   dans 13 min → 14:39', 'Bureau   maintenant → 14:07']);
+    expect(s.lines.slice(0, 3)).toEqual(['Favoris   3', 'Vers Gand-Saint-Pierre   dans 13 min → 14:39', 'Bureau   maintenant → 14:07']);
     expect(s.order?.[0]).toBe('fav-gand');
     c.stop();
   });
@@ -209,13 +241,13 @@ describe('M1 : favoris « réponse directe »', () => {
     expect(home.lines.some((l) => l.startsWith('Bureau'))).toBe(false);
     await gesture('up', 'tap');
     const list = await until(listReady);
-    expect(list.title).toBe('Mes favoris');
+    expect(list.title).toBe('Favoris');
     const pos = list.order!.indexOf('fav-bureau');
-    expect(pos).toBeGreaterThanOrEqual(list.order!.length - 3);
+    expect(pos).toBeGreaterThanOrEqual(list.order!.length - 2);
     for (let k = 0; k < pos; k++) c.onGesture('down');
     await settle();
     const shown = last();
-    const i = shown.lines.indexOf('Vers le bureau   tu y es');
+    const i = shown.lines.indexOf('Bureau   tu y es');
     expect(i).toBeGreaterThanOrEqual(0);
     // le favori n'a pas de 2e ligne
     expect(shown.lines[i + 1] === undefined || !/^IC |^à pied/.test(shown.lines[i + 1])).toBe(true);
@@ -231,8 +263,8 @@ describe('M1 : favoris « réponse directe »', () => {
     // « Favoris » : la liste de tous les favoris
     await gesture('up', 'tap');
     const first = await until(listReady);
-    expect(first).toMatchObject({ screen: 'favorites', title: 'Mes favoris' });
-    expect(first.order).toHaveLength(6);
+    expect(first).toMatchObject({ screen: 'favorites', title: 'Favoris' });
+    expect(first.order).toHaveLength(3);
     flags.noRt = false;
     const seen = new Set<string>();
     for (let k = 0; k < 4; k++) {
@@ -246,96 +278,161 @@ describe('M1 : favoris « réponse directe »', () => {
     c.stop();
   });
 
-  it('CA-M1.8 : sans position, « sans position » ; T sur le trajet : « Position indisponible. »', async () => {
+  it('CA-M1.8 : sans position, « sans position » ; « Gares » et « Bus, tram, métro » : les premières de la liste ; T sur le trajet : « Position indisponible. »', async () => {
     const { c, gesture, until } = await setupController({ pos: null });
     const s = await until(homeReady);
-    expect(s.lines.slice(0, 2)).toEqual(['Favoris   6', 'Bureau   sans position']);
-    expect(s.lines).toContain('Autour de moi   sans position');
+    expect(s.lines).toEqual([
+      'Favoris   3',
+      'Bureau   sans position',
+      'Vers Gand-Saint-Pierre   07:40 → 08:09',
+      'Maison   sans position',
+      '',
+      'Autour de moi   sans position',
+      'Gares   IC 07:42 +2 voie 6 !',
+      'Bus, tram, métro   T3 1 min',
+    ]);
     await gesture('tap');
     expect((await until((x) => x.screen === 'message')).lines.slice(0, 2)).toEqual(['Position indisponible.', 'Autorise la position pour Quai dans l’appli Even.']);
     c.stop();
   });
 
-  it('accueil sans favori (CA-S1.3) : « Ajouter un favori » ouvre la liste vide', async () => {
+  it('accueil sans favori (CA-S1.3) : « Ajouter un favori » ouvre « Favoris », où « Ajouter un favori » dit comment faire', async () => {
     const { c, gesture, until } = await setupController({ settings: { ...preset11(), favorites: [] } });
-    const s = await until((x) => x.screen === 'home' && !x.lines.some((l) => l.endsWith('…') && l !== 'Aller à…'));
-    expect(s.lines).toEqual(['Près de Namur', 'Ajouter un favori', '', 'Autour de moi   3 arrêts', 'Aller à…']);
+    const s = await until((x) => x.screen === 'home' && !x.lines.some((l) => l.endsWith('…')));
+    expect(s.lines).toEqual(['Près de Namur', 'Ajouter un favori', '', 'Autour de moi   3 arrêts', 'Gares   IC 07:42 +2 voie 6 !', 'Bus, tram, métro   T3 1 min']);
     await gesture('tap');
-    expect((await until((x) => x.screen === 'message')).lines).toEqual(['Aucun favori pour l’instant.', 'Ouvre un arrêt dans Autour de moi et touche-le,', 'ou ajoute un favori sur le téléphone.', 'double toucher : retour']);
+    expect((await until((x) => x.screen === 'favorites')).lines).toEqual(['Ajouter un favori   sur le téléphone', 'Autre adresse   sur le téléphone', '▲▼ choisir   toucher : ouvrir   double : retour']);
+    await gesture('tap');
+    expect((await until((x) => x.screen === 'message')).lines).toEqual(['Aucun favori pour l’instant.', 'Ajoute Maison ou Bureau sur le téléphone.', 'double toucher : retour']);
     c.stop();
   });
 
-  it('« Accueil sans favoris » : « Près de … », « Favoris   6 » sans favori dessous, ouvre toute la liste dans l’ordre intelligent', async () => {
+  it('« Accueil sans favoris » : « Près de … », « Favoris   3 » sans favori dessous, ouvre toute la liste dans l’ordre intelligent', async () => {
     const s = preset11();
     s.display.opening = 'home';
     const { c, gesture, until } = await setupController({ settings: s });
-    const home = await until((x) => x.screen === 'home' && x.lines.some((l) => l.startsWith('Autour de moi   3')));
-    expect(home.lines).toEqual(['Près de Namur', 'Favoris   6', '', 'Autour de moi   3 arrêts', 'Aller à…']);
+    const home = await until((x) => x.screen === 'home' && x.lines.some((l) => l.startsWith('Autour de moi   3')) && !x.lines.some((l) => l.endsWith('…')));
+    expect(home.lines).toEqual(['Près de Namur', 'Favoris   3', '', 'Autour de moi   3 arrêts', 'Gares   IC 07:42 +2 voie 6 !', 'Bus, tram, métro   T3 1 min']);
     await gesture('tap');
     const list = await until(listReady);
-    expect(list.title).toBe('Mes favoris');
-    expect(list.order).toEqual(['fav-bureau', 'fav-namur', 'fav-gdn', 'fav-gand', 'fav-dl-nord', 'fav-maison']);
+    expect(list.title).toBe('Favoris');
+    expect(list.order).toEqual(['fav-bureau', 'fav-gand', 'fav-maison']);
     c.stop();
   });
 
-  it('« Toujours ouvrir le favori en tête » : les étapes du 1er favori, suivi', async () => {
+  it('« Toujours ouvrir le favori en tête » : les étapes du 1er favori, pas suivies (CA-122.7)', async () => {
     const s = preset11();
     s.display.opening = 'firstFavorite';
     const { c, until } = await setupController({ settings: s });
     const st = await until(stepsReady);
-    expect(st).toMatchObject({ title: 'Vers le bureau : 07:35 → 09:01', page: 1, followed: true });
+    expect(st).toMatchObject({ page: 1, followed: false });
+    expect(nb(st.title)).toBe(`Vers le bureau : 07:35 → 08:58${FOLLOW}`);
+    expect(c.followed).toBeNull();
+    c.stop();
+  });
+
+  it('CA-122.1 à CA-122.4 : « Gares » : Namur et son prochain train, son tableau ; « Bus, tram, métro » : le détail d’une ligne, puis tous les départs de l’arrêt', async () => {
+    const { c, gesture, until, last } = await setupController({ scenario: 's2' });
+    await until(linesReady);
+    // le tram 3 : son détail (deux sens, 4 passages chacun), puis « Tous les départs de l’arrêt »
+    await gesture('tap');
+    const d = await until((x) => x.screen === 'line' && x.lines.length > 3);
+    expect(d.title).toBe('Tram 3 · Gare du Nord');
+    expect(d.sel).toBe(-1);
+    expect(d.lines.filter((l) => l.startsWith('vers ')).sort()).toEqual(['vers Churchill', 'vers Esplanade']);
+    expect(d.lines.at(-1)).toBe('▲▼ passages   toucher : tous les départs   double : retour');
+    await gesture('tap');
+    const b = await until((x) => x.screen === 'board' && x.lines.length > 2);
+    expect(b.title).toBe('Gare du Nord, tram (STIB) ★');
+    expect(b.lines.at(-1)).toBe('▲▼ départs   toucher : ★ lignes   double : retour');
+    await gesture('double');
+    expect(last()).toMatchObject({ screen: 'line', title: 'Tram 3 · Gare du Nord' });
+    await gesture('double');
+    expect(last().screen).toBe('lines');
+    // « toutes les lignes » (Bruxelles-Nord De Lijn) : toucher, le tableau de l'arrêt
+    await gesture('down', 'down', 'tap');
+    expect((await until((x) => x.screen === 'board' && x.title.startsWith('Bruxelles-Nord'))).title).toBe('Bruxelles-Nord, bus (De Lijn) ★');
+    await gesture('double', 'double');
+    // « Gares » depuis l'accueil : Namur ; toucher, son tableau
+    await until(homeReady);
+    await gesture('down', 'down', 'down', 'tap');
+    const st = await until((x) => x.screen === 'stations' && !x.lines.some((l) => l.endsWith('…')));
+    expect(st).toMatchObject({ title: 'Gares', lines: ['Namur   IC 12:42 voie 4', '▲▼ choisir   toucher : départs   double : retour'] });
+    await gesture('tap');
+    const namur = await until((x) => x.screen === 'board' && x.lines.length > 2);
+    expect(namur.title).toBe('Namur, train (SNCB) ★');
+    expect(namur.lines.at(-1)).toBe('▲▼ départs   toucher : ★ retirer la gare   double : retour');
+    await gesture('double');
+    expect(last().screen).toBe('stations');
     c.stop();
   });
 });
 
-describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.2.1)', () => {
-  it('CA-M2.1 et CA-M2.3 : étapes du trajet suivi ; T : « Dans le train » ; TT : même page', async () => {
-    const { c, gesture, until, last } = await setupController();
+describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.2.1) ; suivi sur demande (1.2.2)', () => {
+  it('CA-M2.1, CA-M2.3 et CA-122.7 : un favori ouvert n’est pas suivi ; « Suivre ce trajet » le suit ; T : « Ne plus suivre », « Arrêts : … » ; TT : même page', async () => {
+    const h = await setupController();
+    const { c, gesture, until, last } = h;
     await until(homeReady);
     await gesture('tap');
     const s = await until(stepsReady);
-    expect(s).toMatchObject({ page: 1, pages: 3, label: 'short', followed: true, title: 'Vers le bureau : 07:35 → 09:01', sel: 0 });
+    expect(s).toMatchObject({ page: 1, pages: 3, label: 'short', followed: false, sel: -1 });
+    expect(nb(s.title)).toBe(`Vers le bureau : 07:35 → 08:58${FOLLOW}`);
     expect(s.lines).toEqual([
       '! Voie modifiée : l’IC part de la voie 6',
       '07:35   Partir à pied vers la gare (7 min)   dans 4 min',
       '07:42   IC vers Bruxelles-Midi, voie 6   +2 min',
       '08:42   Descendre à Bruxelles-Nord',
       '08:42   À pied vers Gare du Nord (2 min)',
-      '~08:47   T4 vers Stalle',
-      '08:52   Descendre à Bourse',
+      '~08:44   Tram 3 vers Churchill',
+      '08:49   Descendre à Bourse',
       '▼ suite du trajet : 1 étape',
-      '▲▼ étapes   toucher : détail   double : retour',
+      HINT_FOLLOW,
     ]);
+    expect(c.followed).toBeNull();
+    // toucher : « Suivre ce trajet » ; « Suivi » sur la ligne du titre, « ▶ » sur la 1re étape
     await gesture('tap');
+    expect(last()).toMatchObject({ followed: true, sel: 0 });
+    expect(nb(last().title)).toBe(`Vers le bureau : 07:35 → 08:58${FOLLOWED}`);
+    expect(nb(last().lines.at(-1)!)).toBe('Trajet suivi : IC 07:42');
+    h.advance(3_000);
+    await c.render();
+    expect(last().lines.at(-1)).toBe(HINT_FOLLOWED);
+    // toucher : « Ne plus suivre », puis le détail du train (« Dans le train ») ; double toucher : la même page
+    await gesture('tap');
+    const menu = await until((x) => x.screen === 'followed');
+    expect(nb(menu.title)).toBe('Vers le bureau : trajet suivi');
+    expect(menu.lines).toEqual(['Ne plus suivre', 'Arrêts : IC vers Bruxelles-Midi, +2 min', '▲▼ choisir   toucher : valider   double : retour']);
+    await gesture('down', 'tap');
     expect(last()).toMatchObject({ screen: 'train', title: 'IC vers Bruxelles-Midi, +2 min' });
     await gesture('double');
-    expect(last()).toMatchObject({ screen: 'steps', page: 1 });
+    expect(last()).toMatchObject({ screen: 'steps', page: 1, followed: true });
     c.stop();
   });
 
   it('CA-M2.2 et CA-121.4 : ▼ fait défiler les étapes, puis ouvre « Autres trajets » ; toucher, double toucher ; trajet suivi inchangé', async () => {
-    const { c, gesture, until, last } = await setupController({ flags: { noRt: true } });
+    const h = await setupController({ flags: { noRt: true } });
+    const { c, gesture, until, last } = h;
     await until(homeReady);
-    await gesture('tap');
-    const p1 = await until(stepsReady);
+    const p1 = await openAndFollow(h);
     expect(p1.lines[0]).toBe('Le plus court : 1 changement, à pied 7 + 2 + 9 min');
     expect(p1.lines.at(-2)).toBe('▼ suite du trajet : 1 étape');
     // ▼ : la suite du même trajet, jamais un autre
     await gesture('down');
     expect(last()).toMatchObject({ page: 1, followed: true, title: p1.title });
-    expect(last().lines.slice(-2)).toEqual(['Fin du trajet. ▼ 2 autres trajets', '▲▼ étapes   toucher : détail   double : retour']);
+    expect(last().lines.slice(-2)).toEqual(['Fin du trajet. ▼ 2 autres trajets', HINT_FOLLOWED]);
     // ▼ au bout : « Autres trajets »
     await gesture('down');
     const list = await until((s) => s.screen === 'others');
     expect(list.title).toBe('Vers le bureau : autres trajets');
-    expect(list.lines).toEqual(['Sans changement   07:33 → 08:58', 'IC, à pied 7 + 12 min', 'Le suivant   08:33 → 10:02', 'IC + tram 3, à pied 7 + 2 + 9 min', '▲▼ choisir   toucher : voir   double : retour']);
-    // toucher : « Le suivant », non suivi
+    expect(list.lines).toEqual(['Le suivant   08:33 → 09:57', 'IC + tram 4, à pied 7 + 2 + 9 min', 'Plus tard   09:33 → 10:58', 'IC + tram 3, à pied 7 + 2 + 9 min', '▲▼ choisir   toucher : voir   double : retour']);
+    // toucher : la 2e entrée, non suivie
     await gesture('down', 'tap');
     const p3 = await until((s) => stepsReady(s) && s.page === 3);
-    expect(p3).toMatchObject({ label: 'next', followed: false, title: 'Vers le bureau : 08:33 → 10:02', sel: -1 });
-    expect(p3.lines[0]).toBe('Le suivant : même trajet, 1 h plus tard');
-    expect(p3.lines).toContain('~08:42   IC vers Bruxelles-Midi, voie 4');
-    expect(p3.lines.at(-1)).toBe('▲▼ étapes   toucher : suivre ce trajet   double : retour');
+    expect(p3).toMatchObject({ label: 'later', followed: false, sel: -1 });
+    expect(nb(p3.title)).toBe(`Vers le bureau : 09:33 → 10:58${FOLLOW}`);
+    expect(p3.lines[0]).toBe('Plus tard : 1 changement, départ 09:33');
+    expect(p3.lines).toContain('~09:42   IC vers Bruxelles-Midi, voie 4');
+    expect(p3.lines.at(-1)).toBe(HINT_FOLLOW);
     // double toucher : la liste, puis les étapes du 1er trajet, à leur fin
     await gesture('double');
     expect(last()).toMatchObject({ screen: 'others', sel: 1 });
@@ -346,62 +443,73 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     c.stop();
   });
 
-  it('CA-M2.4 : « Aller à… », T sur « Bureau » : les étapes directement, jamais « journeys »', async () => {
-    const { c, gesture, until, screens } = await setupController();
+  it('CA-M2.4 et CA-122.2 : « Favoris », T sur « Bureau » : les étapes directement, jamais « journeys » ; suivi : rattaché au lieu', async () => {
+    const h = await setupController();
+    const { c, gesture, until, screens } = h;
     await until(homeReady);
-    // du premier favori : les deux suivants, « Autour de moi », puis « Aller à… »
-    await gesture('down', 'down', 'down', 'down', 'tap');
-    const places = await until((s) => s.screen === 'places' && s.lines.some((l) => l.startsWith('Bureau   arrivée')));
-    // 1.2 : les lieux sont des favoris, dans l'ordre du téléphone (Bureau, puis Maison).
-    expect(places.lines).toEqual(['Bureau   arrivée 09:01', 'Maison   ici', 'Autre adresse   sur le téléphone', '▲▼ choisir   toucher : trajet   double : retour']);
+    await gesture('up', 'tap');
+    const list = await until(listReady);
+    expect(list.lines.slice(0, 2)).toEqual(['Bureau   dans 4 min → 08:58', 'IC 07:42 +2 voie 6 !, 1 changement']);
     await gesture('tap');
     const s = await until(stepsReady);
-    expect(s).toMatchObject({ title: 'Vers le bureau : 07:35 → 09:01', page: 1, followed: true });
-    expect(screens().some((x) => x.screen === 'journeys' || x.screen === 'trip')).toBe(false);
+    expect(s).toMatchObject({ page: 1, followed: false });
+    expect(nb(s.title)).toBe(`Vers le bureau : 07:35 → 08:58${FOLLOW}`);
+    expect(screens().some((x) => ['journeys', 'trip', 'places'].includes(x.screen))).toBe(false);
     // Le trajet suivi est rattaché au favori lieu : « ★ garder ce trajet » dira qu'il y est déjà.
+    await gesture('tap');
     expect(c.followed?.favoriteId).toBe('fav-bureau');
     c.stop();
   });
 
-  it('CA-S4.1 : une adresse récente dans « Aller à… », T : ses étapes ; effacées, elles disparaissent (CA-S4.2)', async () => {
+  it('CA-S4.1 et CA-122.2 : une adresse récente dans « Favoris », sous « Adresses récentes », T : ses étapes ; effacées, elles disparaissent (CA-S4.2)', async () => {
     const s = preset11();
-    s.recent = [{ label: 'Veldstraat 1, 9000 Gent', lat: 51.0537, lon: 3.7225, at: 1 }];
+    // un lieu public (PRD-1.2.2, règle de confidentialité)
+    s.recent = [{ label: 'Korenmarkt, 9000 Gent', lat: 51.0547, lon: 3.7217, at: 1 }];
     const { c, gesture, until, settings } = await setupController({ scenario: 's3', settings: s });
     await until(homeReady);
-    await gesture('down', 'down', 'down', 'down', 'tap');
-    const places = await until((x) => x.screen === 'places' && x.lines.some((l) => l.startsWith('Veldstraat 1   arrivée')));
-    expect(places.lines).toEqual(['Bureau   12 min à pied', 'Maison   arrivée 18:23', 'Veldstraat 1   arrivée 14:57', 'Autre adresse   sur le téléphone', '▲▼ choisir   toucher : trajet   double : retour']);
-    await gesture('down', 'down', 'tap');
+    await gesture('up', 'tap');
+    await until(listReady);
+    // Vers Gand-Saint-Pierre, Bureau, Maison, puis l'adresse, sous la ligne pâle (jamais sous le curseur)
+    await gesture('down', 'down', 'down');
+    const list = await until((x) => listReady(x) && x.lines.includes('Adresses récentes'));
+    // la réponse au format de l'accueil (départ conseillé et arrivée)
+    expect(list.lines.slice(-4)).toEqual(['Adresses récentes', 'Korenmarkt   dans 13 min → 14:55', 'Autre adresse   sur le téléphone', '▲▼ choisir   toucher : ouvrir   double : retour']);
+    await gesture('tap');
     const st = await until(stepsReady);
-    expect(st).toMatchObject({ title: 'Vers Veldstraat 1 : 14:10 → 14:57', page: 1, followed: true, label: 'short' });
+    expect(st).toMatchObject({ page: 1, followed: false, label: 'short' });
+    expect(nb(st.title)).toBe(`Vers Korenmarkt : 14:10 → 14:55${FOLLOW}`);
     expect(st.lines).toContain('14:39   À pied vers l’arrêt du tram (1 min)');
     await gesture('double');
     await settings.update((x) => ({ ...x, recent: [] }));
-    const after = await until((x) => x.screen === 'places' && !x.lines.some((l) => l.endsWith('…')));
-    expect(after.lines.some((l) => l.startsWith('Veldstraat'))).toBe(false);
+    const after = await until((x) => x.screen === 'favorites' && !x.lines.includes('Adresses récentes'));
+    expect(after.lines.some((l) => l.startsWith('Korenmarkt'))).toBe(false);
     c.stop();
   });
 
-  it('Aller à… : Maison depuis la maison, « Tu es déjà à la maison. » ; « Autre adresse » : un message', async () => {
+  it('« Favoris » : Maison depuis la maison, « Tu es déjà à la maison. » ; « Autre adresse » : un message', async () => {
     const { c, gesture, until, last } = await setupController();
     await until(homeReady);
-    await gesture('down', 'down', 'down', 'down', 'tap');
-    await until((s) => s.screen === 'places' && s.lines[1] === 'Maison   ici');
-    await gesture('down', 'tap');
+    await gesture('up', 'tap');
+    const list = await until(listReady);
+    expect(list.lines).toContain('Maison   tu y es');
+    // Bureau, Vers Gand-Saint-Pierre, puis Maison
+    await gesture('down', 'down', 'tap');
     expect(await until((s) => s.screen === 'message')).toMatchObject({ title: 'Vers la maison', lines: ['Tu es déjà à la maison.', 'double toucher : retour'] });
     await gesture('double', 'down', 'tap');
     expect(last().lines.at(-1)).toBe('Tape l’adresse dans Quai, sur le téléphone');
     c.stop();
   });
 
-  it('CA-M2.5 : S3, Gand-Saint-Pierre : « Dans le train » à 14:10, aide à l’arrivée à 14:36', async () => {
-    const { c, gesture, until, last, goTo } = await setupController({ scenario: 's3' });
+  it('CA-M2.5 : S3, Gand-Saint-Pierre suivi : « Dans le train » à 14:10, aide à l’arrivée à 14:36', async () => {
+    const h = await setupController({ scenario: 's3' });
+    const { c, gesture, until, last, goTo } = h;
     await until(homeReady);
     await gesture('tap');
     const s = await until(stepsReady);
-    expect(s.title).toBe('Vers Gand-Saint-Pierre : 14:10 → 14:39');
+    expect(nb(s.title)).toBe(`Vers Gand-Saint-Pierre : 14:10 → 14:39${FOLLOW}`);
     expect(s.lines.slice(0, 3)).toEqual(['Le plus court : direct', '14:10   IC vers Bruges, voie 4   dans 15 min', '14:39   Arrivée à Gand-Saint-Pierre']);
     expect(s.lines).toContain('Fin du trajet. ▼ 2 autres trajets');
+    await gesture('tap');
     goTo(at(14, 10, 20));
     await c.refreshCurrent();
     expect(last()).toMatchObject({ screen: 'train', title: 'IC vers Bruges' });
@@ -411,7 +519,7 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     c.stop();
   });
 
-  it('CA-M2.6 : téléphone, 2e carte : page 2 suivie, message ; pas « dans le train » du 14:10, mais du 14:22', async () => {
+  it('CA-M2.6 : téléphone, 2e carte (bouton « Lunettes ») : page 2 suivie, message ; pas « dans le train » du 14:10, mais du 14:22', async () => {
     const h = await setupController({ scenario: 's3' });
     await h.until(homeReady);
     const s = preset11();
@@ -419,9 +527,10 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     if (fav.kind !== 'trip') throw new Error('fav-gand');
     const result = await h.core.route(fav.from, fav.to, h.clock.now(), s, { lat: 50.8454, lon: 4.3571 });
     const msg = await h.c.showTrip({ title: 'Vers Gand-Saint-Pierre', from: fav.from, to: fav.to, result, index: 1 });
-    expect(msg).toBe('Affiché dans les lunettes : IC 14:22, voie 6.');
+    expect(nb(msg)).toBe('Affiché dans les lunettes : IC 14:22, voie 6.');
     const st = await h.until(stepsReady);
-    expect(st).toMatchObject({ page: 2, followed: true, title: 'Vers Gand-Saint-Pierre : 14:25 → 14:56' });
+    expect(st).toMatchObject({ page: 2, followed: true });
+    expect(nb(st.title)).toBe(`Vers Gand-Saint-Pierre : 14:25 → 14:56${FOLLOWED}`);
     h.goTo(at(14, 10, 30));
     await h.c.refreshCurrent();
     expect(h.last()).toMatchObject({ screen: 'steps', page: 2 });
@@ -435,26 +544,27 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     h.c.stop();
   });
 
-  it('CA-M2.7 : trajet entièrement à pied, T ne fait rien', async () => {
+  it('CA-M2.7 : trajet entièrement à pied, rien à suivre, T ne fait rien', async () => {
     const { c, gesture, until, last } = await setupController({ pos: { lat: 50.848, lon: 4.352 }, now: at(10, 0) });
     const home = await until(homeReady);
     // à pied : on part quand on veut, l'arrivée suit
-    expect(home.lines.slice(0, 2)).toEqual(['Favoris   6', 'Bureau   maintenant → 10:09']);
+    expect(home.lines.slice(0, 2)).toEqual(['Favoris   3', 'Bureau   maintenant → 10:09']);
     await gesture('tap');
     const s = await until(stepsReady);
+    expect(nb(s.title)).toBe('Vers le bureau : 10:00 → 10:09');
     expect(s.lines[0]).toBe('Le plus court : à pied, 9 min');
     expect(s.lines.slice(1, 3)).toEqual(['10:00   Partir à pied (9 min)   en cours', '10:09   Arrivée au bureau']);
     expect(s.lines.slice(-2)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', '▲▼ étapes   double : retour']);
     await gesture('tap');
     expect(last()).toEqual(s);
+    expect(c.followed).toBeNull();
     c.stop();
   });
 
   it('CA-M2.8 : une autre proposition affichée à 07:42 : l’écran passe « dans le train » de l’IC suivi ; T sur une autre proposition la fait suivre', async () => {
     const a = await setupController({ flags: { noRt: true } });
     await a.until(homeReady);
-    await a.gesture('tap');
-    await a.until(stepsReady);
+    await openAndFollow(a);
     // au bout des étapes, « Autres trajets », puis « Le suivant »
     await a.gesture('down', 'down');
     await a.until((s) => s.screen === 'others');
@@ -469,6 +579,7 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     expect(a.last()).toMatchObject({ screen: 'steps', page: 1, followed: true });
     a.c.stop();
 
+    // sans rien suivre : la 2e entrée de la liste (l'IC de 09:42), puis toucher : elle est suivie ; à 07:42, rien ne se passe
     const b = await setupController({ flags: { noRt: true } });
     await b.until(homeReady);
     await b.gesture('tap');
@@ -477,9 +588,8 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     await b.until((s) => s.screen === 'others');
     await b.gesture('down', 'tap', 'tap');
     expect(b.last()).toMatchObject({ page: 3, followed: true });
-    expect(b.last().lines.at(-1)).toBe('Trajet suivi : IC 08:42');
-    expect(b.c.followed?.journey.legs.find((l) => l.kind === 'ride')?.schedDep).toBe(at(8, 42));
-    // le 1er trajet n'est plus suivi ; à 07:42, rien ne se passe
+    expect(nb(b.last().lines.at(-1)!)).toBe('Trajet suivi : IC 09:42');
+    expect(b.c.followed?.journey.legs.find((l) => l.kind === 'ride')?.schedDep).toBe(at(9, 42));
     await b.gesture('double', 'double');
     expect(b.last()).toMatchObject({ screen: 'steps', page: 1, followed: false });
     b.goTo(at(7, 42, 20));
@@ -490,27 +600,40 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
 });
 
 describe('M6 : sans mauvaise surprise', () => {
-  it('CA-M6.1 et CA-M6.2 : retrait annulable dans les 5 s, à l’identique ; ensuite, nouvel ajout « Jamais »', async () => {
-    const { c, gesture, until, last, settings, advance } = await setupController({ scenario: 's2' });
-    await until((s) => s.screen === 'board');
-    const before = structuredClone(settings.get().favorites);
+  /** « Gares » puis Namur : le tableau de la gare gardée (« ★ » dans le titre). */
+  const openNamur = async (h: Awaited<ReturnType<typeof setupController>>) => {
+    await h.until(homeReady);
+    // du premier favori : le suivant, « Autour de moi », puis « Gares »
+    await h.gesture('down', 'down', 'down', 'tap');
+    await h.until((x) => x.screen === 'stations' && !x.lines.some((l) => l.endsWith('…')));
+    await h.gesture('tap');
+    return h.until((x) => x.screen === 'board' && x.lines.length > 2);
+  };
+
+  it('CA-M6.1, CA-M6.2 et REVUE-USAGE n° 3 : ★ d’une gare : retrait annulable dans les 5 s, à l’identique ; ensuite, un nouvel ajout en fin de « Gares »', async () => {
+    const h = await setupController();
+    const { c, gesture, last, settings, advance } = h;
+    expect((await openNamur(h)).title).toBe('Namur, train (SNCB) ★');
+    const before = structuredClone(settings.get().stations);
     await gesture('tap');
-    expect(last().lines.at(-1)).toBe('★ Retiré. Toucher encore : annuler');
-    expect(last().title).toBe('Gare du Nord, tram (STIB)');
-    expect(settings.get().favorites.some((f) => f.id === 'fav-gdn')).toBe(false);
+    expect(last().lines.at(-1)).toBe('★ Retirée. Toucher encore : annuler');
+    expect(last().title).toBe('Namur, train (SNCB)');
+    expect(settings.get().stations.some((p) => p.id === 'fav-namur')).toBe(false);
     advance(4_000);
     await gesture('tap');
-    expect(last().lines.at(-1)).toBe('★ Favori rétabli');
-    expect(last().title).toBe('Gare du Nord, tram (STIB) ★');
-    expect(settings.get().favorites).toEqual(before);
-    // retrait, puis toucher après 6 s : nouveau favori « Jamais », en fin de liste
+    expect(last().lines.at(-1)).toBe('★ Gare rétablie');
+    expect(last().title).toBe('Namur, train (SNCB) ★');
+    expect(settings.get().stations).toEqual(before);
+    // retrait, puis toucher après 6 s : la gare revient en fin de « Gares », sous un nouvel identifiant
     await gesture('tap');
     advance(6_000);
     await gesture('tap');
-    expect(last().lines.at(-1)).toBe('★ Ajouté aux favoris');
-    const favs = settings.get().favorites;
-    expect(favs.at(-1)).toMatchObject({ kind: 'stop', areaId: 'stib:6357F', propose: 'never' });
-    expect(favs.some((f) => f.id === 'fav-gdn')).toBe(false);
+    expect(last().lines.at(-1)).toBe('★ Ajoutée à tes gares');
+    const stations = settings.get().stations;
+    expect(stations.at(-1)).toMatchObject({ areaId: 'sncb:8863008', name: { fr: 'Namur' } });
+    expect(stations.some((p) => p.id === 'fav-namur')).toBe(false);
+    // jamais d'arrêt favori (PRD-1.2.2 § 4)
+    expect(settings.get().favorites.some((f) => f.kind === 'stop')).toBe(false);
     // ▲▼ ne déplacent aucun curseur
     const s = last();
     await gesture('down', 'up');
@@ -519,71 +642,75 @@ describe('M6 : sans mauvaise surprise', () => {
     c.stop();
   });
 
-  it('deux favoris sur la même zone : le toucher retire celui dont le filtre est celui de l’écran (revue)', async () => {
-    const s = preset11();
-    const gdn = s.favorites.find((f) => f.id === 'fav-gdn');
-    if (gdn?.kind !== 'stop') throw new Error('fav-gdn');
-    s.favorites.push({ ...structuredClone(gdn), id: 'fav-gdn-t4', filter: [{ line: '4', head: 'stalle p' }], propose: 'never' });
-    const { c, gesture, until, last, settings, advance } = await setupController({ scenario: 's2', settings: s });
-    await until((x) => x.screen === 'board');
-    await c.show({ screen: 'board', areaId: 'stib:6357F', filter: [{ line: '4', head: 'stalle p' }], name: gdn.name });
-    const b = await until((x) => x.screen === 'board' && x.lines[0]?.startsWith('T4'));
-    expect(b.title).toBe('Gare du Nord, tram (STIB) ★');
+  it('REVUE-USAGE n° 3 : deux lignes au même arrêt (tram 3 et tram 4 à Gare du Nord) : « garder une ligne » retire et rétablit chacune la sienne', async () => {
+    const { c, gesture, until, last, settings, advance } = await setupController({ scenario: 's2' });
+    await until(linesReady);
+    const before = structuredClone(settings.get().lines);
+    // le tram 3 : son détail, puis tous les départs de l'arrêt ; ★ : « Gare du Nord : garder une ligne »
     await gesture('tap');
-    expect(last().lines.at(-1)).toBe('★ Retiré. Toucher encore : annuler');
-    expect(settings.get().favorites.map((f) => f.id)).toEqual(['fav-bureau', 'fav-gdn', 'fav-gand', 'fav-namur', 'fav-dl-nord', 'fav-maison']);
+    await until((x) => x.screen === 'line' && x.lines.length > 3);
+    await gesture('tap');
+    expect((await until((x) => x.screen === 'board' && x.lines.length > 2)).title).toBe('Gare du Nord, tram (STIB) ★');
+    await gesture('tap');
+    const keep = await until((x) => x.screen === 'keepLine' && x.lines.length > 2);
+    expect(nb(keep.title)).toBe('Gare du Nord : garder une ligne');
+    expect(keep.lines).toEqual(['tram 3   ★', 'tram 4   ★', '▲▼ choisir   toucher : ★ garder ou retirer   double : retour']);
+    // le tram 4 : retiré seul, le tram 3 reste
+    await gesture('down', 'tap');
+    expect(last().lines.slice(0, 2)).toEqual(['tram 3   ★', 'tram 4']);
+    expect(last().lines.at(-1)).toBe('★ Retirée. Toucher encore : annuler');
+    expect(settings.get().lines.map((p) => p.id)).toEqual(['fav-gdn-3', 'fav-dl-nord']);
     advance(2_000);
     await gesture('tap');
-    expect(settings.get().favorites.map((f) => f.id)).toEqual(['fav-bureau', 'fav-gdn', 'fav-gand', 'fav-namur', 'fav-dl-nord', 'fav-maison', 'fav-gdn-t4']);
-    // départs de toute la zone (Autour de moi) : aucun favori sans filtre, donc pas de « ★ » ; un toucher en ajoute un
-    await c.show({ screen: 'board', areaId: 'stib:6357F', name: gdn.name });
-    const all = await until((x) => x.screen === 'board' && x.lines.some((l) => l.startsWith('T3   Churchill')) && !x.lines.at(-1)!.startsWith('★'));
-    expect(all.title).toBe('Gare du Nord, tram (STIB)');
-    expect(all.lines.at(-1)).toBe('▲▼ départs   toucher : ★ favori   double : retour');
-    await gesture('tap');
-    expect(last().lines.at(-1)).toBe('★ Ajouté aux favoris');
-    const added = settings.get().favorites.at(-1);
-    expect(added).toMatchObject({ kind: 'stop', areaId: 'stib:6357F', propose: 'never' });
-    expect(added?.kind === 'stop' && added.filter).toBeFalsy();
-    expect(settings.get().favorites.filter((f) => f.kind === 'stop' && f.areaId === 'stib:6357F')).toHaveLength(3);
+    expect(last().lines.at(-1)).toBe('★ Ligne rétablie');
+    expect(settings.get().lines).toEqual(before);
+    // double toucher : les départs, toujours « ★ »
+    await gesture('double');
+    expect(last()).toMatchObject({ screen: 'board', title: 'Gare du Nord, tram (STIB) ★' });
+    expect(settings.get().favorites.some((f) => f.kind === 'stop')).toBe(false);
     c.stop();
   });
 
   it('le message de retrait ne suit pas sur l’écran suivant, et ne s’annule plus après un changement d’écran', async () => {
-    const { c, gesture, until, last, settings } = await setupController({ scenario: 's2' });
-    await until((s) => s.screen === 'board');
+    const h = await setupController();
+    const { c, gesture, until, last, settings } = h;
+    await openNamur(h);
     await gesture('tap', 'double');
-    await until(homeReady);
-    expect(last().lines).not.toContain('★ Retiré. Toucher encore : annuler');
-    // 1.2.1 : pas de pied sur l'accueil (aide des gestes passée) : la dernière ligne reste « Aller à… »
-    expect(last().lines.at(-1)).toBe('Aller à…');
-    expect(settings.get().favorites.some((f) => f.id === 'fav-gdn')).toBe(false);
+    // Namur était la seule gare : « Gares » vide dit où en choisir
+    const st = await until((x) => x.screen === 'stations');
+    expect(st.lines).toEqual(['Choisis tes gares dans Quai, sur le téléphone.', 'double toucher : retour']);
+    expect(last().lines).not.toContain('★ Retirée. Toucher encore : annuler');
+    await gesture('double');
+    const home = await until((x) => x.screen === 'home' && x.lines.includes('Gares   à choisir'));
+    // 1.2.1 : pas de pied sur l'accueil (aide des gestes passée) : la dernière ligne reste « Bus, tram, métro »
+    expect(home.lines.at(-1)).toBe('Bus, tram, métro   T3 1 min');
+    expect(settings.get().stations).toEqual([]);
     c.stop();
   });
 
   it('CA-M6.3 : trajet en cours sur l’accueil, puis repris à la réouverture près d’Ottignies', async () => {
     const a = await setupController();
     await a.until(homeReady);
-    await a.gesture('tap');
-    await a.until(stepsReady);
+    await openAndFollow(a);
     a.goTo(at(7, 36));
     await a.c.refreshCurrent();
     await a.gesture('double');
     const home = await a.until(homeReady);
-    expect(home.lines.slice(0, 2)).toEqual(['En cours : vers le bureau   IC 07:44, voie 6', 'Favoris   6']);
+    // REVUE-USAGE n° 1 et n° 8 : « En cours » remplace la ligne de son favori ; le train, son heure et sa voie
+    expect(home.lines.slice(0, 3)).toEqual(['En cours : vers le bureau   IC 07:42 +2 voie 6 !', 'Favoris   3', 'Vers Gand-Saint-Pierre   07:40 → 08:09']);
     // T sur « En cours » : le trajet, à l'écran qui correspond à l'heure
     await a.gesture('up', 'tap');
     expect(a.last()).toMatchObject({ screen: 'steps', followed: true, page: 1 });
     await a.gesture('double', 'double');
     a.c.onSignal({ kind: 'exit', abnormal: false });
     await a.settle();
-    expect(parseTrip(await a.kv.get(TRIP_KEY))?.title).toBe('Vers le bureau');
+    expect(parseTrip(await a.kv.get(TRIP_KEY))).toMatchObject({ title: 'Vers le bureau', explicit: true });
 
     const b = await setupController({ kv: a.kv, now: at(8, 5), pos: { lat: 50.6727, lon: 4.5694 } });
     const s = await b.until((x) => x.screen === 'train');
     expect(s.title).toBe('IC vers Bruxelles-Midi, +2 min');
     expect(s.lines.at(-1)).toBe('Trajet en cours : vers le bureau');
-    // TT : les étapes, puis l'accueil où « En cours » reste (descente de l'IC à Bruxelles-Nord, puis le T4)
+    // TT : les étapes, puis l'accueil où « En cours » reste (descente de l'IC à Bruxelles-Nord, puis le tram 4)
     await b.gesture('double');
     expect(b.last()).toMatchObject({ screen: 'steps', followed: true });
     await b.gesture('double');
@@ -594,8 +721,7 @@ describe('M6 : sans mauvaise surprise', () => {
   it('CA-M6.4 : TT avant l’heure de départ, rouvert à 07:50 (toujours à la maison) : l’accueil sans « En cours »', async () => {
     const a = await setupController();
     await a.until(homeReady);
-    await a.gesture('tap');
-    expect((await a.until(stepsReady)).followed).toBe(true);
+    expect((await openAndFollow(a)).followed).toBe(true);
     a.goTo(at(7, 32));
     await a.gesture('double');
     a.c.stop();
@@ -603,15 +729,14 @@ describe('M6 : sans mauvaise surprise', () => {
     const b = await setupController({ kv: a.kv, now: at(7, 50) });
     const s = await b.until(homeReady);
     expect(s.lines[0]).not.toMatch(/^En cours/);
-    expect(await b.kv.get(TRIP_KEY)).toBeNull();
+    expect(await b.kv.get(TRIP_KEY)).toBeFalsy();
     b.c.stop();
   });
 
   it('CA-M6.5 et CA-M6.6 : parti sans l’utilisateur, ou arrivé depuis plus de 5 min : plus de trajet en cours', async () => {
     const a = await setupController();
     await a.until(homeReady);
-    await a.gesture('tap');
-    await a.until(stepsReady);
+    await openAndFollow(a);
     a.goTo(at(7, 36));
     await a.c.refreshCurrent();
     a.c.stop();
@@ -622,42 +747,43 @@ describe('M6 : sans mauvaise surprise', () => {
     const b = await setupController({ kv: a.kv, now: at(7, 50) });
     expect((await b.until(homeReady)).lines[0]).not.toMatch(/^En cours/);
     b.c.stop();
-    // 09:10 (arrivée 09:01 plus 5 min), au bureau
+    // 09:10 (arrivée 08:58 plus 5 min, passée), au bureau
     await a.kv.set(TRIP_KEY, saved!);
     const d = await setupController({ kv: a.kv, now: at(9, 10), pos: { lat: 50.8441, lon: 4.3474 } });
     expect((await d.until(homeReady)).lines[0]).not.toMatch(/^En cours/);
     d.c.stop();
-    // 08:52, descendu du T4 à Bourse, en ville : en cours, « arrivée 09:01 » (il reste la marche)
+    // 08:52, descendu du tram 3 à Bourse, en ville : en cours, « arrivée 08:58 » (il reste la marche)
     await a.kv.set(TRIP_KEY, saved!);
     const e = await setupController({ kv: a.kv, now: at(8, 52), pos: { lat: 50.8454, lon: 4.3571 } });
     const st = await e.until((x) => x.screen === 'steps');
     expect(st.lines.at(-1)).toBe('Trajet en cours : vers le bureau');
     await e.gesture('double');
-    expect((await e.until(homeReady)).lines[0]).toBe('En cours : vers le bureau   arrivée 09:01');
+    expect((await e.until(homeReady)).lines[0]).toBe('En cours : vers le bureau   arrivée 08:58');
     e.c.stop();
   });
 
   it('un toucher sur un autre favori pendant un trajet en cours ne change pas le trajet suivi (R2)', async () => {
-    const { c, gesture, until, goTo, last } = await setupController();
+    const h = await setupController();
+    const { c, gesture, until, goTo, last } = h;
     await until(homeReady);
-    await gesture('tap');
-    await until(stepsReady);
+    await openAndFollow(h);
     goTo(at(7, 36));
     await c.refreshCurrent();
     const followed = c.followed?.journey.id;
     await gesture('double');
     const home = await until(homeReady);
     expect(home.lines[0]).toMatch(/^En cours/);
-    // « Favoris » (sous « En cours ») puis Gand-Saint-Pierre (de gare à gare), qui n'est pas sur l'accueil
+    // « Favoris » (sous « En cours ») puis Gand-Saint-Pierre (de gare à gare)
     await gesture('up', 'up', 'down', 'tap');
     const list = await until(listReady);
     const k = list.order!.indexOf('fav-gand');
     for (let i = 0; i < k; i++) c.onGesture('down');
     await gesture('tap');
     const s = await until(stepsReady);
-    expect(s.title).toMatch(/^Vers Gand-Saint-Pierre/);
+    // « Suivre ce trajet » couperait la destination : « Suivre », le titre entier
+    expect(nb(s.title)).toBe('Vers Gand-Saint-Pierre : 07:40 → 08:09   Suivre');
     expect(s.followed).toBe(false);
-    expect(s.lines.at(-1)).toBe('▲▼ étapes   toucher : suivre ce trajet   double : retour');
+    expect(s.lines.at(-1)).toBe(HINT_FOLLOW);
     expect(c.followed?.journey.id).toBe(followed);
     // toucher : on le suit (geste explicite)
     await gesture('tap');
@@ -666,21 +792,25 @@ describe('M6 : sans mauvaise surprise', () => {
     c.stop();
   });
 
-  it('le favori du trajet en cours rouvre ce trajet', async () => {
-    const { c, gesture, until, goTo, last } = await setupController();
+  it('REVUE-USAGE n° 1 : le favori du trajet en cours n’est pas répété sur l’accueil ; dans « Favoris », il rouvre ce trajet', async () => {
+    const h = await setupController();
+    const { c, gesture, until, goTo, last } = h;
     await until(homeReady);
-    await gesture('tap');
-    await until(stepsReady);
+    await openAndFollow(h);
     goTo(at(7, 36));
     await c.refreshCurrent();
     const id = c.followed?.journey.id;
     await gesture('double');
     const home = await until(homeReady);
-    // « En cours », « Favoris », puis le favori du bureau : sa réponse est celle d'un nouveau départ (l'IC de 07:42 est
-    // pris), mais le toucher rouvre le trajet en cours
-    expect(home.lines.slice(0, 3)).toEqual(['En cours : vers le bureau   IC 07:44, voie 6', 'Favoris   6', 'Bureau   08:33 → 10:02']);
-    await gesture('up', 'up', 'down', 'down', 'tap');
-    expect(last()).toMatchObject({ screen: 'steps', followed: true, title: 'Vers le bureau : 07:35 → 09:01' });
+    expect(home.lines.some((l) => l.startsWith('Bureau'))).toBe(false);
+    // « Favoris » : le favori du bureau, sa réponse d'un nouveau départ (l'IC de 07:42 est pris), mais le toucher
+    // rouvre le trajet en cours
+    await gesture('up', 'down', 'tap');
+    const list = await until(listReady);
+    expect(list.lines[0]).toBe('Bureau   08:33 → 09:57');
+    await gesture('tap');
+    expect(last()).toMatchObject({ screen: 'steps', followed: true });
+    expect(nb(last().title)).toBe(`Vers le bureau : 07:35 → 08:58${FOLLOWED}`);
     expect(c.followed?.journey.id).toBe(id);
     c.stop();
   });
@@ -688,8 +818,7 @@ describe('M6 : sans mauvaise surprise', () => {
   it('instantané d’arrière-plan : la pile et le trajet suivi passent à la nouvelle WebView', async () => {
     const a = await setupController();
     await a.until(homeReady);
-    await a.gesture('tap');
-    await a.until(stepsReady);
+    await openAndFollow(a);
     // au bout des étapes, « Autres trajets », puis sa 1re entrée
     await a.gesture('down', 'down');
     await a.until((s) => s.screen === 'others');
@@ -715,8 +844,7 @@ describe('état d’arrière-plan : instantané pris au mauvais moment (revue)',
   it('instantané vide pendant « Chargement… » ; la nouvelle WebView lit quai.trip et reprend le trajet en cours', async () => {
     const a = await setupController();
     await a.until(homeReady);
-    await a.gesture('tap');
-    await a.until(stepsReady);
+    await openAndFollow(a);
     a.goTo(at(7, 38));
     await a.c.refreshCurrent();
     a.c.stop();
@@ -747,14 +875,13 @@ describe('état d’arrière-plan : instantané pris au mauvais moment (revue)',
   it('un écran de chargement ou d’erreur n’est jamais restauré ; trip: null ignoré si le trajet n’avait pas été lu', async () => {
     const a = await setupController();
     await a.until(homeReady);
-    await a.gesture('tap');
-    await a.until(stepsReady);
+    await openAndFollow(a);
     a.goTo(at(7, 38));
     await a.c.refreshCurrent();
     a.c.stop();
     await a.settle();
     const loading = { v: 2, nav: { stack: [{ route: { screen: 'message', kind: 'loading', title: 'Quai', lines: ['Chargement…'] }, sel: 0, top: 0 }] }, trip: null };
-    const error = { v: 2, nav: { stack: [{ route: { screen: 'message', kind: 'error', title: 'Quai', lines: ['Horaires injoignables'] }, sel: 0, top: 0 }] }, trip: null };
+    const error = { v: 2, nav: { stack: [{ route: { screen: 'message', kind: 'error', title: 'Quai', lines: ['Pas de connexion aux horaires'] }, sel: 0, top: 0 }] }, trip: null };
     for (const snap of [loading, error]) {
       const b = await setupController({ kv: a.kv, now: at(7, 50), pos: { lat: 50.6727, lon: 4.5694 }, beforeStart: (c) => c.restore(JSON.stringify(snap)) });
       const s = await b.until((x) => x.screen === 'train');
@@ -774,8 +901,7 @@ describe('état d’arrière-plan : instantané pris au mauvais moment (revue)',
   it('« Dans le train » ne revient pas après restauration quand on était revenu aux étapes (autoDone)', async () => {
     const a = await setupController();
     await a.until(homeReady);
-    await a.gesture('tap');
-    await a.until(stepsReady);
+    await openAndFollow(a);
     a.location.set({ lat: 50.6727, lon: 4.5694 });
     a.goTo(at(8, 5));
     await a.c.refreshCurrent();
@@ -831,7 +957,9 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
     const msg = await h.c.showTrip({ title: 'Vers Saint-Géry', from: { type: 'here' }, to, result: { journeys: proposals() }, index: 0 });
     expect(msg).toBe(`Affiché dans les lunettes${NB}: IC 07:42, voie 4.`);
     const p1 = await h.until(stepsReady);
-    expect(p1).toMatchObject({ page: 1, pages: 3, label: 'short', followed: true, title: 'Vers Saint-Géry : 07:33 → 08:57' });
+    // le bouton « Lunettes » du téléphone est une demande : le trajet est suivi (PRD-1.2.2 § 6)
+    expect(p1).toMatchObject({ page: 1, pages: 3, label: 'short', followed: true });
+    expect(nb(p1.title)).toBe(`Vers Saint-Géry : 07:33 → 08:57${FOLLOWED}`);
     expect(p1.lines[0]).toBe('Le plus court : direct, à pied 7 + 11 min');
     expect(p1.lines.at(-2)).toBe('Fin du trajet. ▼ 2 autres trajets');
     fits(p1);
@@ -842,10 +970,11 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
     fits(list);
     await h.gesture('tap');
     const p2 = await h.until((s) => s.screen === 'steps' && s.page === 2);
-    expect(p2).toMatchObject({ page: 2, pages: 3, label: 'lesswalk', followed: false, title: 'Vers Saint-Géry : 07:33 → 08:53' });
+    expect(p2).toMatchObject({ page: 2, pages: 3, label: 'lesswalk', followed: false });
+    expect(nb(p2.title)).toBe(`Vers Saint-Géry : 07:33 → 08:53${FOLLOW}`);
     expect(p2.lines[0]).toBe('Moins de marche : 1 changement, à pied 7 + 2 + 4 min');
     expect(p2.lines).toContain('08:40   À pied vers Gare du Nord (2 min)');
-    expect(p2.lines).toContain('~08:44   T3 vers Churchill');
+    expect(p2.lines).toContain('~08:44   Tram 3 vers Churchill');
     // 7 étapes pour 6 lignes : ▼ montre la dernière, du même trajet
     expect(p2.lines.at(-2)).toBe('▼ suite du trajet : 1 étape');
     expect(p2.lines.at(-1)).toBe('▲▼ étapes   toucher : suivre ce trajet   double : retour');
@@ -857,7 +986,7 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
     fits(h.last());
     await h.gesture('tap');
     expect(h.last()).toMatchObject({ page: 2, label: 'lesswalk', followed: true });
-    expect(h.last().lines.at(-1)).toBe('Trajet suivi : IC 07:42');
+    expect(nb(h.last().lines.at(-1)!)).toBe('Trajet suivi : IC 07:42');
     expect(h.c.followed?.journey.id).toBe('lesswalk');
     h.c.stop();
   });
@@ -886,18 +1015,18 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
   });
 });
 
-describe('S2 : message « Quai 1.2.1 », GlassesApi', () => {
-  it('CA-121.8 (et CA-3.2, CA-S2.2, CA-M7.1) : « Quai 1.2.1 » une seule fois après la mise à jour depuis la 1.0 ; T mène à l’accueil', async () => {
+describe('S2 : message « Quai 1.2.2 », GlassesApi', () => {
+  it('CA-122.6 (et CA-3.2, CA-S2.2, CA-M7.1) : « Quai 1.2.2 » une seule fois après la mise à jour depuis la 1.0 ; T mène à l’accueil', async () => {
     const a = await setupController({ settings: preset(), keepSeen: true });
-    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.1' });
-    // depuis une version antérieure à la 1.2.0 : la ligne des lieux en plus
+    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.2' });
     expect(a.last().lines).toEqual([
-      'Nouveau : le moins de marche d’abord.',
-      'Sur un trajet, ▼ : la suite, puis les autres trajets.',
-      'Accueil plus simple : tes favoris en tête.',
-      'Tes lieux sont maintenant dans tes favoris.',
+      'Nouveau : tes gares et tes lignes sur l’accueil.',
+      'Tes arrêts favoris y sont rangés, rien n’est perdu.',
+      'Aller à… a rejoint Favoris.',
+      'Un trajet n’est suivi que si tu le demandes.',
       'toucher : continuer',
     ]);
+    for (const l of [a.last().title, ...a.last().lines]) expect(textWidth(l), l).toBeLessThanOrEqual(WIDTHS.full);
     await a.gesture('tap');
     expect((await a.until(homeReady)).screen).toBe('home');
     await a.settle();
@@ -905,37 +1034,33 @@ describe('S2 : message « Quai 1.2.1 », GlassesApi', () => {
     a.c.stop();
     const b = await setupController({ settings: a.settings.get(), keepSeen: true });
     expect((await b.until(homeReady)).screen).toBe('home');
-    expect(b.screens().some((s) => s.title === 'Quai 1.2.1')).toBe(false);
+    expect(b.screens().some((s) => s.title === 'Quai 1.2.2')).toBe(false);
     b.c.stop();
   });
 
-  it('« Quai 1.2.1 » depuis la 1.1 aussi, une seule fois ; depuis la 1.2.0, sans la ligne des lieux ; jamais avec la version vue 1.2.1', async () => {
-    const a = await setupController({ settings: preset11(), keepSeen: true });
+  it('« Quai 1.2.2 » depuis la 1.1, la 1.2.0 et la 1.2.1, les mêmes lignes, une seule fois ; jamais avec la version vue 1.2.2', async () => {
     expect(preset11().seenVersion).toBe('1.1.0');
-    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.1' });
-    expect(a.last().lines).toContain('Tes lieux sont maintenant dans tes favoris.');
-    for (const l of [a.last().title, ...a.last().lines]) expect(textWidth(l), l).toBeLessThanOrEqual(WIDTHS.full);
-    await a.gesture('tap');
-    await a.until(homeReady);
-    await a.settle();
-    a.c.stop();
-    const b = await setupController({ settings: a.settings.get(), keepSeen: true });
-    await b.until(homeReady);
-    expect(b.screens().some((s) => s.title === 'Quai 1.2.1')).toBe(false);
-    b.c.stop();
-    // depuis la 1.2.0 : une fois, trois lignes (les lieux étaient déjà des favoris)
-    const c = await setupController({ settings: { ...preset11(), seenVersion: '1.2.0' }, keepSeen: true });
-    expect(c.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.1' });
-    expect(c.last().lines).toEqual(['Nouveau : le moins de marche d’abord.', 'Sur un trajet, ▼ : la suite, puis les autres trajets.', 'Accueil plus simple : tes favoris en tête.', 'toucher : continuer']);
-    c.c.stop();
-    const d = await setupController({ settings: { ...preset11(), seenVersion: '1.2.1' }, keepSeen: true });
+    for (const seen of ['1.1.0', '1.2.0', '1.2.1']) {
+      const a = await setupController({ settings: { ...preset11(), seenVersion: seen }, keepSeen: true });
+      expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.2' });
+      expect(a.last().lines).toEqual([...NEWS_LINES.map(nb), 'toucher : continuer']);
+      await a.gesture('tap');
+      await a.until(homeReady);
+      await a.settle();
+      a.c.stop();
+      const b = await setupController({ settings: a.settings.get(), keepSeen: true });
+      await b.until(homeReady);
+      expect(b.screens().some((s) => s.title === 'Quai 1.2.2')).toBe(false);
+      b.c.stop();
+    }
+    const d = await setupController({ settings: { ...preset11(), seenVersion: '1.2.2' }, keepSeen: true });
     await d.until(homeReady);
-    expect(d.screens().some((s) => s.title === 'Quai 1.2.1')).toBe(false);
+    expect(d.screens().some((s) => s.title === 'Quai 1.2.2')).toBe(false);
     d.c.stop();
   });
 
-  it('nouvelle installation : bienvenue, jamais « Quai 1.2.1 » ; la version vue est écrite', async () => {
-    const { c, last, gesture, until, settings, settle } = await setupController({ settings: defaults({ onboarded: false }) });
+  it('nouvelle installation : bienvenue, jamais « Quai 1.2.2 » ; la version vue est écrite', async () => {
+    const { c, last, gesture, until, settings, settle, screens } = await setupController({ settings: defaults({ onboarded: false }) });
     await settle();
     expect(last()).toMatchObject({ screen: 'message', title: 'Quai' });
     expect(last().lines[0]).toBe('Bienvenue dans Quai !');
@@ -943,17 +1068,20 @@ describe('S2 : message « Quai 1.2.1 », GlassesApi', () => {
     expect(settings.get().seenVersion).toBe(APP_VERSION);
     await gesture('tap');
     expect((await until((s) => s.screen === 'home')).screen).toBe('home');
+    expect(screens().some((s) => s.title === 'Quai 1.2.2')).toBe(false);
     c.stop();
   });
 
-  it('showBoard : les départs de l’arrêt, message court', async () => {
+  it('showBoard : les départs de l’arrêt, message court ; « ★ » si une de ses lignes est gardée', async () => {
     const { c, until } = await setupController({ scenario: 's2' });
-    await until((s) => s.screen === 'board');
+    await until(linesReady);
     const msg = await c.showBoard('delijn:308611');
-    expect(msg).toBe('Affiché dans les lunettes : départs de Bruxelles-Nord.');
+    expect(nb(msg)).toBe('Affiché dans les lunettes : départs de Bruxelles-Nord.');
     expect((await until((s) => s.screen === 'board' && s.title.startsWith('Bruxelles-Nord'))).title).toBe('Bruxelles-Nord, bus (De Lijn) ★');
-    expect(await c.showBoard('stib:6359')).toBe('Affiché dans les lunettes : départs de Rogier.');
+    expect(nb(await c.showBoard('stib:6359'))).toBe('Affiché dans les lunettes : départs de Rogier.');
     expect((await until((s) => s.title.startsWith('Rogier'))).title).toBe('Rogier, métro et tram (STIB)');
+    expect(nb(await c.showBoard('sncb:8863008'))).toBe('Affiché dans les lunettes : départs de Namur.');
+    expect((await until((s) => s.screen === 'board' && s.title.startsWith('Namur,'))).title).toBe('Namur, train (SNCB) ★');
     c.stop();
   });
 
@@ -966,10 +1094,9 @@ describe('S2 : message « Quai 1.2.1 », GlassesApi', () => {
     const fav = s.favorites.find((f) => f.id === 'fav-gand')!;
     if (fav.kind !== 'trip') throw new Error('fav-gand');
     const result = await h.core.route(fav.from, fav.to, h.clock.now(), s, { lat: 50.8454, lon: 4.3571 });
-    expect(await showTrip(ctx, { title: 'Vers Gand-Saint-Pierre', from: fav.from, to: fav.to, favoriteId: fav.id, result, index: 1 })).toEqual({ text: 'Affiché dans les lunettes\u00a0: IC 14:22, voie 6.', ok: true });
+    expect(await showTrip(ctx, { title: 'Vers Gand-Saint-Pierre', from: fav.from, to: fav.to, favoriteId: fav.id, result, index: 1 })).toEqual({ text: 'Affiché dans les lunettes : IC 14:22, voie 6.', ok: true });
     expect((await h.until((x) => x.screen === 'steps' && x.page === 2)).followed).toBe(true);
-    const gdn = s.favorites.find((f) => f.id === 'fav-gdn');
-    expect(await showBoard(ctx, 'stib:6357F', gdn?.kind === 'stop' ? gdn.filter : undefined)).toEqual({ text: 'Affiché dans les lunettes\u00a0: départs de Gare du Nord.', ok: true });
+    expect(await showBoard(ctx, 'stib:6357F')).toEqual({ text: 'Affiché dans les lunettes : départs de Gare du Nord.', ok: true });
     expect((await h.until((x) => x.screen === 'board')).title).toBe('Gare du Nord, tram (STIB) ★');
     expect(shown).toBe(2);
     h.c.stop();
@@ -986,8 +1113,9 @@ describe('S2 : message « Quai 1.2.1 », GlassesApi', () => {
     const msg = await h.c.showTrip({ title: 'Vers le bureau', from: { type: 'here' }, to, favoriteId: 'fav-bureau', result: old, index: 0 });
     expect(msg).toBe('Affiché dans les lunettes\u00a0: IC 08:42, voie 4.');
     const st = await h.until(stepsReady);
-    // recalcul : l'IC de 08:42 jusqu'à Bruxelles-Nord, puis le tram (le moins de marche d'abord), arrivée 10:02
-    expect(st).toMatchObject({ page: 1, followed: true, title: 'Vers le bureau : 08:33 → 10:02' });
+    // recalcul : l'IC de 08:42 jusqu'à Bruxelles-Nord, puis le tram, arrivée 09:57
+    expect(st).toMatchObject({ page: 1, followed: true });
+    expect(nb(st.title)).toBe(`Vers le bureau : 08:33 → 09:57${FOLLOWED}`);
     expect(h.c.followed?.journey.legs.find((l) => l.kind === 'ride')?.schedDep).toBe(at(8, 42));
     // le suivi automatique ne passe pas « dans le train » de l'IC de 07:42, parti
     await h.c.refreshCurrent();
@@ -1044,18 +1172,20 @@ describe('trajet suivi : règles de fin (M6.3)', () => {
     expect(tripPhase(trip, jj, at(7, 50), { lat: 50.5, lon: 4.8, at: at(7, 50) })).toBe('running');
   });
 
-  it('lecture défensive de quai.trip', () => {
+  it('lecture défensive de quai.trip ; 1.2.2 : sans la marque `explicit` (1.1, 1.2.1), jamais repris (CA-122.7)', () => {
     expect(parseTrip('')).toBeNull();
     expect(parseTrip('pas du json')).toBeNull();
     expect(parseTrip({ v: 2 })).toBeNull();
-    const t = parseTrip({ v: 1, journey: j(1, 2, 0), title: 'Vers le bureau', leaveAt0: 0, startedAt: 0 });
-    expect(t).toMatchObject({ title: 'Vers le bureau', index: 0, key: 'trip-x' });
+    expect(parseTrip({ v: 1, journey: j(1, 2, 0), title: 'Vers le bureau', leaveAt0: 0, startedAt: 0 })).toBeNull();
+    expect(parseTrip({ v: 1, explicit: 'oui', journey: j(1, 2, 0), title: 'Vers le bureau', leaveAt0: 0, startedAt: 0 })).toBeNull();
+    const t = parseTrip({ v: 1, explicit: true, journey: j(1, 2, 0), title: 'Vers le bureau', leaveAt0: 0, startedAt: 0 });
+    expect(t).toMatchObject({ title: 'Vers le bureau', index: 0, key: 'trip-x', explicit: true });
     expect(t?.journeys).toHaveLength(1);
   });
 });
 
-describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-2.2)', () => {
-  const NB = ' ';
+describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-2.2) ; réglages de la 1.1 migrés (PRD-1.2.2 § 5)', () => {
+  const NB = ' ';
   const s3 = { lat: 50.8454, lon: 4.3571 };
   /** S3 : jusqu'à l'aide à l'arrivée de Gand-Saint-Pierre (« Dans le train » à 14:10, arrivée à 14:36). */
   const toArrival = async (h: Awaited<ReturnType<typeof setupController>>) => {
@@ -1072,45 +1202,29 @@ describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-
     return { ...f, to: f.to };
   };
 
-  it('CA-2.2 : S1, accueil de CA-M1.1 avec le lieu « Bureau » ; « Aller à… » : « Bureau   arrivée 08:58 », « Maison   ici » ; « Favoris » : « Vers la maison »', async () => {
-    expect(preset11().favorites.map((f) => [f.id, f.kind])).toEqual([['fav-bureau', 'place'], ['fav-gdn', 'stop'], ['fav-gand', 'trip'], ['fav-namur', 'stop'], ['fav-dl-nord', 'stop'], ['fav-maison', 'place']]);
+  it('CA-2.2 et CA-122.6 : S1, réglages de la 1.1 : lieux et trajet fixe dans « Favoris », Namur dans « Gares », les arrêts dans « Bus, tram, métro »', async () => {
+    const s = preset11();
+    expect(s.favorites.map((f) => [f.id, f.kind])).toEqual([['fav-bureau', 'place'], ['fav-gand', 'trip'], ['fav-maison', 'place']]);
+    expect(s.stations.map((p) => p.id)).toEqual(['fav-namur']);
+    expect(s.lines.map((p) => [p.id, p.line ?? ''])).toEqual([['fav-gdn-3', '3'], ['fav-gdn-4', '4'], ['fav-dl-nord', '']]);
     const { c, gesture, until, last, settle } = await setupController({ flags: { noRt: true } });
     const home = await until(homeReady);
     expect(home.order?.[0]).toBe('fav-bureau');
     // le lieu sous son nom, « Bureau » (la ligne 0 est « Temps réel indisponible… »)
-    expect(home.lines.slice(1, 3)).toEqual(['Favoris   6', 'Bureau   dans 2 min → 08:58']);
+    expect(home.lines.slice(1, 3)).toEqual(['Favoris   3', 'Bureau   dans 2 min → 08:58']);
+    // « Bus, tram, métro » : les trois lignes, dans leur ordre (curseur sur le premier favori : 4 fois ▼)
     await gesture('down', 'down', 'down', 'down', 'tap');
-    const places = await until((x) => x.screen === 'places' && !x.lines.some((l) => /   …$/.test(l)));
-    expect(places.lines).toEqual(['Bureau   arrivée 08:58', 'Maison   ici', 'Autre adresse   sur le téléphone', '▲▼ choisir   toucher : trajet   double : retour']);
+    const lines = await until(linesReady);
+    expect(lines.lines.filter((l) => !l.startsWith('vers ') && !/^\d|~/.test(l)).slice(0, 3)).toEqual(['Tram 3 · Gare du Nord', 'Tram 4 · Gare du Nord', 'Bruxelles-Nord · toutes les lignes']);
     // « Favoris » : le lieu « Maison » comme le trajet « Ma position → maison » de la 1.1, en fin de liste
     await gesture('double', 'up', 'up', 'up', 'up', 'up', 'tap');
     const list = await until(listReady);
-    expect(list.order).toEqual(['fav-bureau', 'fav-namur', 'fav-gdn', 'fav-gand', 'fav-dl-nord', 'fav-maison']);
-    for (let i = 0; i < 5; i++) c.onGesture('down');
+    expect(list.order).toEqual(['fav-bureau', 'fav-gand', 'fav-maison']);
+    for (let i = 0; i < 2; i++) c.onGesture('down');
     await settle();
-    expect(last().lines).toContain('Vers la maison   tu y es');
+    expect(last().lines).toContain('Maison   tu y es');
     await gesture('tap');
     expect(last()).toMatchObject({ screen: 'message', title: 'Vers la maison', lines: ['Tu es déjà à la maison.', 'double toucher : retour'] });
-    c.stop();
-  });
-
-  it('« Aller à… », T sur le lieu du trajet en cours : ce trajet, pas un autre', async () => {
-    const { c, gesture, until, goTo, last } = await setupController();
-    await until(homeReady);
-    await gesture('tap');
-    await until(stepsReady);
-    goTo(at(7, 36));
-    await c.refreshCurrent();
-    const id = c.followed?.journey.id;
-    await gesture('double');
-    const home = await until(homeReady);
-    expect(home.lines[0]).toMatch(/^En cours : vers le bureau/);
-    // « En cours », « Favoris », 3 favoris, « Autour de moi », puis « Aller à… »
-    await gesture('up', 'up', 'down', 'down', 'down', 'down', 'down', 'down', 'tap');
-    await until((x) => x.screen === 'places' && x.lines[0].startsWith('Bureau'));
-    await gesture('tap');
-    expect(last()).toMatchObject({ screen: 'steps', followed: true, title: 'Vers le bureau : 07:35 → 09:01' });
-    expect(c.followed?.journey.id).toBe(id);
     c.stop();
   });
 
@@ -1123,12 +1237,12 @@ describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-
     await toArrival(h);
     await h.gesture('tap');
     expect(h.last().lines.at(-1)).toBe('★ Trajet ajouté aux favoris');
-    expect(h.settings.get().favorites).toHaveLength(7);
+    expect(h.settings.get().favorites).toHaveLength(4);
     expect(h.settings.get().favorites.at(-1)).toMatchObject({ kind: 'place', label: 'Gand-Saint-Pierre', src: 'stop', areaId: gand.to.areaId, address: 'Près de Gand-Saint-Pierre', propose: 'never' });
     expect(h.settings.get().favorites.some((f) => f.kind === 'trip' && f.from.type === 'here')).toBe(false);
     await h.gesture('tap');
     expect(h.last().lines.at(-1)).toBe('★ Déjà dans les favoris');
-    expect(h.settings.get().favorites).toHaveLength(7);
+    expect(h.settings.get().favorites).toHaveLength(4);
     h.c.stop();
   });
 
@@ -1145,24 +1259,26 @@ describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-
     expect(h.settings.get().favorites.at(-1)).toMatchObject({ kind: 'trip', from: { type: 'area', areaId: gand.from.type === 'area' ? gand.from.areaId : '' }, to: { type: 'area', areaId: gand.to.areaId }, propose: 'never' });
     await h.gesture('tap');
     expect(h.last().lines.at(-1)).toBe('★ Déjà dans les favoris');
-    expect(h.settings.get().favorites).toHaveLength(6);
+    expect(h.settings.get().favorites).toHaveLength(3);
     h.c.stop();
-    // le favori « Vers Gand-Saint-Pierre » ouvert depuis l'accueil (le curseur y est) : rien n'est ajouté
+    // le favori « Vers Gand-Saint-Pierre » ouvert depuis l'accueil (le curseur y est), puis suivi : rien n'est ajouté
     const f = await setupController({ scenario: 's3' });
     await f.until(homeReady);
+    await f.gesture('tap');
+    await f.until(stepsReady);
     await f.gesture('tap');
     await toArrival(f);
     await f.gesture('tap');
     expect(f.last().lines.at(-1)).toBe('★ Déjà dans les favoris');
-    expect(f.settings.get().favorites).toHaveLength(6);
+    expect(f.settings.get().favorites).toHaveLength(3);
     f.c.stop();
   });
 
-  it('quai.trip gardé par la 1.1 (« simple », « fast ») : étiquettes relues par labelOf, la raison suit', () => {
+  it('quai.trip avec les étiquettes de la 1.1 (« simple », « fast ») : relues par labelOf, la raison suit', () => {
     const leg = { kind: 'ride' as const, from: { name: { fr: 'A', nl: 'A' }, lat: 0, lon: 0 }, to: { name: { fr: 'B', nl: 'B' }, lat: 0, lon: 0 }, dep: 1, arr: 2, schedDep: 1, schedArr: 2 };
     const j = (id: string, label: string, reason: string) => ({ id, label, reason, legs: [leg], dep: 1, arr: 2, leaveAt: 0, transfers: 0, rt: false, alerts: [] });
     const t = parseTrip({
-      v: 1, title: 'Vers le bureau', leaveAt0: 0, startedAt: 0, index: 0, key: 'k',
+      v: 1, explicit: true, title: 'Vers le bureau', leaveAt0: 0, startedAt: 0, index: 0, key: 'k',
       journey: j('a', 'simple', `Le plus simple${NB}: direct`),
       journeys: [j('a', 'simple', `Le plus simple${NB}: direct`), j('b', 'fast', `Le plus rapide${NB}: 1 changement, à pied 19 + 3${NB}min`), j('c', 'next', `Le suivant${NB}: même trajet, 1${NB}h plus tard`), j('d', 'autre', 'Autre')],
     })!;
@@ -1175,30 +1291,37 @@ describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-
     ]);
   });
 
-  it('trajet en cours écrit par la 1.1 : repris après la mise à jour, avec « Le plus court »', async () => {
+  it('CA-122.7 : un trajet en cours écrit par la 1.1 ou la 1.2.1 (sans demande) n’est pas repris ; suivi sur demande, il l’est, avec « Le plus court »', async () => {
     // sans l'alerte « Partir maintenant », la ligne du haut montre la raison
     const p = preset11();
     const settings = { ...p, alerts: { ...p.alerts, leave: false } };
     const a = await setupController({ flags: { noRt: true }, settings });
     await a.until(homeReady);
-    await a.gesture('tap');
-    await a.until(stepsReady);
+    await openAndFollow(a);
     a.goTo(at(7, 36));
     await a.c.refreshCurrent();
     a.c.stop();
     await a.settle();
-    const saved = JSON.parse((await a.kv.get(TRIP_KEY))!) as { journey: Journey; journeys: Journey[] };
+    const saved = JSON.parse((await a.kv.get(TRIP_KEY))!) as { journey: Journey; journeys: Journey[]; explicit?: boolean };
     expect(saved.journey.label).toBe('short');
-    // le même trajet, tel que la 1.1 l'a écrit
+    expect(saved.explicit).toBe(true);
+    // le même trajet, tel que la 1.1 l'a écrit (anciennes étiquettes, sans la marque `explicit`) : pas « En cours »
     const old = (x: Journey) => ({ ...x, label: x.label === 'short' ? 'simple' : x.label, reason: x.reason?.replace(/^Le plus court/, 'Le plus simple') });
-    await a.kv.set(TRIP_KEY, JSON.stringify({ ...saved, journey: old(saved.journey), journeys: saved.journeys.map(old) }));
+    const { explicit: _explicit, ...v11 } = saved;
+    await a.kv.set(TRIP_KEY, JSON.stringify({ ...v11, journey: old(saved.journey), journeys: saved.journeys.map(old) }));
     const b = await setupController({ kv: a.kv, now: at(7, 36), flags: { noRt: true }, settings });
-    const st = await b.until(stepsReady);
+    expect((await b.until(homeReady)).lines[0]).not.toMatch(/^En cours/);
+    expect(b.c.followed).toBeNull();
+    b.c.stop();
+    // demandé (marque `explicit`), avec les anciennes étiquettes : repris, relu « Le plus court »
+    await a.kv.set(TRIP_KEY, JSON.stringify({ ...saved, journey: old(saved.journey), journeys: saved.journeys.map(old) }));
+    const d = await setupController({ kv: a.kv, now: at(7, 36), flags: { noRt: true }, settings });
+    const st = await d.until(stepsReady);
     expect(st).toMatchObject({ page: 1, label: 'short', followed: true });
     expect(st.lines[0]).toBe('Le plus court : 1 changement, à pied 7 + 2 + 9 min');
-    expect(b.c.followed?.journeys.map((j) => j.label)).toEqual(['short', 'none', 'next']);
+    expect(d.c.followed?.journeys.map((j) => j.label)).toEqual(['short', 'next', 'later']);
     expect(st.lines.at(-2)).toBe('▼ suite du trajet : 1 étape');
     expect(st.lines.join('\n')).not.toMatch(/simple|undefined/);
-    b.c.stop();
+    d.c.stop();
   });
 });

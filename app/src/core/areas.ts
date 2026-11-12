@@ -95,16 +95,20 @@ export function lastDepartureOfPattern(prep: PreparedArea, pattern: number, tMax
   return undefined;
 }
 
-/** Clés des tuiles couvrant un rayon autour d'un point (au plus 3 × 3 autour de la tuile du point). */
+/**
+ * Clés des tuiles couvrant un rayon autour d'un point : au plus 2 tuiles de part et d'autre de celle du point (5 × 5,
+ * environ 4 km garantis). Les rayons de la marche (moins d'une tuile) en prennent 3 × 3 au plus, comme avant ;
+ * 1.2.2 : « Autour de moi » vide cherche l'arrêt le plus proche à 3 km (nearby léger, tuiles seules).
+ */
 export function tileKeysAround(lat: number, lon: number, radiusM: number, tile: Meta['tile']): string[] {
   const dLat = radiusM / 111_320;
   const dLon = radiusM / (111_320 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)));
   const cy = Math.floor(lat / tile.lat);
   const cx = Math.floor(lon / tile.lon);
-  const y0 = Math.max(cy - 1, Math.floor((lat - dLat) / tile.lat));
-  const y1 = Math.min(cy + 1, Math.floor((lat + dLat) / tile.lat));
-  const x0 = Math.max(cx - 1, Math.floor((lon - dLon) / tile.lon));
-  const x1 = Math.min(cx + 1, Math.floor((lon + dLon) / tile.lon));
+  const y0 = Math.max(cy - 2, Math.floor((lat - dLat) / tile.lat));
+  const y1 = Math.min(cy + 2, Math.floor((lat + dLat) / tile.lat));
+  const x0 = Math.max(cx - 2, Math.floor((lon - dLon) / tile.lon));
+  const x1 = Math.min(cx + 2, Math.floor((lon + dLon) / tile.lon));
   const keys: string[] = [];
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) keys.push(`${y}_${x}`);
   return keys;

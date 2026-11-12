@@ -54,6 +54,8 @@ export const ICON = {
   searchGrey: svg('<circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path>', 20, '#6B756E'),
   search: svg('<circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path>', 20, '#FFFFFF'),
   walk: svg('<circle cx="13" cy="4" r="2"></circle><path d="M10 21l2-6-2-3 1-5 4 3 3 1"></path><path d="M12 15l3 6M9 9l-3 2"></path>', 14, '#3F4842'),
+  /** 1.2.2 : ligne « Trajets » des réglages (marche maximale, marge). */
+  walker: svg('<circle cx="13" cy="4" r="2"></circle><path d="M10 21l2-6-2-3 1-5 4 3 3 1"></path><path d="M12 15l3 6M9 9l-3 2"></path>'),
   trainSmall: svg('<rect x="5" y="3" width="14" height="13" rx="3"></rect><path d="M5 10h14M8 20l2-4M16 20l-2-4"></path>', 14, '#161A17'),
   tramSmall: svg('<rect x="6" y="6" width="12" height="11" rx="2"></rect><path d="M9 3h6M12 3v3M6 12h12M9 17l-2 4M15 17l2 4"></path>', 14, '#161A17'),
   busSmall: svg('<rect x="5" y="3" width="14" height="15" rx="2"></rect><path d="M5 10h14M8 18v2M16 18v2"></path>', 14, '#161A17'),

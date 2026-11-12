@@ -27,12 +27,33 @@ export interface BoardRequest {
   prep: PreparedArea;
   limit: number;
   filter?: LineFilter[];
+  /**
+   * 1.2.2 (lineBoard, core/linepicks.ts) : motifs retenus (rangs dans le fichier de zone), à la place de `filter`.
+   * Un passage STIB sans motif connu, d'une des lignes `lines`, est gardé si `unknown(destination)` le dit.
+   */
+  pick?: { patterns: ReadonlySet<number>; lines: ReadonlySet<string>; unknown: (head: Names) => boolean };
 }
 
 interface Candidate {
   di: number; // index dans deps
   t: number;
 }
+
+/** 1.2.2 : motif (rang dans le fichier de zone, -1 si inconnu) de chaque départ rendu par buildBoards. */
+const PATTERN_OF = new WeakMap<Departure, number>();
+export function patternOfDeparture(d: Departure): number | undefined {
+  return PATTERN_OF.get(d);
+}
+const withPattern = (d: Departure, pi: number): Departure => {
+  PATTERN_OF.set(d, pi);
+  return d;
+};
+
+/** Motifs retenus par une demande : `pick` (lineBoard), sinon le filtre de ligne. */
+const requestFilter = (r: BoardRequest): ((pi: number) => boolean) => {
+  const pick = r.pick;
+  return pick ? (pi) => pick.patterns.has(pi) : patternFilter(r.prep, r.filter);
+};
 
 /** Vrai si le motif passe le filtre (absent ou vide = tout). */
 export function patternFilter(prep: PreparedArea, filter: LineFilter[] | undefined): (pi: number) => boolean {
@@ -214,10 +235,11 @@ export function mergeStib(
   points: Map<string, StibEntry[] | null> | null,
   now: number,
   filter: LineFilter[] | undefined,
+  pick?: BoardRequest['pick'],
 ): Departure[] {
   const out: Departure[] = [];
   const horizon = new Map<string, number>(); // `${stopIdx}|${pattern}` → dernier passage annoncé
-  const ok = patternFilter(prep, filter);
+  const ok = requestFilter({ prep, limit: 0, filter, pick });
   const fkeys = (filter ?? []).map((f) => ({ line: f.line, head: headKey(f.head) }));
   if (points) {
     prep.file.stops.forEach((st, stopIdx) => {
@@ -229,6 +251,8 @@ export function mergeStib(
           if (!ok(x.pi)) continue;
           const key = `${stopIdx}|${x.pi}`;
           horizon.set(key, Math.max(horizon.get(key) ?? 0, x.t));
+        } else if (pick) {
+          if (!pick.lines.has(x.line) || !pick.unknown(x.head)) continue;
         } else if (fkeys.length) {
           const hk = headKey(x.head.fr);
           if (!fkeys.some((f) => f.line === x.line && headScore(f.head, hk) > 0)) continue;
@@ -247,7 +271,7 @@ export function mergeStib(
         };
         if (x.msg) d.msg = x.msg;
         if (x.last) d.last = true;
-        out.push(d);
+        out.push(withPattern(d, p ? x.pi : -1));
       }
     });
   }
@@ -256,7 +280,7 @@ export function mergeStib(
     const dep = prep.file.deps[c.di];
     const h = horizon.get(`${dep[3]}|${dep[2]}`);
     if (h !== undefined && c.t <= h) continue;
-    out.push(staticDeparture(prep, c.di, c.t));
+    out.push(withPattern(staticDeparture(prep, c.di, c.t), dep[2]));
   }
   return out;
 }
@@ -301,7 +325,7 @@ export function applyMemory(d: Departure, mem: RtTrip, stopRt: string | undefine
 
 /** Calcule plusieurs tableaux en groupant les appels au relais (un lot par opérateur). */
 export async function buildBoards(reqs: BoardRequest[], rt: RealtimeClient, now: number): Promise<Board[]> {
-  const cands = reqs.map((r) => candidates(r.prep, now, r.limit, patternFilter(r.prep, r.filter)));
+  const cands = reqs.map((r) => candidates(r.prep, now, r.limit, requestFilter(r)));
 
   const tripIds = new Map<Op, Set<string>>();
   const points = new Set<string>();
@@ -332,7 +356,7 @@ export async function buildBoards(reqs: BoardRequest[], rt: RealtimeClient, now:
     let deps: Departure[];
     if (op === 'stib') {
       if (stibRes?.error) rtErrors.push('stib');
-      deps = mergeStib(prep, cands[i], stibRes ? stibRes.map : null, now, r.filter);
+      deps = mergeStib(prep, cands[i], stibRes ? stibRes.map : null, now, r.filter, r.pick);
     } else {
       const res = byOp.get(op);
       if (res?.error) rtErrors.push(op);
@@ -350,7 +374,7 @@ export async function buildBoards(reqs: BoardRequest[], rt: RealtimeClient, now:
         if (d.est < now - PAST_MS) continue;
         if (!d.rt && d.sched < now - PAST_MS) continue;
         if (d.cancelled && d.sched < now - PAST_MS) continue;
-        deps.push(d);
+        deps.push(withPattern(d, prep.file.deps[c.di][2]));
       }
     }
     deps.sort(byEst);

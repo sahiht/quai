@@ -5,17 +5,21 @@
  * Pour chaque bande de ligne (27 px), on calcule les segments attendus (début de colonne + largeur mesurée avec la
  * police des lunettes, @evenrealities/pretext) et on vérifie sur la capture : aucun pixel allumé hors des segments
  * (marge de 3 px), chaque segment allumé et son texte dessiné jusqu'au bout (une ligne coupée par le micrologiciel
- * s'arrêterait avant). Écrans contrôlés : accueil, favoris, Aller à… (menus), étapes et « Autres trajets ».
+ * s'arrêterait avant). Écrans contrôlés : accueil, « Favoris », étapes et « Autres trajets » ; 1.2.2 : « Gares »,
+ * « Bus, tram, métro », le détail d'une ligne, « garder une ligne » et le trajet suivi (« Ne plus suivre »).
  *
- * 1.2.1 : accueil à son propre gabarit (PRD-1.2.1 § 4) : « Favoris », « Autour de moi », « Aller à… » à gauche, leurs
- * nombres à droite ; dessous « Favoris », chaque favori en retrait de 20 px, nom à gauche et réponse calée au bord
- * droit ; une ligne vide (aucun pixel) ; pied compact (le jour férié en dernière ligne quand l'aide est masquée).
+ * 1.2.1 : accueil à son propre gabarit (PRD-1.2.1 § 4) : « Favoris » et « Autour de moi » à gauche, leurs nombres à
+ * droite ; dessous « Favoris », chaque favori en retrait de 20 px, nom à gauche et réponse calée au bord droit ; une
+ * ligne vide (aucun pixel) ; pied compact (le jour férié en dernière ligne quand l'aide est masquée). 1.2.2 : « Gares »
+ * et « Bus, tram, métro » sous « Autour de moi », la ligne vide saute d'abord s'il manque une ligne ; sur un trajet,
+ * l'état (« Suivi », « Suivre ce trajet ») calé à droite de la ligne du titre ; les sens d'une ligne en retrait, leurs
+ * passages calés au bord droit, comme les favoris de l'accueil.
  * « Autres trajets » : nom à gauche et heures à droite, puis la 2e ligne (moyens, pourquoi) à la marge.
  * `levels()` mesure aussi la luminosité de chaque bande (relief : favoris un ton plus pâles que leur titre).
  */
 import { PNG } from 'pngjs';
 import { textWidth } from '../../../app/src/glasses/font';
-import { GEO, HOME_INDENT, LAYOUTS } from '../../../app/src/glasses/layout';
+import { GEO, HOME_INDENT, LAYOUTS, WIDTHS } from '../../../app/src/glasses/layout';
 
 const LINE_H = 27;
 const SCREEN_H = 288;
@@ -33,11 +37,16 @@ export interface LoggedScreen {
 
 type Seg = { from: number; to: number; text: string };
 
-const MENU = new Set(['favorites', 'places']);
-const CHECKED = new Set(['home', 'favorites', 'places', 'steps', 'others']);
+/** Écrans en liste à une colonne de droite (gabarit de chacun, layout.ts). */
+const MENU: Record<string, keyof typeof LAYOUTS> = { favorites: 'favorites', stations: 'stations', keepLine: 'menu', followed: 'menu' };
+const CHECKED = new Set(['home', 'steps', 'others', 'lines', 'line', ...Object.keys(MENU)]);
 const TOP_STEPS = /^(! |Le plus court|Le plus simple|Le plus rapide|Moins de marche|Plus tôt|Sans changement|Moins de changements|À pied|Le suivant|Plus tard)/;
 const TOP_HOME = /^(Temps réel indisponible|Pas de réseau|Horaires |Près de |! )/;
-const NOTE = /^(~ horaire prévu|Temps réel indisponible|Pas de réseau|Horaires |▼ |Fin du trajet\.|▲ trajet précédent|Pas d’autre trajet pour l’instant$)/;
+const NOTE = /^(~ horaire prévu|\* s’arrête avant le terminus|Temps réel indisponible|Pas de réseau|Horaires |▼ |Fin du trajet\.|▲ trajet précédent|Pas d’autre trajet pour l’instant$)/;
+/** Accueil : les lignes qui suivent les favoris (jamais en retrait, même sans ligne vide). */
+const HOME_TOOLS = /^(Autour de moi|Gares|Bus, tram, métro)( {3}|$)/;
+/** « Bus, tram, métro » : titre d'une ligne choisie (à la marge) ; le reste, ses sens, en retrait. */
+const LINE_TITLE = /^((Bus SNCB|Bus|Tram|Métro|Ligne) \S+ · |.+ · toutes les lignes$)/;
 /** Ligne d'aide (ou message temporaire de l'accueil) : jamais une ligne de la liste. */
 const HINT = /^(▲▼ |toucher |double |★ )/;
 /** Note de l'accueil (1.2.1 § 4.7) : le jour férié, dernière ligne quand l'aide est masquée. */
@@ -62,11 +71,25 @@ function rightSeg(def: { c: { x: number; w?: number } }, text: string): Seg {
 /** Segments attendus d'une ligne de liste selon le gabarit (colonnes séparées par 3 espaces dans le journal). */
 function rowSegments(screen: string, line: string): Seg[] {
   const parts = line.split('   ');
-  if (MENU.has(screen)) {
-    const def = LAYOUTS.menu;
+  if (MENU[screen]) {
+    const def = LAYOUTS[MENU[screen]];
     if (parts.length === 1) return [{ from: def.a.x, to: def.a.x + width(parts[0]), text: parts[0] }];
     const a = parts.slice(0, -1).join('   ');
     return [{ from: def.a.x, to: def.a.x + width(a), text: a }, rightSeg(def, parts[parts.length - 1])];
+  }
+  if (screen === 'lines') {
+    // titre de la ligne à la marge ; ses sens en retrait, les passages calés au bord droit (comme les favoris)
+    if (LINE_TITLE.test(line)) return [{ from: LAYOUTS.lines.a.x, to: LAYOUTS.lines.a.x + width(line), text: line }];
+    return indentedSegments(LAYOUTS.lines.b.x, line);
+  }
+  if (screen === 'line') {
+    // détail : « vers … » et « Tous les départs de l’arrêt » à la marge ; un passage en retrait (heure, terminus s'il
+    // diffère), son attente dans la colonne d'état
+    const def = LAYOUTS.line;
+    if (parts.length === 1 && !/^(~?\d\d:\d\d|aucun passage$)/.test(line)) return [{ from: def.a.x, to: def.a.x + width(line), text: line }];
+    const out: Seg[] = [{ from: def.b.x, to: def.b.x + width(parts[0]), text: parts[0] }];
+    if (parts[1] !== undefined) out.push({ from: def.c.x, to: def.c.x + width(parts[1]), text: parts[1] });
+    return out;
   }
   const def = LAYOUTS.steps;
   const [a, b, c] = parts;
@@ -76,22 +99,25 @@ function rowSegments(screen: string, line: string): Seg[] {
   return out;
 }
 
-/** Accueil 1.2.1 : ligne de menu (« Favoris   4 ») ou favori en retrait (nom, puis réponse calée au bord droit). */
+/** Ligne en retrait (favori de l'accueil, sens d'une ligne) : texte à gauche, et le reste calé au bord droit. */
+function indentedSegments(x: number, line: string): Seg[] {
+  const parts = line.split('   ');
+  const end = GEO.X_END - GEO.SAFETY;
+  if (parts.length === 1) return [{ from: x, to: x + width(parts[0]), text: parts[0] }];
+  const left = parts.slice(0, -1).join('   ');
+  const right = parts[parts.length - 1];
+  return [
+    { from: x, to: x + width(left), text: left },
+    { from: end - width(right) - 5, to: end, text: right },
+  ];
+}
+
+/** Accueil : ligne de menu (« Favoris   4 ») ou favori en retrait (nom, puis réponse calée au bord droit). */
 function homeSegments(line: string, indented: boolean): Seg[] {
   const def = LAYOUTS.home;
   if (!line) return [];
   const parts = line.split('   ');
-  if (indented) {
-    const x = def.b.x;
-    const end = GEO.X_END - GEO.SAFETY;
-    if (parts.length === 1) return [{ from: x, to: x + width(parts[0]), text: parts[0] }];
-    const left = parts.slice(0, -1).join('   ');
-    const right = parts[parts.length - 1];
-    return [
-      { from: x, to: x + width(left), text: left },
-      { from: end - width(right) - 5, to: end, text: right },
-    ];
-  }
+  if (indented) return indentedSegments(def.b.x, line);
   if (parts.length === 1) return [{ from: def.a.x, to: def.a.x + width(parts[0]), text: parts[0] }];
   const a = parts.slice(0, -1).join('   ');
   return [{ from: def.a.x, to: def.a.x + width(a), text: a }, rightSeg(def, parts[parts.length - 1])];
@@ -122,7 +148,7 @@ function bands(s: LoggedScreen): Band[] | null {
   // « Autres trajets » sans autre proposition : message (gabarit des messages), non contrôlé ici
   if (s.screen === 'others' && lines[0] === 'Pas d’autre trajet pour l’instant') return null;
   const home = s.screen === 'home';
-  const hasTop = s.screen === 'steps' ? TOP_STEPS.test(lines[0] ?? '') : home && TOP_HOME.test(lines[0] ?? '');
+  const hasTop = s.screen === 'steps' ? TOP_STEPS.test(lines[0] ?? '') : home ? TOP_HOME.test(lines[0] ?? '') : s.screen === 'line' && /^! /.test(lines[0] ?? '');
   const top = hasTop ? lines.shift()! : undefined;
   let hint: string | undefined;
   let note: string | undefined;
@@ -135,7 +161,8 @@ function bands(s: LoggedScreen): Band[] | null {
   } else {
     hint = lines.pop();
     note = lines.length && NOTE.test(lines[lines.length - 1]) ? lines.pop() : undefined;
-    const reserve = s.screen !== 'places' && s.screen !== 'others';
+    // ligne de note réservée (layout.ts, reserveNote) : partout sauf « Autres trajets » et les menus
+    const reserve = !['others', 'keepLine', 'followed'].includes(s.screen);
     footLines = (reserve || note ? 1 : 0) + 1;
   }
   const footY = SCREEN_H - GEO.BOTTOM_MARGIN - footLines * LINE_H;
@@ -144,7 +171,12 @@ function bands(s: LoggedScreen): Band[] | null {
   const out: Band[] = [];
   const clockW = s.clock ? width(s.clock) : 0;
   const clockEnd = GEO.X_END - GEO.SAFETY;
-  out.push({ y: GEO.TITLE_Y, label: 'titre', text: s.title, segs: [{ from: GEO.X_TEXT, to: GEO.X_TEXT + width(s.title), text: s.title }, ...(s.clock ? [{ from: clockEnd - clockW, to: clockEnd, text: s.clock }] : [])] });
+  // 1.2.2 : l'état d'un trajet (« Suivi », « Suivre ce trajet ») calé à droite de la ligne du titre
+  const [tLeft, tRight] = s.screen === 'steps' ? s.title.split('   ') : [s.title];
+  const titleEnd = GEO.X_TEXT + WIDTHS.title;
+  const titleSegs: Seg[] = [{ from: GEO.X_TEXT, to: GEO.X_TEXT + width(tLeft), text: tLeft }];
+  if (tRight) titleSegs.push({ from: titleEnd - width(tRight) - 5, to: titleEnd, text: tRight });
+  out.push({ y: GEO.TITLE_Y, label: 'titre', text: s.title, segs: [...titleSegs, ...(s.clock ? [{ from: clockEnd - clockW, to: clockEnd, text: s.clock }] : [])] });
   if (top !== undefined) out.push({ y: GEO.TITLE_Y + LINE_H, label: 'ligne du haut', text: top, segs: [{ from: GEO.X_TEXT, to: GEO.X_TEXT + width(top), text: top }] });
   // accueil : les favoris en retrait sont les lignes entre « Favoris » et la ligne vide
   let underFavorites = false;
@@ -154,8 +186,8 @@ function bands(s: LoggedScreen): Band[] | null {
       if (/^Favoris( |$)/.test(l)) {
         segs = homeSegments(l, false);
         underFavorites = true;
-      } else if (!l) {
-        segs = [];
+      } else if (!l || HOME_TOOLS.test(l)) {
+        segs = homeSegments(l, false);
         underFavorites = false;
       } else segs = homeSegments(l, underFavorites);
     } else if (s.screen === 'others') segs = othersSegments(l, i % 2 === 1);
@@ -232,7 +264,7 @@ export function levels(png: Buffer, s: LoggedScreen): { text: string; label: str
     });
 }
 
-/** Lignes coupées par « … » (hors libellés qui en contiennent un : « Aller à… », « Calcul du trajet… »). */
+/** Lignes coupées par « … » (hors libellés qui en contiennent un : « Aller à… » du message « Quai 1.2.2 », « Calcul du trajet… »). */
 export function truncatedLines(s: LoggedScreen): string[] {
   return [s.title, ...s.lines].filter((l) => l.includes('…') && !/Aller à…|Calcul du trajet…|Chargement…/.test(l));
 }

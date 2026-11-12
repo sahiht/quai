@@ -49,8 +49,8 @@ describe('propositions du champ unique', () => {
     // préréglage 1.0 migré : les lieux dans l'ordre de « Mes favoris »
     expect(options(f.list)).toEqual([
       ['Ma position', 'position actuelle'],
-      ['Bureau', 'mon lieu'],
-      ['Maison', 'mon lieu'],
+      ['Bureau', 'favori'],
+      ['Maison', 'favori'],
       ['Veldstraat 1, 9000 Gent', 'récent'],
     ]);
     expect(f.list.getAttribute('role')).toBe('listbox');

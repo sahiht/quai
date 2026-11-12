@@ -11,6 +11,9 @@ import { buildDataFiles } from './support/gen-fixtures';
 import { at } from './support/network';
 import { at as endpoint, legsOf, network, SETTINGS, type MiniNet } from './routing/support';
 import { hhmm } from '../../src/core/util';
+import { MESSAGES } from '../../src/core/errors';
+import { FULL_PX } from '../../src/glasses/format';
+import { textWidth } from '../../src/glasses/font';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -52,8 +55,9 @@ describe('init et fichiers statiques', () => {
       return new Promise<Response>(() => undefined);
     });
     const p = env.core.init();
-    // Serveur injoignable (délai dépassé) : « Horaires injoignables : nouvel essai dans 30 s » (PRD M8.6).
-    const check = expect(p).rejects.toMatchObject({ code: 'dataUnreachable', message: 'Horaires injoignables\u00a0: nouvel essai dans 30\u00a0s' });
+    // Serveur injoignable (délai dépassé) : « Pas de connexion aux horaires : nouvel essai dans 30 s » (PRD M8.6,
+    // 1.2.2 revue d'usage n° 10).
+    const check = expect(p).rejects.toMatchObject({ code: 'dataUnreachable', message: 'Pas de connexion aux horaires\u00a0: nouvel essai dans 30\u00a0s' });
     await vi.advanceTimersByTimeAsync(9_999);
     expect(calls).toBe(1);
     await vi.advanceTimersByTimeAsync(2);
@@ -409,5 +413,15 @@ describe('temps réel : cache et lots', () => {
     expect(h.ok).toBe(false);
     expect(h.sources.stib).toEqual({ ok: false, error: 'Relais injoignable' });
     expect(h.time).toBe(new Date(at('2026-11-10T12:10')).toISOString());
+  });
+});
+
+describe('messages d’erreur du cœur', () => {
+  it('chacun tient sur une ligne des lunettes (542 px), « Pas de connexion aux horaires » compris (1.2.2, revue n° 10)', () => {
+    expect(MESSAGES.dataUnreachable).toBe('Pas de connexion aux horaires\u00a0: nouvel essai dans 30\u00a0s');
+    for (const m of Object.values(MESSAGES)) {
+      expect(textWidth(m), m).toBeLessThanOrEqual(FULL_PX);
+      expect(m).not.toContain('\u2014');
+    }
   });
 });

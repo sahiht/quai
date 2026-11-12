@@ -276,7 +276,7 @@ describe('cœur : données statiques malformées ou absentes', () => {
     dataProxy.rules = [];
   });
 
-  it('meta.json illisible ou absent : « Données indisponibles » ; serveur en erreur ou arrêté : « Horaires injoignables » (M8.6)', async () => {
+  it('meta.json illisible ou absent : « Données indisponibles » ; serveur en erreur ou arrêté : « Pas de connexion aux horaires » (M8.6, 1.2.2)', async () => {
     // le serveur répond sans le fichier (ou avec un fichier illisible) : vérifier la publication de cette nuit
     for (const fault of [{ status: 200, body: '{"v":1,' }, { status: 404, body: '{}' }, { status: 200, body: '{"v":2}' }] as const) {
       dataProxy.rules = [{ match: /meta\.json$/, fault: () => fault }];
@@ -294,7 +294,7 @@ describe('cœur : données statiques malformées ou absentes', () => {
     expect(await down.suggest(null, PRESET)).toBeNull();
   });
 
-  it('fichier de zone en erreur serveur après init() : « Horaires injoignables », pas « vérifie la publication »', async () => {
+  it('fichier de zone en erreur serveur après init() : « Pas de connexion aux horaires », pas « vérifie la publication »', async () => {
     dataProxy.rules = [{ match: /areas\/stib\/6357F\.json$/, fault: () => ({ status: 503, body: '' }) }];
     const c = core();
     await c.init();

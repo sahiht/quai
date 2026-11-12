@@ -83,12 +83,14 @@ describe('alertes', () => {
   it('retard ≥ delayMin : « ! IC 07:42 : +7 min » ; en dessous : rien', async () => {
     const env = makeEnv({ now: '2026-11-10T07:20' });
     env.server.relay.rt.sncb.trips[IC_0742] = { u: [[1, '8863008_4', 420, null, 0]] };
-    // 1.2.1 : la proposition 1 (IC puis T3) perd sa correspondance et porte aussi « ! Correspondance recalculée » ;
-    // l'alerte de retard se lit sur l'IC direct, proposé « Sans changement » (il arrive 1 min avant)
+    // 1.2.2 : la proposition 1 (IC puis T3) perd sa correspondance et porte aussi « ! Correspondance recalculée » ;
+    // l'IC direct (12 min à pied, au-delà de la marche maximale) n'est plus proposé (PRD-1.2.2 § 7.3) ; rafraîchie,
+    // la proposition 1 ne garde que l'alerte de retard
     const js = await env.core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, env.clock.t, env.preset, MAISON);
     expect(js[0].alerts.map((a) => nb(a.text))).toEqual(['! Correspondance recalculée', '! IC 07:42 : +7 min']);
-    const j = js.find((x) => x.label === 'none')!;
-    expect(j.alerts.map((a) => nb(a.text))).toEqual(['! IC 07:42 : +7 min']);
+    expect(js.some((x) => x.label === 'none')).toBe(false);
+    const j = js[0];
+    expect((await env.core.refresh(j, env.preset)).alerts.map((a) => nb(a.text))).toEqual(['! IC 07:42 : +7 min']);
     const lenient: Settings = { ...env.preset, alerts: { ...env.preset.alerts, delayMin: 10 } };
     expect((await env.core.refresh(j, lenient)).alerts).toEqual([]);
   });

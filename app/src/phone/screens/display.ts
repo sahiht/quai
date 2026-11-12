@@ -54,13 +54,14 @@ export function displayScreen(ctx: PhoneCtx): HTMLElement {
     h(
       'div',
       { class: 'box', style: 'padding:12px 16px 2px' },
+      // 1.2.2 (revue d'usage n° 11) : libellés revus, mêmes valeurs enregistrées.
       radios<Settings['display']['opening']>({
         legend: 'À l’ouverture de Quai',
         value: s.display.opening,
         options: [
-          { value: 'suggest', label: 'Mes favoris en tête, selon l’heure et le lieu' },
-          { value: 'firstFavorite', label: 'Toujours ouvrir le favori en tête' },
-          { value: 'home', label: 'Accueil sans favoris' },
+          { value: 'suggest', label: 'L’accueil, avec mes favoris en tête' },
+          { value: 'firstFavorite', label: 'Directement mon premier favori' },
+          { value: 'home', label: 'L’accueil, sans favoris' },
         ],
         onChange: (v) => set((d) => ({ ...d, opening: v })),
       }),
@@ -72,7 +73,7 @@ export function displayScreen(ctx: PhoneCtx): HTMLElement {
         legend: 'Ordre des favoris',
         value: s.display.favOrder,
         options: [
-          { value: 'smart', label: 'Selon l’heure et le lieu' },
+          { value: 'smart', label: 'Automatique, selon l’heure et ta position' },
           { value: 'mine', label: 'Dans mon ordre' },
         ],
         onChange: (v) => set((d) => ({ ...d, favOrder: v })),

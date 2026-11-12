@@ -4,8 +4,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getTextWidth } from '@evenrealities/pretext';
 import { layoutPage } from '../../src/glasses/layout';
-import { boardView, messageView, placesView } from '../../src/glasses/views';
-import type { ContainerSpec } from '../../src/glasses/types';
+import { boardView, messageView } from '../../src/glasses/views';
+import type { ContainerSpec, GlassesView } from '../../src/glasses/types';
 import { advance, BASELINE, describeContainers, drawContainers, glyphPositions, LEVEL_ALPHA } from '../../src/web/display';
 import { classifyPress, keyBelongsToFocus, keyToGesture, TapSequencer } from '../../src/web/gestures';
 import { createWebLocation, locationText, MANUAL_KEY } from '../../src/web/location';
@@ -97,16 +97,17 @@ describe('écran des lunettes dessiné dans un canvas', () => {
         updatedAt: 0,
       },
       { now: 0, settings: defaults() },
-      { isFavorite: false },
+      { kept: false },
     );
     const text = describeContainers(layoutPage(v, { sel: 0, top: 0 }).containers);
     expect(text).toContain('Gare du Nord, tram (STIB)');
     expect(text).toContain('T3, Churchill, 2 min');
     expect(text).not.toContain('sélection');
     expect(text).toContain('départs');
-    // une liste à curseur dit la ligne choisie
-    const menu = describeContainers(layoutPage(placesView({}, { now: 0, settings: defaults() }), { sel: 0, top: 0 }).containers);
-    expect(menu).toContain('sélection : Aucun lieu enregistré, sur le téléphone');
+    // une liste à curseur dit la ligne choisie (liste écrite ici : les textes des écrans des lunettes changent)
+    const list: GlassesView = { screen: 'favorites', layout: 'menu', title: 'Favoris', clock: '07:31', items: [{ a: 'Ajouter un favori' }, { a: 'Autre adresse', c: 'sur le téléphone' }], hints: '' };
+    const menu = describeContainers(layoutPage(list, { sel: 1, top: 0 }).containers);
+    expect(menu).toContain('sélection : Autre adresse, sur le téléphone');
   });
 });
 

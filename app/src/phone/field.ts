@@ -160,7 +160,8 @@ export function placeField(ctx: FieldCtx, o: FieldOptions): PlaceField {
       if (!q || matchesQuery(q, here.label)) items.push({ label: here.label, type: here.type, pick: () => pick({ kind: 'here', label: here.label }) });
     }
     if (o.places) {
-      for (const p of placesOf(s)) if (!q || matchesQuery(q, p.label)) items.push({ label: p.label, type: 'mon lieu', pick: () => pick({ kind: 'place', place: p, label: p.label }) });
+      // 1.2.2 (revue d'usage n° 5) : un lieu est un favori, plus « mon lieu ».
+      for (const p of placesOf(s)) if (!q || matchesQuery(q, p.label)) items.push({ label: p.label, type: 'favori', pick: () => pick({ kind: 'place', place: p, label: p.label }) });
     }
     const recentLabels = new Set<string>();
     if (o.recent) {

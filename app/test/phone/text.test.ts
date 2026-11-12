@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Journey, JourneyLabel, Leg, PlanResult } from '../../src/core/api';
 import { cardTitle, emptyState, summaryText, T, timesText, typo } from '../../src/phone/text';
+import { APP_VERSION, compareVersions } from '../../src/version';
 import { at, defaults, preset } from './helpers';
 
 const NB = ' ';
@@ -34,9 +35,10 @@ describe('typographie (§ 6.0)', () => {
 describe('cartes (T2)', () => {
   const short = journey('short', [walk(at(7, 33), 7), ride(at(7, 42), at(8, 46)), walk(at(8, 46), 10)]);
 
-  it('heures comme le titre des étapes, durée, changements, marche', () => {
+  it('heures comme le titre des étapes, durée, changements ; la marche seulement dans la ligne « moyens » (revue d’usage n° 13)', () => {
     expect(timesText(short, at(7, 31))).toBe('07:33 → 08:56');
-    expect(summaryText(short)).toBe(`1${NB}h${NB}23, direct, 17${NB}min à${NB}pied`);
+    expect(summaryText(short)).toBe(`1${NB}h${NB}23, direct`);
+    expect(summaryText(journey('fewer', [walk(at(7, 33), 2), ride(at(7, 35), at(8, 10)), walk(at(8, 10), 2), ride(at(8, 12), at(8, 40)), walk(at(8, 40), 3)], 1))).toBe(`1${NB}h${NB}12, 1 changement`);
     const onFoot = journey('walk', [walk(at(8, 50), 22)]);
     expect(summaryText(onFoot)).toBe(`22${NB}min à${NB}pied`);
   });
@@ -110,11 +112,14 @@ describe('notes de version 1.2.0 (PRD-1.2 § 6)', () => {
   });
 });
 
-describe('version 1.2.1 (PRD-1.2.1 § 8)', () => {
-  it('app.json, package.json et package-lock.json en 1.2.1', () => {
+describe('version (PRD-1.2.1 § 8, PRD-1.2.2 § 9)', () => {
+  it('app.json, package.json et package-lock.json à la même version, celle de l’écran Données (1.2.1 ou plus)', () => {
     const APP = fileURLToPath(new URL('../../', import.meta.url));
-    for (const f of ['app.json', 'package.json']) expect(JSON.parse(readFileSync(join(APP, f), 'utf8')).version, f).toBe('1.2.1');
+    const v = JSON.parse(readFileSync(join(APP, 'app.json'), 'utf8')).version;
+    expect(compareVersions(v, '1.2.1')).toBeGreaterThanOrEqual(0);
+    expect(v).toBe(APP_VERSION);
+    expect(JSON.parse(readFileSync(join(APP, 'package.json'), 'utf8')).version).toBe(v);
     const lock = JSON.parse(readFileSync(join(APP, 'package-lock.json'), 'utf8'));
-    expect([lock.version, lock.packages[''].version]).toEqual(['1.2.1', '1.2.1']);
+    expect([lock.version, lock.packages[''].version]).toEqual([v, v]);
   });
 });

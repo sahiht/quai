@@ -4,9 +4,11 @@
  *   QUAI_REAL=/home/claude/real-data/data [QUAI_REAL_LINES=/home/claude/routing-proto/out] [QUAI_REAL_PAIRS=300] \
  *     npx vitest run test/core/routing/real.test.ts
  *
- * Instantané 1.1 publié par le pipeline (11/11 et 12/11) : QUAI_REAL=/home/claude/real-data-11/data
- * QUAI_REAL_DAY=2026-11-11 (les requêtes de 23:10 ont besoin du lendemain dans l'instantané ; le contrôle large tourne
- * aussi le 12/11) ; QUAI_REAL_MAXWALK=5 : contrôle large avec 5 min de marche maximale (PRD-1.2.1 CA-121.9).
+ * Instantané 1.1 publié par le pipeline (11/11 et 12/11) : QUAI_REAL=/home/claude/real-data-11/data (jour des requêtes :
+ * le premier jour de l'instantané quand il ne couvre pas le 10/11, ou QUAI_REAL_DAY ; les requêtes de 23:10 ont besoin
+ * du lendemain dans l'instantané) ; QUAI_REAL_MAXWALK=5 : contrôle large avec 5 min de marche maximale.
+ * Classement : PRD-1.2.2 § 7 (le premier arrive le plus tôt, chaque minute de marche au-delà de la marche maximale
+ * compte triple).
  *
  * Dossier de données temporaire : zones, recherche et tuiles de l'instantané ; fichiers de ligne et tuiles de lignes
  * du prototype (même format, même instantané) ; meta.lines ajouté ; trains/ avec les autorisations de montée et de
@@ -22,18 +24,27 @@ import type { LineIndex, Meta, TileFile, TrainsDay } from '../../../../shared/ty
 import type { Endpoint, Journey, PlanResult, Settings } from '../../../src/core/api';
 import { DEFAULT_SETTINGS } from '../../../src/core/api';
 import { computeRoute, type RouteDebug } from '../../../src/core/routing/engine';
-import { itemOf, longestOf, walkTier } from '../../../src/core/routing/rank';
+import { costOf, itemOf, longestOf } from '../../../src/core/routing/rank';
 import { dropNets, netMemory } from '../../../src/core/routing/repair';
 import { reasonText } from '../../../src/core/routing/reason';
-import { distanceM, gtfsTime, hhmm, lineLabel, localDate, walkMinutes } from '../../../src/core/util';
+import { gtfsTime, hhmm, lineLabel, localDate } from '../../../src/core/util';
 import { DATA_BASE, makeEnv } from '../support/env';
 
 const REAL = process.env.QUAI_REAL ?? '';
 const PROTO = process.env.QUAI_REAL_LINES ?? '/home/claude/routing-proto/out';
 const PAIRS = Number(process.env.QUAI_REAL_PAIRS ?? 300);
-/** Jour des requêtes (QUAI_REAL_DAY, défaut 2026-11-10, l'instantané 1.0 du design). Les attentes datées (cas G,
- *  CA-M8.1, CA-M8.4) ne valent que pour l'instantané du 10/11 ; sur un autre jour, seuls les contrôles génériques tournent. */
-const DAY = process.env.QUAI_REAL_DAY ?? '2026-11-10';
+/** Jour des requêtes (QUAI_REAL_DAY ; sinon 2026-11-10, l'instantané 1.0 du design, s'il est couvert, ou le premier jour
+ *  de l'instantané). Les attentes datées (cas G, CA-M8.1, CA-M8.4) ne valent que pour l'instantané du 10/11 ; sur un
+ *  autre jour, seuls les contrôles génériques tournent. */
+/** Jours couverts par l'instantané (vide sans QUAI_REAL). */
+const DATES: readonly string[] = (() => {
+  try {
+    return (JSON.parse(readFileSync(join(REAL, 'meta.json'), 'utf8')) as Meta).serviceDates;
+  } catch {
+    return [];
+  }
+})();
+const DAY = process.env.QUAI_REAL_DAY || (DATES.includes('2026-11-10') || !DATES.length ? '2026-11-10' : DATES[0]);
 const SNAP10 = DAY === '2026-11-10';
 const SETTINGS: Settings = { ...DEFAULT_SETTINGS, onboarded: true, maxWalkMin: 10 };
 /** Contrôle large : marche maximale QUAI_REAL_MAXWALK (10 min par défaut ; 5 pour les réglages du propriétaire). */
@@ -196,26 +207,35 @@ describe.skipIf(!REAL)(`données réelles (${DAY})`, () => {
       }
     }
     console.log(lines.join('\n'));
-    for (const q of QUERIES) if (!q.n.startsWith('A.3')) expect(results.get(q.n)?.journeys.length, q.n).toBeGreaterThan(0);
+    // une requête datée hors de l'instantané (CA-M8.4 le 11/11 sur celui du 13/11) n'a pas d'horaires : pas d'attente
+    for (const q of QUERIES) if (!q.n.startsWith('A.3') && DATES.includes(localDate(q.after))) expect(results.get(q.n)?.journeys.length, q.n).toBeGreaterThan(0);
   }, 600_000);
 
-  it.skipIf(!SNAP10)('CA-M8.1 (1.2.1) : IC jusqu’à Bruxelles-Luxembourg puis bus 95 d’abord, jamais Bruxelles-Chapelle ; une proposition à 23:50 pour le lendemain', () => {
+  it.skipIf(!SNAP10)('CA-M8.1 (1.2.2) : IC jusqu’à Bruxelles-Schuman, métro 1 et tram 10 d’abord, l’IC et le bus 95 en « Moins de changements », jamais Bruxelles-Chapelle ; une proposition à 23:50 pour le lendemain', () => {
     const r = results.get('19 CA-M8.1 Maison → Bureau 07:31');
-    // 1.2.1 (le moins de marche d'abord) : l'IC jusqu'à Bruxelles-Central puis 12 min à pied (palier 1) arrive 8 min
-    // après l'IC et le bus 95 (palier 0) : plus proposé (§ 1.4)
-    const first = r?.journeys[0];
-    expect(first?.legs.filter((l) => l.kind === 'ride').map((l) => `${l.cat ?? l.line} ${l.to.name.fr}`)).toEqual(['IC Bruxelles-Luxembourg', '95 Grand-Place']);
+    // 1.2.2 (PRD-1.2.2 § 7) : par Schuman, 08:54 et 2 changements (coût 08:56), contre 08:56 et 1 changement par
+    // Bruxelles-Luxembourg et le bus 95 (coût 08:57), proposé en « Moins de changements » ; comme sur l'instantané 1.1
+    // (CA-1.9). L'IC jusqu'à Bruxelles-Central puis 12 min à pied n'est toujours pas proposé.
+    const rides = (j?: Journey) => j?.legs.filter((l) => l.kind === 'ride').map((l) => `${l.cat ?? l.line} ${l.to.name.fr}`);
+    expect(rides(r?.journeys[0])).toEqual(['IC Bruxelles-Schuman', '1 De Brouckère', '10 Anneessens']);
+    expect(r?.journeys[1]?.label).toBe('fewer');
+    expect(rides(r?.journeys[1])).toEqual(['IC Bruxelles-Luxembourg', '95 Grand-Place']);
     for (const x of r?.journeys ?? []) expect(x.legs.some((l) => l.to.areaId === 'sncb:8812104' || l.from.areaId === 'sncb:8812104')).toBe(false);
     const night = results.get('20 CA-M8.1 Maison → Bureau 23:50');
     expect(night?.journeys.length).toBeGreaterThan(0);
     expect(localDate(night?.journeys[0].legs.find((l) => l.kind === 'ride')?.dep ?? 0)).toBe('2026-11-11');
   });
 
-  it.skipIf(!SNAP10)('cas G : S1 06:20 direct d’abord, un trajet « Plus tôt »', () => {
+  it.skipIf(!SNAP10)('cas G (1.2.2) : la nuit, l’arrivée la plus tôt d’abord (S19 05:02, métro 1 et 6), puis « Le suivant » : le S1 direct de 06:20', () => {
     const r = results.get('21 cas G : Waterloo → Bruxelles-Midi 23:50');
-    expect(r?.journeys[0]).toMatchObject({ label: 'short', transfers: 0 });
-    expect(hhmm(r?.journeys[0].legs[0].dep ?? 0)).toBe('06:20');
-    expect(r?.journeys.some((j) => j.label === 'earlier')).toBe(true);
+    // 1.2.2 (PRD-1.2.2 § 7) : 05:58 et 2 changements (coût 06:00) avant le S1 direct de 06:20, qui arrive plus de
+    // 15 min après : pas de « Sans changement ». Garde (§ 7.4) : le S1 de 06:20 (06:46, direct) domine le S19 de 06:02
+    // et ses deux métros (06:58) : il est « Le suivant » ; le S19 de 07:02 l'est par le S1 de 07:20, au-delà de 2 h
+    expect(r?.journeys[0]).toMatchObject({ label: 'short', transfers: 2 });
+    expect(hhmm(r?.journeys[0].legs[0].dep ?? 0)).toBe('05:02');
+    expect(hhmm(r?.journeys[0].arr ?? 0)).toBe('05:58');
+    expect(r?.journeys.slice(1).map((j) => `${j.label} ${hhmm(j.dep)} → ${hhmm(j.arr)} ${j.transfers}`)).toEqual(['next 06:20 → 06:46 0']);
+    for (const j of r?.journeys ?? []) expect(localDate(j.dep)).toBe('2026-11-11');
   });
 
   it('CA-M5.8 : Namur → Saint-Nicolas par Bruxelles (deux correspondances), pas par Lille', () => {
@@ -236,7 +256,7 @@ describe.skipIf(!REAL)(`données réelles (${DAY})`, () => {
     for (const j of r?.journeys ?? []) expect(maxWait(j)).toBeLessThanOrEqual(60);
   });
 
-  it(`contrôle « réseau complet » : ${PAIRS} paires, au moins 97 % de meilleures arrivées et de propositions 1 identiques ; jamais un détour en tête (CA-121.9)`, async () => {
+  it(`contrôle « réseau complet » : ${PAIRS} paires, au moins 97 % de meilleures arrivées identiques et de propositions 1 aussi bonnes ; jamais une proposition 1 dominée ni une marche absurde (PRD-1.2.2 § 7)`, async () => {
     const meta = JSON.parse(readFileSync(join(DIR, 'meta.json'), 'utf8')) as Meta;
     const cache = new Map<string, unknown>();
     const read = <T>(path: string): T | null => {
@@ -279,12 +299,12 @@ describe.skipIf(!REAL)(`données réelles (${DAY})`, () => {
     let onlyFull = 0;
     let smallMs = 0;
     const gaps: string[] = [];
-    // CA-121.9 (PRD-1.2.1 § 1.2) : la proposition 1 n'arrive jamais plus de 30 min après le trajet le plus tôt de
-    // l'heure demandée (garde-fou contre les détours) ; combien sont au-dessus du palier 0, combien poussées plus haut
+    // PRD-1.2.2 § 7 : parmi les candidats de l'heure demandée (marche seule de 30 min au plus comprise), la proposition 1
+    // n'est jamais dominée (arrivée, plus longue marche, changements) ni une marche absurde (plus de M + 5 min à pied
+    // alors qu'un trajet sans marche de plus de M arrive au plus 15 min après) ; combien ne sont pas la plus tôt
     const maxWalk = LARGE.maxWalkMin;
-    const tierOf = (j: Journey) => walkTier(longestOf(itemOf(j)), maxWalk);
-    const guard = { checked: 0, tierAbove0: 0, pushed: 0, notEarliest: 0, worst: 0 };
-    const detours: string[] = [];
+    const guard = { checked: 0, notEarliest: 0, worst: 0, overMax: 0 };
+    const bad: string[] = [];
     for (let i = 0; i < PAIRS; i++) {
       const c1 = centres[Math.floor(rnd() * centres.length)];
       const c2 = rnd() < 0.35 ? centres[Math.floor(rnd() * centres.length)] : c1;
@@ -310,22 +330,26 @@ describe.skipIf(!REAL)(`données réelles (${DAY})`, () => {
         continue;
       }
       comparable++;
-      // garde-fou : candidats partis dans l'heure demandée (marche seule de 30 min au plus comprise)
+      // candidats partis dans l'heure demandée (marche seule de 30 min au plus comprise)
       const inHour = dbgS.cands.map(itemOf).filter((x) => x.dep <= after / 60_000 + 60 && (x.rides > 0 || x.walk <= 30));
-      if (inHour.length && rs.journeys[0].legs.some((l) => l.kind === 'ride')) {
-        const first = rs.journeys[0];
+      if (inHour.length) {
+        const first = itemOf(rs.journeys[0]);
+        const lw = longestOf(first);
         const E = Math.min(...inHour.map((x) => x.arr));
-        const late = Math.round(first.arr / 60_000 - E);
+        const late = Math.round(first.arr - E);
         guard.checked++;
         guard.worst = Math.max(guard.worst, late);
-        if (tierOf(first) > 0) guard.tierAbove0++;
         if (late > 0) guard.notEarliest++;
-        if (inHour.some((x) => walkTier(longestOf(x), maxWalk) < tierOf(first))) guard.pushed++;
-        if (late > 30) detours.push(`${c1[0]}→${c2[0]} #${i} ${hhmm(after)} : proposition 1 ${hhmm(first.dep)} → ${hhmm(first.arr)}, ${late} min après le plus tôt`);
+        if (lw > maxWalk) guard.overMax++;
+        const where = `${c1[0]}→${c2[0]} #${i} ${hhmm(after)} : proposition 1 ${hhmm(first.dep * 60_000)} → ${hhmm(first.arr * 60_000)}`;
+        for (const x of inHour) {
+          const xl = longestOf(x);
+          if (x.arr <= first.arr && xl <= lw && x.transfers <= first.transfers && (x.arr < first.arr || xl < lw || x.transfers < first.transfers)) bad.push(`${where} dominée`);
+          if (lw > maxWalk + 5 && xl <= maxWalk && x.arr <= first.arr + 15) bad.push(`${where} : ${lw} min à pied, marche absurde`);
+        }
       }
-      const walkRef = walkMinutes(distanceM(o, d));
       const afterMin = (after - gtfsTime(DAY, 0)) / 60_000;
-      const usable = (x: RouteDebug['raw'][number]) => x.wait <= 60 && (walkRef > 60 || x.arr <= afterMin + walkRef);
+      const usable = (x: RouteDebug['raw'][number]) => x.wait <= 60 && x.dep >= afterMin;
       const best = (dbg: RouteDebug, k: number) => Math.min(...dbg.raw.filter((x) => usable(x) && x.k <= k).map((x) => x.arr));
       let ok = true;
       for (const k of [1, 2, 3]) {
@@ -337,20 +361,20 @@ describe.skipIf(!REAL)(`données réelles (${DAY})`, () => {
         }
       }
       if (ok) sameBest++;
-      // « Le plus court » du petit réseau aussi bon que celui du réseau complet, à 5 min près (arrivée et durée)
+      // proposition 1 du petit réseau aussi bonne que celle du réseau complet, à 5 min de coût près (PRD-1.2.2 § 7)
       const s1 = itemOf(rs.journeys[0]);
       const s2 = rf.journeys.length ? itemOf(rf.journeys[0]) : s1;
-      if (s1.id === s2.id || (s1.arr < s2.arr + 5 && s1.arr - s1.dep < s2.arr - s2.dep + 5)) sameSimple++;
-      else gaps.push(`   « Le plus court » : ${hhmm(rs.journeys[0].dep)} → ${hhmm(rs.journeys[0].arr)} contre ${hhmm(rf.journeys[0].dep)} → ${hhmm(rf.journeys[0].arr)}`);
+      if (s1.id === s2.id || costOf(s1, maxWalk) < costOf(s2, maxWalk) + 5) sameSimple++;
+      else gaps.push(`   proposition 1 : ${hhmm(rs.journeys[0].dep)} → ${hhmm(rs.journeys[0].arr)} contre ${hhmm(rf.journeys[0].dep)} → ${hhmm(rf.journeys[0].arr)}`);
     }
     console.log(
       `${gaps.join('\n')}\n${PAIRS} paires (marche maximale ${maxWalk} min) ; comparables ${comparable} ; aucune proposition des deux côtés ${none} ; seul le réseau complet trouve ${onlyFull}\n` +
         `meilleures arrivées identiques (1, 2, 3 véhicules) : ${sameBest}/${comparable} (${((100 * sameBest) / Math.max(1, comparable)).toFixed(1)} %) ; proposition 1 : ${sameSimple}/${comparable} (${((100 * sameSimple) / Math.max(1, comparable)).toFixed(1)} %) ; calcul moyen (petit réseau, fichiers en mémoire) ${Math.round(smallMs / PAIRS)} ms\n` +
-        `CA-121.9 : ${guard.checked} propositions 1 contrôlées ; au-dessus du palier 0 : ${guard.tierAbove0} ; poussées au-dessus d'un palier plus bas par le garde-fou : ${guard.pushed} ; pas la plus tôt : ${guard.notEarliest} ; au plus ${guard.worst} min après la plus tôt\n${detours.join('\n')}`,
+        `PRD-1.2.2 § 7 : ${guard.checked} propositions 1 contrôlées ; plus longue marche au-delà de la marche maximale : ${guard.overMax} ; pas la plus tôt : ${guard.notEarliest} ; au plus ${guard.worst} min après la plus tôt\n${bad.join('\n')}`,
     );
     expect(sameBest / Math.max(1, comparable)).toBeGreaterThanOrEqual(0.97);
     expect(sameSimple / Math.max(1, comparable)).toBeGreaterThanOrEqual(0.97);
-    expect(detours).toEqual([]);
+    expect(bad).toEqual([]);
   }, 3_600_000);
 });
 
@@ -366,7 +390,7 @@ const SNAP11 = (() => {
   return !!m.lines && m.serviceDates.includes('2026-11-11') && m.serviceDates.includes('2026-11-12');
 })();
 
-describe.skipIf(!SNAP11)('le moins de marche d’abord sur l’instantané 1.1 (PRD-1.2 CA-1.7 à CA-1.11, PRD-1.2.1 CA-121.1)', () => {
+describe.skipIf(!SNAP11)('classement 1.2.2 sur l’instantané 1.1 (PRD-1.2 CA-1.7 à CA-1.11, PRD-1.2.1 CA-121.1, PRD-1.2.2 § 7)', () => {
   const MADOU = pt(50.8504, 4.3707, 'Madou');
   const MAISON = pt(50.4655, 4.859, 'Maison');
   const BUREAU = pt(50.8441, 4.3474, 'Bureau');
@@ -393,27 +417,32 @@ describe.skipIf(!SNAP11)('le moins de marche d’abord sur l’instantané 1.1 (
 
   it('CA-1.8 : Namur Place Léopold → Madou, 07:31 : IC jusqu’à Bruxelles-Luxembourg, bus 12, métro 2 ; « Moins de changements »', async () => {
     const r = await route(MAISON, MADOU, at('2026-11-12', 7, 31));
-    expect(summary(r)).toEqual(['short 07:34 → 08:44', 'fewer 07:34 → 08:52', 'next 08:06 → 09:30']);
+    expect(summary(r)).toEqual(['short 07:34 → 08:44', 'fewer 07:34 → 08:52', 'next 08:06 → 09:18']);
     expect(r.journeys.map(reason).slice(0, 2)).toEqual(['Le plus court : 2 changements, à pied 8 + 1 + 2 min', 'Moins de changements : 1 changement, à pied 8 + 2 + 10 min']);
     expect(lines(r.journeys[0])).toEqual(['IC Namur → Bruxelles-Luxembourg', '12 Luxembourg → Trône', '2 Trône → Madou']);
+    // « Le suivant » (garde, PRD-1.2.2 § 7.4) : l'IC suivant puis le bus 64 (09:18), qui domine le bus 12 (09:30)
+    expect(lines(r.journeys[2])).toEqual(['IC Namur → Bruxelles-Luxembourg', '64 Luxembourg → Trône', '2 Trône → Madou']);
   });
 
-  it('CA-1.9 : Maison → Bureau et → Rue Neuve 1, 07:31 : par Bruxelles-Luxembourg ou Schuman ; vers Rue Neuve, le direct « Sans changement »', async () => {
+  it('CA-1.9 : Maison → Bureau et → Rue Neuve 1, 07:31 : par Schuman ou Bruxelles-Luxembourg ; vers Rue Neuve, le direct « Sans changement »', async () => {
     const b = await route(MAISON, BUREAU, at('2026-11-12', 7, 31));
-    // 1.2.1 § 1.4 : le direct puis 12 min à pied (palier 1) arrive 8 min après : plus « Sans changement »
-    expect(summary(b)).toEqual(['short 07:34 → 08:56', 'next 08:06 → 09:25', 'next 08:22 → 09:48']);
-    expect(lines(b.journeys[0])).toEqual(['IC Namur → Bruxelles-Luxembourg', '95 Luxembourg → Grand-Place']);
-    expect(reason(b.journeys[0])).toBe('Le plus court : 1 changement, à pied 8 + 1 + 6 min');
+    // 1.2.2 : par Schuman, métro 1 et tram 10, 2 min plus tôt que l'IC et le bus 95 (« Moins de changements ») ; le
+    // direct puis 12 min à pied (2 min de trop) arrive 8 min après : jamais « Sans changement »
+    expect(summary(b)).toEqual(['short 07:34 → 08:54', 'fewer 07:34 → 08:56', 'next 08:06 → 09:25']);
+    expect(lines(b.journeys[0])).toEqual(['IC Namur → Bruxelles-Schuman', '1 Schuman → De Brouckère', '10 De Brouckère → Anneessens']);
+    expect(reason(b.journeys[0])).toBe('Le plus court : 2 changements, à pied 8 + 2 + 3 min');
+    expect(lines(b.journeys[1])).toEqual(['IC Namur → Bruxelles-Luxembourg', '95 Luxembourg → Grand-Place']);
+    expect(reason(b.journeys[1])).toBe('Moins de changements : 1 changement, à pied 8 + 1 + 6 min');
     const n = await route(MAISON, pt(50.8505, 4.3545, 'Rue Neuve 1'), at('2026-11-12', 7, 31));
     expect(summary(n).slice(0, 2)).toEqual(['short 07:34 → 08:49', 'none 07:34 → 09:02']);
     expect(lines(n.journeys[0])).toEqual(['IC Namur → Bruxelles-Schuman', '1 Schuman → De Brouckère']);
   });
 
-  it('CA-1.10 : Braine-l’Alleud Côté du Collège → Madou : jamais le bus 36 vers Rixensart en tête (11/11 13:30, marche 5 et 10) ; 12/11 07:31', async () => {
+  it('CA-1.10 : Braine-l’Alleud Côté du Collège → Madou : jamais le bus 36 vers Rixensart (11/11 13:30, marche 5 et 10) ; 12/11 07:31', async () => {
     for (const m of [5, 10]) {
       const r = await route(BRAINE, MADOU, at('2026-11-11', 13, 30), m);
       expect(summary(r)[0], `marche ${m}`).toBe('short 13:39 → 14:47');
-      // 1.2.1 § 2 : « Plus tôt » (22 min à pied et l'IC) marche plus : « Moins de marche »
+      // PRD-1.2.1 § 2 : « Plus tôt » (22 min à pied et l'IC) marche plus : « Moins de marche »
       expect(reason(r.journeys[0])).toBe('Moins de marche : 1 changement, à pied 8 + 1 + 2 min');
       expect(lines(r.journeys[0])).toEqual(['W Braine-l’Alleud Bonne Fosse → Saint-Gilles Porte de Hal Metro', '2 Porte de Hal → Madou']);
       expect(r.journeys.some(bus36)).toBe(false);
@@ -434,22 +463,28 @@ describe.skipIf(!SNAP11)('le moins de marche d’abord sur l’instantané 1.1 (
     expect(reasonText('fewer', r.journeys[1])).toBe(r.journeys[1].reason);
   });
 
-  it('CA-121.1 : les trois cas réels du PRD-1.2.1 § 1.5 (marche maximale 5 min)', async () => {
-    // Arrêts publics seulement (jamais d'adresse personnelle dans le dépôt). Braine-l'Alleud → Schaerbeek, 11/11 19:42 : bus W puis S1 ; « Plus tôt » : 22 min à pied, IC 20:08, IC 20:33
+  it('CA-121.1 et PRD-1.2.2 § 7 : les trois cas réels du PRD-1.2.1 § 1.5 (marche maximale 5 min)', async () => {
+    // Arrêts publics seulement (jamais d'adresse personnelle dans le dépôt). Braine-l'Alleud → Schaerbeek, 11/11 19:42 :
+    // bus W puis S1 ; les 22 min à pied, IC 20:08, IC 20:33 seulement en « Plus tôt »
     const mama = await route(BRAINE, pt(50.87755, 4.37966, 'Schaerbeek Gare'), at('2026-11-11', 19, 42), 5);
-    expect(summary(mama).slice(0, 2)).toEqual(['short 19:57 → 21:05', 'earlier 19:44 → 20:52']);
+    // « Le suivant » (garde, PRD-1.2.2 § 7.4) : le bus W puis le tram 92 (20:39 → 22:01), qui domine le bus W puis le
+    // S1 suivant (20:27 → 22:05)
+    expect(summary(mama)).toEqual(['short 19:57 → 21:05', 'earlier 19:44 → 20:52', 'next 20:39 → 22:01']);
     expect(lines(mama.journeys[0]).map((x) => x.split(' ')[0])).toEqual(['W', 'S1']);
+    expect(lines(mama.journeys[2]).map((x) => x.split(' ')[0])).toEqual(['W', '92']);
     expect(mama.journeys[1].legs.filter((l) => l.kind === 'ride').map((l) => `${l.cat} ${hhmm(l.dep)}`)).toEqual(['IC 20:08', 'IC 20:33']);
     expect(mama.journeys.map(reason).slice(0, 2)).toEqual(['Moins de marche : 1 changement, à pied 8 + 1 + 3 min', 'Plus tôt de 13 min, mais 22 min à pied']);
+    for (const j of mama.journeys) if (j.label !== 'earlier') expect(Math.max(...j.legs.map((l) => (l.kind === 'walk' ? (l.walkMin ?? 0) : 0)))).toBeLessThan(15);
     // Braine-l'Alleud → Madou, 12/11 07:31 : bus 36, IC 08:01, métro 2
     const bureau = await route(BRAINE, MADOU, at('2026-11-12', 7, 31), 5);
     expect(summary(bureau)[0]).toBe('short 07:49 → 08:33');
     expect(lines(bureau.journeys[0]).map((x) => x.split(' ')[0])).toEqual(['36', 'IC', '2']);
     expect(hhmm(bureau.journeys[0].legs.find((l) => l.cat === 'IC')!.dep)).toBe('08:01');
-    // « Plus tard » : bus 36 de 07:54, S1 08:06, métro 2 (3 min à pied au plus), pas le S1 après 22 min à pied
-    expect(summary(bureau)[2]).toBe('later 07:54 → 08:50');
-    expect(bureau.journeys[2].legs.filter((l) => l.kind === 'ride').map((l) => `${l.cat ?? l.line} ${hhmm(l.dep)}`)).toEqual(['36 07:54', 'S1 08:06', '2 08:39']);
-    expect(Math.max(...bureau.journeys[2].legs.map((l) => (l.kind === 'walk' ? (l.walkMin ?? 0) : 0)))).toBe(3);
+    // « Plus tard » : bus 36 de 07:54, S1 08:06, métro 2 (3 min à pied au plus), pas le S1 après 22 min à pied ;
+    // l'IC après 22 min à pied (même arrivée) marche plus au-delà de la marche maximale : jamais « Moins de changements »
+    expect(summary(bureau).slice(1)).toEqual(['later 07:54 → 08:50', 'later 08:14 → 09:01']);
+    expect(bureau.journeys[1].legs.filter((l) => l.kind === 'ride').map((l) => `${l.cat ?? l.line} ${hhmm(l.dep)}`)).toEqual(['36 07:54', 'S1 08:06', '2 08:39']);
+    expect(Math.max(...bureau.journeys[1].legs.map((l) => (l.kind === 'walk' ? (l.walkMin ?? 0) : 0)))).toBe(3);
     // Braine-l'Alleud Côté du Collège → Madou, 11/11 13:30 : bus W, métro 2 ; « Plus tôt » : 22 min à pied et l'IC
     const braine = await route(BRAINE, MADOU, at('2026-11-11', 13, 30), 5);
     expect(summary(braine).slice(0, 2)).toEqual(['short 13:39 → 14:47', 'earlier 13:44 → 14:39']);

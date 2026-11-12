@@ -112,7 +112,7 @@ export function dataScreen(ctx: PhoneCtx): HTMLElement {
     const now = ctx.clock.now();
     updates.replaceChildren(
       h('div', { class: 'kv' }, h('dt', null, 'Horaires officiels'), h('dd', null, meta ? generatedText(meta.generatedAt, now) : ctx.coreError() ?? '…')),
-      h('div', { class: 'kv' }, h('dt', null, 'Trajets vers tes lieux'), h('dd', null, !meta ? '…' : fresh && !fresh.ok ? 'pas à jour' : 'prêts pour aujourd’hui')),
+      h('div', { class: 'kv' }, h('dt', null, 'Trajets vers tes favoris'), h('dd', null, !meta ? '…' : fresh && !fresh.ok ? 'pas à jour' : 'prêts pour aujourd’hui')),
       h('div', { class: 'kv' }, h('dt', null, 'Temps réel'), h('dd', null, realtimeText(ctx.coreNow()?.status?.().rt, health))),
       h('div', { class: 'kv' }, h('dt', null, 'Version de Quai'), h('dd', null, APP_VERSION)),
     );

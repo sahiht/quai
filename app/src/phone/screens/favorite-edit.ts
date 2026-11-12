@@ -1,36 +1,29 @@
 /**
- * Ajout et modification d'un favori (PRD-1.2 § 2.2, PRD-1.2.1 § 7.1).
+ * Ajout et modification d'un favori (PRD-1.2 § 2.2, PRD-1.2.1 § 7.1, PRD-1.2.2 § 4).
  *  - « Nouveau favori » : en haut, deux choix de même taille, « Un endroit » (choisi d'office) et « Un trajet de A à
- *    B ». « Un endroit » : un seul champ « Adresse, gare ou arrêt », avec en tête « Ma position actuelle ». Une adresse
- *    ou la position donne un lieu ; une gare ou un arrêt, au choix « Ses prochains départs » (un arrêt) ou « Le trajet
- *    pour y aller » (un lieu « Près de {arrêt} »). « Un trajet de A à B » : le formulaire du trajet fixe.
- *  - Arrêt : lignes et directions, créneau (1.1). Trajet fixe : « Départ » (jamais « Ma position »), « Arrivée », nom
- *    affiché, créneau (1.1). Lieu : voir places.ts.
+ *    B ». « Un endroit » : un seul champ « Adresse, gare ou arrêt », avec en tête « Ma position actuelle » ; une
+ *    adresse, la position, une gare ou un arrêt donnent toujours un lieu (« Le trajet pour y aller »). 1.2.2 (revue
+ *    d'usage n° 3) : plus d'arrêt favori ; pour une gare, un lien au-dessus du formulaire l'ajoute à « Gares » ; pour
+ *    un arrêt de bus, tram ou métro, il mène à « Ajouter une ligne », arrêt présélectionné.
+ *  - Trajet fixe : « Départ » (jamais « Ma position »), « Arrivée », nom affiché, créneau (1.1). Lieu : voir places.ts.
  *  - Modification : pas de choix, le formulaire du favori ; suppression confirmée dans la page.
  */
-import type { Endpoint, Favorite, FavoriteStop, FavoriteTrip, LineFilter, Mode, NameLang, Propose, SearchItem } from '../../core/api';
-import { OP_NAME, displayName, mainMode } from '../../core/util';
-import type { Names, Op } from '../../../../shared/types';
+import type { Endpoint, Favorite, FavoriteTrip, Propose, SearchItem } from '../../core/api';
+import { displayName } from '../../core/util';
 import { LIMITS, newId } from '../../settings';
-import { headText } from '../../glasses/format';
 import { header, type PhoneCtx } from '../app';
-import { debounce, h, liveRegion } from '../dom';
+import { h, liveRegion } from '../dom';
 import { placeField, privacyNote, type FieldChoice } from '../field';
-import { endpointText, limitText, PROPOSE_LABEL, sameEndpoint, shortAddress, T, typo } from '../text';
-import { confirmInPage, radios, segmentedTabs } from '../ui';
+import { endpointText, limitText, nextDeparturesLink, PROPOSE_LABEL, PROPOSE_ORDER, sameEndpoint, shortAddress, stationAddedText, stationLimitText, T, typo } from '../text';
+import { confirmInPage, messageHub, radios, segmentedTabs } from '../ui';
 import { favoritesScreen } from './favorites';
+import { withStation } from './picks';
 import { hereSpot, placeForm, spotOf, type Spot } from './places';
 
-const MODE_TITLE: Record<Mode, string> = { train: 'Train', metro: 'Métro', tram: 'Tram', bus: 'Bus' };
 const BACK = { label: T.myFavs, hash: '#/favoris' };
 
-/** « Le proposer à l’ouverture » d'un arrêt ou d'un trajet fixe (1.1) : quatre créneaux avec leurs heures. */
-export const PROPOSE_OPTIONS: { value: Propose; label: string }[] = (['never', 'near', 'morning', 'evening'] as const).map((value) => ({ value, label: typo(PROPOSE_LABEL[value]) }));
-
-/** Arrêt choisi (gare ou arrêt), avec ses modes s'ils sont connus. */
-interface AreaPick { areaId: string; op: Op; name: Names; lat: number; lon: number; modes: Mode[] }
-
-const areaOfItem = (it: SearchItem): AreaPick => ({ areaId: it.id, op: it.op, name: it.n, lat: it.lat, lon: it.lon, modes: it.modes });
+/** « En tête de l’accueil » d'un trajet fixe (revue d'usage n° 11) : Automatique, le matin, le soir, d'office à moins de 300 m. */
+export const PROPOSE_OPTIONS: { value: Propose; label: string }[] = PROPOSE_ORDER.map((value) => ({ value, label: typo(PROPOSE_LABEL[value]) }));
 
 /** Extrémité d'un trajet fixe à partir d'un choix du champ unique. */
 export function endpointOf(c: FieldChoice): Endpoint {
@@ -46,141 +39,31 @@ export function withFavorite(list: Favorite[], fav: Favorite): Favorite[] | null
   return list.length >= LIMITS.favorites ? null : [...list, fav];
 }
 
-/* ------------------------------ Arrêt ------------------------------ */
-
-/** Champ d'arrêt (modification d'un arrêt favori) : gares et arrêts seulement, avec leur type. */
-function stopPicker(ctx: PhoneCtx, opts: { id: string; label: string; value: string; onPick: (a: AreaPick) => void }): HTMLElement {
-  const s = ctx.settings.get();
-  const input = h('input', { id: opts.id, class: 'input', type: 'search', value: opts.value, autocomplete: 'off', role: 'combobox', 'aria-expanded': 'false', 'aria-controls': `${opts.id}-list`, 'aria-autocomplete': 'list' });
-  const list = h('ul', { class: 'suggest', id: `${opts.id}-list`, role: 'listbox', 'aria-label': `${opts.label} : propositions` });
-  const option = (label: string, sub: string, pick: () => void): HTMLLIElement =>
-    h('li', { role: 'none' }, h('button', { type: 'button', role: 'option', 'aria-selected': 'false', onclick: () => { pick(); list.replaceChildren(); input.setAttribute('aria-expanded', 'false'); } }, h('span', { class: 's1' }, label), h('span', { class: 's2' }, sub)));
-  // Numéro de requête : la réponse d'une saisie dépassée (arrivée en retard) est ignorée, jamais mélangée.
-  let seq = 0;
-  const run = debounce(async () => {
-    const my = ++seq;
-    const q = input.value.trim();
-    let items: SearchItem[] = [];
-    if (q.length >= 2) {
-      try {
-        const core = await ctx.core();
-        items = await core.search(q, ctx.location.last() ?? undefined);
-      } catch {
-        items = []; // recherche indisponible : la liste reste vide
-      }
-    }
-    if (my !== seq) return;
-    list.replaceChildren(
-      ...items.slice(0, 8).map((it) => {
-        const label = displayName(it.n, s.lang);
-        return option(label, it.kindLabel, () => {
-          input.value = label;
-          opts.onPick(areaOfItem(it));
-        });
-      }),
-    );
-    input.setAttribute('aria-expanded', list.children.length ? 'true' : 'false');
-  }, 220);
-  input.addEventListener('input', run);
-  input.addEventListener('focus', run);
-  return h('div', { class: 'field' }, h('label', { for: opts.id }, opts.label), input, list);
-}
-
-/** Nom d'un arrêt dans son champ : « Gare du Nord, tram (STIB) ». */
-const areaText = (a: AreaPick, lang: NameLang): string =>
-  `${displayName(a.name, lang)}${a.modes.length ? `, ${MODE_TITLE[mainMode(a.modes)].toLowerCase()} (${OP_NAME[a.op]})` : ` (${OP_NAME[a.op]})`}`;
+/* ------------------------------ Gare ou arrêt : la bonne rubrique ------------------------------ */
 
 /**
- * Formulaire d'un arrêt favori (1.1) : lignes et directions, créneau, « Enregistrer ». En modification : le champ
- * de l'arrêt et la suppression.
+ * Lien au-dessus du formulaire d'un lieu placé à une gare ou à un arrêt (revue d'usage n° 3) : une gare SNCB
+ * s'ajoute à « Gares » d'un toucher (« Namur ajoutée à Gares. ») ; un arrêt de bus, tram ou métro mène à « Ajouter
+ * une ligne », arrêt présélectionné à la 2e étape.
  */
-function stopForm(ctx: PhoneCtx, o: { existing?: FavoriteStop; area?: AreaPick }): HTMLElement {
-  const s = ctx.settings.get();
-  const existing = o.existing;
-  let area: AreaPick | null = existing ? { areaId: existing.areaId, op: existing.op, name: existing.name, lat: existing.lat, lon: existing.lon, modes: [] } : (o.area ?? null);
-  let filter: LineFilter[] | undefined = existing?.filter;
-  let propose: Propose = existing?.propose ?? 'never';
-  const live = liveRegion();
-  const linesBox = h('div');
-  const save = h('button', { type: 'button', class: 'btn btn-primary btn-big btn-block' }, T.save);
-  const sync = (): void => {
-    save.disabled = !area;
-  };
-
-  async function loadLines(): Promise<void> {
-    linesBox.replaceChildren();
-    if (!area) return;
-    const a = area;
-    linesBox.appendChild(h('p', { class: 'small muted' }, 'Chargement des lignes…'));
-    try {
-      const core = await ctx.core();
-      const lines = await core.linesAt(a.areaId);
-      if (a !== area) return;
-      if (!a.modes.length && lines.length) {
-        a.modes = [...new Set(lines.map((l) => l.mode))];
-        // Le champ montre le mode (« Gare du Nord, tram (STIB) »), sauf si une saisie est en cours.
-        const input = picker?.querySelector<HTMLInputElement>('input');
-        if (input && (input.value === areaText({ ...a, modes: [] }, s.lang) || input.value === displayName(a.name, s.lang))) input.value = areaText(a, s.lang);
-      }
-      const fs = h('fieldset', null, h('legend', { class: 'legend-sm' }, 'Lignes et directions à afficher'));
-      const chosen = new Set((filter ?? []).map((f) => `${f.line}|${f.head}`));
-      const all = !filter?.length;
-      for (const l of lines) {
-        const key = `${l.filter.line}|${l.filter.head}`;
-        const cb = h('input', { type: 'checkbox', checked: all || chosen.has(key) });
-        cb.addEventListener('change', () => {
-          const boxes = [...fs.querySelectorAll<HTMLInputElement>('input[type=checkbox]')];
-          const picked = lines.filter((_, i) => boxes[i]?.checked).map((x) => x.filter);
-          filter = picked.length === lines.length || !picked.length ? undefined : picked;
-        });
-        fs.appendChild(h('label', { class: 'choice compact' }, cb, `${MODE_TITLE[l.mode]} ${l.line} vers ${headText(l.head, s.lang, a.op)}`));
-      }
-      linesBox.replaceChildren(lines.length ? fs : h('p', { class: 'small muted' }, 'Aucune ligne trouvée pour cet arrêt.'));
-    } catch (e) {
-      // Zone disparue (M8) : « Arrêt introuvable : choisis-le à nouveau ».
-      const text = e instanceof Error && !/introuvable/i.test(e.message) ? e.message : T.stopMissing;
-      linesBox.replaceChildren(h('p', { class: 'small', role: 'alert' }, typo(text)));
-    }
-  }
-
-  const picker = existing
-    ? stopPicker(ctx, {
-        id: 'fav-arret',
-        label: 'Arrêt ou gare',
-        value: area ? areaText(area, s.lang) : '',
-        onPick: (a) => {
-          area = a;
-          filter = undefined;
-          void loadLines();
-          sync();
-        },
-      })
-    : null;
-
-  save.addEventListener('click', async () => {
-    if (!area) return;
-    const st: FavoriteStop = { kind: 'stop', id: existing?.id ?? newId('fav', ctx.settings.get().favorites.map((f) => f.id)), areaId: area.areaId, op: area.op, name: area.name, lat: area.lat, lon: area.lon, propose };
-    if (filter?.length) st.filter = filter;
-    if (!withFavorite(ctx.settings.get().favorites, st)) {
-      live.say(typo(limitText(LIMITS.favorites)), true);
-      return;
-    }
-    await ctx.settings.update((x) => ({ ...x, favorites: withFavorite(x.favorites, st) ?? x.favorites }));
-    ctx.go('#/favoris');
+export function departuresLink(ctx: PhoneCtx, it: SearchItem): HTMLElement {
+  if (it.op !== 'sncb') return h('a', { class: 'jump', href: `#/lignes/ajouter?arret=${encodeURIComponent(it.id)}` }, typo(T.nextPassagesLink));
+  const name = displayName(it.n, ctx.settings.get().lang);
+  const hub = messageHub();
+  const msg = hub.slot();
+  const station = { areaId: it.id, name: it.n, lat: it.lat, lon: it.lon };
+  const link = h('button', { type: 'button', class: 'jump' }, typo(nextDeparturesLink(name)));
+  link.addEventListener('click', async () => {
+    const r = withStation(ctx.settings.get(), station, ctx.clock.now());
+    if (r === 'exists') return hub.say(msg, T.stationExists);
+    if (r === 'full') return hub.say(msg, typo(stationLimitText(LIMITS.stations)), true);
+    await ctx.settings.update((x) => {
+      const again = withStation(x, station, ctx.clock.now());
+      return typeof again === 'object' ? again.settings : x;
+    });
+    hub.say(msg, stationAddedText(name));
   });
-
-  void loadLines();
-  sync();
-  return h(
-    'div',
-    { class: 'stop-form' },
-    picker,
-    linesBox,
-    radios<Propose>({ legend: T.proposeLegend, options: PROPOSE_OPTIONS, value: propose, onChange: (v) => (propose = v) }),
-    save,
-    live.el,
-    existing ? deleteFavorite(ctx, existing.id) : null,
-  );
+  return h('div', { class: 'jump-box' }, link, msg);
 }
 
 /* ------------------------------ Trajet fixe ------------------------------ */
@@ -242,12 +125,13 @@ function tripForm(ctx: PhoneCtx, existing?: FavoriteTrip): HTMLElement {
 
 /* ------------------------------ Nouveau favori ------------------------------ */
 
-/** Les deux choix de « Nouveau favori » (PRD-1.2.1 § 7.1) : un endroit (lieu ou arrêt), ou un trajet fixe. */
+/** Les deux choix de « Nouveau favori » (PRD-1.2.1 § 7.1) : un endroit (un lieu), ou un trajet fixe. */
 export type NewFavoriteKind = 'place' | 'trip';
 
 /**
  * « Un endroit » (PRD-1.2 § 2.2) : champ unique « Adresse, gare ou arrêt » avec en tête « Ma position actuelle », puis
- * le formulaire de l'endroit choisi (lieu, ou pour une gare : « Ses prochains départs » ou « Le trajet pour y aller »).
+ * le formulaire du lieu choisi. Une gare ou un arrêt donne toujours un lieu « Près de … » (« Le trajet pour y aller »),
+ * avec au-dessus le lien vers « Gares » ou « Bus, tram, métro » (revue d'usage n° 3).
  */
 function placeChoice(ctx: PhoneCtx): HTMLElement {
   const live = liveRegion();
@@ -291,24 +175,11 @@ function placeChoice(ctx: PhoneCtx): HTMLElement {
       if (spot) showPlace(spot, c.kind === 'address' ? shortAddress(c.label) : c.label);
       return;
     }
-    // Gare ou arrêt : « Ses prochains départs » (par défaut) ou « Le trajet pour y aller ».
-    const area = areaOfItem(c.item);
-    const below = h('div');
-    const show = (mode: 'board' | 'place'): void => {
-      below.replaceChildren(mode === 'board' ? stopForm(ctx, { area }) : placeForm(ctx, { spot: spotOf(c)!, name: c.label }));
-    };
-    const choice = radios<'board' | 'place'>({
-      legend: T.inGlasses,
-      value: 'board',
-      options: [
-        { value: 'board', label: T.nextDepartures },
-        { value: 'place', label: T.tripThere },
-      ],
-      onChange: show,
-    });
-    show('board');
-    form.replaceChildren(choice, below);
-    choice.querySelector<HTMLInputElement>('input:checked')?.focus({ preventScroll: true });
+    // Gare ou arrêt : un lieu « Près de … » ; ses départs se gardent dans la bonne rubrique, par le lien au-dessus.
+    const spot = spotOf(c);
+    if (!spot) return;
+    form.replaceChildren(departuresLink(ctx, c.item), placeForm(ctx, { spot, name: c.label }));
+    form.querySelector<HTMLInputElement>('#pl-nom')?.focus({ preventScroll: true });
   }
 
   return h('div', { class: 'place-choice' }, field.el, privacyNote(), live.el, form);
@@ -342,7 +213,7 @@ export function fixedTripScreen(ctx: PhoneCtx): HTMLElement {
 
 /* ------------------------------ Modification ------------------------------ */
 
-/** Suppression d'un arrêt ou d'un trajet fixe, confirmée dans la page (« Supprimer ce favori ? »). */
+/** Suppression d'un trajet fixe, confirmée dans la page (« Supprimer ce favori ? »). */
 function deleteFavorite(ctx: PhoneCtx, id: string): HTMLElement {
   return confirmInPage({
     trigger: T.removeFavButton,
@@ -356,10 +227,13 @@ function deleteFavorite(ctx: PhoneCtx, id: string): HTMLElement {
   });
 }
 
-/** Modification d'un favori selon sa sorte ; favori inconnu (supprimé, ancien lien) : la liste. */
+/**
+ * Modification d'un favori selon sa sorte ; favori inconnu (supprimé, ancien lien) : la liste. 1.2.2 : un arrêt favori
+ * n'existe plus dans les réglages v4 (rangé dans « Gares » ou « Bus, tram, métro ») : la liste aussi.
+ */
 export function favoriteEditScreen(ctx: PhoneCtx, id: string): HTMLElement {
   const f = ctx.settings.get().favorites.find((x) => x.id === id);
-  if (!f) return favoritesScreen(ctx);
+  if (!f || f.kind === 'stop') return favoritesScreen(ctx);
   if (f.kind === 'place') return h('div', { class: 'screen' }, header(ctx, f.label, undefined, BACK), placeForm(ctx, { existing: f }));
-  return h('div', { class: 'screen' }, header(ctx, 'Modifier le favori', undefined, BACK), f.kind === 'stop' ? stopForm(ctx, { existing: f }) : tripForm(ctx, f));
+  return h('div', { class: 'screen' }, header(ctx, 'Modifier le favori', undefined, BACK), tripForm(ctx, f));
 }

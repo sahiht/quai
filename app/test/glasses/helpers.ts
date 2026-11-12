@@ -1,10 +1,26 @@
 /**
- * Outils des tests des lunettes (1.2.1) : trajets construits à la main, cœur de test (faux cœur dont on remplace les
- * réponses), contrôleur avec horloge simulée et faux port SDK, contrôle des largeurs au pixel.
+ * Outils des tests des lunettes (1.2.1, 1.2.2) : trajets construits à la main, cœur de test (faux cœur dont on remplace
+ * les réponses), contrôleur avec horloge simulée et faux port SDK, contrôle des largeurs au pixel.
  * Les textes des raisons viennent du cœur : les tests construisent leurs propres raisons, sans dépendre de celles du
- * cœur en cours de changement.
+ * cœur en cours de changement. 1.2.2 : gares et lignes choisies (réglages v4) sur des gares et arrêts publics.
  */
-import { DEFAULT_SETTINGS, type Core, type Favorite, type FavoriteAnswer, type Journey, type JourneyLabel, type Leg, type NearbyItem, type Settings } from '../../src/core/api';
+import {
+  DEFAULT_SETTINGS,
+  type Board,
+  type Core,
+  type Departure,
+  type Favorite,
+  type FavoriteAnswer,
+  type Journey,
+  type JourneyLabel,
+  type Leg,
+  type LineBoard,
+  type LineDeparture,
+  type LinePick,
+  type NearbyItem,
+  type Settings,
+  type StationPick,
+} from '../../src/core/api';
 import { gtfsTime } from '../../src/core/util';
 import { createFakeCore, dataFreshness } from '../../src/dev/fake-core';
 import { GlassesController } from '../../src/glasses/controller';
@@ -80,12 +96,16 @@ export function page(v: GlassesView): PageSpec {
   return layoutPage(v, effectiveFrame(initNav({ screen: 'home' }).stack[0], v, g.capacity));
 }
 
-/** Lignes de chaque conteneur qui dépassent sa largeur ou sa hauteur (mesure au pixel). */
+/**
+ * Lignes de chaque conteneur qui dépassent sa largeur ou sa hauteur (mesure au pixel). 1.2.2 : un pied vide (accueil
+ * sans aide ni jour férié) a 1 px de haut et un contenu blanc : il ne dépasse pas.
+ */
 export function overflowing(p: PageSpec): string[] {
   const bad: string[] = [];
   for (const c of p.containers) {
     for (const line of c.content.split('\n')) if (textWidth(line) > c.w) bad.push(`${c.name} : « ${line} » ${textWidth(line)} px > ${c.w} px`);
-    if (c.content.split('\n').length * 27 > c.h) bad.push(`${c.name} : ${c.content.split('\n').length} lignes pour ${c.h} px`);
+    const blank = !c.content.trim();
+    if (!blank && c.content.split('\n').length * 27 > c.h) bad.push(`${c.name} : ${c.content.split('\n').length} lignes pour ${c.h} px`);
     if (c.y + c.h > 288) bad.push(`${c.name} : sous le bas de l'écran (${c.y + c.h} px)`);
   }
   return bad;
@@ -113,12 +133,68 @@ export const settingsWith = (favorites: Favorite[], patch: Partial<Settings> = {
   ...patch,
 });
 
+/** 1.2.2 : gares de « Gares », publiques (identifiants des fixtures et du faux cœur). */
+export const STATIONS = {
+  braine: { id: 'st-braine', areaId: 'sncb:8814266', name: N('Braine-l’Alleud'), lat: 50.6833, lon: 4.3747 } as StationPick,
+  nord: { id: 'st-nord', areaId: 'sncb:8812005', name: { fr: 'Bruxelles-Nord', nl: 'Brussel-Noord' }, lat: 50.86, lon: 4.36 } as StationPick,
+  namur: { id: 'st-namur', areaId: 'sncb:8863008', name: { fr: 'Namur', nl: 'Namen' }, lat: 50.4685, lon: 4.8625 } as StationPick,
+};
+
+/** 1.2.2 : lignes de « Bus, tram, métro », à des arrêts publics (faux cœur : W à Merbraine, tram 3 et 4 à Gare du Nord). */
+export const LINES = {
+  w: { id: 'ln-w', areaId: 'tec:Bbrlmer1', op: 'tec', name: N('Braine-l’Alleud Merbraine'), lat: 50.6833, lon: 4.3891, line: 'W', mode: 'bus' } as LinePick,
+  t3: { id: 'ln-t3', areaId: 'stib:6357F', op: 'stib', name: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86004, lon: 4.36017, line: '3', mode: 'tram' } as LinePick,
+  t4: { id: 'ln-t4', areaId: 'stib:6357F', op: 'stib', name: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86004, lon: 4.36017, line: '4' } as LinePick,
+  /** Arrêt favori sans filtre de la 1.2.1, migré : toutes les lignes. */
+  gdnAll: { id: 'ln-gdn', areaId: 'stib:6357F', op: 'stib', name: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86004, lon: 4.36017 } as LinePick,
+};
+
+/* ------------------------------ Départs construits (1.2.2) ------------------------------ */
+
+/** Un départ : `minutes` après `now`, temps réel par défaut. */
+export function dep(now: number, minutes: number, p: Partial<LineDeparture> = {}): LineDeparture {
+  const t = now + minutes * MIN;
+  return { op: 'tec', mode: 'bus', line: 'W', head: N('Bruxelles Midi'), sched: t, est: t, rt: true, delayMin: 0, cancelled: false, ...p };
+}
+
+/** Train au départ d'une gare, `minutes` après `now`. */
+export const trainAt = (now: number, minutes: number, p: Partial<Departure> = {}): Departure =>
+  dep(now, minutes, { op: 'sncb', mode: 'train', line: 'IC', head: { fr: 'Bruxelles-Midi', nl: 'Brussel-Zuid' }, platform: '1', ...p });
+
+const areaOf = (id: string, name: string, op: LinePick['op'], modes: LineBoard['area']['modes']): LineBoard['area'] => ({ id, op, n: N(name), lat: 50.8, lon: 4.3, modes, lines: [] });
+
+/** Tableau de départs construit. */
+export function boardOf(id: string, name: string, departures: Departure[], p: Partial<Board> = {}): Board {
+  const op = id.split(':')[0] as LinePick['op'];
+  return { area: areaOf(id, name, op, op === 'sncb' ? ['train'] : ['bus']), departures, anyPlanned: departures.some((d) => !d.rt), rtErrors: [], updatedAt: 0, ...p };
+}
+
+/** Passages d'une ligne à un arrêt, par sens (lineBoard construit). */
+export function lineBoardOf(id: string, name: string, line: string, directions: { head: string; departures: LineDeparture[] }[], p: Partial<LineBoard> = {}): LineBoard {
+  const op = id.split(':')[0] as LinePick['op'];
+  return {
+    area: areaOf(id, name, op, [p.mode ?? 'bus']),
+    op,
+    mode: 'bus',
+    line,
+    directions: directions.map((d) => ({ head: N(d.head), departures: d.departures })),
+    state: directions.some((d) => d.departures.length) ? 'ok' : 'none',
+    anyPlanned: directions.some((d) => d.departures.some((x) => !x.rt)),
+    rtErrors: [],
+    updatedAt: 0,
+    ...p,
+  };
+}
+
 /** Lieux des tests, sur des arrêts publics (jamais d'adresse personnelle dans le dépôt) ; Maison est la position de départ. */
 export const MAISON = { lat: 50.68634, lon: 4.39427 };
 export const PLACES = {
   maison: { kind: 'place', id: 'fav-maison', label: 'Maison', lat: MAISON.lat, lon: MAISON.lon, propose: 'never' } as Favorite,
+  /** 1.2.2 : un 4e lieu, à un arrêt public (Waterloo Eglise). */
+  ecole: { kind: 'place', id: 'fav-ecole', label: 'École', lat: 50.7174, lon: 4.3979, propose: 'never' } as Favorite,
   bureau: { kind: 'place', id: 'fav-bureau', label: 'Bureau', lat: 50.8504, lon: 4.3707, propose: 'never' } as Favorite,
   mama: { kind: 'place', id: 'fav-mama', label: 'Mama', lat: 50.87755, lon: 4.37966, propose: 'never' } as Favorite,
+  /** Arrêt favori de la 1.2.1 : les réglages v4 le rangent dans « Gares » (migration, settings.ts). */
   gare: { kind: 'stop', id: 'fav-gare', areaId: 'sncb:8814266', op: 'sncb', name: N('Braine-l’Alleud'), lat: 50.6833, lon: 4.3747, propose: 'never' } as Favorite,
 };
 
@@ -131,6 +207,12 @@ export interface StubOptions {
   plan?: (now: number) => Journey[];
   /** Nombre d'arrêts « Autour de moi ». */
   nearby?: number;
+  /** 1.2.2 : départs d'une zone (sinon ceux du faux cœur). */
+  board?: (areaId: string, now: number) => Board | undefined;
+  /** 1.2.2 : passages d'une ligne à un arrêt (sinon ceux du faux cœur). */
+  lineBoard?: (areaId: string, line: string, now: number) => LineBoard | undefined;
+  /** 1.2.2 : demandes reçues par le cœur (board, lineBoard, nearby), pour compter les requêtes. */
+  calls?: string[];
 }
 
 const nearbyItems = (n: number): NearbyItem[] =>
@@ -151,8 +233,17 @@ export function stubCore(now: () => number, o: StubOptions = {}): Core {
     async refresh(j: Journey) {
       return j;
     },
-    async nearby() {
+    async nearby(_lat: number, _lon: number, radius: number, opts?: { light?: boolean }) {
+      o.calls?.push(`nearby:${radius}${opts?.light ? ':light' : ''}`);
       return nearbyItems(o.nearby ?? 9);
+    },
+    async board(areaId: string, opts?: { limit?: number }) {
+      o.calls?.push(`board:${areaId}`);
+      return o.board?.(areaId, now()) ?? base.board(areaId, opts);
+    },
+    async lineBoard(areaId: string, line: string, opts?: { perDirection?: number }) {
+      o.calls?.push(`lineBoard:${areaId}:${line}`);
+      return o.lineBoard?.(areaId, line, now()) ?? base.lineBoard(areaId, line, opts);
     },
     async route() {
       const journeys = plan ? plan(now()) : [];
@@ -192,6 +283,8 @@ export interface SetupOptions {
   core?: (now: () => number) => Core;
   kv?: ReturnType<typeof createKV>;
   web?: boolean;
+  /** Quai Web : ancres ouvertes dans l'onglet Réglages (openPhone) ; sans elles, le contrôleur montre un message. */
+  opened?: string[];
 }
 
 /** Contrôleur des lunettes : horloge simulée (rien n'avance seul), faux port SDK, journal QUAI_SCREEN. */
@@ -229,7 +322,8 @@ export async function setup(o: SetupOptions) {
   const settings = new SettingsStore(kv, o.settings);
   const logs: string[] = [];
   const core = (o.core ?? ((now) => stubCore(now)))(clock.now);
-  const c = new GlassesController({ platform, core, settings, clock, configured: true, freshness: dataFreshness, e2e: true, log: (l) => logs.push(l), web: o.web });
+  const opened = o.opened;
+  const c = new GlassesController({ platform, core, settings, clock, configured: true, freshness: dataFreshness, e2e: true, log: (l) => logs.push(l), web: o.web, ...(opened ? { openPhone: (h: string) => void opened.push(h) } : {}) });
   const screens = (): Screen[] => logs.filter((l) => l.startsWith('QUAI_SCREEN ')).map((l) => JSON.parse(l.slice(12)) as Screen);
   const last = (): Screen => screens()[screens().length - 1];
   const settle = (ms = 25) => new Promise((r) => setTimeout(r, ms));

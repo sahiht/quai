@@ -21,7 +21,8 @@
  * - Sans changement : « Sans changement : à pied {a} + {b} min » (sans marche : « arrivée {HH:MM} ») ; Moins de
  *   changements : « Moins de changements : {changements}, à pied {a} + {b} min ».
  * - « Le suivant » : écart entre les départs prévus du premier véhicule du trajet et de `ref` (la proposition
- *   précédente de même structure), comme dans l'horaire : « 15 min plus tard », « 1 h plus tard ».
+ *   précédente de même structure), comme dans l'horaire : « 15 min plus tard », « 1 h plus tard ». Remplacé par un
+ *   trajet d'autres lignes qui le domine (PRD-1.2.2 § 7.4) : « Le suivant : 1 h plus tard », sans « même trajet ».
  * - « départ {HH:MM} » (Plus tard) : heure de départ du trajet (marche comprise), comme le titre des étapes.
  * - Sans la proposition 1 (`ref` absent), Plus tôt et Moins de marche gardent la forme de la 1.2
  *   (« {étiquette} : {changements}, à pied {a} + {b} min »).
@@ -129,9 +130,19 @@ export function reasonText(label: JourneyLabel, j: Trip, ref?: Trip, name: strin
       return cap(`${head} ${ch}, départ ${hhmm(j.dep)}`);
     case 'walk':
       return cap(`${head} ${walkTotal}${NB}min, arrivée ${hhmm(j.arr)}`);
-    case 'next':
-      return cap(`${head} même trajet, ${laterText(ref ? (firstRideDep(j) - firstRideDep(ref)) / 60_000 : 0)}`);
+    case 'next': {
+      const later = laterText(ref ? (firstRideDep(j) - firstRideDep(ref)) / 60_000 : 0);
+      return cap(ref && linesOf(j) !== linesOf(ref) ? `${head} ${later}` : `${head} même trajet, ${later}`);
+    }
   }
+}
+
+/** Suite des lignes d'un trajet (train : catégorie). */
+function linesOf(j: Pick<Journey, 'legs'>): string {
+  return j.legs
+    .filter(isRide)
+    .map((l) => (l.op === 'sncb' || l.mode === 'train' ? `sncb/${l.cat ?? l.line ?? ''}` : `${l.op}/${l.line ?? ''}`))
+    .join('|');
 }
 
 type Labeled = Trip & Pick<Journey, 'label'>;

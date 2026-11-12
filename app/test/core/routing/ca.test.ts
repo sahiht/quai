@@ -1,8 +1,9 @@
 /**
  * Critères d'acceptation sur les fixtures (fixtures/network.json étendu, fichiers de ligne générés) : PRD 1.1 CA-M2.1,
  * CA-M2.2, CA-M2.5, CA-M2.7, CA-M3.1, CA-M3.3, CA-M5.1 à CA-M5.7 avec « Le plus court » (PRD-1.2 CA-1.3 et CA-1.6) ;
- * PRD-1.2 CA-1.4 (Rue Neuve 1) et CA-1.5 (Waterloo, cas H), revus pour PRD-1.2.1 § 1 (le moins de marche d'abord) et
- * § 2 (noms et raisons). Ce calcul fait foi (valeurs du rapport du routage).
+ * PRD-1.2 CA-1.4 (Rue Neuve 1) et CA-1.5 (Waterloo, cas H), revus pour PRD-1.2.2 § 7 (le premier arrive le plus tôt,
+ * chaque minute de marche au-delà de la marche maximale compte triple) et PRD-1.2.1 § 2 (noms et raisons). Ce calcul
+ * fait foi (valeurs du rapport du routage).
  */
 import { describe, expect, it } from 'vitest';
 import type { Endpoint, Journey, PlanResult, Settings } from '../../../src/core/api';
@@ -46,27 +47,30 @@ function check(r: PlanResult): PlanResult {
 }
 
 describe('CA-M2 : trajet du matin (S1 → Bureau, 10/11 07:31)', () => {
-  it('CA-M2.2 et CA-1.3, scène noRT (1.2.1) : IC puis T3 sous la marche maximale, le direct « Sans changement », « Le suivant »', async () => {
+  it('CA-M2.2 et CA-1.3, scène noRT (1.2.2) : IC puis T3 d’abord ; le direct et ses 12 min à pied jamais « Sans changement » ; « Le suivant » : l’IC 08:42 puis le T4, qui domine l’IC 08:42 puis le T3', async () => {
     const { core, preset } = makeEnv({ now: '2026-11-10T07:31', scene: 'noRT' });
     const r = check(await core.route(here, bureau, atTime('2026-11-10T07:31'), preset, S1));
-    // 1.2.1 (le moins de marche d'abord) : le même IC et la même arrivée, mais le T3 depuis Bruxelles-Nord garde chaque
-    // marche sous les 10 min réglées (palier 0) ; l'IC direct puis 12 min à pied (palier 1) arrive à la même heure :
-    // « Sans changement »
-    expect(labels(r)).toEqual(['short', 'none', 'next']);
-    expect(r.journeys.map(times)).toEqual(['07:33 → 08:58', '07:33 → 08:58', '08:33 → 10:02']);
+    // 1.2.2 (PRD-1.2.2 § 7) : le même IC et la même arrivée ; le T3 depuis Bruxelles-Nord garde chaque marche dans les
+    // 10 min réglées (coût 08:58 + 1 changement), l'IC direct puis 12 min à pied en a 2 de trop (08:58 + 6 min) ; il
+    // marche plus que la proposition 1 au-delà de la marche maximale : jamais « Sans changement »
+    expect(labels(r)).toEqual(['short', 'next']);
+    // garde (PRD-1.2.2 § 7.4) : l'IC 08:42 puis le T3 de 09:48 (08:33 → 10:02) est dominé par l'IC 08:42 puis le T4 de
+    // 09:43 (même départ, arrivée 09:57, mêmes marches, même changement) : ce trajet prend sa place de « Le suivant »
+    expect(r.journeys.map(times)).toEqual(['07:33 → 08:58', '08:33 → 09:57']);
     expect(legsOf(r.journeys[0])).toBe('marche 7 | 07:42 IC Namur → Bruxelles-Nord 08:40 | marche 2 | 08:44 T3 Gare du Nord → Bourse 08:49 | marche 9');
-    expect(legsOf(r.journeys[1])).toBe('marche 7 | 07:42 IC Namur → Bruxelles-Central 08:46 | marche 12');
-    expect(r.journeys.map((j) => plain(j.reason))).toEqual(['Le plus court : 1 changement, à pied 7 + 2 + 9 min', 'Sans changement : à pied 7 + 12 min', 'Le suivant : même trajet, 1 h plus tard']);
-    const ic = r.journeys[2].legs[1];
+    expect(legsOf(r.journeys[1])).toBe('marche 7 | 08:42 IC Namur → Bruxelles-Nord 09:40 | marche 2 | 09:43 T4 Gare du Nord → Bourse 09:48 | marche 9');
+    // d'autres lignes que la proposition 1 : pas « même trajet »
+    expect(r.journeys.map((j) => plain(j.reason))).toEqual(['Le plus court : 1 changement, à pied 7 + 2 + 9 min', 'Le suivant : 1 h plus tard']);
+    const ic = r.journeys[1].legs[1];
     expect([hhmm(ic.dep), ic.cat, ic.head?.fr, ic.platform, ic.rt]).toEqual(['08:42', 'IC', 'Bruxelles-Midi', '5', false]);
     // plan() de la 1.0 : les mêmes propositions
     expect((await core.plan(here, bureau, atTime('2026-11-10T07:31'), preset, S1)).map((j) => j.id)).toEqual(r.journeys.map((j) => j.id));
   });
 
-  it('CA-M2.1, scène base (1.2.1) : 07:35 → 08:58 par Bruxelles-Nord et le T3, l’alerte de voie en tête, étiquette « short »', async () => {
+  it('CA-M2.1, scène base (1.2.2) : 07:35 → 08:58 par Bruxelles-Nord et le T3, l’alerte de voie en tête, étiquette « short »', async () => {
     const { core, preset } = makeEnv({ now: '2026-11-10T07:31' });
     const r = check(await core.route(here, bureau, atTime('2026-11-10T07:31'), preset, S1));
-    // l'IC a 2 min de retard : le T3 de 08:44 reste attrapable ; le direct (09:00, palier plus haut) n'est plus proposé
+    // l'IC a 2 min de retard : le T3 de 08:44 reste attrapable ; le direct (09:00, 2 min de marche de trop) n'est pas proposé
     expect(times(r.journeys[0])).toBe('07:35 → 08:58');
     expect(r.journeys[0].label).toBe('short');
     expect(plain(r.journeys[0].alerts[0]?.text)).toBe('! Voie modifiée : l’IC part de la voie 6');
@@ -87,18 +91,18 @@ describe('CA-M2 : trajet du matin (S1 → Bureau, 10/11 07:31)', () => {
 });
 
 describe('CA-M3 et CA-M2.5 : vers Gand-Saint-Pierre (S3, 13:55, scène base)', () => {
-  it('CA-M3.3 et CA-1.6 : le plus court 14:10, puis le suivant 14:22 (+3 min) et 14:40', async () => {
+  it('CA-M3.3 et CA-1.6 : le plus court 14:10, puis le suivant 14:22 (+3 min), puis « Plus tard » 14:40 (« Le suivant » une seule fois)', async () => {
     const { core, preset } = makeEnv({ now: '2026-11-10T13:55' });
     const fav = preset.favorites.find((f) => f.id === 'fav-gand');
     if (fav?.kind !== 'trip') throw new Error('preset');
     const r = check(await core.route(fav.from, fav.to, atTime('2026-11-10T13:55'), preset, S3));
-    expect(labels(r)).toEqual(['short', 'next', 'next']);
+    expect(labels(r)).toEqual(['short', 'next', 'later']);
     expect(r.journeys.map((j) => `${hhmm(j.legs[0].schedDep)} ${hhmm(j.legs[0].dep)}`)).toEqual(['14:10 14:10', '14:22 14:25', '14:40 14:40']);
     // CA-M2.5 : pas de marche au début ; « Le plus court : direct » ; le suivant 14:25 → 14:56
     expect(r.journeys.map(times)).toEqual(['14:10 → 14:39', '14:25 → 14:56', '14:40 → 15:09']);
     expect(plain(r.journeys[0].reason)).toBe('Le plus court : direct');
     expect(plain(r.journeys[1].reason)).toBe('Le suivant : même trajet, 12 min plus tard');
-    expect(plain(r.journeys[2].reason)).toBe('Le suivant : même trajet, 18 min plus tard');
+    expect(plain(r.journeys[2].reason)).toBe('Plus tard : direct, départ 14:40');
     expect(r.journeys[0].legs[0]).toMatchObject({ cat: 'IC', head: { fr: 'Bruges' }, platform: '4', to: { areaId: 'sncb:8892007' } });
   });
 
@@ -106,7 +110,8 @@ describe('CA-M3 et CA-M2.5 : vers Gand-Saint-Pierre (S3, 13:55, scène base)', (
     const { core, preset } = makeEnv({ now: '2026-11-10T07:31', scene: 'noRT' });
     const r = check(await core.route(here, RUE_NEUVE, atTime('2026-11-10T07:31'), preset, S1));
     expect(labels(r)).toEqual(['short', 'none', 'next']);
-    expect(r.journeys.map(times)).toEqual(['07:33 → 08:51', '07:33 → 08:56', '08:33 → 09:55']);
+    // « Le suivant » : l'IC 08:42 puis le T4 de 09:43 (09:50), qui domine l'IC 08:42 puis le T3 de 09:48 (09:55)
+    expect(r.journeys.map(times)).toEqual(['07:33 → 08:51', '07:33 → 08:56', '08:33 → 09:50']);
     expect(legsOf(r.journeys[0])).toBe('marche 7 | 07:42 IC Namur → Bruxelles-Nord 08:40 | marche 2 | 08:44 T3 Gare du Nord → De Brouckere 08:48 | marche 3');
     expect(legsOf(r.journeys[1])).toBe('marche 7 | 07:42 IC Namur → Bruxelles-Central 08:46 | marche 10');
     expect(plain(r.journeys[0].reason)).toBe('Le plus court : 1 changement, à pied 7 + 2 + 3 min');
@@ -115,10 +120,10 @@ describe('CA-M3 et CA-M2.5 : vers Gand-Saint-Pierre (S3, 13:55, scène base)', (
     expect(r.empty).toBeUndefined();
   });
 
-  it('CA-1.5 et CA-M5.5 (1.2.1) : Waterloo (cas H) : bus W puis métro d’abord (« Moins de marche »), 19 min à pied et le S1 « Plus tôt »', async () => {
+  it('CA-1.5 et CA-M5.5 (1.2.2) : Waterloo (cas H) : bus W puis métro d’abord (« Moins de marche »), 19 min à pied et le S1 « Plus tôt »', async () => {
     const { core, preset } = makeEnv({ now: '2026-11-10T07:31', scene: 'noRT' });
     const r = check(await core.route(WATERLOO, ROGIER, atTime('2026-11-10T07:31'), preset));
-    // 1.2.1 : le moins de marche d'abord ; le S1 (19 min à pied, palier 2) arrive 16 min plus tôt : « Plus tôt »
+    // 1.2.2 : le S1 arrive 16 min plus tôt, mais ses 19 min à pied en ont 9 de trop (27 min) : « Plus tôt »
     expect(labels(r)).toEqual(['short', 'earlier', 'next']);
     expect(legsOf(r.journeys[0])).toBe('marche 2 | 07:36 W Waterloo Eglise → Bruxelles Midi 08:21 | marche 2 | 08:29 M2 Gare du Midi → Rogier 08:43 | marche 3');
     expect(legsOf(r.journeys[1])).toBe('marche 19 | 07:55 S1 Waterloo → Bruxelles-Nord 08:25 | marche 5');

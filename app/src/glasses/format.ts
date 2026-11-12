@@ -3,8 +3,8 @@
  * 1.1 : textes exacts du PRD § 6.1 ; jours et attentes selon core/text.ts (« demain » jamais avant 04:00,
  * « imminent »), titres des trajets par vers() du cœur, comme sur le téléphone.
  */
-import type { Departure, FavoriteAnswer, Journey, Leg, NameLang, Settings } from '../core/api';
-import { meansText } from '../core/means';
+import type { Departure, FavoriteAnswer, Journey, Leg, LineDeparture, NameLang, PlanResult, Settings } from '../core/api';
+import { meansText, rideName } from '../core/means';
 import { NB as CORE_NB, dayWord as coreDayWord, timeText, vers } from '../core/text';
 import { OP_NAME, displayName, hhmm, lineLabel, mainMode, minutesUntil } from '../core/util';
 import type { AreaSummary, Mode, Names, Op } from '../../../shared/types';
@@ -19,20 +19,34 @@ export const HINTS = {
   /** Quai Web : rien à quitter, l'onglet se ferme dans le navigateur. */
   homeWeb: `▲▼ choisir   toucher${NB}: ouvrir`,
   nearby: `▲▼ arrêt   toucher${NB}: départs   double${NB}: retour`,
-  board: `▲▼ départs   toucher${NB}: ★ favori   double${NB}: retour`,
-  boardFav: `▲▼ départs   toucher${NB}: ★ retirer   double${NB}: retour`,
+  /** 1.2.2 (REVUE-USAGE n° 3) : départs d'une gare SNCB : ★ la garde dans « Gares » ou l'en retire. */
+  boardStation: `▲▼ départs   toucher${NB}: ★ garder la gare   double${NB}: retour`,
+  boardStationKept: `▲▼ départs   toucher${NB}: ★ retirer la gare   double${NB}: retour`,
+  /** 1.2.2 : départs d'un arrêt de bus, tram ou métro : ★ ouvre « garder une ligne ». */
+  boardStop: `▲▼ départs   toucher${NB}: ★ lignes   double${NB}: retour`,
+  /** 1.2.2 : « {arrêt} : garder une ligne ». */
+  keepLine: `▲▼ choisir   toucher${NB}: ★ garder ou retirer   double${NB}: retour`,
   favorites: `▲▼ choisir   toucher${NB}: ouvrir   double${NB}: retour`,
-  places: `▲▼ choisir   toucher${NB}: trajet   double${NB}: retour`,
-  /** Étapes du trajet suivi (1.2.1 : ▲▼ font défiler les étapes, jamais un autre trajet). */
-  steps: `▲▼ étapes   toucher${NB}: détail   double${NB}: retour`,
-  /** Étapes d'une autre proposition. */
+  /** 1.2.2 : « Gares » (PRD-1.2.2 § 2). */
+  stations: `▲▼ choisir   toucher${NB}: départs   double${NB}: retour`,
+  /** 1.2.2 : « Bus, tram, métro » (§ 3) : détail d'une ligne, ou départs d'un arrêt « toutes les lignes ». */
+  lines: `▲▼ choisir   toucher${NB}: ouvrir   double${NB}: retour`,
+  /** 1.2.2 : détail d'une ligne à son arrêt. */
+  line: `▲▼ passages   toucher${NB}: tous les départs   double${NB}: retour`,
+  /** Étapes du trajet suivi (1.2.1 : ▲▼ font défiler les étapes ; 1.2.2 : toucher propose « Ne plus suivre »). */
+  steps: `▲▼ étapes   toucher${NB}: ne plus suivre   double${NB}: retour`,
+  /** Étapes d'une autre proposition, ou d'un trajet ouvert et pas encore suivi (1.2.2). */
   stepsOther: `▲▼ étapes   toucher${NB}: suivre ce trajet   double${NB}: retour`,
   /** Trajet entièrement à pied. */
   stepsWalk: `▲▼ étapes   double${NB}: retour`,
+  /** 1.2.2 : « Ne plus suivre » et le détail du véhicule. */
+  followed: `▲▼ choisir   toucher${NB}: valider   double${NB}: retour`,
   /** 1.2.1 : « Autres trajets ». */
   others: `▲▼ choisir   toucher${NB}: voir   double${NB}: retour`,
   train: `▲▼ arrêts   double${NB}: retour`,
   arrival: `toucher${NB}: ★ garder ce trajet   double${NB}: retour`,
+  /** 1.2.2 (REVUE-USAGE n° 10) : « Autour de moi » vide, l'arrêt le plus proche. */
+  nearest: `toucher${NB}: ses départs   double${NB}: retour`,
   message: `double toucher${NB}: retour`,
   retry: `toucher${NB}: réessayer   double${NB}: retour`,
   /** Erreur à l'écran racine (lancement) : le double toucher quitte. */
@@ -41,10 +55,50 @@ export const HINTS = {
   firstRun: `toucher${NB}: continuer   double${NB}: quitter`,
   /** Quai Web : rien à quitter, l'onglet se ferme dans le navigateur. */
   firstRunWeb: `toucher${NB}: continuer`,
-  /** Message « Quai 1.2.1 ». */
+  /** Message « Quai 1.2.2 ». */
   news: `toucher${NB}: continuer`,
   quit: `double toucher${NB}: quitter`,
 } as const;
+
+/**
+ * 1.2.2 : textes des rubriques « Gares » et « Bus, tram, métro » (PRD-1.2.2 § 1.1 à § 3, REVUE-USAGE n° 6), en un seul
+ * endroit pour les ajuster.
+ */
+export const SECTION = {
+  stations: 'Gares',
+  lines: 'Bus, tram, métro',
+  /** Rubrique vide, à droite sur l'accueil. */
+  empty: 'à choisir',
+  /** Toucher sur une rubrique vide (appli Even ; Quai Web ouvre la section de l'onglet Réglages). */
+  chooseStations: 'Choisis tes gares dans Quai, sur le téléphone',
+  chooseLines: 'Choisis tes lignes dans Quai, sur le téléphone',
+  chooseStationsWeb: 'Choisis tes gares dans l’onglet Réglages',
+  chooseLinesWeb: 'Choisis tes lignes dans l’onglet Réglages',
+  /** Accueil : rien dans l'horizon des tableaux pour l'élément le plus proche. */
+  noDeparture: 'aucun départ',
+  /** « Gares » : gare sans train dans l'horizon des tableaux (§ 2). */
+  noTrain: 'aucun train',
+  /** Un sens sans passage ; une ligne sans aucun passage. */
+  noPassage: 'aucun passage',
+  noPassageAll: 'aucun passage dans les prochaines heures',
+  /** Ligne qui ne passe plus à son arrêt (§ 3) ; Quai Web : dans l'onglet Réglages. */
+  missing: `introuvable${NB}: modifie-la sur le téléphone`,
+  missingWeb: `introuvable${NB}: modifie-la dans Réglages`,
+  /** Gare introuvable dans les données du jour. */
+  missingStation: 'introuvable',
+  /** Arrêt sans filtre (arrêt favori de la 1.2.1 migré) : « Gare du Nord · toutes les lignes ». */
+  allLines: 'toutes les lignes',
+  /** Dernière ligne du détail d'une ligne : le tableau de l'arrêt. */
+  allDepartures: 'Tous les départs de l’arrêt',
+} as const;
+
+/**
+ * 1.2.2 : passage qui s'arrête avant le terminus de son sens (PRD-1.2.2 § 3) : marqué « * » dans « Bus, tram, métro »,
+ * expliqué dans la ligne du bas ; son terminus est écrit dans le détail.
+ */
+export const PARTIAL_MARK = '*';
+export const NOTE_PARTIAL = `${PARTIAL_MARK} s’arrête avant le terminus`;
+export const untilText = (head: string): string => `jusqu’à ${head}`;
 
 export const NOTE_PLANNED = '~ horaire prévu, sans temps réel';
 /** Sources du temps réel (ou relais) en panne (M8.5). */
@@ -173,10 +227,46 @@ export function vehicleOf(leg: Pick<Leg, 'mode' | 'line' | 'cat'>): string {
   return leg.mode && leg.line ? lineLabel(leg.mode, leg.line) : leg.line || '';
 }
 
+/**
+ * 1.2.2 : bus de remplacement de la SNCB (op 'sncb', mode 'bus', ligne « BUS ») : « Bus SNCB » dans les phrases, les
+ * étapes, « Dans le train » et « En cours », jamais « BUS » seul (les colonnes étroites des départs gardent « BUS »).
+ */
+const SNCB_BUS = 'Bus SNCB';
+const isSncbBus = (leg: Partial<Pick<Leg, 'op' | 'mode'>>): boolean => leg.op === 'sncb' && leg.mode === 'bus';
+
 /** Véhicule dans une phrase (1.1, L1 et messages) : « IC », « S1 », « T4 », « M2 », « Bus 232 », « Bus W ». */
-export function vehicleName(leg: Pick<Leg, 'mode' | 'line' | 'cat'>): string {
+export function vehicleName(leg: Pick<Leg, 'mode' | 'line' | 'cat'> & Partial<Pick<Leg, 'op'>>): string {
+  if (isSncbBus(leg)) return SNCB_BUS;
   if (leg.mode === 'bus' && leg.line) return `Bus ${leg.line}`;
   return vehicleOf(leg);
+}
+
+/** Première lettre en majuscule (début de ligne). */
+export const upperFirst = (text: string): string => (text ? text[0].toUpperCase() + text.slice(1) : text);
+
+/**
+ * 1.2.2 (REVUE-USAGE n° 8) : un véhicule en toutes lettres, en minuscules dans une liste ou au milieu d'une phrase :
+ * « bus W », « tram 3 », « métro 2 », « IC » (rideName du cœur, celui des moyens « bus W + IC ») ; bus de remplacement
+ * de la SNCB : « bus SNCB » tant que rideName dit « BUS ».
+ */
+export function rideWords(leg: Pick<Leg, 'op' | 'mode' | 'line' | 'cat'>): string {
+  const w = rideName(leg);
+  return isSncbBus(leg) && /^bus$/i.test(w) ? 'bus SNCB' : w;
+}
+
+/** 1.2.2 (n° 8) : le même en tête de ligne d'étape ou de titre : « Bus W », « Tram 3 », « Métro 2 », « IC », « Bus SNCB ». */
+export function vehicleWords(leg: Pick<Leg, 'op' | 'mode' | 'line' | 'cat'>): string {
+  return upperFirst(rideWords(leg));
+}
+
+/**
+ * 1.2.2 (n° 8) : code court d'un véhicule dans une colonne étroite (« En cours ») : « IC », « S1 », « T3 », « M2 »,
+ * « W » ; bus de remplacement de la SNCB : « Bus SNCB ».
+ */
+export function lineCode(leg: Pick<Leg, 'op' | 'mode' | 'line' | 'cat'>): string {
+  if (isSncbBus(leg)) return SNCB_BUS;
+  if (leg.op === 'sncb' || leg.mode === 'train') return leg.cat || leg.line || 'Train';
+  return leg.line ? lineLabel(leg.mode ?? 'bus', leg.line) : rideName(leg);
 }
 
 /** « Tram 1 », « Bus 232 », « Métro 2 » (écran d'arrivée). */
@@ -431,21 +521,141 @@ export function tripHomeText(a: FavoriteAnswer | undefined, now: number): string
 }
 
 /**
- * Prochain départ d'un arrêt favori sur l'accueil (1.2.1, § 4.3), sans « ~ » : « IC 21:08 voie 2 » (forme courte
- * « v.2 » si la colonne est trop étroite), « T3 2 min », « IC demain 06:20 » ; « , dernier » ajouté s'il tient.
+ * Prochain départ dans une colonne de droite de 210 px (1.2.1 : arrêt favori de l'accueil, § 4.3 ; 1.2.2 : « Gares »
+ * et « Bus, tram, métro » de l'accueil et lignes de « Gares », REVUE-USAGE n° 6) : « IC 21:08 voie 2 » (forme courte
+ * « v.2 » si la colonne est trop étroite), « T3 2 min », « W 08:45 », « IC demain 06:20 » ; « , dernier » ajouté s'il
+ * tient. Sur l'accueil, jamais de « ~ » (`markPlanned` faux) ; ailleurs, comme « Autour de moi ».
  */
+export function departureRightText(d: Departure, now: number, markPlanned = false, maxPx = HOME_RIGHT_PX): { text: string; tail?: string } {
+  let text = nextText(d, now, markPlanned);
+  if (d.mode === 'train' && !d.cancelled && !dayWord(d.sched, now)) {
+    const plat = platformText(d.platform, d.newPlatform);
+    const long = `${d.line} ${plannedMark(d.rt, markPlanned)}${hhmm(d.sched)}${delaySuffix(d.delayMin)}${plat ? ' ' + plat : ''}`;
+    if (textWidth(long) <= maxPx) text = long;
+  }
+  return d.last && !d.cancelled ? { text, tail: LAST_MARK } : { text };
+}
+
+/** Prochain départ d'un arrêt favori sur l'accueil (1.2.1, § 4.3), sans « ~ » (departureRightText). */
 export function stopHomeText(a: FavoriteAnswer | undefined, now: number): { text: string; tail?: string } {
   if (!a) return { text: '…' };
   if (a.state === 'missing') return { text: 'introuvable' };
   const d = upcoming(a.board?.departures ?? [], now)[0];
   if (!d) return { text: 'aucun départ' };
-  let text = nextText(d, now, false);
-  if (d.mode === 'train' && !d.cancelled && !dayWord(d.sched, now)) {
-    const plat = platformText(d.platform, d.newPlatform);
-    const long = `${d.line} ${hhmm(d.sched)}${delaySuffix(d.delayMin)}${plat ? ' ' + plat : ''}`;
-    if (textWidth(long) <= HOME_RIGHT_PX) text = long;
+  return departureRightText(d, now);
+}
+
+/**
+ * 1.2.2 : réponse d'une adresse récente de « Favoris » au format de l'accueil (REVUE-USAGE n° 2) : « 07:40 → 08:51 »,
+ * « tu y es », « aucun trajet », « … » (en calcul ou sans position).
+ */
+export function planHomeText(result: PlanResult | null | undefined, now: number): string {
+  if (!result) return '…';
+  if (result.empty === 'here') return 'tu y es';
+  if (result.empty === 'noPosition') return 'sans position';
+  return tripHomeText({ favoriteId: '', kind: 'trip', state: result.journeys.length ? 'ok' : 'none', plan: result, updatedAt: now }, now);
+}
+
+/**
+ * 1.2.2 (REVUE-USAGE n° 7) : 2e ligne d'un lieu ou d'un trajet dans « Favoris », plus pâle : le détail sans l'arrivée,
+ * déjà dite en ligne 1 : premier véhicule en toutes lettres et son heure prévue, retard, voie, changements (« bus W
+ * 07:36, 1 changement », « IC 07:42 +2 voie 6 !, direct ») ; gare de départ hors de portée à pied : « IC voie 4 à
+ * Bruxelles-Central » ; à pied : « à pied, 9 min ». null : pas de 2e ligne (« tu y es », « aucun trajet », en calcul).
+ * `planned` : un « ~ » est montré (note du bas).
+ */
+export function favoriteDetail(a: FavoriteAnswer | undefined, now: number, settings: Settings, maxPx = FULL_PX): { text: string; planned: boolean } | null {
+  const j = a?.state === 'ok' ? a.plan?.journeys[0] : undefined;
+  if (!j) return null;
+  const r = firstRide(j);
+  if (!r) return { text: `à pied, ${minText(journeyMinutes(j))}`, planned: false };
+  if (!catchable(j, now)) return null;
+  const fit = (t: string): string => (textWidth(t) <= maxPx ? t : truncate(t, maxPx));
+  if (a?.fromStation) {
+    const plat = r.mode === 'train' ? platformText(r.platform, r.newPlatform) : '';
+    return { text: fit(`${rideWords(r)}${plat ? ' ' + plat : ''} à ${displayName(r.from.name, settings.lang)}`), planned: false };
   }
-  return d.last && !d.cancelled ? { text, tail: LAST_MARK } : { text };
+  const planned = !r.rt && !r.cancelled && settings.display.markPlanned;
+  const time = r.cancelled ? `${hhmm(r.schedDep)} SUPPRIMÉ` : `${planned ? '~' : ''}${hhmm(r.schedDep)}${delaySuffix(r.delayMin)}`;
+  const build = (short: boolean): string => {
+    const plat = r.mode === 'train' && !r.cancelled ? platformText(r.platform, r.newPlatform, short) : '';
+    return `${rideWords(r)} ${time}${plat ? ' ' + plat : ''}, ${transfersText(j.transfers)}`;
+  };
+  const long = build(false);
+  return { text: textWidth(long) <= maxPx ? long : fit(build(true)), planned };
+}
+
+/* ------------------------------ 1.2.2 : Bus, tram, métro ------------------------------ */
+
+/** Titre d'une ligne à son arrêt (PRD-1.2.2 § 3) : « Bus W · Merbraine » ; mode pas encore connu : « Ligne W · … ». */
+export function lineTitle(mode: Mode | undefined, line: string, stop: string): string {
+  return `${mode ? vehicleLong(mode, line) : `Ligne ${line}`} · ${stop}`;
+}
+
+/** Arrêt sans filtre : « Gare du Nord · toutes les lignes ». */
+export const allLinesTitle = (stop: string): string => `${stop} · ${SECTION.allLines}`;
+
+/** Un passage comme sur les tableaux : « 3 » (minutes), « ~4 », « imminent », « SUPPRIMÉ », « ~08:45 » au-delà d'1 h. */
+function passage(d: LineDeparture, now: number, markPlanned: boolean): { v: string; minutes: boolean; partial: boolean } {
+  const partial = !!d.partial;
+  if (d.cancelled) return { v: 'SUPPRIMÉ', minutes: false, partial };
+  const m = minutesUntil(d.est, now);
+  const mark = plannedMark(d.rt, markPlanned);
+  if (m >= 60) return { v: `${mark}${hhmm(d.est)}`, minutes: false, partial };
+  if (m < 1) return { v: 'imminent', minutes: false, partial };
+  return { v: `${mark}${m}`, minutes: true, partial };
+}
+
+/** « demain » (ou « le 12/11 ») devant des heures d'un autre jour, comme les tableaux (S6) ; '' le jour même. */
+function laterDay(d: Pick<Departure, 'est' | 'cancelled'> | undefined, now: number): string {
+  return d && !d.cancelled && minutesUntil(d.est, now) >= 60 ? dayWord(d.est, now) : '';
+}
+
+/**
+ * Les 2 prochains passages d'un sens (PRD-1.2.2 § 3) : « 3 · 18 min », « imminent · 9 min », « ~4 · ~19 min »,
+ * « SUPPRIMÉ · 18 min », « 45 min · 08:45 » ; un seul : « 3 min » ; aucun : « aucun passage ». Un passage partiel
+ * (`partial`, il s'arrête avant le terminus du sens) est marqué « * » : « 3* · 18 min », « 3 · 18 min* ». Le
+ * lendemain, comme les tableaux : « demain 06:02 · 06:10 ».
+ */
+export function passagesText(deps: readonly LineDeparture[], now: number, markPlanned: boolean, maxPx = HOME_RIGHT_PX): string {
+  const ps = deps.slice(0, 2).map((d) => passage(d, now, markPlanned));
+  if (!ps.length) return SECTION.noPassage;
+  const one = (p: (typeof ps)[number], unit: boolean): string => `${p.v}${p.minutes && unit ? `${NB}min` : ''}${p.partial ? PARTIAL_MARK : ''}`;
+  const day = laterDay(deps[0], now);
+  const pre = day ? `${day} ` : '';
+  if (ps.length === 1) return pre + one(ps[0], true);
+  const [a, b] = ps;
+  // l'unité une seule fois quand les deux passages sont en minutes (« 3 · 18 min »)
+  const both = `${pre}${one(a, !(a.minutes && b.minutes))} · ${one(b, true)}`;
+  // le lendemain, les deux heures ne tiennent pas toujours dans la colonne (« demain ~06:04 · ~06:12 ») : la première
+  return day && textWidth(both) > maxPx ? pre + one(a, true) : both;
+}
+
+/**
+ * Arrêt « toutes les lignes » : les 2 prochains départs sur une ligne, « T3 Churchill 2 min · T4 Stalle 5 min » ; trop
+ * long : les destinations sont coupées, jamais la ligne ni l'attente. Le lendemain : « demain, 232 Vilvorde 06:10 · … ».
+ */
+export function stopPassagesText(deps: readonly Departure[], now: number, lang: NameLang, markPlanned: boolean, maxPx: number): string {
+  const ps = deps.slice(0, 2).map((d) => ({ line: lineLabel(d.mode, d.line), head: headText(d.head, lang, d.op), wait: minutesText(d, now, markPlanned) }));
+  if (!ps.length) return SECTION.noPassageAll;
+  const day = laterDay(deps[0], now);
+  const join = (heads: string[]): string => (day ? `${day}, ` : '') + ps.map((p, i) => [p.line, heads[i], p.wait].filter(Boolean).join(' ')).join(' · ');
+  const full = join(ps.map((p) => p.head));
+  if (textWidth(full) <= maxPx) return full;
+  const share = Math.max(0, (maxPx - textWidth(join(ps.map(() => '')))) / ps.length - 6);
+  const cut = join(ps.map((p) => truncate(p.head, share)));
+  return textWidth(cut) <= maxPx ? cut : truncate(cut, maxPx);
+}
+
+/** Détail d'une ligne : l'heure prévue d'un passage (« 07:48 », « ~08:08 », « 07:48 +3 »). */
+export function passageTime(d: Departure, markPlanned: boolean): string {
+  return `${d.cancelled ? '' : plannedMark(d.rt, markPlanned)}${hhmm(d.sched)}${d.cancelled ? '' : delaySuffix(d.delayMin)}`;
+}
+
+/** Détail d'une ligne : l'attente (« dans 3 min », « imminent », « dans 1 h 05 », « SUPPRIMÉ »). */
+export function waitText(d: Pick<Departure, 'est' | 'cancelled'>, now: number): string {
+  if (d.cancelled) return 'SUPPRIMÉ';
+  const m = minutesUntil(d.est, now);
+  return m < 1 ? 'imminent' : `dans ${durationText(m)}`;
 }
 
 /** Durées des marches d'au moins 1 min, dans l'ordre du trajet. */
@@ -471,16 +681,23 @@ export function meansLine(j: Pick<Journey, 'legs' | 'dep' | 'arr'>): string {
 }
 
 /**
- * Étape suivante d'un trajet en cours (ligne « En cours » de l'accueil) : « IC 07:44, voie 6 » avant de monter,
+ * Étape suivante d'un trajet en cours (ligne « En cours » de l'accueil) : avant de monter, le véhicule comme sur les
+ * départs (1.2.2, REVUE-USAGE n° 8 : code court, heure prévue, retard, voie, « ! » si elle change ; la même heure que
+ * la ligne de sa gare) : « IC 07:42 +2 voie 6 ! » (« v.6 ! » si la colonne est trop étroite), « W 07:36 » ;
  * « descente 08:48 » dans le véhicule, « arrivée 09:00 » ensuite.
  */
-export function runningNext(j: Journey, now: number): string {
+export function runningNext(j: Journey, now: number, maxPx = HOME_RIGHT_PX): string {
   for (const l of j.legs) {
     if (l.kind !== 'ride' || l.arr <= now) continue;
-    if (l.cancelled) return `${vehicleName(l)} ${hhmm(l.schedDep)} SUPPRIMÉ`;
+    const code = lineCode(l);
+    if (l.cancelled) return `${code} ${hhmm(l.schedDep)} SUPPRIMÉ`;
     if (now < l.dep) {
-      const p = l.mode === 'train' ? l.newPlatform || l.platform : undefined;
-      return `${vehicleName(l)} ${hhmm(l.dep)}${p ? `, voie ${p}` : ''}`;
+      const time = `${code} ${hhmm(l.schedDep)}${delaySuffix(l.delayMin)}`;
+      if (l.mode !== 'train') return time;
+      const long = platformText(l.platform, l.newPlatform);
+      if (!long) return time;
+      const text = `${time} ${long}`;
+      return textWidth(text) <= maxPx ? text : `${time} ${platformText(l.platform, l.newPlatform, true)}`;
     }
     return `descente ${hhmm(l.arr)}`;
   }

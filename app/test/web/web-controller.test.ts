@@ -1,14 +1,14 @@
 /**
  * Quai Web : même contrôleur et mêmes écrans que les lunettes, avec les différences du web :
  * pas de sortie (1.2.1 : sans message, PRD-1.2.1 § 4.5), gestes sans anti-rebond matériel, textes qui renvoient à
- * l'onglet Réglages,
- * « Autre adresse » qui ouvre la recherche, « Aucun lieu enregistré » qui ouvre « Nouveau favori », position changée
- * tout de suite (endroit choisi).
+ * l'onglet Réglages, « Autre adresse » (1.2.2 : en fin de « Favoris », PRD-1.2.2 § 1.2) qui ouvre la recherche,
+ * position changée tout de suite (endroit choisi). Les ancres #/gares et #/lignes ouvertes par les lunettes :
+ * test/phone/app.test.ts.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { GlassesController } from '../../src/glasses/controller';
 import type { HubSignal } from '../../src/glasses/gestures';
-import { firstRunView, favoritesView, placesView } from '../../src/glasses/views';
+import { firstRunView, favoritesView } from '../../src/glasses/views';
 import { createClock } from '../../src/platform/clock';
 import { createKV, memoryBackend } from '../../src/platform/kv';
 import type { Fix, GlassesPort, LocationPort, Platform } from '../../src/platform/types';
@@ -71,7 +71,6 @@ describe('contrôleur en mode web', () => {
     expect(exits).toEqual([]);
     // l'accueil reste tel quel : ni « Sur le web, ferme simplement l’onglet », ni autre ligne de pied
     expect(last()).toEqual(home);
-    expect(last().lines.at(-1)).toBe('Aller à…');
     expect(last().lines.join('\n')).not.toMatch(/ferme simplement/);
     c.stop();
   });
@@ -118,11 +117,11 @@ describe('contrôleur en mode web', () => {
     c.stop();
   });
 
-  it('Aller à… « Autre adresse » ouvre la recherche dans l’onglet Réglages', async () => {
+  it('« Favoris », « Autre adresse » ouvre la recherche dans l’onglet Réglages (PRD-1.2.2 § 1.2)', async () => {
     const { c, last, settle, opened } = await setup();
-    await c.replaceRoute({ screen: 'places' });
+    await c.replaceRoute({ screen: 'favorites' });
     await settle();
-    expect(last().screen).toBe('places');
+    expect(last().screen).toBe('favorites');
     const idx = last().lines.findIndex((l) => l.startsWith('Autre adresse'));
     expect(last().lines[idx]).toBe('Autre adresse   dans Réglages');
     for (let i = 0; i < idx; i++) c.onGesture('down');
@@ -141,23 +140,18 @@ describe('écrans des lunettes en mode web', () => {
     const v = firstRunView(ctx());
     expect(v.items.map((i) => i.a).join(' ')).toContain('l’onglet Réglages');
     expect(v.items.map((i) => i.a).join(' ')).not.toMatch(/Even Hub|téléphone/);
-    expect(v.items.map((i) => i.a.replace(/\u00a0/g, ' '))).toEqual(['Bienvenue dans Quai !', 'Termine les réglages dans l’onglet Réglages :', 'position, langue et tes lieux, en une minute.']);
+    expect(v.items.map((i) => i.a.replace(/\u00a0/g, ' '))).toEqual(['Bienvenue dans Quai !', 'Termine les réglages dans l’onglet Réglages :', 'position, langue et tes favoris, en une minute.']);
     expect(v.hints).toBe('toucher : continuer');
     expect(firstRunView({ ...ctx(), web: false }).hints).toMatch(/quitter/);
   });
 
-  it('favoris et lieux : renvoient à l’onglet Réglages', () => {
-    expect(favoritesView({}, ctx()).items.map((i) => i.a)).toEqual(['Aucun favori pour l’instant.', 'Ouvre un arrêt dans Autour de moi et touche-le,', 'ou ajoute un favori dans l’onglet Réglages.']);
-    const p = placesView({}, ctx());
-    expect(p.items.map((i) => [i.a, i.c])).toEqual([
-      ['Aucun lieu enregistré', 'dans Réglages'],
-      ['Autre adresse', 'dans Réglages'],
-    ]);
-    expect(p.items.map((i) => i.action)).toEqual([
-      { kind: 'phone', hash: '#/favoris/nouveau', text: 'Ajoute Maison ou Bureau dans l’onglet Réglages' },
-      { kind: 'phone', hash: '#/recherche', text: 'Tape l’adresse dans l’onglet Réglages' },
-    ]);
-    // appli Even : inchangé
-    expect(placesView({}, { ...ctx(), web: false }).items.map((i) => i.c)).toEqual(['sur le téléphone', 'sur le téléphone']);
+  it('« Favoris » vide : renvoie à l’onglet Réglages, jamais au téléphone ; ce qui s’ouvre dans Réglages a son ancre', () => {
+    const texts = (v: ReturnType<typeof favoritesView>) => v.items.flatMap((i) => [i.a, i.b, i.c, i.action?.kind === 'phone' ? i.action.text : '']).filter(Boolean).join(' ').replace(/\u00a0/g, ' ');
+    const web = favoritesView({}, ctx());
+    expect(texts(web)).toMatch(/Réglages/);
+    expect(texts(web)).not.toMatch(/téléphone|Even Hub/);
+    for (const i of web.items) if (i.action?.kind === 'phone') expect(['#/favoris/nouveau', '#/recherche']).toContain(i.action.hash);
+    // appli Even : le téléphone
+    expect(texts(favoritesView({}, { ...ctx(), web: false }))).toMatch(/téléphone/);
   });
 });

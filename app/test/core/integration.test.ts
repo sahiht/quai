@@ -54,11 +54,13 @@ function suite(label: string, dataDir: string) {
         const a = env('2026-11-10T07:31', 'noRT');
         const js = await a.core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, a.clock.t, a.preset, MAISON);
         const j = js[0];
-        // 1.2.1 (le moins de marche d'abord) : même IC, même arrivée, le T3 garde chaque marche sous les 10 min réglées ;
-        // l'IC direct puis 12 min à pied vient ensuite (« Sans changement »)
+        // 1.2.2 (PRD-1.2.2 § 7) : même IC, même arrivée, le T3 garde chaque marche sous les 10 min réglées ; l'IC direct
+        // puis 12 min à pied n'est plus proposé (jamais « Sans changement » avec plus de marche de trop) ; puis le suivant
         expect(steps(j)).toEqual(['marche 7', 'IC 07:42 voie 4 → Bruxelles-Nord 08:40', 'marche 2', '3 08:44 → Bourse 08:49', 'marche 9']);
         expect([hhmm(j.leaveAt), hhmm(j.arr)]).toEqual(['07:33', '08:58']);
-        expect(steps(js[1])).toEqual(['marche 7', 'IC 07:42 voie 4 → Bruxelles-Central 08:46', 'marche 12']);
+        // le suivant : l'IC de 08:42, puis un tram jusqu'à la Bourse (lequel : garde-fous de core/routing/rank.ts)
+        expect(steps(js[1]).slice(0, 3)).toEqual(['marche 7', 'IC 08:42 voie 5 → Bruxelles-Nord 09:40', 'marche 2']);
+        expect(steps(js[1])[3]).toMatch(/^[34] 09:\d\d → Bourse 09:\d\d$/);
         const b = env('2026-11-10T07:31');
         const k = (await b.core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, b.clock.t, b.preset, MAISON))[0];
         expect(steps(k)).toEqual(['marche 7', 'IC 07:44 voie 6 → Bruxelles-Nord 08:42', 'marche 2', '3 08:44 → Bourse 08:49', 'marche 9']);
@@ -185,12 +187,14 @@ function suite(label: string, dataDir: string) {
       expect(ts).toHaveLength(3);
       const m = env('2026-11-10T07:31');
       const js = await m.core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, m.clock.t, m.preset, MAISON);
-      // 1.2.1 : IC 07:42 puis T3, le suivant (IC 08:42 puis T3) et, plus tard, l'IC 08:42 puis le T4 (palier 0, 09:57)
-      // plutôt que l'IC 08:42 direct et ses 12 min à pied (palier 1, 09:58) : trois trajets distincts
-      expect(js.map((j) => `${j.label} ${hhmm(j.leaveAt)} ${j.legs.filter((l) => l.kind === 'ride').length}`)).toEqual(['short 07:35 2', 'next 08:33 2', 'later 08:33 2']);
+      // 1.2.2 : IC 07:42 puis T3, puis « Le suivant » : l'IC 08:42 puis le T4 (08:33 → 09:57), qui domine l'IC 08:42
+      // puis le T3 (PRD-1.2.2 § 7.4) ; deux trajets distincts
+      expect(js.map((j) => `${j.label} ${hhmm(j.leaveAt)} ${j.legs.filter((l) => l.kind === 'ride').length}`)).toEqual(['short 07:35 2', 'next 08:33 2']);
       expect(await m.core.plan({ type: 'here' }, { type: 'place', placeId: 'maison' }, m.clock.t, m.preset, MAISON)).toEqual([]);
+      // 1.2.2 : la marche (12 min, 2 de trop) d'abord ; « Moins de marche » : l'IC puis le T3, 9 min à pied au plus,
+      // 20 min plus tard (PRD-1.2.2 § 7.3)
       const walk = await core.plan({ type: 'here' }, { type: 'place', placeId: 'bureau' }, clock.t, preset, CENTRAL);
-      expect(walk.map((j) => j.legs.map((l) => l.kind).join('+'))).toEqual(['walk']);
+      expect(walk.map((j) => `${j.label} ${j.legs.map((l) => l.kind).join('+')}`)).toEqual(['short walk', 'lesswalk ride+walk+ride+walk']);
     });
 
     it('réglages de démonstration : tous les favoris se résolvent', async () => {

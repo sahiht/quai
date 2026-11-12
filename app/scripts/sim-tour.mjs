@@ -2,6 +2,8 @@
 /**
  * Visite automatique de Quai dans le simulateur Even Hub (API d'automatisation) :
  * parcourt les écrans des lunettes avec les gestes et enregistre les captures dans test/screens/.
+ * 1.2.2 : accueil avec « Gares » et « Bus, tram, métro », « Favoris » (adresses récentes), « Gares », « Bus, tram,
+ * métro », détail d'une ligne, « garder une ligne », trajet suivi sur demande (« Suivre ce trajet », « Ne plus suivre »).
  *
  *   npm run dev                          (autre terminal, port 5173)
  *   npm run sim-tour                     (faux cœur : ?fake=1)
@@ -11,7 +13,8 @@
  * Options : --url (page de l'appli), --data/--relay (vrai cœur), --preset (URL des réglages de démonstration,
  * par défaut fixtures/app/preset.json servi par le serveur Vite), --out (dossier), --port (automatisation, 9898),
  * --sim (binaire du simulateur), --only glasses|phone, --keep (ne pas fermer le simulateur à la fin).
- * Sans écran (DISPLAY absent), le simulateur est lancé avec xvfb-run -a.
+ * Sans écran (DISPLAY absent), le simulateur est lancé avec xvfb-run -a. Le simulateur (WebKitGTK, pas Chromium) est
+ * lancé sans les variables de proxy : il ne parle qu'aux serveurs de la machine.
  */
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
@@ -90,7 +93,9 @@ async function launch(url) {
   await stopSim();
   const cmd = process.env.DISPLAY ? SIM : 'xvfb-run';
   const argv = process.env.DISPLAY ? ['--automation-port', String(PORT), url] : ['-a', SIM, '--automation-port', String(PORT), url];
-  proc = spawn(cmd, argv, { detached: true, stdio: 'ignore' });
+  // ni proxy ni accès hors de la machine (le propriétaire ne veut aucun trafic vers Google ni ailleurs)
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(https?|all|no)_proxy$/i.test(k)));
+  proc = spawn(cmd, argv, { detached: true, stdio: 'ignore', env });
   for (let i = 0; i < 100; i++) {
     try {
       if ((await (await fetch(API + '/api/ping')).text()).includes('pong')) break;
@@ -198,9 +203,19 @@ async function step(label, fn) {
 }
 
 const is = (screen, extra = () => true) => (s) => s.screen === screen && extra(s);
-/** Écran chargé : plus de « … » d'attente en bout de ligne (« Aller à… » est un libellé). */
+/** Écran chargé : plus de « … » d'attente en bout de ligne. */
 const loaded = (s) => !s.lines.some((l) => l.endsWith('   …') || l === '…');
 const homeReady = is('home', loaded);
+/** Ligne du haut de l'accueil (jamais un élément sélectionnable). */
+const TOP_HOME = /^(Temps réel indisponible|Pas de réseau|Horaires |Près de |! )/;
+/** Rang de l'élément de l'accueil dont la ligne vérifie `re` (sans la ligne du haut, la ligne vide, la note, l'aide). */
+function homeIndex(s, re) {
+  const l = [...s.lines];
+  if (TOP_HOME.test(l[0] ?? '')) l.shift();
+  const i = l.filter((x) => x !== '' && !/^(Jour férié|▲▼ )/.test(x)).findIndex((x) => re.test(x));
+  if (i < 0) throw new Error(`élément ${re} absent de l’accueil`);
+  return i;
+}
 
 /** Déplace la sélection jusqu'à l'élément `index` de l'écran courant (gestes espacés de 450 ms). */
 async function select(index, timeout = 8000) {
@@ -223,36 +238,58 @@ const S3 = { mockLat: 50.8454, mockLon: 4.3571, mockNow: '2026-11-10T13:55:00+01
 const withPreset = (p) => ({ ...p, reset: 1, preset: PRESET });
 
 async function glassesTour() {
-  await step('Scénario 1 : accueil, étapes, Aller à…', async () => {
+  await step('Scénario 1 : accueil, étapes, suivre, Favoris, Gares', async () => {
     await launch(pageUrl(withPreset(S1)));
-    await shotGlasses('home', await waitScreen(homeReady));
+    const home = await waitScreen(homeReady);
+    await shotGlasses('home', home);
     await input('click');
-    await shotGlasses('steps', await waitScreen(is('steps')));
+    await shotGlasses('steps', await waitScreen(is('steps', (s) => s.followed === false)));
+    // « Suivre ce trajet », puis toucher : « Ne plus suivre » et le détail du train
+    await input('click');
+    await waitScreen(is('steps', (s) => s.followed === true));
+    await sleep(2800);
+    await input('click');
+    await shotGlasses('followed', await waitScreen(is('followed')));
+    await input('double_click');
+    await waitScreen(is('steps'));
+    await input('double_click');
+    const h = await waitScreen(homeReady);
+    await select(0);
+    await input('click');
+    await shotGlasses('favorites', await waitScreen(is('favorites', loaded), 15_000));
     await input('double_click');
     await waitScreen(homeReady);
-    await select(3);
+    await select(homeIndex(h, /^Gares {3}/));
     await input('click');
-    await shotGlasses('places', await waitScreen(is('places', loaded), 15_000));
-    await select(1);
+    await shotGlasses('stations', await waitScreen(is('stations', loaded), 15_000));
     await input('click');
-    await shotGlasses('journeys', await waitScreen(is('journeys'), 15_000));
+    await shotGlasses('board-station', await waitScreen(is('board', loaded), 15_000));
   });
 
   await step('Scénario 1 en accéléré : voie modifiée, puis dans le train', async () => {
     await launch(pageUrl({ ...withPreset(S1), mockSpeed: 30 }));
     await waitScreen(homeReady);
     await input('click', 200);
-    await waitScreen(is('steps'));
+    await waitScreen(is('steps', (s) => s.followed === false));
+    await input('click', 200);
+    await waitScreen(is('steps', (s) => s.followed === true));
     await shotGlasses('steps-alert', await waitScreen(is('steps', (s) => s.clock >= '07:37' && s.lines[0]?.startsWith('!')), 30_000, 'étapes à 07:37'));
     await shotGlasses('train', await waitScreen(is('train', clockAtLeast('08:05')), 90_000, 'dans le train à 08:05'));
   });
 
-  await step('Scénario 2 : favori proche, autour de moi, tableaux', async () => {
+  await step('Scénario 2 : lignes proches, détail, garder une ligne, autour de moi, tableaux', async () => {
     await launch(pageUrl(withPreset(S2)));
-    await shotGlasses('board', await waitScreen(is('board')));
-    await input('double_click');
-    await shotGlasses('home-near', await waitScreen(is('home', (s) => s.lines.some((l) => l.includes('arrêts')))));
-    await select(0);
+    await shotGlasses('lines', await waitScreen(is('lines', loaded), 15_000));
+    await input('click');
+    await shotGlasses('line', await waitScreen(is('line', loaded), 15_000));
+    await input('click');
+    await shotGlasses('board', await waitScreen(is('board', loaded), 15_000));
+    await input('click');
+    await shotGlasses('keep-line', await waitScreen(is('keepLine', loaded), 15_000));
+    for (let i = 0; i < 4 && lastScreen?.screen !== 'home'; i++) await input('double_click', 700);
+    const h = await waitScreen(homeReady);
+    await shotGlasses('home-near', h);
+    await select(homeIndex(h, /^Autour de moi {3}/));
     await input('click');
     await shotGlasses('nearby', await waitScreen(is('nearby')));
     await select(2);
@@ -263,24 +300,19 @@ async function glassesTour() {
     await select(1);
     await input('click');
     await shotGlasses('board-train', await waitScreen(is('board', (s) => /SNCB/.test(s.title))));
-    await input('double_click');
-    await waitScreen(is('nearby'));
-    await input('double_click');
-    await waitScreen(homeReady);
-    await select(1);
-    await input('click');
-    await shotGlasses('favorites', await waitScreen(is('favorites', (s) => !s.lines.some((l) => l.endsWith('…'))), 15_000));
   });
 
-  await step('Scénario 3 : trains A ▶ B et détail du train', async () => {
+  await step('Scénario 3 : trajet de gare à gare, suivi, détail du train', async () => {
     await launch(pageUrl(withPreset(S3)));
     await waitScreen(homeReady);
-    await select(1);
     await input('click');
-    await waitScreen(is('favorites'));
-    await select(2);
+    await shotGlasses('trip', await waitScreen(is('steps')));
     await input('click');
-    await shotGlasses('trip', await waitScreen(is('trip')));
+    await waitScreen(is('steps', (s) => s.followed === true));
+    await sleep(2800);
+    await input('click');
+    await waitScreen(is('followed'));
+    await input('down');
     await input('click');
     await shotGlasses('train-detail', await waitScreen(is('train')));
   });
@@ -288,12 +320,10 @@ async function glassesTour() {
   await step('Scénario 3 en accéléré : arrivée à Gand', async () => {
     await launch(pageUrl({ ...withPreset(S3), mockNow: '2026-11-10T14:05:00+01:00', mockSpeed: 30 }));
     await waitScreen(homeReady);
-    await select(1);
     await input('click', 250);
-    await waitScreen(is('favorites'));
-    await select(2);
+    await waitScreen(is('steps', (s) => s.followed === false));
     await input('click', 250);
-    await waitScreen(is('trip'));
+    await waitScreen(is('steps', (s) => s.followed === true));
     await shotGlasses('arrival', await waitScreen(is('arrival', (s) => s.lines.length > 2 && !s.lines[1]?.startsWith('Recherche')), 90_000, 'arrivée'));
   });
 
@@ -301,8 +331,8 @@ async function glassesTour() {
     await launch(pageUrl({ ...S2, reset: 1 }));
     await shotGlasses('first-run', await waitScreen(is('message', (s) => s.lines[0]?.startsWith('Bienvenue'))));
     await launch(pageUrl({ ...withPreset(S2), mockLat: 50.1, mockLon: 5.2 }));
-    await waitScreen(homeReady);
-    await select(0);
+    const h = await waitScreen(homeReady);
+    await select(homeIndex(h, /^Autour de moi {3}/));
     await input('click');
     await shotGlasses('nearby-empty', await waitScreen(is('message', (s) => s.title === 'Autour de moi' && s.lines[0]?.startsWith('Aucun'))));
     if (!REAL) {
@@ -316,9 +346,10 @@ async function phoneTour() {
   const shots = [
     ['onboarding', { ...S3, reset: 1 }, '#/'],
     ['home', withPreset(S3), '#/'],
-    ['places', withPreset(S1), '#/lieux'],
+    ['picks', withPreset(S3), '#/gares'],
     ['favorites', withPreset(S3), '#/favoris'],
-    ['favorite-edit', withPreset(S2), '#/favoris/fav-gdn'],
+    ['favorite-edit', withPreset(S2), '#/favoris/fav-gand'],
+    ['trips', withPreset(S1), '#/trajets'],
     ['display', withPreset(S2), '#/affichage'],
     ['alerts', withPreset(S1), '#/alertes'],
     ['data', withPreset(S2), '#/donnees'],

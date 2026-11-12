@@ -1,22 +1,26 @@
 // @vitest-environment happy-dom
 /**
- * Affichage (T5, S3) : « À l’ouverture de Quai » et « Ordre des favoris » ; aperçu : l'accueil des lunettes avec ses
- * favoris, qui suit les réglages.
+ * Affichage (T5, S3) : « À l’ouverture de Quai » et « Ordre des favoris » (libellés de la revue d'usage n° 11, mêmes
+ * valeurs) ; aperçu : l'accueil des lunettes avec ses favoris, qui suit les réglages ; réglages v4 de l'exemple.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { textWidth } from '../../src/glasses/font';
 import { geometry, layoutPage } from '../../src/glasses/layout';
 import { effectiveFrame, initNav } from '../../src/glasses/nav';
 import type { PageSpec } from '../../src/glasses/types';
-import { homePreview } from '../../src/phone/samples';
+import { homePreview, sampleSettings } from '../../src/phone/samples';
 import { displayScreen } from '../../src/phone/screens/display';
 import { defaults, harness, mount, textOf, until } from './helpers';
 
 afterEach(() => document.body.replaceChildren());
 
-/** Lignes plus larges que leur conteneur, ou conteneurs trop bas pour leurs lignes (27 px), comme test/ui/helpers.ts. */
+/**
+ * Lignes plus larges que leur conteneur, ou conteneurs trop bas pour leurs lignes (27 px), comme test/ui/helpers.ts ;
+ * un conteneur vide (pied de hauteur nulle sans aide des gestes, revue d'usage n° 1) n'a pas de ligne.
+ */
 function overflowing(page: PageSpec): string[] {
   return page.containers.flatMap((c) => {
+    if (!c.content.trim()) return [];
     const rows = c.content.split('\n');
     const wide = rows.filter((l) => textWidth(l) > c.w).map((l) => `${c.name} : « ${l} » ${textWidth(l)} px > ${c.w} px`);
     return rows.length * 27 > c.h ? [...wide, `${c.name} : ${rows.length} lignes pour ${c.h} px`] : wide;
@@ -34,14 +38,21 @@ const lines = (v: ReturnType<typeof homePreview>) =>
   });
 
 describe('Affichage', () => {
-  it('textes du PRD : ouverture et ordre des favoris', () => {
+  it('libellés de la revue d’usage n° 11 : ouverture et ordre des favoris, sans « proposer » ni « lieu »', () => {
     const hz = harness({ settings: defaults() });
     const el = mount(displayScreen(hz.ctx));
     const legends = [...el.querySelectorAll('legend')].map((l) => textOf(l));
     expect(legends).toContain('À l’ouverture de Quai');
     expect(legends).toContain('Ordre des favoris');
-    const labels = [...el.querySelectorAll('label.choice')].map((l) => textOf(l));
-    expect(labels).toEqual(expect.arrayContaining(['Mes favoris en tête, selon l’heure et le lieu', 'Toujours ouvrir le favori en tête', 'Accueil sans favoris', 'Selon l’heure et le lieu', 'Dans mon ordre']));
+    const labels = [...el.querySelectorAll('label.choice')].map((l) => [l.querySelector('input')!.value, textOf(l)]);
+    expect(labels).toEqual([
+      ['suggest', 'L’accueil, avec mes favoris en tête'],
+      ['firstFavorite', 'Directement mon premier favori'],
+      ['home', 'L’accueil, sans favoris'],
+      ['smart', 'Automatique, selon l’heure et ta position'],
+      ['mine', 'Dans mon ordre'],
+    ]);
+    expect(textOf(el)).not.toMatch(/propos|le lieu/);
   });
 
   it('« Dans mon ordre » est enregistré (S3)', async () => {
@@ -52,22 +63,43 @@ describe('Affichage', () => {
     await until(() => hz.settings.get().display.favOrder === 'mine');
   });
 
-  it('aperçu : l’accueil 1.2.1 avec ses 3 favoris, selon l’ouverture, l’ordre et le rayon (T5, PRD-1.2.1 § 4)', () => {
-    const d = defaults().display;
+  it('exemple en réglages v4 : favoris (endroits et trajets), une gare et une ligne ; aucun arrêt favori', () => {
+    const s = sampleSettings(defaults());
+    expect(s.favorites.map((f) => `${f.kind}:${f.id}`)).toEqual(['trip:ex-gand', 'place:ex-bureau', 'trip:ex-mons']);
+    expect(s.stations.map((x) => [x.id, x.areaId])).toEqual([['ex-namur', 'sncb:8863008']]);
+    expect(s.lines.map((x) => [x.id, x.areaId, x.line, x.mode])).toEqual([['ex-gdn', 'stib:6357F', '3', 'tram']]);
+  });
+
+  it('aperçu : l’accueil 1.2.2 (PRD-1.2.2 § 1.1, revue d’usage n° 6), 3 favoris, puis la gare et la ligne avec leur prochain départ', () => {
     expect(lines(homePreview(defaults()))).toEqual([
       'Favoris | 3',
       'Bureau | dans 4 min → 09:00',
-      'Namur, train | IC 07:42 +2 voie 6 !',
-      'Gare du Nord, tram | T3 6 min',
+      'Vers Mons | dans 14 min → 09:04',
+      'Vers Gand-Saint-Pierre | 08:58 → 09:30',
       '',
       'Autour de moi | 3 arrêts',
-      'Aller à…',
+      'Gares | IC 07:42 +2 voie 6 !',
+      'Bus, tram, métro | T3 6 min',
     ]);
-    // « Dans mon ordre » : l'ordre du téléphone, la gare du Nord en tête
-    expect(lines(homePreview(defaults({ display: { ...d, favOrder: 'mine' } }))).slice(1, 4)).toEqual(['Gare du Nord, tram | T3 6 min', 'Bureau | dans 4 min → 09:00', 'Namur, train | IC 07:42 +2 voie 6 !']);
-    // « Accueil sans favoris », rayon de 800 m : « Favoris » sans favori dessous, 4 arrêts ; 300 m : 2 arrêts
-    expect(lines(homePreview(defaults({ display: { ...d, opening: 'home', radiusM: 800 } })))).toEqual(['Favoris | 3', '', 'Autour de moi | 4 arrêts', 'Aller à…']);
-    expect(lines(homePreview(defaults({ display: { ...d, radiusM: 300 } })))).toContain('Autour de moi | 2 arrêts');
+  });
+
+  it('aperçu : selon l’ouverture, l’ordre et le rayon (T5, PRD-1.2.1 § 4)', () => {
+    const d = defaults().display;
+    /** Favoris montrés sous « Favoris » (une ligne chacun) et ligne « Autour de moi ». */
+    const favs = (v: ReturnType<typeof homePreview>) => v.items.filter((i) => i.action?.kind === 'openFavorite').map((i) => lines({ ...v, items: [i] })[0]);
+    const around = (v: ReturnType<typeof homePreview>) => lines(v).find((l) => l.startsWith('Autour de moi'));
+    const v = homePreview(defaults());
+    expect(lines(v)[0]).toBe('Favoris | 3');
+    expect(favs(v)).toEqual(['Bureau | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04', 'Vers Gand-Saint-Pierre | 08:58 → 09:30']);
+    expect(around(v)).toBe('Autour de moi | 3 arrêts');
+    // « Dans mon ordre » : l'ordre du téléphone, le trajet vers Gand en tête
+    expect(favs(homePreview(defaults({ display: { ...d, favOrder: 'mine' } })))).toEqual(['Vers Gand-Saint-Pierre | 08:58 → 09:30', 'Bureau | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04']);
+    // « L’accueil, sans favoris », rayon de 800 m : « Favoris » sans favori dessous, 4 arrêts ; 300 m : 2 arrêts
+    const bare = homePreview(defaults({ display: { ...d, opening: 'home', radiusM: 800 } }));
+    expect(lines(bare)[0]).toBe('Favoris | 3');
+    expect(favs(bare)).toEqual([]);
+    expect(around(bare)).toBe('Autour de moi | 4 arrêts');
+    expect(around(homePreview(defaults({ display: { ...d, radiusM: 300 } })))).toBe('Autour de moi | 2 arrêts');
   });
 
   it('aperçu dans l’écran : les 3 favoris tiennent dans les lunettes, sans débordement ; le lecteur d’écran lit leurs réponses', () => {
@@ -78,8 +110,7 @@ describe('Affichage', () => {
       expect(overflowing(page), `aides ${gestureHints}`).toEqual([]);
     }
     const el = mount(displayScreen(harness({ settings: defaults() }).ctx));
-    expect(el.querySelector('.preview')!.getAttribute('aria-label')!.replace(/\u00a0/g, ' ')).toBe(
-      'Aperçu dans les lunettes : Quai, Favoris 3, Bureau dans 4 min → 09:00, Namur, train IC 07:42 +2 voie 6 !, Gare du Nord, tram T3 6 min, Autour de moi 3 arrêts, Aller à…',
-    );
+    const label = el.querySelector('.preview')!.getAttribute('aria-label')!.replace(/\u00a0/g, ' ');
+    expect(label).toBe('Aperçu dans les lunettes : Quai, Favoris 3, Bureau dans 4 min → 09:00, Vers Mons dans 14 min → 09:04, Vers Gand-Saint-Pierre 08:58 → 09:30, Autour de moi 3 arrêts, Gares IC 07:42 +2 voie 6 !, Bus, tram, métro T3 6 min');
   });
 });

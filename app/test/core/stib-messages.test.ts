@@ -97,7 +97,7 @@ describe('tableaux STIB : mentions de service', () => {
     expect(fmt(b, env.clock.t)).toEqual(['T3 Churchill 2 min', 'T3 Churchill ~11 min', 'T3 Churchill ~18 min', 'T3 Churchill ~26 min']);
     expect(b.departures.every((d) => d.msg === undefined)).toBe(true);
     expect(b.anyPlanned).toBe(true);
-    const v = boardView(b, { now: env.clock.t, settings: settings() }, { isFavorite: false });
+    const v = boardView(b, { now: env.clock.t, settings: settings() }, { kept: false });
     expect(v.top).toBeUndefined();
     expect(glassesLines(v)).toContain('T3   Churchill   ~11 min');
     expect(v.note).toBe('~ horaire prévu, sans temps réel');
@@ -123,7 +123,7 @@ describe('tableaux STIB : mentions de service', () => {
     const b = await env.core.board('stib:6357F', { limit: 3, filter: [{ line: '3', head: 'churchill' }, { line: '4', head: 'stalle p' }] });
     expect(fmt(b, env.clock.t).slice(0, 2)).toEqual(['T3 Churchill 2 min (dernier)', 'T4 Stalle (P) 5 min']);
     const ctx = { now: env.clock.t, settings: settings() };
-    const lines = glassesLines(boardView(b, ctx, { isFavorite: false }));
+    const lines = glassesLines(boardView(b, ctx, { kept: false }));
     expect(lines).toContain('T3   Churchill, dernier   2 min');
     expect(lines).toContain('T4   Stalle   5 min');
     const near = await env.core.nearby(50.86, 4.359, 100);
@@ -136,7 +136,7 @@ describe('tableaux STIB : mentions de service', () => {
     env.server.relay.stib.points['6357'] = [{ line: '3', dest: { fr: 'CHURCHILL', nl: 'CHURCHILL' }, times: [T('12:12')], msg: 'Dernier passage' }];
     const b = await env.core.board('stib:6357F', { limit: 1, filter: [{ line: '3', head: 'churchill' }] });
     b.departures[0].head = { fr: 'Une destination vraiment très longue pour la colonne', nl: 'x' };
-    const lines = glassesLines(boardView(b, { now: env.clock.t, settings: settings() }, { isFavorite: false }));
+    const lines = glassesLines(boardView(b, { now: env.clock.t, settings: settings() }, { kept: false }));
     expect(lines[0]).toMatch(/^T3 {3}Une destination vraiment.*…, dernier {3}2 min$/);
   });
 });

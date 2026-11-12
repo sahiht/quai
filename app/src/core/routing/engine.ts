@@ -1,27 +1,30 @@
 /**
- * route() : trajets porte à porte, le moins de marche d'abord (PRD-1.2.1 § 1 ; PRD-1.2 § 1 ; PRD 1.1 § 4, M3, M5,
- * M8 ; design-routing.md § 4).
+ * route() : trajets porte à porte (PRD-1.2.2 § 7 : le premier arrive le plus tôt, chaque minute de marche au-delà de
+ * la marche maximale compte triple ; PRD-1.2 § 1 ; PRD 1.1 § 4, M3, M5, M8 ; design-routing.md § 4).
  *
  * 1. Extrémités : « Ma position » (sinon empty 'noPosition'), lieu, zone (0 min de marche), adresse (M5a).
- *    Arrivée à 300 m au plus : empty 'here' ; à maxWalkMin à pied ou moins : la marche seule.
- * 2. Vagues de fichiers (select.ts) : index, tuiles et tuiles de lignes ; lignes L_O et L_D et trains/ des jours
- *    utiles ; lignes du milieu. Recherche toujours élargie (PRD-1.2 § 1.2) : arrêts jusqu'à 15 min à pied, gares
- *    jusqu'à 25 min (ou la marche maximale plus 5 min) ; aucun arrêt : empty 'noStopFrom' / 'noStopTo', accessMin 15.
- * 3. Réseau (network.ts) et RAPTOR par rondes sur la plage de départs de l'heure demandée (raptor.ts), passes
- *    d'accès et de sortie : large (15 et 25 min), une par palier de marche (PRD-1.2.1 § 1.1 : la marche maximale,
- *    puis 5 min de plus par palier, jusqu'aux rayons de la recherche élargie), courte (5 min). Attente en
- *    correspondance de 60 min au plus ; jamais un véhicule plus lent que d'y aller à pied (jusqu'à 60 min de marche).
- *    Nuit : plage de 12 h, puis trains du lendemain, puis à partir de 04:00 du jour suivant.
- *    Premier véhicule en retard mais attrapable (PRD § 4.2, § 4.5) : la plage commence 30 min avant l'heure demandée,
- *    sur le même réseau ; un trajet parti à l'heure prévue n'est gardé que si le temps réel le rend attrapable.
+ *    Arrivée à 300 m au plus : empty 'here'. La marche seule (30 min au plus) concourt avec les autres trajets, avec sa
+ *    propre marche (PRD-1.2.2 § 7, correctif 3 : plus de raccourci « marche seule »).
+ * 2. Vagues de fichiers (select.ts) : index, tuiles et tuiles de lignes ; lignes L_O et L_D, lignes de métro du réseau
+ *    d'une extrémité (correctif 2) et trains/ des jours utiles ; lignes du milieu. Recherche toujours élargie (PRD-1.2
+ *    § 1.2) : arrêts jusqu'à 15 min à pied, gares jusqu'à 25 min (ou la marche maximale plus 5 min) ; aucun arrêt :
+ *    la marche seule si elle dure 30 min au plus, sinon empty 'noStopFrom' / 'noStopTo', accessMin 15.
+ * 3. Réseau (network.ts) et RAPTOR multicritère sur la plage de départs de l'heure demandée (raptor.ts, correctif 1 :
+ *    arrivée et plus longue marche, à égalité la marche totale), en une passe aux rayons de la recherche élargie.
+ *    Attente en correspondance de 60 min au plus. Nuit : plage de 12 h, puis trains du lendemain, puis à partir de
+ *    04:00 du jour suivant. Premier véhicule en retard mais attrapable (PRD § 4.2, § 4.5) : la plage commence 30 min
+ *    avant l'heure demandée, sur le même réseau ; un trajet parti à l'heure prévue n'est gardé que si le temps réel le
+ *    rend attrapable.
  * 4. « Le suivant » : départs suivants de la même structure (mêmes lignes et sens, mêmes montées et descentes ;
  *    train : mêmes gares et même catégorie), jusqu'à 2 h après la proposition 1.
- * 5. Classement sur les horaires prévus (rank.ts), temps réel sur les propositions, 3 réserves et les trajets au
- *    premier véhicule déjà parti à l'heure prévue (un appel par opérateur pour tous) ; véhicule supprimé : trajet
- *    retiré ; correspondance devenue impossible : reste du trajet recalculé (repair.ts) ; seuls les trajets encore
- *    attrapables sur l'heure estimée restent (départ du premier véhicule moins la marche, au plus tôt l'heure
- *    demandée) ; nouveau classement sur les heures estimées ; étiquettes et raisons (reason.ts). 3 propositions au
- *    plus, dans l'ordre d'affichage. Réseau et trajets proposés retenus pour refresh() (repair.ts).
+ * 5. Un seul classement sur tous les candidats (rank.ts, correctif 4) : le temps réel remplace les heures des trajets
+ *    qu'il touche, il ne réduit pas l'ensemble. Temps réel sur les propositions, 3 réserves (les suivantes au coût) et
+ *    les trajets au premier véhicule déjà parti à l'heure prévue (un appel par opérateur pour tous) ; véhicule
+ *    supprimé : trajet retiré ; correspondance devenue impossible : reste du trajet recalculé (repair.ts) ; seuls les
+ *    trajets encore attrapables sur l'heure estimée restent (départ du premier véhicule moins la marche, au plus tôt
+ *    l'heure demandée) ; nouveau classement de tous les candidats ; une proposition sans temps réel le reçoit, puis
+ *    dernier classement ; étiquettes et raisons (reason.ts). 3 propositions au plus, dans l'ordre d'affichage. Réseau
+ *    et trajets proposés retenus pour refresh() (repair.ts).
  * 6. Rien : empty 'noTrip' et la gare SNCB la plus proche de l'arrivée (« Chercher vers {gare} »).
  * Sans fichiers de ligne (meta.lines absent, index d'une autre génération) : candidats du calcul 1.0 (plan.ts), même
  * classement.
@@ -36,10 +39,10 @@ import { candLegs, walkOnlyLegs, type EndPoint } from './legs';
 import { accessMap, linePart, Net, trainPart, trainTripOf, type RRoute } from './network';
 import { maxWalkOf, P, walkRadii, walkReachM } from './params';
 import { earliestTrip, raptor, type Cand, type RideRef } from './raptor';
-import { itemOf, rank, type RankItem } from './rank';
+import { byCostOrder, itemOf, rank, type RankItem } from './rank';
 import { reasonsOf } from './reason';
 import { recalcAlert, rememberNet, repairLegs, type NetRecipe } from './repair';
-import { loadLines, middleLines, pickLines, soft, wave1, type RoutingSource } from './select';
+import { backboneLines, loadLines, middleLines, pickLines, soft, wave1, type RoutingSource } from './select';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -66,7 +69,7 @@ export interface Tune {
 export interface RouteDebug {
   cands: Journey[];
   raw: { k: number; arr: number; pass: number; dep: number; wait: number }[];
-  net?: { stops: number; routes: number; lines: number; lo: number; ld: number; middle: number };
+  net?: { stops: number; routes: number; lines: number; lo: number; ld: number; middle: number; backbone?: number };
   files: number;
   computeMs: number;
   mode: 'lines' | 'legacy' | 'walk' | 'empty';
@@ -235,12 +238,13 @@ export async function computeRoute(
   const now = env.now();
   const recomputed = (legs: Leg[]) => recompute(skeleton(legs), legs, settings, now, true);
   const walkJourney = () => recomputed(walkOnlyLegs(endName(O), endName(D), directWalk, after));
-
-  if (directWalk <= maxWalk) {
+  /** Aucun arrêt autour d'une extrémité : la marche seule si elle dure 30 min au plus. */
+  const onFoot = async (empty: 'noStopFrom' | 'noStopTo', accessMin: number): Promise<PlanResult> => {
+    if (directWalk > P.walkOnlyMaxMin) return { journeys: [], empty, accessMin };
     if (debug) debug.mode = 'walk';
     const [j] = await env.refresh([walkJourney()], true);
     return { journeys: labeled([{ item: itemOf(j), label: 'short' }]) };
-  }
+  };
 
   const src = env.source;
   const meta = src.meta;
@@ -249,8 +253,8 @@ export async function computeRoute(
   const w1 = await wave1(src, O, D, R, !!meta.lines);
   // aucun arrêt connu autour (tuiles ; tuiles de lignes, qui comptent aussi les arrêts d'arrivée seule)
   const accessMin = R.urban;
-  if (!O.areaId && !w1.nearO.length && !w1.ltO.size) return { journeys: [], empty: 'noStopFrom', accessMin };
-  if (!D.areaId && !w1.nearD.length && !w1.ltD.size) return { journeys: [], empty: 'noStopTo', accessMin };
+  if (!O.areaId && !w1.nearO.length && !w1.ltO.size) return onFoot('noStopFrom', accessMin);
+  if (!D.areaId && !w1.nearD.length && !w1.ltD.size) return onFoot('noStopTo', accessMin);
 
   const dates = meta.serviceDates;
   const base0 = serviceDayBase(dates[0]);
@@ -283,10 +287,14 @@ export async function computeRoute(
     const first = tune.allLines ? index.lines.map((_, i) => i) : [...new Set([...LO, ...LD])];
     const [files, trains] = await Promise.all([loadLines(src, index, first), trainsOf(wanted)]);
     const requestDay = trains.find((f) => serviceDayBase(f.date) <= after && after < serviceDayBase(f.date) + 24 * HOUR) ?? trains[0] ?? null;
+    // lignes de métro près d'une extrémité (PRD-1.2.2 § 7, correctif 2) : l'épine dorsale d'une ville, que les lignes du
+    // milieu ne prennent pas toujours (Ceria → Braine-l'Alleud : métro 5 puis 6 jusqu'à Bruxelles-Midi)
+    const LB = tune.allLines ? [] : backboneLines(index, requestDay, [O, D]).filter((li) => !files.has(li));
     const middle = tune.allLines
       ? []
-      : middleLines({ index, O, D, radii: R, nearO: w1.nearO, nearD: w1.nearD, LO, LD, files, day: requestDay, K: tune.middleK, urbanUrbanMax: tune.urbanUrbanMax });
-    const mfiles = middle.length ? await loadLines(src, index, middle) : new Map<number, LineFile>();
+      : middleLines({ index, O, D, radii: R, nearO: w1.nearO, nearD: w1.nearD, LO, LD, files, day: requestDay, K: tune.middleK, urbanUrbanMax: tune.urbanUrbanMax, skip: new Set(LB) });
+    const third = [...new Set([...middle, ...LB])];
+    const mfiles = third.length ? await loadLines(src, index, third) : new Map<number, LineFile>();
     const lineFiles = [...files.values(), ...mfiles.values()];
     fileCount = lineFiles.length;
 
@@ -306,36 +314,22 @@ export async function computeRoute(
     let trainFiles = trains;
     net = build(trainFiles);
     // aucun arrêt dans la recherche élargie, ni dans les tuiles ni dans le réseau chargé
-    if (!O.areaId && !w1.nearO.length && !accessMap(net, O, R.urban, R.station).size) return { journeys: [], empty: 'noStopFrom', accessMin };
-    if (!D.areaId && !w1.nearD.length && !accessMap(net, D, R.urban, R.station).size) return { journeys: [], empty: 'noStopTo', accessMin };
+    if (!O.areaId && !w1.nearO.length && !accessMap(net, O, R.urban, R.station).size) return onFoot('noStopFrom', accessMin);
+    if (!D.areaId && !w1.nearD.length && !accessMap(net, D, R.urban, R.station).size) return onFoot('noStopTo', accessMin);
     const afterMin = (after - base0) / MIN;
-    // passes d'accès et de sortie : large (PRD-1.2 § 1.2), puis une par palier de marche (PRD-1.2.1 § 1.1 : la marche
-    // maximale, puis 5 min de plus par palier) et la passe courte : un trajet qu'une passe plus large cache derrière
-    // un trajet de palier plus haut (parti plus tard, arrivé plus tôt) reste candidat (§ 1.3)
-    const passes: [number, number][] = [[R.urban, R.station]];
-    const limits: number[] = [R.short];
-    for (let m = R.pref; m < Math.max(R.urban, R.station); m += P.walkStepMin) limits.push(m);
-    for (const m of [...new Set(limits)].sort((a, b) => b - a)) {
-      const p: [number, number] = [Math.min(R.urban, m), Math.min(R.station, m)];
-      if (!passes.some(([u, s]) => u === p[0] && s === p[1])) passes.push(p);
-    }
+    // une seule passe, aux rayons de la recherche élargie : le calcul multicritère garde aussi les trajets qui
+    // marchent moins (accès, correspondances, sortie), sans les passes par palier de la 1.2.1
     const run = (n: Net, from: number, windowMin: number): Cand[] => {
-      const out: Cand[] = [];
-      passes.forEach(([lu, ls], pass) => {
-        const acc = accessMap(n, O, lu, ls);
-        const egr = accessMap(n, D, lu, ls);
-        if (!acc.size || !egr.size) return;
-        for (const c of raptor(n, { access: acc, egress: egr, after: from, windowMin, urbanUrbanMax: tune.urbanUrbanMax })) {
-          out.push(c);
-          // départs d'avant l'heure demandée : hors des mesures (comparaison au réseau complet)
-          if (c.dep >= afterMin) debug?.raw.push({ k: c.rides.length, arr: c.arr, dep: c.dep, pass, wait: c.maxWait });
-        }
-      });
+      const acc = accessMap(n, O, R.urban, R.station);
+      const egr = accessMap(n, D, R.urban, R.station);
+      if (!acc.size || !egr.size) return [];
+      const out = raptor(n, { access: acc, egress: egr, after: from, windowMin, urbanUrbanMax: tune.urbanUrbanMax });
+      // départs d'avant l'heure demandée : hors des mesures (comparaison au réseau complet)
+      for (const c of out) if (c.dep >= afterMin) debug?.raw.push({ k: c.rides.length, arr: c.arr, dep: c.dep, pass: 0, wait: c.maxWait });
       return out;
     };
-    // garde-fous : attente de 60 min au plus ; jamais plus lent que d'y aller à pied maintenant (marche ≤ 60 min)
-    const usable = (list: Cand[]) =>
-      list.filter((c) => c.maxWait <= P.maxWaitMin && (directWalk > P.walkRefMaxMin || c.arr <= afterMin + directWalk));
+    // garde-fou : attente de 60 min au plus (le calcul l'applique déjà à chaque correspondance)
+    const usable = (list: Cand[]) => list.filter((c) => c.maxWait <= P.maxWaitMin);
     // plage élargie vers le passé pour le premier véhicule (même réseau, aucun fichier de plus) : un départ prévu
     // avant l'heure demandée ne reste que s'il est en retard et encore attrapable (temps réel, plus bas)
     const range = usable(run(net, afterMin - P.lateLookbackMin, P.windowMin + P.lateLookbackMin));
@@ -350,7 +344,9 @@ export async function computeRoute(
       if (!lateById.has(j.id)) lateById.set(j.id, j);
     }
     late.push(...lateById.values());
-    if (!cands.length) cands = usable(run(net, afterMin, P.nightWindowMin));
+    // aucun départ dans l'heure demandée (le calcul n'a alors pris que le premier départ possible) : plage de 12 h, pour
+    // que les trajets de la nuit et du matin concourent tous (le premier départ n'est pas toujours le meilleur)
+    if (!cands.some((c) => c.dep <= afterMin + P.windowMin)) cands = [...cands, ...usable(run(net, afterMin, P.nightWindowMin))];
     if (!cands.length && trainFiles.length < dates.length) {
       // rien ce soir : trains de tous les jours couverts
       trainFiles = await trainsOf(dates);
@@ -365,7 +361,7 @@ export async function computeRoute(
         if (debug && cands.length) debug.tomorrow = true;
       }
     }
-    if (debug) debug.net = { stops: net.size, routes: net.routes.length, lines: lineFiles.length, lo: LO.length, ld: LD.length, middle: mfiles.size };
+    if (debug) debug.net = { stops: net.size, routes: net.routes.length, lines: lineFiles.length, lo: LO.length, ld: LD.length, middle: middle.length, backbone: LB.length };
 
     const n0 = net;
     const byKey = new Map<string, { c: Cand; j: Journey }>();
@@ -377,19 +373,28 @@ export async function computeRoute(
       if (!cur || c.dep > cur.c.dep) byKey.set(j.id, { c, j });
     };
     for (const c of cands) addCand(c);
-    if (directWalk <= P.walkOnlyMaxMin) journeys.push(walkJourney());
+    // la marche seule concourt avec les autres trajets (30 min au plus)
+    const walk = directWalk <= P.walkOnlyMaxMin ? walkJourney() : null;
     // « Le suivant » : départs suivants de la structure de la proposition 1
-    const first0 = rank(
-      [...byKey.values()].map((x) => itemOf(x.j)),
-      after / MIN,
-      maxWalk,
-    )[0];
+    const first0 = rank([...[...byKey.values()].map((x) => itemOf(x.j)), ...(walk ? [itemOf(walk)] : [])], after / MIN, maxWalk)[0];
     const shortCand = first0 ? [...byKey.values()].find((x) => x.j === first0.item.j)?.c : undefined;
     if (shortCand) {
       const until = Math.max(afterMin, shortCand.dep) + P.laterMaxMin;
-      // départs suivants dans les 2 h (au plus 8) : le classement retire ceux qu'un départ plus tardif domine
-      for (const c of nextOfStructure(net, shortCand, 8, until)) addCand(c);
+      // départs suivants dans les 2 h (au plus 30) : le classement retire ceux qu'un départ plus tardif du même trajet
+      // domine (à arrivée égale, le dernier premier véhicule qui fait la correspondance)
+      const nexts = nextOfStructure(net, shortCand, 30, until);
+      for (const c of nexts) addCand(c);
+      // garde (PRD-1.2.2 § 7.4) : un trajet d'autres lignes qui domine un « Le suivant » parti après la plage doit être
+      // un candidat (le T4 de 17:56 pour l'IC de 18:06 plutôt que le T3 de 17:53) : recherche à partir des deux
+      // premiers, jusqu'à 30 min plus tard (un trajet qui le domine part avant son arrivée)
+      const end = afterMin + P.windowMin;
+      const firstNexts = nexts
+        .filter((c) => c.dep > end && !nexts.some((o) => o !== c && o.dep >= c.dep && o.arr <= c.arr && (o.dep > c.dep || o.arr < c.arr)))
+        .sort((a, b) => a.dep - b.dep)
+        .slice(0, P.proposals - 1);
+      for (const x of firstNexts) for (const c of usable(run(net, x.dep, Math.min(P.nextGuardMin, x.arr - x.dep)))) addCand(c);
     }
+    if (walk) journeys.push(walk);
     journeys.push(...[...byKey.values()].map((x) => x.j));
     if (!tune.allLines) recipe = { gen: meta.generatedAt, lines: lineFiles.map((f) => f.id), days: trainFiles.map((f) => f.date) };
   } else if (env.legacy) {
@@ -397,9 +402,7 @@ export async function computeRoute(
     const legs = await env.legacy(O, D, after, maxWalk);
     for (const l of legs) {
       const j = recomputed(l.map((x) => ({ ...x, from: { ...x.from }, to: { ...x.to } })));
-      const it = itemOf(j);
-      if (it.maxWait > P.maxWaitMin) continue;
-      if (directWalk <= P.walkRefMaxMin && it.arr > after / MIN + directWalk) continue;
+      if (itemOf(j).maxWait > P.maxWaitMin) continue;
       journeys.push(j);
     }
     if (directWalk <= P.walkOnlyMaxMin) journeys.push(walkJourney());
@@ -413,41 +416,58 @@ export async function computeRoute(
     if (debug.mode !== 'legacy') debug.mode = index ? 'lines' : 'legacy';
   }
 
-  // classement sur les horaires prévus, temps réel sur les propositions, les réserves et les trajets au premier
-  // véhicule déjà parti à l'heure prévue (un appel par opérateur pour tous), nouveau classement sur les heures estimées
-  const first = rank(journeys.map(itemOf), after / MIN, maxWalk, P.proposals + P.reserves);
+  // un seul classement sur tous les candidats (PRD-1.2.2 § 7, correctif 4) : le temps réel remplace les heures des
+  // trajets qu'il touche (propositions, réserves au coût, trajets au premier véhicule déjà parti à l'heure prévue ; un
+  // appel par opérateur pour tous), il ne réduit pas l'ensemble ; un trajet supprimé, devenu inattrapable ou dont la
+  // correspondance ne tient plus (sauf recalcul) en sort
+  const T = after / MIN;
+  const pool = new Map<string, Journey>(journeys.map((j) => [j.id, j]));
+  const refreshed = new Set<string>();
+  const cancelled = (j: Journey) => j.legs.some((l) => l.kind === 'ride' && l.cancelled);
+  // encore attrapable sur l'heure estimée : départ du premier véhicule moins la marche, au plus tôt l'heure demandée
+  const catchable = (j: Journey) => itemOf(j).dep >= T;
+  const update = async (list: Journey[]): Promise<void> => {
+    const todo = list.filter((j) => !refreshed.has(j.id));
+    if (!todo.length) return;
+    for (const j of todo) refreshed.add(j.id);
+    const live = await env.refresh(todo, true);
+    const repaired: Journey[] = [];
+    live.forEach((j, i) => {
+      const id = todo[i].id;
+      pool.delete(id);
+      if (cancelled(j)) return;
+      if (brokenConnection(j) < 0) {
+        if (catchable(j)) pool.set(j.id, j);
+        return;
+      }
+      // correspondance rendue impossible par un retard : reste du trajet recalculé sur le réseau en mémoire
+      const legs = net ? repairLegs(j, net, endName(D), maxWalk) : null;
+      if (legs) repaired.push(recomputed(legs));
+    });
+    if (!repaired.length) return;
+    const fixed = await env.refresh(repaired, true);
+    for (const j of fixed) {
+      refreshed.add(j.id);
+      if (cancelled(j) || brokenConnection(j) >= 0 || !catchable(j) || pool.has(j.id)) continue;
+      pool.set(j.id, { ...j, alerts: [recalcAlert(env.now()), ...j.alerts] });
+    }
+  };
+  const ranked = () => rank([...pool.values()].map(itemOf), T, maxWalk, P.proposals);
+  const first = ranked();
   if (!first.length && !late.length) {
     if (debug) debug.computeMs = performance.now() - t0;
     return noTrip(O, D, net, w1.nearD);
   }
-  const live = await env.refresh([...first.map((r) => r.item.j), ...late], true);
-  const lateIds = new Set(late.map((j) => j.id));
-  const cancelled = (j: Journey) => j.legs.some((l) => l.kind === 'ride' && l.cancelled);
-  // encore attrapable sur l'heure estimée : départ du premier véhicule moins la marche, au plus tôt l'heure demandée ;
-  // départ prévu avant l'heure demandée : jamais plus lent que d'y aller à pied, sur l'heure estimée
-  const catchable = (j: Journey, wasLate: boolean) =>
-    itemOf(j).dep >= after / MIN && !(wasLate && directWalk <= P.walkRefMaxMin && j.arr > after + directWalk * MIN);
-  const kept = live.filter((j) => !cancelled(j) && brokenConnection(j) < 0 && catchable(j, lateIds.has(j.id)));
-  // correspondance rendue impossible par un retard : reste du trajet recalculé sur le réseau en mémoire
-  if (net) {
-    const repaired: { j: Journey; wasLate: boolean }[] = [];
-    for (const j of live) {
-      if (cancelled(j) || brokenConnection(j) < 0) continue;
-      const legs = repairLegs(j, net, endName(D), maxWalk);
-      if (legs) repaired.push({ j: recomputed(legs), wasLate: lateIds.has(j.id) });
-    }
-    if (repaired.length) {
-      const fixed = await env.refresh(
-        repaired.map((x) => x.j),
-        true,
-      );
-      fixed.forEach((j, i) => {
-        if (cancelled(j) || brokenConnection(j) >= 0 || !catchable(j, repaired[i].wasLate) || kept.some((k) => k.id === j.id)) return;
-        kept.push({ ...j, alerts: [recalcAlert(env.now()), ...j.alerts] });
-      });
-    }
+  const reserves = byCostOrder([...pool.values()].map(itemOf), maxWalk)
+    .slice(0, P.proposals + P.reserves)
+    .map((x) => x.j);
+  await update([...first.map((r) => r.item.j), ...reserves, ...late]);
+  let final = ranked();
+  // une proposition encore aux horaires prévus (le temps réel a changé l'ordre) : temps réel, puis dernier classement
+  for (let round = 0; round < 2 && final.some((r) => !refreshed.has(r.item.j.id)); round++) {
+    await update(final.map((r) => r.item.j));
+    final = ranked();
   }
-  const final = rank(kept.map(itemOf), after / MIN, maxWalk, P.proposals);
   if (debug) debug.computeMs = performance.now() - t0;
   if (!final.length) return noTrip(O, D, net, w1.nearD);
   const out = labeled(final);

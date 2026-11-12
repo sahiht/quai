@@ -5,7 +5,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Journey } from '../../src/core/api';
-import { pareto, type TrainOption } from '../../src/core/trains';
+import { indexDay, pareto, trainLeg, type TrainOption } from '../../src/core/trains';
+import type { TrainsDay } from '../../../shared/types';
 import { hhmm } from '../../src/core/util';
 import { makeEnv } from './support/env';
 import { at } from './support/network';
@@ -134,5 +135,27 @@ describe('pareto', () => {
       [12, 45, 0],
       [20, 70, 0],
     ]);
+  });
+});
+
+describe('1.2.2 : bus de remplacement de la SNCB (catégorie « BUS » du fichier trains/)', () => {
+  it('étape en mode bus, catégorie et ligne « BUS » gardées ; un train reste un train', () => {
+    const day: TrainsDay = {
+      v: 1,
+      date: '2026-11-12',
+      stations: [
+        { id: 'sncb:8872009', n: { fr: 'Charleroi-Central', nl: 'Charleroi-Centraal' }, lat: 50.4046, lon: 4.4384 },
+        { id: 'sncb:8871100', n: { fr: 'Marchienne-au-Pont', nl: 'Marchienne-au-Pont' }, lat: 50.4096, lon: 4.3953 },
+      ],
+      trips: [
+        { id: 'bus-1954', cat: 'BUS', num: '1954', head: { fr: 'Marchienne-au-Pont', nl: 'Marchienne-au-Pont' }, s: [[0, -1, 250, '', 1], [1, 260, -1, '2', 2]] },
+        { id: 'ic-1', cat: 'IC', num: '1', head: { fr: 'Marchienne-au-Pont', nl: 'Marchienne-au-Pont' }, s: [[0, -1, 250, '3', 1], [1, 256, -1, '2', 2]] },
+      ],
+    };
+    const d = indexDay(day);
+    const bus = trainLeg({ day: d, trip: 0, i: 0, k: 1 });
+    expect(bus).toMatchObject({ op: 'sncb', mode: 'bus', line: 'BUS', cat: 'BUS', num: '1954' });
+    expect(hhmm(bus.dep)).toBe('04:10');
+    expect(trainLeg({ day: d, trip: 1, i: 0, k: 1 })).toMatchObject({ op: 'sncb', mode: 'train', line: 'IC', cat: 'IC', platform: '3' });
   });
 });

@@ -7,6 +7,8 @@
  * Version 2 (Quai 1.1, docs/v1.1/DECISIONS.md) : réglages v2 (adresses récentes, ordre des favoris, version vue,
  * lieux par adresse), extrémité « adresse », trajets étiquetés et expliqués (route), réponses des favoris
  * (orderFavorites, answer), adresses (geocode), état du temps réel (status), échanges lunettes ↔ téléphone.
+ * 1.2.2 (docs/v1.2.2/PRD-1.2.2.md) : réglages v4 (gares et lignes choisies : stations, lines ; plus d'arrêt dans
+ * les favoris), lignes par numéro (findLines, lineStops) et passages d'une ligne à un arrêt par sens (lineBoard).
  */
 import type { Op, Mode, Names, AreaSummary, Meta, HealthResponse, GeocodeResult, GeoSource } from '../../../shared/types';
 
@@ -76,20 +78,45 @@ export interface FavoritePlace extends Place {
   kind: 'place';
   propose: Propose;
 }
-/** 1.2 : un trajet fixe ne part jamais de « Ma position » (ce cas est un favori lieu). */
+/**
+ * 1.2 : un trajet fixe ne part jamais de « Ma position » (ce cas est un favori lieu).
+ * 1.2.2 : FavoriteStop n'est plus que lu (réglages v3 et antérieurs) ; la migration le range dans `stations` (gare
+ * SNCB) ou `lines` (autres réseaux). Les réglages v4 n'ont que des lieux et des trajets dans `favorites`.
+ */
 export type Favorite = FavoriteStop | FavoriteTrip | FavoritePlace;
 
 /**
- * Réglages, version 3 (1.2). Une version 2 (1.1) ou 1 (1.0) est migrée par settings.ts (PRD-1.2 § 2.4) : chaque
+ * 1.2.2 (PRD-1.2.2 § 2) : gare de la rubrique « Gares » des lunettes, choisie sur le téléphone.
+ * `near` : ses départs s'ouvrent d'office à moins de 300 m (comme le créneau « près » d'un arrêt favori de la 1.2.1).
+ */
+export interface StationPick { id: string; areaId: string; name: Names; lat: number; lon: number; near?: true }
+
+/**
+ * 1.2.2 (PRD-1.2.2 § 3) : ligne à un arrêt de la rubrique « Bus, tram, métro » ; les deux sens sont affichés.
+ * `line` absent : toutes les lignes de l'arrêt (arrêt favori sans filtre de la 1.2.1, migré). `mode` : si connu.
+ */
+export interface LinePick {
+  id: string;
+  areaId: string; op: Op; name: Names; lat: number; lon: number;
+  line?: string;                // nom court : 'W', '36', '71'
+  mode?: Mode;
+  near?: true;                  // ses passages s'ouvrent d'office à moins de 300 m (voir StationPick)
+}
+
+/**
+ * Réglages, version 4 (1.2.2). Une version 3 (1.2) range ses arrêts favoris dans `stations` et `lines`
+ * (PRD-1.2.2 § 5). Une version 2 (1.1) ou 1 (1.0) est d'abord migrée en v3 par settings.ts (PRD-1.2 § 2.4) : chaque
  * lieu devient un favori lieu ; un favori « Ma position → ce lieu » fusionne avec lui (place, id, nom, créneau) ;
  * « Ma position → adresse ou arrêt » devient un lieu ; le reste est gardé. `places` n'existe plus.
  */
 export interface Settings {
-  v: 3;
+  v: 4;
   onboarded: boolean;
   lang: NameLang;
   maxWalkMin: number;           // 5..20 : préférence (PRD-1.2 § 1.2), plus un mur
-  favorites: Favorite[];        // 32 au plus, dans l'ordre choisi sur le téléphone
+  favorites: Favorite[];        // 32 au plus, dans l'ordre choisi sur le téléphone ; 1.2.2 : lieux et trajets
+  stations: StationPick[];      // 1.2.2 : 32 au plus, dans l'ordre choisi sur le téléphone
+  lines: LinePick[];            // 1.2.2 : 32 au plus, dans l'ordre choisi sur le téléphone
   recent: RecentAddress[];      // 5 au plus, la plus récente d'abord (S4)
   /**
    * Dernière version dont les nouveautés ont été vues (« 1.1.0 »). '' = nouvelle installation : les lunettes
@@ -114,11 +141,13 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  v: 3,
+  v: 4,
   onboarded: false,
   lang: 'fr',
   maxWalkMin: 10,
   favorites: [],
+  stations: [],
+  lines: [],
   recent: [],
   seenVersion: '',
   display: { depsPerStop: 4, radiusM: 500, gestureHints: true, markPlanned: true, opening: 'suggest', favOrder: 'smart' },
@@ -154,6 +183,39 @@ export interface Board {
 }
 
 export interface NearbyItem { area: AreaSummary; distanceM: number; walkMin: number; next?: Departure }
+
+/** 1.2.2 : passage d'une ligne dans un sens (lineBoard). `partial` : s'arrête avant le terminus du sens (`head` dit où). */
+export interface LineDeparture extends Departure { partial?: boolean }
+
+/** 1.2.2 : un sens d'une ligne à un arrêt. */
+export interface LineDirection {
+  head: Names;                  // terminus principal du sens (le plus desservi dans les prochaines heures)
+  departures: LineDeparture[];  // triés par est, `perDirection` au plus
+}
+
+/** 1.2.2 (PRD-1.2.2 § 3) : prochains passages d'une ligne à un arrêt, par sens. */
+export interface LineBoard {
+  area: AreaSummary;
+  op: Op; mode: Mode; line: string;
+  /** 1 sens (terminus, boucle) ou 2 ; 3 au plus si la ligne se sépare juste après l'arrêt. Ordre stable. */
+  directions: LineDirection[];
+  /** missing : la ligne ne passe plus à cet arrêt ; none : aucun passage dans l'horizon des tableaux (23 h). */
+  state: 'ok' | 'none' | 'missing';
+  anyPlanned: boolean;          // au moins un passage sans temps réel
+  rtErrors: Op[];
+  updatedAt: number;
+}
+
+/** 1.2.2 : ligne trouvée par son numéro (findLines), pour « Ajouter une ligne » sur le téléphone. */
+export interface LineMatch {
+  op: Op; mode: Mode; line: string;
+  ends: Names[];                // terminus principaux (2 en général) : « Braine-l'Alleud ↔ Bruxelles Midi »
+  routes: string[];             // LineFile.id de ses variantes
+  nearest?: { areaId: string; name: Names; distanceM: number };  // son arrêt le plus proche de `near`
+}
+
+/** 1.2.2 : arrêt d'une ligne (lineStops). */
+export interface LineStop { areaId: string; name: Names; lat: number; lon: number; distanceM?: number }
 
 export interface Stopover { name: Names; areaId?: string; sched: number; est: number; platform?: string }
 
@@ -327,6 +389,15 @@ export interface Core {
   board(areaId: string, opts?: { limit?: number; filter?: LineFilter[] }): Promise<Board>;
   /** Lignes et directions d'une zone, pour composer le filtre d'un favori. */
   linesAt(areaId: string): Promise<{ line: string; mode: Mode; head: Names; filter: LineFilter }[]>;
+  /**
+   * 1.2.2 : lignes de bus, tram et métro (pas les trains) dont le nom court est `query` (« w », « 36 » ; casse,
+   * espaces et zéros de tête ignorés), les plus proches de `near` d'abord, 8 au plus.
+   */
+  findLines(query: string, near?: LatLon | null): Promise<LineMatch[]>;
+  /** 1.2.2 : arrêts d'une ligne (toutes ses variantes), les plus proches de `near` d'abord, sinon dans l'ordre de la ligne. */
+  lineStops(line: Pick<LineMatch, 'op' | 'line' | 'routes'>, near?: LatLon | null): Promise<LineStop[]>;
+  /** 1.2.2 : prochains passages d'une ligne à un arrêt, par sens, temps réel inclus. `perDirection` défaut 2. */
+  lineBoard(areaId: string, line: string, opts?: { perDirection?: number }): Promise<LineBoard>;
   /** Recherche par nom (≥ 2 caractères), 20 résultats max ; gares d'abord, puis les plus proches si `near`. */
   search(query: string, near?: { lat: number; lon: number }): Promise<SearchItem[]>;
   /** Trains entre deux gares (zones SNCB), direct ou une correspondance, à partir de `after`. limit défaut 3. */

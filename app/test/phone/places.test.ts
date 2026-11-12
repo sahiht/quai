@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 /**
  * Lieux, favoris de la 1.2 (PRD-1.2 § 2.2) : « Nouveau favori » (champ unique avec « Ma position actuelle »), lieu par
- * adresse, par arrêt (« Le trajet pour y aller ») ou par la position, jamais de coordonnées, créneau proposé d'office
- * (« Bureau » le matin), lieux 1.0 « Adresse à vérifier », suppression d'un lieu utilisé par un trajet fixe, limite
- * des 32 favoris.
+ * adresse, par arrêt (« Le trajet pour y aller », toujours en 1.2.2, avec le lien vers « Gares » ou « Bus, tram,
+ * métro », revue d'usage n° 3) ou par la position, jamais de coordonnées, créneau proposé d'office (« Bureau » le
+ * matin), lieux 1.0 « Adresse à vérifier », suppression d'un lieu utilisé par un trajet fixe, limite des 32 favoris.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Favorite, FavoritePlace, FavoriteTrip } from '../../src/core/api';
@@ -95,7 +95,7 @@ describe('« Nouveau favori » (PRD-1.2 § 2.2, PRD-1.2.1 § 7.1)', () => {
     expect(panel.hidden).toBe(false);
     expect(panelOf(el, placeTab).hidden).toBe(true);
     expect(['fav-de', 'fav-vers', 'fav-nom'].map((id) => textOf(panel.querySelector(`label[for="${id}"]`)))).toEqual(['Départ', 'Arrivée', 'Nom affiché (« Vers le bureau »), facultatif']);
-    expect(textOf(panel.querySelector('legend'))).toBe('Le proposer à l’ouverture');
+    expect(textOf(panel.querySelector('legend'))).toBe('En tête de l’accueil');
     expect(button(panel, 'Enregistrer').disabled).toBe(true);
     // flèches gauche et droite, Début et Fin : le choix suit le curseur
     tripTab.focus();
@@ -164,8 +164,8 @@ describe('« Nouveau favori » (PRD-1.2 § 2.2, PRD-1.2.1 § 7.1)', () => {
     expect(textOf(el.querySelector('.spot .t1'))).toBe('Rue Neuve 1, 1000 Bruxelles');
     await until(() => textOf(el.querySelector('.spot .t3')) !== '…');
     expect(textOf(el.querySelector('.spot .t3'))).toMatch(/à \d+ min à pied/);
-    const legend = [...el.querySelectorAll('legend')].find((l) => textOf(l) === 'Le proposer à l’ouverture')!;
-    expect([...legend.parentElement!.querySelectorAll('label')].map((l) => textOf(l))).toEqual(['Jamais', 'Le matin (5 h à 11 h)', 'Le soir (15 h à 21 h)']);
+    const legend = [...el.querySelectorAll('legend')].find((l) => textOf(l) === 'En tête de l’accueil')!;
+    expect([...legend.parentElement!.querySelectorAll('label')].map((l) => textOf(l))).toEqual(['Automatique', 'Le matin (5 h à 11 h)', 'Le soir (15 h à 21 h)']);
     button(el, 'Bureau').click(); // 2
     expect(name.value).toBe('Bureau');
     expect(textOf(el.querySelector<HTMLInputElement>('input[type="radio"]:checked')!.closest('label'))).toBe('Le matin (5 h à 11 h)');
@@ -189,7 +189,8 @@ describe('« Nouveau favori » (PRD-1.2 § 2.2, PRD-1.2.1 § 7.1)', () => {
     never.checked = true;
     never.dispatchEvent(new Event('change'));
     button(el, 'Bureau').click();
-    expect(checked()).toBe('Jamais');
+    // « Jamais » s'appelle « Automatique » (revue d'usage n° 11), même valeur enregistrée
+    expect(checked()).toBe('Automatique');
   });
 
   it('adresse choisie puis texte corrigé sans nouveau choix : le formulaire disparaît, rien à enregistrer', async () => {
@@ -211,32 +212,44 @@ describe('« Nouveau favori » (PRD-1.2 § 2.2, PRD-1.2.1 § 7.1)', () => {
     expect(textOf(el.querySelector('.spot .t2'))).toBe('Position approximative : la rue, sans numéro.');
   });
 
-  it('CA-2.3 : gare « Namur » : « Ses prochains départs » donne un arrêt, « Le trajet pour y aller » un lieu « Près de Namur »', async () => {
+  it('revue d’usage n° 3 : une gare donne toujours un lieu « Près de Namur » ; le lien l’ajoute à « Gares », jamais un arrêt favori', async () => {
     const hz = harness({ settings: defaults(), flags: { geo: 'down' } });
     const el = mount(newFavoriteScreen(hz.ctx));
     await pick(el, el.querySelector<HTMLInputElement>('#nf-lieu')!, 'namur', 'Namur', 'gare SNCB');
-    const legend = [...el.querySelectorAll('legend')].find((l) => textOf(l) === 'Dans les lunettes')!;
-    const radios = [...legend.parentElement!.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
-    expect(radios.map((r) => textOf(r.closest('label')))).toEqual(['Ses prochains départs', 'Le trajet pour y aller']);
-    expect(radios[0].checked).toBe(true);
-    // arrêt : lignes et directions, quatre créneaux (« Quand je suis à moins de 300 m » compris)
-    await until(() => el.querySelectorAll('.stop-form input[type="checkbox"]').length > 0);
-    expect(textOf(el.querySelector('.stop-form'))).toContain('Quand je suis à moins de 300 m');
+    // plus de choix « Dans les lunettes » : le formulaire du lieu, directement
+    expect([...el.querySelectorAll('legend')].map((l) => textOf(l))).not.toContain('Dans les lunettes');
+    expect(el.textContent).not.toContain('Ses prochains départs »');
+    expect(textOf(el.querySelector('.spot .t1'))).toBe('Près de Namur');
+    expect(el.querySelector<HTMLInputElement>('#pl-nom')!.value).toBe('Namur');
+    // au-dessus du formulaire, le lien vers « Gares »
+    const link = el.querySelector<HTMLButtonElement>('.jump')!;
+    expect(link.compareDocumentPosition(el.querySelector('.place-form')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(link.textContent).toBe('Ses prochains départs\u00a0: ajouter Namur à Gares');
+    link.click();
+    await until(() => textOf(el.querySelector('.jump-box .msg')) !== '');
+    expect(textOf(el.querySelector('.jump-box .msg'))).toBe('Namur ajoutée à Gares.');
+    expect(hz.settings.get().stations).toEqual([expect.objectContaining({ areaId: 'sncb:8863008', name: { fr: 'Namur', nl: 'Namen' } })]);
+    link.click();
+    await until(() => textOf(el.querySelector('.jump-box .msg')) === 'Déjà dans tes gares.');
+    expect(hz.settings.get().stations).toHaveLength(1);
+    // le lieu s'enregistre comme avant ; aucun favori « stop » dans les réglages (critère du n° 3)
     button(el, 'Enregistrer').click();
     await until(() => hz.settings.get().favorites.length === 1);
-    expect(hz.settings.get().favorites[0]).toMatchObject({ kind: 'stop', areaId: 'sncb:8863008', propose: 'never' });
+    expect(hz.settings.get().favorites[0]).toMatchObject({ kind: 'place', label: 'Namur', src: 'stop', areaId: 'sncb:8863008', address: 'Près de Namur', propose: 'never' });
+    expect(hz.settings.get().favorites.some((f) => f.kind === 'stop')).toBe(false);
+  });
 
-    const hz2 = harness({ settings: defaults(), flags: { geo: 'down' } });
-    const el2 = mount(newFavoriteScreen(hz2.ctx));
-    await pick(el2, el2.querySelector<HTMLInputElement>('#nf-lieu')!, 'namur', 'Namur', 'gare SNCB');
-    const trip = [...el2.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find((r) => textOf(r.closest('label')) === 'Le trajet pour y aller')!;
-    trip.checked = true;
-    trip.dispatchEvent(new Event('change'));
-    expect(textOf(el2.querySelector('.spot .t1'))).toBe('Près de Namur');
-    expect(el2.querySelector<HTMLInputElement>('#pl-nom')!.value).toBe('Namur');
-    button(el2, 'Enregistrer').click();
-    await until(() => hz2.settings.get().favorites.length === 1);
-    expect(hz2.settings.get().favorites[0]).toMatchObject({ kind: 'place', label: 'Namur', src: 'stop', areaId: 'sncb:8863008', address: 'Près de Namur', propose: 'never' });
+  it('revue d’usage n° 3 : un arrêt de tram donne un lieu ; le lien mène à « Ajouter une ligne », arrêt présélectionné', async () => {
+    const hz = harness({ settings: defaults(), flags: { geo: 'down' } });
+    const el = mount(newFavoriteScreen(hz.ctx));
+    await pick(el, el.querySelector<HTMLInputElement>('#nf-lieu')!, 'gare du nord', 'Gare du Nord', 'tram STIB');
+    const link = el.querySelector<HTMLAnchorElement>('a.jump')!;
+    expect(textOf(link)).toBe('Ses prochains passages : choisir une ligne dans Bus, tram, métro');
+    expect(link.getAttribute('href')).toBe('#/lignes/ajouter?arret=stib%3A6357F');
+    expect(textOf(el.querySelector('.spot .t1'))).toBe('Près de Gare du Nord');
+    // pas de lien « Gares » pour un arrêt de tram, rien d'ajouté tant qu'on n'a pas choisi de ligne
+    expect(el.querySelector('button.jump')).toBeNull();
+    expect(hz.settings.get().lines).toEqual([]);
   });
 
   it('« Ma position actuelle » : position prise sur place, sans coordonnées ; sans position : on le dit', async () => {
@@ -251,7 +264,7 @@ describe('« Nouveau favori » (PRD-1.2 § 2.2, PRD-1.2.1 § 7.1)', () => {
     expect(input.value).toBe('Ma position actuelle');
     expect(textOf(el.querySelector('.spot .t1'))).toBe('Position prise sur place');
     expect(button(el, 'Enregistrer').disabled).toBe(true);
-    expect(textOf(el.querySelector('#pl-hint'))).toBe('Donne un nom au lieu.');
+    expect(textOf(el.querySelector('#pl-hint'))).toBe('Donne un nom à cet endroit.');
     type(el.querySelector<HTMLInputElement>('#pl-nom')!, 'Piscine');
     noCoords(el);
     button(el, 'Enregistrer').click();

@@ -155,9 +155,13 @@ export function serializeNav(s: NavState): string {
 }
 
 /** Écrans connus (un instantané de la 1.0 peut contenir un écran retiré en 1.1 : « journeys », « trip », Q6). */
-const SCREENS: ReadonlySet<string> = new Set(['home', 'nearby', 'board', 'favorites', 'places', 'steps', 'others', 'train', 'arrival', 'message']);
+const SCREENS: ReadonlySet<string> = new Set(['home', 'nearby', 'board', 'favorites', 'stations', 'lines', 'line', 'keepLine', 'steps', 'others', 'followed', 'train', 'arrival', 'message']);
 
-/** Lecture défensive d'un instantané ; null s'il est invalide. Les écrans inconnus sont retirés de la pile. */
+/**
+ * Lecture défensive d'un instantané ; null s'il est invalide. Les écrans inconnus sont retirés de la pile. 1.2.2 : un
+ * « Aller à… » (`places`) gardé par la 1.2.1 s'ouvre sur « Favoris », où son contenu se trouve désormais (PRD-1.2.2
+ * § 1.2) ; « Autres favoris » (`exclude` de la 1.2.0) aussi.
+ */
 export function parseNav(x: unknown): NavState | null {
   try {
     const v = typeof x === 'string' ? JSON.parse(x) : x;
@@ -165,8 +169,10 @@ export function parseNav(x: unknown): NavState | null {
     const stack: NavFrame[] = [];
     for (const f of (v as NavState).stack) {
       if (!f || typeof f !== 'object' || !f.route || typeof f.route !== 'object' || typeof (f.route as Route).screen !== 'string') return null;
-      if (!SCREENS.has((f.route as Route).screen)) continue;
-      stack.push({ route: f.route, sel: Number.isFinite(f.sel) ? f.sel : 0, top: Number.isFinite(f.top) ? f.top : 0, fresh: !!f.fresh });
+      const screen = (f.route as { screen: string }).screen;
+      const route: Route = screen === 'places' || screen === 'favorites' ? { screen: 'favorites' } : f.route;
+      if (!SCREENS.has(route.screen)) continue;
+      stack.push({ route, sel: Number.isFinite(f.sel) ? f.sel : 0, top: Number.isFinite(f.top) ? f.top : 0, fresh: !!f.fresh });
     }
     return stack.length ? { stack } : null;
   } catch {

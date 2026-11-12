@@ -3,17 +3,30 @@
  * Tout est sérialisable en JSON (état d'arrière-plan, journal QUAI_SCREEN).
  */
 import type { Endpoint, Journey, LineFilter } from '../core/api';
-import type { Names, Op } from '../../../shared/types';
+import type { Mode, Names, Op } from '../../../shared/types';
 
+/**
+ * 1.2.2 : « Aller à… » (`places`) n'existe plus, son contenu est dans « Favoris » (PRD-1.2.2 § 1.2) ; un état gardé par
+ * la 1.2.1 sur cet écran s'ouvre sur « Favoris » (parseNav).
+ */
 export type ScreenId =
   | 'home'
   | 'nearby'
   | 'board'
   | 'favorites'
-  | 'places'
+  /** 1.2.2 : « Gares » (PRD-1.2.2 § 2). */
+  | 'stations'
+  /** 1.2.2 : « Bus, tram, métro » (§ 3). */
+  | 'lines'
+  /** 1.2.2 : détail d'une ligne à son arrêt, les deux sens (§ 3). */
+  | 'line'
+  /** 1.2.2 : « {arrêt} : garder une ligne », ouvert par ★ des départs d'un arrêt (REVUE-USAGE n° 3). */
+  | 'keepLine'
   | 'steps'
   /** 1.2.1 : « Autres trajets », les autres propositions d'un trajet (PRD-1.2.1 § 3.3). */
   | 'others'
+  /** 1.2.2 : toucher sur le trajet suivi : « Ne plus suivre » et le détail du véhicule (PRD-1.2.2 § 6). */
+  | 'followed'
   | 'train'
   | 'arrival'
   | 'message';
@@ -46,8 +59,9 @@ export interface StepsRoute {
   to?: Endpoint;
   favoriteId?: string;
   /**
-   * 1.1 : la proposition 1 devient le trajet suivi une fois calculée. 'open' : toucher sur un favori ou un lieu
-   * (un trajet déjà en cours reste suivi) ; 'phone' : demande explicite du téléphone.
+   * 'phone' : demande explicite du téléphone (bouton « Lunettes ») : la proposition 1 devient le trajet suivi une fois
+   * calculée. 1.2.2 (PRD-1.2.2 § 6) : ouvrir un favori, un lieu ou une adresse ne fait plus suivre ; la valeur 'open'
+   * d'un état gardé par la 1.2.1 est ignorée.
    */
   follow?: 'open' | 'phone';
   /**
@@ -76,20 +90,49 @@ export interface OthersRoute {
   favoriteId?: string;
 }
 
+/** 1.2.2 : une ligne à son arrêt (LinePick avec `line`), pour son détail. */
+export interface LineRoute {
+  screen: 'line';
+  /** LinePick.id (absent : ouvert d'ailleurs). */
+  pick?: string;
+  areaId: string;
+  op: Op;
+  line: string;
+  /** Nom de l'arrêt (titre « Bus W · Merbraine ») ; `mode` si connu. */
+  name: Names;
+  mode?: Mode;
+}
+
+/** 1.2.2 : « {arrêt} : garder une ligne » (lignes de l'arrêt, core.linesAt). */
+export interface KeepLineRoute {
+  screen: 'keepLine';
+  areaId: string;
+  op: Op;
+  name: Names;
+  lat: number;
+  lon: number;
+}
+
 export type Route =
   | { screen: 'home' }
   | { screen: 'nearby' }
   | { screen: 'board'; areaId: string; filter?: LineFilter[]; name?: Names }
-  /** `exclude` : favoris déjà montrés sur l'accueil (« Autres favoris ») ; absent : « Mes favoris ». */
-  | { screen: 'favorites'; exclude?: string[] }
-  | { screen: 'places' }
+  /** 1.2.2 : « Favoris » : favoris, adresses récentes, « Autre adresse » (PRD-1.2.2 § 1.2). */
+  | { screen: 'favorites' }
+  | { screen: 'stations' }
+  /** `focus` : LinePick.id sous le curseur à l'ouverture (ligne `near` ouverte d'office, REVUE-USAGE n° 4). */
+  | { screen: 'lines'; focus?: string }
+  | LineRoute
+  | KeepLineRoute
   | StepsRoute
   | OthersRoute
+  /** 1.2.2 : « Ne plus suivre » et le détail du véhicule, pour le trajet suivi du moment. */
+  | { screen: 'followed' }
   | { screen: 'train'; journey: Journey; leg: number; label?: string; auto?: boolean; trip?: { from: AreaRef; to: AreaRef } }
   | { screen: 'arrival'; journey: Journey; leg: number; trip?: { from: AreaRef; to: AreaRef } }
   | { screen: 'message'; kind: MessageKind; title: string; lines: string[] };
 
-/** news : message « Quai 1.2.1 » (une fois, après la mise à jour depuis une version antérieure ; lignes dans la route). */
+/** news : message « Quai 1.2.2 » (une fois, après la mise à jour depuis une version antérieure ; lignes dans la route). */
 export type MessageKind = 'loading' | 'error' | 'empty' | 'firstRun' | 'notConfigured' | 'info' | 'news';
 
 /** Ce que fait un toucher sur un élément. */
@@ -97,19 +140,35 @@ export type Intent =
   | { kind: 'open'; route: Route }
   /** Favori de l'accueil ou de la liste : ses étapes (trajet) ou ses départs (arrêt). */
   | { kind: 'openFavorite'; id: string }
-  /** Lieu ou adresse récente de « Aller à… » : les étapes du trajet proposé. */
+  /** Adresse récente de « Favoris » (1.2.1 : lieu ou adresse de « Aller à… ») : les étapes du trajet proposé. */
   | { kind: 'go'; key: string; to: Endpoint; label: string }
   /** Ligne « En cours » : le trajet suivi, à l'écran qui correspond à l'heure. */
   | { kind: 'resume' }
-  /** Étapes d'une autre proposition : elle devient le trajet suivi. */
+  /** « Suivre ce trajet » : la proposition affichée devient le trajet suivi (PRD-1.2.2 § 6). */
   | { kind: 'follow' }
-  | { kind: 'toggleFavoriteStop' }
+  /** 1.2.2 : « Ne plus suivre » (§ 6). */
+  | { kind: 'unfollow' }
+  /** 1.2.2 : ★ des départs d'une gare : la garder ou la retirer de « Gares » (REVUE-USAGE n° 3). */
+  | { kind: 'toggleStation' }
+  /** 1.2.2 : « garder une ligne » : la ligne `line` de l'arrêt de l'écran, gardée ou retirée. */
+  | { kind: 'toggleLine'; line: string; mode: Mode }
   | { kind: 'saveTrip' }
   | { kind: 'toast'; text: string }
   /** Quai Web : ouvrir un écran des réglages (#/…) ; dans l'appli Even, `text` s'affiche en message. */
   | { kind: 'phone'; hash: string; text: string }
   | { kind: 'retry' }
   | { kind: 'continue' };
+
+/**
+ * 1.2.2 : ligne en retrait sous un élément (un sens d'une ligne de « Bus, tram, métro ») : texte de la colonne b, puis
+ * `bRight` aligné à droite dans la même colonne (comme les favoris de l'accueil).
+ */
+export interface SubRow {
+  b: string;
+  bRight?: string;
+  /** Fin de `bRight` ajoutée seulement si elle tient. */
+  bRightTail?: string;
+}
 
 /** Un élément de liste : une ligne (colonnes a, b, c), ou deux lignes (a2/b2 sur la seconde). */
 export interface Item {
@@ -125,6 +184,13 @@ export interface Item {
    * la hauteur de l'élément mais ne se sélectionne pas : les indices des éléments ne changent pas.
    */
   gap?: boolean;
+  /**
+   * 1.2.2 : ligne pâle au-dessus de l'élément (séparateur « Adresses récentes » de « Favoris »), dans la colonne b ;
+   * comme `gap`, elle compte dans sa hauteur et ne se sélectionne jamais.
+   */
+  head?: string;
+  /** 1.2.2 : lignes en retrait sous l'élément, qui en font partie (curseur sur la 1re ligne seulement). */
+  sub?: SubRow[];
   /** Fin de la colonne b jamais coupée (ex. « , dernier ») : la colonne b est raccourcie avant elle. */
   bTail?: string;
   /** Fin de la colonne c ajoutée seulement si elle tient en entier (la colonne c n'est jamais coupée pour elle). */
@@ -145,6 +211,14 @@ export type Layout =
   | 'home'
   /** 1.2.1 : « Autres trajets » (PRD-1.2.1 § 3.3). */
   | 'others'
+  /** 1.2.2 : « Favoris », au format de l'accueil, détail plus pâle en 2e ligne (REVUE-USAGE n° 7). */
+  | 'favorites'
+  /** 1.2.2 : « Gares » : nom, prochain train à droite (PRD-1.2.2 § 2). */
+  | 'stations'
+  /** 1.2.2 : « Bus, tram, métro » : titre de la ligne, sens en retrait plus pâles (§ 3). */
+  | 'lines'
+  /** 1.2.2 : détail d'une ligne : sens, puis heure, terminus si différent, attente (§ 3). */
+  | 'line'
   | 'nearby'
   | 'board'
   | 'boardTrain'
@@ -160,6 +234,11 @@ export interface GlassesView {
   screen: ScreenId;
   layout: Layout;
   title: string;
+  /**
+   * 1.2.2 : texte aligné à droite sur la ligne du titre, avant l'heure : « Suivi » ou « Suivre ce trajet » sur l'écran
+   * d'un trajet (PRD-1.2.2 § 6). Le titre est coupé avant lui ; journalisé après trois espaces.
+   */
+  titleRight?: string;
   clock: string;
   top?: TopLine;
   items: Item[];
@@ -171,7 +250,8 @@ export interface GlassesView {
   hints: string;
   /**
    * 1.2.1 (accueil) : sous une note (jour férié), la ligne d'aide n'est pas réservée quand l'aide est vide ; la note
-   * devient la dernière ligne de l'écran et la liste garde une ligne de plus.
+   * devient la dernière ligne de l'écran et la liste garde une ligne de plus. 1.2.2 (REVUE-USAGE n° 1) : sans note
+   * non plus, la ligne d'aide n'existe que si l'aide s'affiche (ou un message temporaire) ; le pied peut être vide.
    */
   compactFoot?: boolean;
   /** Élément sélectionné au premier affichage (ex. « prochain » arrêt dans le train). */

@@ -15,6 +15,14 @@ import { join } from 'node:path';
 export const CHROME_BIN = process.env.CHROME_BIN ?? ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => existsSync(p)) ?? 'google-chrome';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Variables de proxy retirées de l'environnement de Chrome (1.2.2 : aucun trafic vers Google, même refusé). */
+const PROXY_VARS = new Set(['HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'NO_PROXY'].flatMap((k) => [k, k.toLowerCase()]));
+
+/** Environnement du processus, sans ses variables de proxy. */
+export function withoutProxy(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([k]) => !PROXY_VARS.has(k)));
+}
+
 type Json = Record<string, unknown>;
 interface Pending {
   resolve(v: Json): void;
@@ -48,7 +56,12 @@ export class Chrome {
     private profile: string,
   ) {}
 
-  /** Lance Chrome sans affichage avec un profil neuf (stockage vide). */
+  /**
+   * Lance Chrome sans affichage avec un profil neuf (stockage vide). 1.2.2 : aucun trafic vers Google (souhait du
+   * propriétaire) : services d'arrière-plan coupés (comptes, mises à jour des composants, synchronisation, rapports),
+   * et surtout aucun accès au réseau hors de la machine : sans les variables de proxy dans l'environnement, sans proxy,
+   * et tout nom d'hôte autre que localhost et 127.0.0.1 introuvable (les pages se servent sur 127.0.0.1).
+   */
   static async launch(): Promise<Chrome> {
     const profile = mkdtempSync(join(tmpdir(), 'quai-chrome-'));
     const proc = spawn(
@@ -62,13 +75,24 @@ export class Chrome {
         '--no-sandbox',
         '--disable-gpu',
         '--disable-extensions',
+        '--no-proxy-server',
+        '--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE localhost , EXCLUDE 127.0.0.1',
         '--disable-background-networking',
+        '--disable-component-update',
+        '--disable-sync',
+        '--disable-default-apps',
+        '--disable-domain-reliability',
+        '--disable-client-side-phishing-detection',
+        '--disable-breakpad',
+        '--metrics-recording-only',
+        '--no-pings',
+        '--disable-features=OptimizationHints,Translate,MediaRouter,AutofillServerCommunication,CertificateTransparencyComponentUpdater',
         '--hide-scrollbars',
         '--lang=fr-BE',
         '--font-render-hinting=none',
         'about:blank',
       ],
-      { stdio: ['ignore', 'pipe', 'pipe'], detached: true },
+      { stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: withoutProxy(process.env) },
     );
     const url = await new Promise<string>((resolve, reject) => {
       let buf = '';

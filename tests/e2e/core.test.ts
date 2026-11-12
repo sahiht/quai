@@ -7,13 +7,27 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createCore, dataFreshness } from '../../app/src/core/index';
-import type { Core, Departure, Journey, Leg, Settings } from '../../app/src/core/api';
+import type { Core, Departure, Favorite, FavoriteStop, Journey, Leg, Settings } from '../../app/src/core/api';
 import { migrateSettings } from '../../app/src/settings';
 import { areaLabel, displayName, hhmm, lineLabel, minutesUntil } from '../../app/src/core/util';
 import { buildFixtureData, memoryKV, ROOT, startDataServer, startStack, type Proc, type Stack } from './lib/stack';
 
-/** Réglages de la 1.0 (preset.json) lus par la 1.2 : migrés en v3, le lieu « Bureau » fusionné avec « Vers le bureau ». */
-const PRESET: Settings = migrateSettings(JSON.parse(readFileSync(join(ROOT, 'fixtures', 'app', 'preset.json'), 'utf8')));
+/**
+ * Réglages de la 1.0 (preset.json) lus par la 1.2.2 : migrés en v4, le lieu « Bureau » fusionné avec « Vers le
+ * bureau », les arrêts favoris rangés dans les gares et les lignes (PRD-1.2.2 § 5).
+ */
+const RAW = JSON.parse(readFileSync(join(ROOT, 'fixtures', 'app', 'preset.json'), 'utf8')) as { favorites: { id: string; kind: string }[] };
+const PRESET: Settings = migrateSettings(RAW);
+/** Les mêmes réglages lus par la 1.2.1 (arrêts favoris compris) : le cœur répond toujours à un arrêt favori. */
+const LEGACY: Settings = {
+  ...PRESET,
+  favorites: [
+    ...RAW.favorites
+      .map((r) => PRESET.favorites.find((f) => f.id === r.id) ?? (r.kind === 'stop' ? (r as unknown as FavoriteStop) : undefined))
+      .filter((f): f is Favorite => f !== undefined),
+    ...PRESET.favorites.filter((f) => !RAW.favorites.some((r) => r.id === f.id)),
+  ],
+};
 const MAISON = { lat: 50.4655, lon: 4.859 };
 const S2_POS = { lat: 50.86, lon: 4.359 };
 const CENTRAL = { lat: 50.8454, lon: 4.3571 };
@@ -114,7 +128,7 @@ for (const scene of ['base', 'noRT'] as const) {
         for (const n of list) if (n.next) expect(n.next.rt).toBe(rt && n.next.tripId !== 'N5-0730'); // N5-0730 hors flux TEC
       });
 
-      it('Aller à… Bureau, 1re proposition (1.2.1) : marche 7, IC 07:42 jusqu’à Bruxelles-Nord, T3, marche 9', async () => {
+      it('Aller à… Bureau, 1re proposition (1.2.2) : marche 7, IC 07:42 jusqu’à Bruxelles-Nord, T3, marche 9', async () => {
         const js = await coreAt(now).plan({ type: 'here' }, { type: 'place', placeId: 'fav-bureau' }, now, PRESET, MAISON);
         expect(js.length).toBeGreaterThanOrEqual(1);
         expect(js.length).toBeLessThanOrEqual(3);
@@ -127,10 +141,13 @@ for (const scene of ['base', 'noRT'] as const) {
         const rank = (l: Journey['label']) => (l === 'fewer' ? 3 : ORDER.indexOf(l ?? ''));
         for (let i = 1; i < js.length; i++) expect(rank(js[i].label)).toBeGreaterThanOrEqual(rank(js[i - 1].label));
         const j = js[0];
-        // 1.2.1 (le moins de marche d'abord) : même IC, même arrivée que le direct, mais le T3 depuis Bruxelles-Nord garde
-        // chaque marche sous les 10 min réglées ; le direct et ses 12 min à pied arrivent à la même heure (noRT,
-        // « Sans changement ») ou 2 min plus tard (base, plus proposé)
+        // 1.2.2 (PRD-1.2.2 § 7, coût = arrivée + 3 × la marche de trop + 1 par changement) : même IC, même arrivée que le
+        // direct, mais le T3 depuis Bruxelles-Nord garde chaque marche sous les 10 min réglées ; le direct et ses 12 min
+        // à pied marchent 2 min de trop : jamais « Sans changement » ; ensuite les trajets suivants
         expect(j.label).toBe('short');
+        expect(js.map((x) => x.label)).not.toContain('none');
+        expect(js.slice(1).every((x) => x.label === 'next' || x.label === 'later')).toBe(true);
+        expect(js.some((x) => x.legs.some((l) => l.kind === 'walk' && (l.walkMin ?? 0) > PRESET.maxWalkMin))).toBe(false);
         expect(j.legs.map((l) => l.kind)).toEqual(['walk', 'ride', 'walk', 'ride', 'walk']);
         const [w1, ic, w2, tram, w3] = j.legs;
         expect([w1.walkMin, w2.walkMin, w3.walkMin]).toEqual([7, 2, 9]);
@@ -145,15 +162,12 @@ for (const scene of ['base', 'noRT'] as const) {
           expect(hhmm(ic.arr)).toBe('08:42');
           expect(hhmm(j.leaveAt)).toBe('07:35');
           expect(j.alerts[0]?.text).toBe('! Voie modifiée\u00a0: l’IC part de la voie 6');
-          expect(js.map((x) => x.label)).toEqual(['short', 'next', 'later']);
         } else {
           expect([hhmm(ic.dep), ic.newPlatform, ic.delayMin, ic.rt]).toEqual(['07:42', undefined, 0, false]);
           expect(hhmm(ic.arr)).toBe('08:40');
           expect(hhmm(j.leaveAt)).toBe('07:33');
           expect(j.alerts.filter((a) => a.kind === 'platform')).toEqual([]);
           expect(j.rt).toBe(false);
-          expect(js.map((x) => x.label)).toEqual(['short', 'none', 'next']);
-          expect(js[1].legs.map((l) => (l.kind === 'walk' ? `marche ${l.walkMin}` : `${l.cat} ${l.to.areaId}`))).toEqual(['marche 7', 'IC sncb:8813003', 'marche 12']);
         }
         for (const x of js) checkTexts(...x.alerts.map((a) => a.text));
       });
@@ -178,14 +192,18 @@ for (const scene of ['base', 'noRT'] as const) {
 
     describe('scénario 2 : 2026-11-10 12:10, près de la gare du Nord', () => {
       const now = T('12:10');
-      const fav = PRESET.favorites.find((f) => f.id === 'fav-gdn')!;
+      const fav = LEGACY.favorites.find((f) => f.id === 'fav-gdn')!;
 
       it('ouverture : fav-gdn (à moins de 300 m) s’ouvre seul, départs filtrés T3, T3, T4', async () => {
-        const s = await coreAt(now).suggest(S2_POS, PRESET);
+        // réglages de la 1.2.1 : l'arrêt favori « près » s'ouvre par suggest()
+        const s = await coreAt(now).suggest(S2_POS, LEGACY);
         expect(s?.kind).toBe('favoriteStop');
         expect(s?.favoriteId).toBe('fav-gdn');
         expect(s?.autoOpen).toBe(true);
         checkTexts(s?.title, s?.subtitle);
+        // 1.2.2 : migré en tram 3 et tram 4 « près » de la rubrique Bus, tram, métro (ouverts par les lunettes)
+        expect(PRESET.lines.filter((l) => l.areaId === 'stib:6357F').map((l) => `${l.line} ${l.near}`)).toEqual(['3 true', '4 true']);
+        expect((await coreAt(now).suggest(S2_POS, PRESET))?.kind).not.toBe('favoriteStop');
         const b = await coreAt(now).board('stib:6357F', { limit: PRESET.display.depsPerStop, filter: fav.kind === 'stop' ? fav.filter : undefined });
         const tilde = rt ? '' : '~';
         expect(b.departures.map((d) => depText(d, now))).toEqual(
@@ -363,8 +381,33 @@ describe('fonctions transversales', () => {
       { line: '3', head: 'esplanade' },
       { line: '4', head: 'stalle p' },
     ]);
-    const fav = PRESET.favorites.find((f) => f.id === 'fav-gdn');
+    const fav = LEGACY.favorites.find((f) => f.id === 'fav-gdn');
     expect(fav?.kind === 'stop' ? fav.filter : null).toEqual(lines.map((l) => l.filter));
+  });
+
+  it('1.2.2 : lignes par numéro, arrêts et passages par sens, sur les données du pipeline et le vrai relais (CA-122.4)', async () => {
+    const now = T('12:10');
+    const core = coreAt(now);
+    const [t3] = await core.findLines('3', S2_POS);
+    expect(t3).toMatchObject({ op: 'stib', mode: 'tram', line: '3', routes: ['stib:3'], nearest: { areaId: 'stib:6357F' } });
+    expect(t3.ends.map((n) => n.fr)).toEqual(['Churchill', 'Esplanade']);
+    expect((await core.findLines('W')).map((m) => `${m.op} ${m.line} ${m.ends.map((n) => n.fr).join(' ↔ ')}`)).toEqual(['tec W Braine-l’Alleud Gare ↔ Bruxelles Midi']);
+    const [w] = await core.findLines('w');
+    expect((await core.lineStops(w)).map((x) => x.areaId)).toEqual(['tec:Bbrlgar1', 'tec:Bwategl1', 'tec:Bbxlmid1']);
+    // tram 3 à Gare du Nord : deux sens, en temps réel STIB (scène base)
+    const b = await core.lineBoard('stib:6357F', '3');
+    expect(b).toMatchObject({ state: 'ok', op: 'stib', mode: 'tram', line: '3', anyPlanned: false, rtErrors: [] });
+    expect(b.directions.map((d) => `${displayName(d.head, 'fr')} : ${d.departures.map((x) => `${hhmm(x.est)}${x.rt ? '' : '~'}`).join(', ')}`)).toEqual([
+      'Churchill : 12:12, 12:20',
+      'Esplanade : 12:16, 12:24',
+    ]);
+    checkTexts(...b.directions.map((d) => d.head.fr));
+    // bus W à Waterloo Eglise : deux sens ; ligne absente et arrêt inconnu : introuvable
+    const wb = await coreAt(T('07:31')).lineBoard('tec:Bwategl1', 'W');
+    expect(wb.directions.map((d) => d.head.fr)).toEqual(['Bruxelles Midi', 'Braine-l’Alleud Gare']);
+    expect(wb.directions.every((d) => d.departures.length === 2)).toBe(true);
+    expect((await core.lineBoard('stib:6357F', 'W')).state).toBe('missing');
+    expect((await core.lineBoard('stib:404', '3')).state).toBe('missing');
   });
 
   it('trains Namur → Gand-Saint-Pierre : une correspondance, au moins 4 min en gare', async () => {
@@ -390,14 +433,17 @@ describe('fonctions transversales', () => {
     expect(await coreAt(now).trains('sncb:8863008', 'sncb:8863008', now, 3)).toEqual([]);
   });
 
-  it('destination à distance de marche : une seule étape à pied', async () => {
+  it('destination à distance de marche : jamais plus tard qu’à pied (1.2.2 : la marche seule concourt avec les autres trajets)', async () => {
     const now = T('12:10');
     const rogier = { type: 'area', areaId: 'stib:6359', op: 'stib', name: { fr: 'Rogier', nl: 'Rogier' }, lat: 50.856925, lon: 4.358875 } as const;
     const js = await coreAt(now).plan({ type: 'here' }, rogier, now, PRESET, S2_POS);
-    expect(js.length).toBe(1);
-    expect(js[0].legs.map((l) => l.kind)).toEqual(['walk']);
-    expect(js[0].legs[0].walkMin).toBeLessThanOrEqual(PRESET.maxWalkMin);
+    expect(js.length).toBeGreaterThanOrEqual(1);
+    expect(js.length).toBeLessThanOrEqual(3);
+    expect(js[0].label).toBe('short');
+    // 6 min à pied (arrivée 12:16) ; le T3 de 12:12 à Gare du Nord, à 2 min, arrive à 12:14 : il passe d'abord
+    expect(js[0].arr).toBeLessThanOrEqual(T('12:16'));
     expect(js[0].transfers).toBe(0);
+    for (const j of js) for (const l of j.legs) if (l.kind === 'walk') expect(l.walkMin).toBeLessThanOrEqual(PRESET.maxWalkMin);
   });
 
   it('jamais un véhicule plus lent que la marche : Bruxelles-Central → Bureau (12 min à pied)', async () => {

@@ -220,7 +220,8 @@ describe('favoris « réponse directe » (L1)', () => {
 
   it('trajet en cours : étape suivante, messages', () => {
     const j = bureau({ delay: 2, newPlatform: '6' });
-    expect(runningNext(j, at(7, 36))).toBe('IC 07:44, voie 6');
+    // 1.2.2 (REVUE-USAGE n° 8) : comme sur les départs de sa gare, heure prévue, retard, voie modifiée « ! »
+    expect(nb(runningNext(j, at(7, 36)))).toBe('IC 07:42 +2 voie 6 !');
     expect(runningNext(j, at(8, 5))).toBe('descente 08:48');
     expect(runningNext(j, at(8, 52))).toBe('arrivée 09:00');
     const cancelled = { ...j, legs: j.legs.map((l) => (l.kind === 'ride' ? { ...l, cancelled: true } : l)) };

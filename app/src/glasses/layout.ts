@@ -85,6 +85,23 @@ export const LAYOUTS: Record<Layout, LayoutDef> = {
   menu: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(MENU_W), w: MENU_W, align: 'right', level: 3 }, gap: TIGHT },
   home: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT + HOME_INDENT, level: 2 }, c: { x: right(WIDE_W), w: WIDE_W, align: 'right', level: 4 }, gap: TIGHT },
   others: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 2 }, c: { x: right(WIDE_W), w: WIDE_W, align: 'right', level: 4 }, gap: TIGHT },
+  /**
+   * 1.2.2 : « Favoris » au format de l'accueil (REVUE-USAGE n° 7) : nom et réponse au plus clair (colonne de droite de
+   * 210 px, comme « Autres trajets »), détail et séparateur « Adresses récentes » un ton plus pâles (colonne b).
+   */
+  favorites: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 2 }, c: { x: right(WIDE_W), w: WIDE_W, align: 'right', level: 4 }, gap: TIGHT },
+  /** 1.2.2 : « Gares » : nom de la gare, prochain train dans la colonne de droite de l'accueil (PRD-1.2.2 § 2). */
+  stations: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(WIDE_W), w: WIDE_W, align: 'right', level: 4 }, gap: TIGHT },
+  /**
+   * 1.2.2 : « Bus, tram, métro » (§ 3) : titre de la ligne au plus clair (colonne a) ; ses sens en retrait, plus pâles,
+   * le terminus puis les passages alignés à droite (colonne b, comme les favoris de l'accueil).
+   */
+  lines: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT + HOME_INDENT, level: 2 }, c: { x: right(WIDE_W), w: WIDE_W, align: 'right', level: 4 }, gap: TIGHT },
+  /**
+   * 1.2.2 : détail d'une ligne (§ 3) : « vers … » et « Tous les départs de l'arrêt » au plus clair (colonne a) ; chaque
+   * passage en retrait, heure puis terminus s'il diffère (colonne b), attente dans la colonne d'état des étapes.
+   */
+  line: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT + HOME_INDENT, level: 3 }, c: { x: right(STATE_W), w: STATE_W, level: 4 }, gap: TIGHT },
   nearby: { a: { x: X_TEXT, level: 4 }, b: { x: right(NEXT_W) - GAP - 64, w: 64, level: 3 }, c: { x: right(NEXT_W), w: NEXT_W, level: 4 } },
   board: { a: { x: X_TEXT, w: 52, level: 4 }, b: { x: X_TEXT + 52 + GAP, level: 3 }, c: { x: right(96), w: 96, level: 4 } },
   boardTrain: { a: { x: X_TEXT, w: 40, level: 4 }, b: { x: X_TEXT + 40 + GAP, level: 3 }, c: { x: right(160), w: 160, level: 4 } },
@@ -109,6 +126,8 @@ export const WIDTHS = {
   homeRow: X_END - (X_TEXT + HOME_INDENT) - GEO.SAFETY,
   /** 1.2.1 : colonne de droite de l'accueil et de « Autres trajets ». */
   wideRight: WIDE_W - GEO.SAFETY,
+  /** 1.2.2 : un passage du détail d'une ligne (heure, terminus s'il diffère), à côté de l'attente. */
+  lineText: right(STATE_W) - TIGHT - (X_TEXT + HOME_INDENT) - GEO.SAFETY,
 };
 
 export interface Frame {
@@ -116,8 +135,11 @@ export interface Frame {
   top: number;
 }
 
-/** Nombre de lignes d'un élément (1 ou 2), plus sa ligne vide au-dessus (1.2.1). */
-export const itemLines = (it: Item): number => (it.gap ? 1 : 0) + (it.two || it.a2 || it.b2 ? 2 : 1);
+/**
+ * Nombre de lignes d'un élément (1 ou 2), plus sa ligne vide (1.2.1) et sa ligne pâle (1.2.2) au-dessus, et ses lignes
+ * en retrait en dessous (1.2.2).
+ */
+export const itemLines = (it: Item): number => (it.gap ? 1 : 0) + (it.head ? 1 : 0) + (it.two || it.a2 || it.b2 ? 2 : 1) + (it.sub?.length ?? 0);
 
 /** Premier élément visible le plus bas possible (écrans sans curseur : la fin de la liste tient à l'écran). */
 export function maxTop(items: Item[], capacity: number): number {
@@ -154,8 +176,9 @@ export function geometry(v: Pick<GlassesView, 'top' | 'note' | 'reserveNote'> & 
   const hasTop = !!v.top?.text;
   const rowsY = GEO.TITLE_Y + LINE_H + (hasTop ? LINE_H : 0) + 3;
   const noteLine = !!(v.reserveNote || v.note);
-  // 1.2.1 (accueil) : sous la note du jour férié, pas de ligne d'aide vide ; la note est la dernière ligne de l'écran.
-  const hintLine = !(v.compactFoot && noteLine && !v.hints && !toast);
+  // Accueil : la ligne d'aide n'existe que si l'aide s'affiche (1.2.1 : sous la note du jour férié ; 1.2.2, REVUE-USAGE
+  // n° 1 : toujours, les 7 premiers jours passés) ou pendant un message temporaire. Sans note, le pied est vide.
+  const hintLine = !v.compactFoot || !!v.hints || toast;
   const footLines = (noteLine ? 1 : 0) + (hintLine ? 1 : 0);
   const footY = SCREEN_H - GEO.BOTTOM_MARGIN - footLines * LINE_H;
   const capacity = Math.max(1, Math.floor((footY - rowsY) / LINE_H));
@@ -286,15 +309,29 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   const lines: string[] = [];
   if (g.hasTop && v.top) lines.push(truncate(v.top.text, X_END - X_TEXT - GEO.SAFETY));
 
+  // 1.2.1 (accueil) : nom puis réponse alignée à droite, dans le même conteneur (même luminosité) ; 1.2.2 : sens d'une
+  // ligne de « Bus, tram, métro » (lignes en retrait sous l'élément).
+  const rightRow = (left: string, r: string, tail: string | undefined) =>
+    spread(left, withOptionalTail(r, tail, Math.min(def.c.w ?? 0, X_END - def.c.x) - GEO.SAFETY), X_END - def.b.x - GEO.SAFETY, def.gap ?? GAP);
+  /** Ligne sans curseur, dans la colonne b seulement (ligne pâle au-dessus, lignes en retrait en dessous). */
+  const bOnly = (text: string, log: string): void => {
+    colA.push('');
+    colB.push(text);
+    colC.push('');
+    cursor.push('');
+    lines.push(log);
+  };
+
   for (let i = from; i < to; i++) {
     const it = items[i];
     if (it.gap) {
       // 1.2.1 : ligne vide au-dessus de l'élément (journalisée vide : elle se voit à l'écran).
-      colA.push('');
-      colB.push('');
-      colC.push('');
-      cursor.push('');
-      lines.push('');
+      bOnly('', '');
+    }
+    if (it.head) {
+      // 1.2.2 : ligne pâle au-dessus de l'élément (« Adresses récentes »), jamais sous le curseur.
+      const h = truncate(it.head, X_END - def.b.x - GEO.SAFETY);
+      bOnly(h, h);
     }
     const b = it.b ?? '';
     const c = it.c ?? '';
@@ -303,8 +340,7 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     let bt = bAny ? withTail(b, it.bTail, room(def, 'b', { c })) : '';
     let bLog = bt;
     if (it.bRight) {
-      // 1.2.1 (accueil) : nom puis réponse alignée à droite, dans le même conteneur (même luminosité).
-      const row = spread(b, withOptionalTail(it.bRight, it.bRightTail, Math.min(def.c.w ?? 0, X_END - def.c.x) - GEO.SAFETY), X_END - def.b.x - GEO.SAFETY, def.gap ?? GAP);
+      const row = rightRow(b, it.bRight, it.bRightTail);
       bt = row.text;
       bLog = [row.left, row.right].filter(Boolean).join(COL_SEP);
     }
@@ -324,6 +360,12 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
       // 2e ligne réservée mais vide (favori en calcul) : rien à journaliser.
       if (a2 || b2) lines.push([a2, b2].filter(Boolean).join(COL_SEP));
     }
+    for (const s of it.sub ?? []) {
+      // 1.2.2 : lignes en retrait sous l'élément (sens d'une ligne), le texte de droite aligné au bord.
+      const row = s.bRight ? rightRow(s.b, s.bRight, s.bRightTail) : null;
+      const text = row ? row.text : truncate(s.b, X_END - def.b.x - GEO.SAFETY);
+      bOnly(text, row ? [row.left, row.right].filter(Boolean).join(COL_SEP) : text);
+    }
   }
 
   const foot: string[] = [];
@@ -335,7 +377,10 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   if (hintText && g.hintLine) lines.push(hintText);
 
   const titleW = TITLE_W;
-  const title = truncate(v.title, titleW - GEO.SAFETY) || 'Quai';
+  // 1.2.2 : « Suivi » ou « Suivre ce trajet » aligné à droite sur la ligne du titre (écran d'un trajet, PRD-1.2.2 § 6).
+  const titleRow = v.titleRight ? spread(v.title, v.titleRight, titleW - GEO.SAFETY, TIGHT) : null;
+  const title = titleRow ? titleRow.text : truncate(v.title, titleW - GEO.SAFETY) || 'Quai';
+  const titleLog = titleRow ? [titleRow.left, titleRow.right].filter(Boolean).join(COL_SEP) : title;
   const rowsH = g.capacity * LINE_H;
   const C = (id: number, name: string, x: number, y: number, w: number, h: number, content: string, level: Brightness): ContainerSpec => ({
     id,
@@ -358,10 +403,14 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     C(IDS.colA, 'colA', def.a.x, g.rowsY, X_END - def.a.x, rowsH, join(colA), message ? 4 : def.a.level),
     C(IDS.colB, 'colB', def.b.x, g.rowsY, X_END - def.b.x, rowsH, join(colB), def.b.level),
     C(IDS.colC, 'colC', def.c.x, g.rowsY, X_END - def.c.x, rowsH, join(colC), def.c.level),
-    C(IDS.foot, 'foot', X_TEXT, g.footY, X_END - X_TEXT, g.footLines * LINE_H, foot.join('\n'), opts.toast ? 4 : 2),
+    // 1.2.2 : pied vide (accueil sans aide ni jour férié) : 1 px, toujours les 8 mêmes conteneurs (REVUE-USAGE n° 1).
+    C(IDS.foot, 'foot', X_TEXT, g.footY, X_END - X_TEXT, Math.max(FOOT_MIN_H, g.footLines * LINE_H), foot.join('\n'), opts.toast ? 4 : 2),
   ];
-  return { containers, lines, screen: v.screen, title, clock: v.clock, top, visible: to - from, sel };
+  return { containers, lines, screen: v.screen, title: titleLog, clock: v.clock, top, visible: to - from, sel };
 }
+
+/** Hauteur d'un pied sans ligne (la documentation du SDK permet 0 ; 1 px évite un champ omis par protobuf). */
+export const FOOT_MIN_H = 1;
 
 /** Clé de forme : si elle change, il faut reconstruire la page (rebuildPageContainer). */
 export function shapeKey(p: PageSpec): string {

@@ -1,16 +1,15 @@
 /**
  * Textes du téléphone (PRD § 6.2 et § 6.3) : typographie française, cartes de trajets (titre, ligne « moyens »,
- * phrase ; PRD-1.2.1 § 7.2), jour férié (§ 5), réponses courtes des favoris, sous-titres des lieux. Fonctions pures,
- * sans DOM.
+ * phrase ; PRD-1.2.1 § 7.2), jour férié (§ 5), réponses courtes des favoris, sous-titres des lieux, gares et lignes
+ * choisies (PRD-1.2.2 § 4). Fonctions pures, sans DOM.
  */
-import type { Endpoint, Favorite, FavoriteAnswer, Journey, NameLang, Place, PlanResult, Propose, Settings } from '../core/api';
+import type { Endpoint, FavoriteAnswer, Journey, LineMatch, LinePick, Mode, NameLang, Op, Place, PlanResult, Propose, Settings } from '../core/api';
 import { LABEL_TEXT } from '../core/api';
 import { favoriteTitle, placeOf } from '../core/favorites';
-import { displayLabel, HOLIDAY_TEXT, holidayName, longestWalk, meansText, walksMore } from '../core/means';
+import { displayLabel, HOLIDAY_TEXT, holidayName, longestWalk, meansText, rideName, walksMore } from '../core/means';
 import { NB, shortAddress } from '../core/text';
-import { areaLabel, displayName, hhmm } from '../core/util';
+import { displayName, hhmm, OP_NAME } from '../core/util';
 import { atTitle, durationText, journeyStart, spanText, stopAnswerLine, transfersText, tripAnswerLine, walkMinOf } from '../glasses/format';
-import { compareVersions } from '../version';
 import { normalizeForSearch } from '../../../shared/names';
 
 /** Espace insécable (U+00A0) du cœur ; adresse courte « Veldstraat 1 » (titres « Vers … »). */
@@ -32,7 +31,8 @@ export function typo(s: string): string {
 
 export const T = {
   where: 'Où vas-tu ?',
-  wherePlaceholder: 'Adresse, gare, arrêt ou lieu',
+  /** 1.2.2 (revue d'usage n° 5) : plus de « lieu », un lieu est un favori depuis la 1.2. */
+  wherePlaceholder: 'Adresse, gare, arrêt ou favori',
   addrPlaceholder: 'Rue et numéro, commune',
   privacy: 'Adresses : services officiels des Régions bruxelloise, flamande et wallonne. Seul le texte tapé leur est envoyé, ta position reste sur le téléphone.',
   /** Quai Web, rubrique « Position » (PRD-1.2 § 3). */
@@ -55,7 +55,7 @@ export const T = {
   hereSearching: 'Recherche de ta position…',
   hereDown: 'Position indisponible : autorise la position pour Quai dans l’appli Even, ou choisis une adresse ou un arrêt.',
   hereDownWeb: 'Position indisponible : autorise-la dans le navigateur, ou choisis une adresse ou un arrêt.',
-  needName: 'Donne un nom au lieu.',
+  needName: 'Donne un nom à cet endroit.',
   needSpot: 'Choisis une adresse ou un arrêt dans la liste.',
   clearRecent: 'Effacer les adresses récentes',
   recentTitle: 'Adresses récentes',
@@ -78,61 +78,129 @@ export const T = {
   kindTrip: `Un trajet de A${NB}à${NB}B`,
   kindTripSub: 'départ et arrivée fixes',
   fixedTrip: 'Trajet fixe',
-  allLines: 'Toutes les lignes',
   name: 'Nom',
   save: 'Enregistrer',
-  inGlasses: 'Dans les lunettes',
-  nextDepartures: 'Ses prochains départs',
-  tripThere: 'Le trajet pour y aller',
-  proposeLegend: 'Le proposer à l’ouverture',
+  /** 1.2.2 (revue d'usage n° 11) : le créneau met le favori en tête de l'accueil ; « Jamais » devient « Automatique ». */
+  proposeLegend: 'En tête de l’accueil',
   reorder: 'Changer l’ordre',
   up: 'Monter',
   down: 'Descendre',
   done: 'Terminé',
-  favsLead: 'Tes lieux, tes arrêts et tes trajets. En tête dans les lunettes selon l’heure et le lieu (réglage Affichage).',
+  /** « A à B » insécable, comme kindTrip. */
+  favsLead: `Tes endroits et tes trajets de A${NB}à${NB}B. En tête dans les lunettes selon l’heure et ta position (réglage Affichage).`,
   maxWalk: 'Marche maximale',
   /** PRD-1.2.1 § 7.3 : paliers de marche, plus de marche seulement si les trajets qui restent dans la limite sont bien plus lents. */
   maxWalkSub: 'D’abord les trajets dans cette limite ; au-delà, s’il n’y a pas mieux',
   rtDown: 'Temps réel indisponible, horaires prévus',
   offline: 'Pas de réseau : réessaie dans un instant.',
+  /** 1.2.2 (revue d'usage n° 9) : écran « Trajets » (marche maximale, marge) ; « Alertes » ne garde que les alertes. */
+  trips: 'Trajets',
+  margin: 'Marge avant de partir',
+  marginSub: 'comprise dans l’heure de départ conseillée',
+  leaveAlert: 'Heure de partir à pied',
+  leaveAlertSub: 'à l’heure de départ conseillée',
+  works: 'Travaux et déviations',
+  worksSub: 'sur tes gares et tes lignes',
+  /** 1.2.2 (PRD-1.2.2 § 4) : gares et lignes choisies, sur l'accueil du téléphone et dans l'onglet Réglages de Quai Web. */
+  stations: 'Gares',
+  lines: 'Bus, tram, métro',
+  addStation: 'Ajouter une gare',
+  addLine: 'Ajouter une ligne',
+  noStation: 'Aucune gare pour l’instant.',
+  noLine: 'Aucune ligne pour l’instant.',
+  /** Ouverture d'office des départs à moins de 300 m (`near`, l'ancien créneau « près » d'un arrêt favori). */
+  pickNear: 'Ouvrir d’office à moins de 300 m',
+  removePick: 'Retirer',
+  stationExists: 'Déjà dans tes gares.',
+  lineExists: 'Déjà dans tes lignes.',
+  /** Type à droite d'une proposition déjà choisie. */
+  stationTaken: 'déjà dans tes gares',
+  lineTaken: 'déjà dans tes lignes',
+  stationLead: 'Ses prochains trains s’afficheront dans les lunettes.',
+  stationField: 'Nom de la gare',
+  stationPlaceholder: 'Namur, Gand-Saint-Pierre…',
+  stationNearby: 'Les plus proches de ta position.',
+  stationNone: 'Aucune gare ne correspond. Vérifie l’orthographe.',
+  lineLead: 'Ses passages, dans les deux sens, s’afficheront dans les lunettes.',
+  lineField: 'Numéro de la ligne',
+  linePlaceholder: 'W, 36, 71…',
+  lineNone: 'Aucune ligne de bus, tram ou métro ne porte ce numéro. Pour un train, ajoute sa gare dans Gares.',
+  linesFound: 'Lignes trouvées',
+  whichStop: 'À quel arrêt ?',
+  stopFilter: 'Filtrer les arrêts',
+  stopPlaceholder: 'Nom de l’arrêt',
+  stopsLoading: 'Chargement des arrêts…',
+  stopNone: 'Aucun arrêt de cette ligne ne correspond.',
+  stopsNone: 'Aucun arrêt trouvé pour cette ligne.',
+  chosenStop: 'arrêt choisi',
+  changeLine: 'Changer de ligne',
+  anotherLine: 'Ajouter une autre ligne',
+  searchDown: 'Recherche impossible pour l’instant : réessaie dans un instant.',
+  /** « Un endroit » (revue d'usage n° 3) : un arrêt de bus, tram ou métro mène à « Ajouter une ligne », arrêt présélectionné. */
+  nextPassagesLink: 'Ses prochains passages : choisir une ligne dans Bus, tram, métro',
 } as const;
 
-/** Version où les lieux sont devenus des favoris : qui vient d'avant lit une ligne de plus dans la bannière. */
-const PLACES_AS_FAVORITES = '1.2.0';
-
 /**
- * Bannière « Nouveau » de l'accueil du téléphone (PRD-1.2.1 § 6) : les nouveautés du message « Quai 1.2.1 » des
- * lunettes, dans le même ordre, dites depuis le téléphone (le ▼ et l'accueil sont ceux des lunettes) ; depuis une
- * version antérieure à la 1.2.0, « Tes lieux sont maintenant dans tes favoris. » en plus. `seen` : la version vue avant
- * la mise à jour.
+ * Bannière « Nouveau » de l'accueil du téléphone, message « Quai 1.2.2 » (PRD-1.2.2 § 9, revue d'usage n° 4) : une
+ * ligne par nouveauté, les mêmes depuis la 1.2.1, la 1.2.0 ou la 1.1, comme les lunettes et Quai Web.
  */
-export function newsLines(seen: string): string[] {
-  const lines = ['Nouveau : le moins de marche d’abord.', 'Dans les lunettes, sur un trajet, ▼ : la suite, puis les autres trajets.', 'Accueil des lunettes plus simple : tes favoris en tête.'];
-  if (seen && compareVersions(seen, PLACES_AS_FAVORITES) < 0) lines.push('Tes lieux sont maintenant dans tes favoris.');
-  return lines;
+export const NEWS_122: readonly string[] = [
+  'Nouveau : tes gares et tes lignes de bus, tram et métro sur l’accueil des lunettes.',
+  'Tes arrêts favoris y sont rangés, rien n’est perdu.',
+  'Dans les lunettes, Aller à… a rejoint Favoris.',
+  'Un trajet n’est suivi que si tu le demandes.',
+];
+
+/** Lignes de la bannière « Nouveau » (NEWS_122), quelle que soit la version vue avant la mise à jour. */
+export function newsLines(_seen = ''): string[] {
+  return [...NEWS_122];
 }
 
 /** Suppression d'un lieu utilisé par un trajet fixe (PRD-1.2 § 2.2). */
 export const removeUsedPlaceText = (name: string): string => `Supprimer « ${name} » ? Les trajets fixes qui l’utilisent seront aussi supprimés.`;
 /** Limite des favoris atteinte (PRD-1.2 § 2.2). */
 export const limitText = (max: number): string => `${max} favoris au plus : supprimes-en un.`;
+/** 1.2.2 : limites des gares et des lignes atteintes (LIMITS.stations, LIMITS.lines de settings.ts). */
+export const stationLimitText = (max: number): string => `${max} gares au plus : retires-en une.`;
+export const lineLimitText = (max: number): string => `${max} lignes au plus : retires-en une.`;
+/** 1.2.2 : gare ajoutée (« Ajouter une gare », lien de « Un endroit », revue d'usage n° 3). */
+export const stationAddedText = (name: string): string => `${name} ajoutée à Gares.`;
+/** « Un endroit » (revue d'usage n° 3) : une gare SNCB choisie, ses départs dans Gares. */
+export const nextDeparturesLink = (name: string): string => `Ses prochains départs : ajouter ${name} à Gares`;
+/** Retrait d'une gare ou d'une ligne, confirmé dans la page, puis annoncé. */
+export const removeStationText = (name: string): string => `Retirer ${name} de tes gares ?`;
+export const removeLineText = (name: string): string => `Retirer ${name} de tes lignes ?`;
+export const stationGoneText = (name: string): string => `${name} n’est plus dans tes gares.`;
+export const lineGoneText = (name: string): string => `${name} n’est plus dans tes lignes.`;
+/** « Ajouter une ligne » depuis un arrêt (?arret=…) : ses lignes en raccourcis, et une ligne qui n'y passe pas. */
+export const stopLinesText = (stop: string): string => (stop ? `Lignes à ${stop} :` : 'Lignes de cet arrêt :');
+export const notServedText = (stop: string): string => `Cette ligne ne passe pas à ${stop}.`;
+/** Rang annoncé après « Monter » ou « Descendre » : « Namur : 2e sur 3. » */
+export const rankText = (name: string, rank: number, total: number): string => `${name} : ${rank === 1 ? '1er' : `${rank}e`} sur ${total}.`;
+/** Ligne « Trajets » des réglages (revue d'usage n° 9) : « Marche 10 min au plus, marge 2 min ». */
+export const tripsSummary = (maxWalkMin: number, marginMin: number): string => `Marche ${maxWalkMin} min au plus, marge ${marginMin} min`;
 export const noStopText = (min: number): string => `Aucun arrêt à moins de ${min} min à pied de cette adresse.`;
 export const noFullTripText = (station: string): string => `Pas de trajet complet. Essaie ${station}, puis le tram.`;
 export const searchTowards = (station: string): string => `Chercher vers ${station}`;
 /** Annonce du nombre de résultats (« 3 trajets. »). */
 export const tripsCount = (n: number): string => `${n} trajet${n > 1 ? 's' : ''}.`;
 
-/** « Le proposer à l'ouverture » : créneaux avec leurs heures (S3). */
+/**
+ * « En tête de l’accueil » (revue d'usage n° 11, mêmes valeurs enregistrées) : créneaux avec leurs heures (S3) ;
+ * « Automatique » (never) laisse l'ordre des favoris décider.
+ */
 export const PROPOSE_LABEL: Record<Propose, string> = {
-  never: 'Jamais',
-  near: 'Quand je suis à moins de 300 m',
+  never: 'Automatique',
+  near: 'L’ouvrir d’office à moins de 300 m',
   morning: 'Le matin (5 h à 11 h)',
   evening: 'Le soir (15 h à 21 h)',
 };
-/** Créneaux d'un lieu (PRD-1.2 § 2.2) : « Quand je suis à moins de 300 m » n'a pas de sens pour un lieu. */
+/** Ordre des créneaux d'un trajet fixe : Automatique, le matin, le soir, d'office à moins de 300 m. */
+export const PROPOSE_ORDER: readonly Propose[] = ['never', 'morning', 'evening', 'near'];
+/** Créneaux d'un lieu (PRD-1.2 § 2.2) : l'ouverture d'office à moins de 300 m n'a pas de sens pour un lieu. */
 export const PLACE_PROPOSE: readonly Propose[] = ['never', 'morning', 'evening'];
-/** Fin du sous-titre d'un favori : « proposé le matin ». */
-export const PROPOSE_TEXT: Record<Propose, string> = { never: '', near: 'proposé à moins de 300 m', morning: 'proposé le matin', evening: 'proposé le soir' };
+/** Fin du sous-titre d'un favori : « en tête le matin ». */
+export const PROPOSE_TEXT: Record<Propose, string> = { never: '', near: 'ouvert d’office à moins de 300 m', morning: 'en tête le matin', evening: 'en tête le soir' };
 
 /* ------------------------------ Adresses ------------------------------ */
 
@@ -197,11 +265,43 @@ export function towardsText(to: Endpoint, settings: Settings): string {
 /** « au bureau », « à Veldstraat 1 » (« Tu es déjà au bureau. »). */
 export const atText = (to: Endpoint, settings: Settings): string => atTitle(towardsText(to, settings));
 
-/** Nom d'un favori sur l'accueil du téléphone : « Vers le bureau » (lieu, trajet), ou le libellé de l'arrêt. */
-export function favoriteName(f: Favorite, settings: Settings, answer?: FavoriteAnswer): string {
-  if (f.kind !== 'stop') return favoriteTitle(f, settings);
-  const area = answer?.board?.area;
-  return area ? areaLabel(area, settings.lang) : f.op === 'sncb' ? `${displayName(f.name, settings.lang)}, train` : displayName(f.name, settings.lang);
+/* ------------------------------ Gares et lignes choisies (1.2.2) ------------------------------ */
+
+/** Nom d'une ligne : « Bus W », « Tram 3 », « Métro 2 » (mot et numéro, `rideName` du cœur) ; mode inconnu : « Ligne 3 ». */
+export function lineName(l: { op: Op; line: string; mode?: Mode }): string {
+  if (!l.mode || l.mode === 'train') return `Ligne ${l.line}`;
+  const n = rideName({ op: l.op, mode: l.mode, line: l.line });
+  return n.charAt(0).toUpperCase() + n.slice(1);
+}
+
+/**
+ * Titre d'une ligne choisie (PRD-1.2.2 § 3 et § 4) : « Bus W · Merbraine » ; sans ligne (arrêt favori de la 1.2.1
+ * sans filtre, migré) : « Gare du Nord · toutes les lignes ». `mode` : le mode s'il est connu autrement (linesAt).
+ */
+export function linePickTitle(p: Pick<LinePick, 'op' | 'name' | 'line' | 'mode'>, lang: NameLang, mode: Mode | undefined = p.mode): string {
+  const stop = displayName(p.name, lang);
+  return p.line ? `${lineName({ op: p.op, line: p.line, mode })} · ${stop}` : `${stop} · toutes les lignes`;
+}
+
+/** Ligne trouvée par son numéro (PRD-1.2.2 § 4) : « Bus W TEC, Braine-l’Alleud ↔ Bruxelles Midi ». */
+export function lineMatchText(m: Pick<LineMatch, 'op' | 'mode' | 'line' | 'ends'>, lang: NameLang): string {
+  const ends = m.ends.map((e) => displayName(e, lang)).join(' ↔ ');
+  return `${lineName(m)} ${OP_NAME[m.op]}${ends ? `, ${ends}` : ''}`;
+}
+
+/** Confirmation d'une ligne ajoutée (PRD-1.2.2 § 4) : « Bus W à Merbraine ajouté : les deux sens s’afficheront dans les lunettes. » */
+export function lineAddedText(l: { op: Op; line: string; mode?: Mode }, stop: string): string {
+  const named = lineName(l);
+  // « Bus », « Tram », « Métro » sont masculins ; « Ligne » (mode inconnu) est féminin.
+  return `${named} à ${stop} ${named.startsWith('Ligne ') ? 'ajoutée' : 'ajouté'} : les deux sens s’afficheront dans les lunettes.`;
+}
+
+/** Distance d'une proposition, à droite : « ici », « 450 m », « 1,2 km », « 52 km ». */
+export function distanceText(m: number): string {
+  if (m < 50) return 'ici';
+  if (m < 1000) return `${Math.round(m / 10) * 10} m`;
+  if (m < 9950) return `${(m / 1000).toFixed(1).replace('.', ',')} km`;
+  return `${Math.round(m / 1000)} km`;
 }
 
 /** Même trajet (favori ou recherche) : même départ et même arrivée. */
@@ -235,13 +335,15 @@ export function timesText(j: Journey, now: number): string {
   return spanText(start, end, now);
 }
 
-/** « 1 h 23, direct, 17 min à pied » ; trajet à pied : « 22 min à pied ». */
+/**
+ * « 1 h 23, direct » ; trajet à pied : « 22 min à pied ». 1.2.2 (revue d’usage n° 13) : plus la marche, que la ligne
+ * « moyens » détaille (« à pied 2 + 2 + 3 min ») et dont la phrase parle au besoin.
+ */
 export function summaryText(j: Journey): string {
   const { start, end } = journeyTimes(j);
   const dur = durationText((end - start) / 60_000);
   if (!j.legs.some((l) => l.kind === 'ride')) return `${dur} à pied`;
-  const walk = walkMinutesOf(j);
-  return [dur, transfersText(j.transfers), walk ? `${walk} min à pied` : ''].filter(Boolean).join(', ');
+  return `${dur}, ${transfersText(j.transfers)}`;
 }
 
 /** « 13 min », « 1 h 05 » (un nombre de minutes). */

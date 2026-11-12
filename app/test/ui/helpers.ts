@@ -40,7 +40,10 @@ export const defaults = (patch: Partial<Settings> = {}): Settings => ({ ...struc
 /** Espaces insécables remplacées par des espaces (comparaisons de textes). */
 export const nb = (t: string): string => t.replace(/ /g, ' ');
 
-/** Vérifie qu'aucune ligne d'un conteneur ne dépasse sa largeur (mesure au pixel). */
+/**
+ * Vérifie qu'aucune ligne d'un conteneur ne dépasse sa largeur (mesure au pixel), ni sa hauteur. 1.2.2 : un conteneur
+ * vide (pied réduit à 1 px sur l'accueil sans aide des gestes) n'a pas de hauteur à tenir.
+ */
 export function overflowing(page: PageSpec): string[] {
   const bad: string[] = [];
   for (const c of page.containers) {
@@ -48,7 +51,8 @@ export function overflowing(page: PageSpec): string[] {
       if (textWidth(line) > c.w) bad.push(`${c.name}: « ${line} » ${textWidth(line)} px > ${c.w} px`);
     }
     const lines = c.content.split('\n').length;
-    if (lines * 27 > c.h) bad.push(`${c.name}: ${lines} lignes pour ${c.h} px`);
+    if (c.content.trim() && lines * 27 > c.h) bad.push(`${c.name}: ${lines} lignes pour ${c.h} px`);
+    if (c.y + c.h > 288) bad.push(`${c.name}: sous le bas de l’écran (${c.y + c.h} px)`);
   }
   return bad;
 }

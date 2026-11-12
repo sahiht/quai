@@ -142,7 +142,8 @@ export function yourFavoritesScreen(ctx: PhoneCtx): HTMLElement {
     { class: 'screen' },
     header(ctx, 'Tes favoris', 'Facultatif. Maison et bureau deviennent tes premiers favoris.'),
     h('section', { class: 'box pad' }, maison.el, bureau.el, privacyNote()),
-    h('label', { class: 'choice check-row' }, slots, 'Me proposer le trajet vers le bureau le matin, et vers la maison le soir'),
+    // 1.2.2 (revue d'usage n° 11) : le créneau met le favori en tête de l'accueil ; plus de « proposer ».
+    h('label', { class: 'choice check-row' }, slots, 'Mettre le bureau en tête le matin, et la maison le soir'),
     live.el,
     done,
     later,

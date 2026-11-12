@@ -29,9 +29,9 @@ describe('machine d’états des gestes', () => {
   it('toucher ouvre l’élément sélectionné', () => {
     const s = setSelection(initNav({ screen: 'home' }), 2, 0);
     const v = view(3);
-    v.items[2].action = { kind: 'open', route: { screen: 'places' } };
+    v.items[2].action = { kind: 'open', route: { screen: 'stations' } };
     const r = handleGesture(s, 'tap', v, 7);
-    expect(r.effect).toEqual({ kind: 'intent', intent: { kind: 'open', route: { screen: 'places' } } });
+    expect(r.effect).toEqual({ kind: 'intent', intent: { kind: 'open', route: { screen: 'stations' } } });
   });
 
   it('double toucher : retour, puis sortie depuis la racine', () => {
@@ -87,8 +87,8 @@ describe('machine d’états des gestes', () => {
     const short = { ...v, items: rows(3) };
     expect(handleGesture(initNav({ screen: 'home' }), 'down', short, 6).effect).toEqual({ kind: 'edge', dir: 'down' });
     // départs sans action d'élément : le toucher reste celui de l'écran
-    const board = view(3, { layout: 'board', screen: 'board', items: rows(3), scroll: true, tap: { kind: 'toggleFavoriteStop' } });
-    expect(handleGesture(initNav({ screen: 'home' }), 'tap', board, 6).effect).toEqual({ kind: 'intent', intent: { kind: 'toggleFavoriteStop' } });
+    const board = view(3, { layout: 'board', screen: 'board', items: rows(3), scroll: true, tap: { kind: 'toggleStation' } });
+    expect(handleGesture(initNav({ screen: 'home' }), 'tap', board, 6).effect).toEqual({ kind: 'intent', intent: { kind: 'toggleStation' } });
   });
 
   it('instantané sérialisable pour l’arrière-plan', () => {
@@ -102,6 +102,12 @@ describe('machine d’états des gestes', () => {
     const old = { stack: [{ route: { screen: 'home' }, sel: 0, top: 0 }, { route: { screen: 'journeys', label: 'Bureau' }, sel: 1, top: 0 }] };
     expect(parseNav(old)?.stack.map((f) => f.route.screen)).toEqual(['home']);
     expect(parseNav({ stack: [{ route: { screen: 'trip' }, sel: 0, top: 0 }] })).toBeNull();
+    // 1.2.2 : « Aller à… » de la 1.2.1 et « Autres favoris » de la 1.2.0 : « Favoris »
+    expect(parseNav({ stack: [{ route: { screen: 'home' }, sel: 0, top: 0 }, { route: { screen: 'places' }, sel: 3, top: 1 }] })?.stack[1]).toEqual({ route: { screen: 'favorites' }, sel: 3, top: 1, fresh: false });
+    expect(parseNav({ stack: [{ route: { screen: 'favorites', exclude: ['a'] }, sel: 0, top: 0 }] })?.stack[0].route).toEqual({ screen: 'favorites' });
+    // les écrans de la 1.2.2 passent d'une WebView à l'autre
+    const s122 = push(push(initNav({ screen: 'home' }), { screen: 'lines' }), { screen: 'line', areaId: 'tec:Bbrlmer1', op: 'tec', line: 'W', name: { fr: 'Merbraine', nl: 'Merbraine' } });
+    expect(parseNav(serializeNav(s122))).toEqual(s122);
   });
 });
 

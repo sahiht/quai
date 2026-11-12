@@ -3,17 +3,20 @@
  * Aucune fonction ne lève d'exception sur une entrée invalide : on retombe sur les valeurs par défaut.
  * Version 3 (1.2, docs/v1.2/PRD-1.2.md § 2.4) : lieux et favoris en une seule liste ; un lieu est un favori
  * (kind 'place') ; un trajet fixe ne part jamais de « Ma position ».
+ * Version 4 (1.2.2, docs/v1.2.2/PRD-1.2.2.md § 5) : gares (`stations`) et lignes à un arrêt (`lines`) choisies ; les
+ * arrêts favoris y sont rangés et ne restent plus dans `favorites`.
  */
-import type { Endpoint, Favorite, FavoritePlace, FavoriteStop, FavoriteTrip, KV, LineFilter, NameLang, Place, Propose, RecentAddress, Settings } from './core/api';
+import type { Endpoint, Favorite, FavoritePlace, FavoriteStop, FavoriteTrip, KV, LineFilter, LinePick, NameLang, Place, Propose, RecentAddress, Settings, StationPick } from './core/api';
 import { DEFAULT_SETTINGS } from './core/api';
 import { shortAddress } from './core/text';
 import { displayName } from './core/util';
-import type { Names, Op } from '../../shared/types';
+import type { Mode, Names, Op } from '../../shared/types';
 
 export const SETTINGS_KEY = 'quai.settings';
-export const CURRENT_VERSION = 3;
+export const CURRENT_VERSION = 4;
 
 const OPS: readonly Op[] = ['sncb', 'stib', 'delijn', 'tec'];
+const MODES: readonly Mode[] = ['train', 'metro', 'tram', 'bus'];
 const LANGS: readonly NameLang[] = ['fr', 'nl', 'local'];
 const PROPOSE: readonly Propose[] = ['never', 'near', 'morning', 'evening'];
 /** Créneaux d'un lieu : « Quand je suis à moins de 300 m » n'a pas de sens pour lui et devient « Jamais ». */
@@ -25,6 +28,8 @@ const PLACE_SRC: readonly NonNullable<Place['src']>[] = ['address', 'stop', 'her
 
 export const LIMITS = {
   favorites: 32, // 1.2 : 20 favoris et 12 lieux de la 1.1, la migration ne perd rien
+  stations: 32, // 1.2.2 : autant que de favoris, la migration ne perd aucun arrêt
+  lines: 32, // 1.2.2 : idem (un arrêt qui ne tient plus ligne par ligne devient « toutes les lignes »)
   recent: 5,
   label: 30,
   address: 120,
@@ -212,6 +217,99 @@ function placeFromTrip(f: FavoriteTrip, lang: NameLang): FavoritePlace | undefin
   return undefined;
 }
 
+function stationPick(x: unknown): StationPick | undefined {
+  if (!isObj(x)) return undefined;
+  const id = str(x.id, 60);
+  const a = areaId(x.areaId);
+  const n = names(x.name);
+  const la = lat(x.lat);
+  const lo = lon(x.lon);
+  if (!id || !a || !a.startsWith('sncb:') || !n || la === undefined || lo === undefined) return undefined;
+  const p: StationPick = { id, areaId: a, name: n, lat: la, lon: lo };
+  if (x.near === true) p.near = true;
+  return p;
+}
+
+function linePick(x: unknown): LinePick | undefined {
+  if (!isObj(x)) return undefined;
+  const id = str(x.id, 60);
+  const a = areaId(x.areaId);
+  const op = oneOf(x.op, OPS, undefined as unknown as Op);
+  const n = names(x.name);
+  const la = lat(x.lat);
+  const lo = lon(x.lon);
+  if (!id || !a || !op || op === 'sncb' || !n || la === undefined || lo === undefined) return undefined;
+  const p: LinePick = { id, areaId: a, op, name: n, lat: la, lon: lo };
+  const line = str(x.line, 20);
+  if (line) p.line = line;
+  if (MODES.includes(x.mode as Mode) && x.mode !== 'train') p.mode = x.mode as Mode;
+  if (x.near === true) p.near = true;
+  return p;
+}
+
+/** Identifiants : 60 caractères au plus, comme à la lecture (une seconde lecture ne les change pas). */
+const ID_MAX = 60;
+
+/**
+ * 1.2.2 (PRD-1.2.2 § 5) : un arrêt favori rejoint les gares (gare SNCB) ou les lignes (autres réseaux : une ligne
+ * par ligne de son filtre, toutes les lignes de l'arrêt sans filtre), sans doublon ni dépassement des limites.
+ * L'ordre des favoris est gardé ; un arrêt déjà présent n'est pas ajouté une deuxième fois (il lui donne seulement son
+ * ouverture d'office). Le créneau « près » (ouverture d'office à moins de 300 m) devient `near`. Le réseau est lu
+ * dans l'identifiant de zone, comme pour les gares et les lignes. Identifiants uniques parmi favoris, gares et
+ * lignes : celui de l'arrêt, suivi de la ligne s'il en donne plusieurs (« fav-gdn-3 »), puis « -2 », « -3 »…
+ * Rien n'est perdu (32 favoris au plus, 32 gares et 32 lignes) : une place est gardée pour chaque arrêt qui suit ; un
+ * arrêt dont les lignes ne tiennent plus devient une seule ligne « toutes les lignes ».
+ */
+export function moveStops(favorites: readonly Favorite[], stations: StationPick[], lines: LinePick[]): Favorite[] {
+  const rest: Favorite[] = [];
+  const taken = new Set([...stations.map((x) => x.id), ...lines.map((x) => x.id), ...favorites.filter((f) => f.kind !== 'stop').map((f) => f.id)]);
+  const freeId = (base: string, suffix = '') => {
+    const make = (s: string) => `${base.slice(0, Math.max(1, ID_MAX - s.length))}${s}`;
+    let out = make(suffix);
+    for (let n = 2; taken.has(out); n++) out = make(`${suffix}-${n}`);
+    taken.add(out);
+    return out;
+  };
+  const opOf = (f: FavoriteStop) => f.areaId.slice(0, f.areaId.indexOf(':')) as Op;
+  let after = favorites.filter((f) => f.kind === 'stop' && opOf(f) !== 'sncb').length;
+  for (const f of favorites) {
+    if (f.kind !== 'stop') {
+      rest.push(f);
+      continue;
+    }
+    const near = f.propose === 'near';
+    const op = opOf(f);
+    if (op === 'sncb') {
+      const known = stations.find((x) => x.areaId === f.areaId);
+      if (known) {
+        if (near) known.near = true;
+      } else if (stations.length < LIMITS.stations) {
+        stations.push({ id: freeId(f.id), areaId: f.areaId, name: f.name, lat: f.lat, lon: f.lon, ...(near ? { near } : {}) });
+      }
+      continue;
+    }
+    after -= 1;
+    const wanted = [...new Set((f.filter ?? []).map((x) => x.line))];
+    const fresh = wanted.filter((line) => !lines.some((x) => x.areaId === f.areaId && x.line === line));
+    // une place gardée pour chacun des arrêts suivants ; sinon l'arrêt entier, toutes ses lignes
+    const fits = !fresh.length || fresh.length <= LIMITS.lines - lines.length - after;
+    const each: (string | undefined)[] = wanted.length && fits ? wanted : [undefined];
+    for (const line of each) {
+      const known = lines.find((x) => x.areaId === f.areaId && x.line === line);
+      if (known) {
+        if (near) known.near = true;
+        continue;
+      }
+      if (lines.length >= LIMITS.lines) continue;
+      const p: LinePick = { id: freeId(f.id, line === undefined || each.length === 1 ? '' : `-${line}`), areaId: f.areaId, op, name: f.name, lat: f.lat, lon: f.lon };
+      if (line !== undefined) p.line = line;
+      if (near) p.near = true;
+      lines.push(p);
+    }
+  }
+  return rest;
+}
+
 /**
  * Favoris v3 dans l'ordre, identifiants uniques, 32 au plus. Un trajet « Ma position → … » n'est pas un trajet fixe :
  * vers un lieu, c'est ce lieu (déjà dans la liste) ; vers une adresse ou un arrêt, il devient un lieu. Un trajet fixe
@@ -236,7 +334,7 @@ function favoritesOf(raw: unknown[], lang: NameLang): Favorite[] {
 }
 
 /**
- * Valide et complète des réglages (format v3). Des réglages d'une version antérieure (`v` 1 ou 2 : anciens
+ * Valide et complète des réglages (format v4). Des réglages d'une version antérieure (`v` 1 à 3 : anciens
  * enregistrements, préréglages) sont d'abord migrés. Ne lève jamais.
  */
 export function validateSettings(input: unknown): Settings {
@@ -244,7 +342,20 @@ export function validateSettings(input: unknown): Settings {
   const d = DEFAULT_SETTINGS;
   const x = isObj(input) ? input : {};
   const lang = oneOf(x.lang, LANGS, d.lang);
-  const favorites = favoritesOf(Array.isArray(x.favorites) ? x.favorites : [], lang);
+  const stations: StationPick[] = [];
+  for (const r of Array.isArray(x.stations) ? x.stations : []) {
+    const p = stationPick(r);
+    if (p && !stations.some((q) => q.id === p.id || q.areaId === p.areaId)) stations.push(p);
+    if (stations.length >= LIMITS.stations) break;
+  }
+  const lines: LinePick[] = [];
+  for (const r of Array.isArray(x.lines) ? x.lines : []) {
+    const p = linePick(r);
+    if (p && !lines.some((q) => q.id === p.id || (q.areaId === p.areaId && q.line === p.line))) lines.push(p);
+    if (lines.length >= LIMITS.lines) break;
+  }
+  // 1.2.2 : un arrêt favori encore présent (réglages écrits par une version antérieure) rejoint gares ou lignes
+  const favorites = moveStops(favoritesOf(Array.isArray(x.favorites) ? x.favorites : [], lang), stations, lines);
   const recent: RecentAddress[] = [];
   for (const r of Array.isArray(x.recent) ? x.recent : []) {
     const ok = recentAddress(r);
@@ -255,11 +366,13 @@ export function validateSettings(input: unknown): Settings {
   const disp = isObj(x.display) ? x.display : {};
   const al = isObj(x.alerts) ? x.alerts : {};
   return {
-    v: 3,
+    v: 4,
     onboarded: bool(x.onboarded, d.onboarded),
     lang,
     maxWalkMin: clampInt(x.maxWalkMin, LIMITS.maxWalkMin, d.maxWalkMin),
     favorites,
+    stations,
+    lines,
     recent,
     seenVersion: seen,
     display: {
@@ -355,6 +468,11 @@ const MIGRATIONS: Record<number, (x: Obj) => Obj> = {
     const { places: _places, ...rest } = x;
     return { ...rest, favorites, v: 3 };
   },
+  /**
+   * 1.2 vers 1.2.2 (PRD-1.2.2 § 5) : les arrêts favoris rejoignent les gares et les lignes (moveStops, appliqué par
+   * validateSettings) ; le reste est gardé, seenVersion compris (le message « Quai 1.2.2 » s'affichera une fois).
+   */
+  3: (x) => ({ ...x, stations: Array.isArray(x.stations) ? x.stations : [], lines: Array.isArray(x.lines) ? x.lines : [], v: 4 }),
 };
 
 /** Version d'un objet de réglages (0 si absente ou invalide). */

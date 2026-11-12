@@ -14,7 +14,19 @@ import { validateSettings } from '../../src/settings';
 import { makeEnv, type Scene } from './support/env';
 import { CORE_DATA_DIR, readJson, REPO_DIR, at } from './support/network';
 
-const PRESET_11 = validateSettings(readJson(join(REPO_DIR, 'fixtures', 'app', 'preset-1.1.json')));
+const RAW_11 = readJson<{ favorites: { id: string; kind: string }[] }>(join(REPO_DIR, 'fixtures', 'app', 'preset-1.1.json'));
+const PRESET_11 = validateSettings(RAW_11);
+/**
+ * 1.2.2 : les arrêts favoris quittent les favoris (réglages v4, PRD-1.2.2 § 5) ; l'ordre intelligent et les réponses
+ * d'un arrêt favori restent pour des données d'une version antérieure : le préréglage 1.1 tel que la 1.2.1 le lisait,
+ * arrêts compris, à leur place.
+ */
+const LEGACY_11: Settings = {
+  ...PRESET_11,
+  favorites: RAW_11.favorites
+    .map((r) => PRESET_11.favorites.find((f) => f.id === r.id) ?? (r.kind === 'stop' ? (r as unknown as FavoriteStop) : undefined))
+    .filter((f): f is Favorite => f !== undefined),
+};
 const POS = {
   s1: { lat: 50.4655, lon: 4.859 },
   s2: { lat: 50.86, lon: 4.359 },
@@ -22,7 +34,7 @@ const POS = {
   bureau: { lat: 50.8441, lon: 4.3474 },
 };
 
-async function answers(now: string, here: { lat: number; lon: number } | null, scene: Scene = 'base', settings: Settings = PRESET_11) {
+async function answers(now: string, here: { lat: number; lon: number } | null, scene: Scene = 'base', settings: Settings = LEGACY_11) {
   const env = makeEnv({ now, scene });
   const last = new Map<string, FavoriteAnswer>();
   for (const f of settings.favorites) last.set(f.id, await env.core.answer(f, here, settings));
@@ -32,9 +44,19 @@ const ids = (o: { favoriteId: string }[]) => o.map((r) => r.favoriteId);
 
 describe('ordre intelligent (M1.4)', () => {
   it('le préréglage 1.1 est du v2 valide (A.2) : préréglage 1.0 plus fav-maison « Le soir », en dernier', () => {
-    expect(PRESET_11.favorites.map((f) => f.id)).toEqual(['fav-bureau', 'fav-gdn', 'fav-gand', 'fav-namur', 'fav-dl-nord', 'fav-maison']);
-    // 1.2 : migré en réglages v3 (PRD-1.2 § 2.4) : « Ma position → Maison » est devenu le lieu « Maison »
-    expect(PRESET_11.favorites[5]).toMatchObject({ kind: 'place', id: 'fav-maison', label: 'Maison', propose: 'evening' });
+    expect(LEGACY_11.favorites.map((f) => f.id)).toEqual(['fav-bureau', 'fav-gdn', 'fav-gand', 'fav-namur', 'fav-dl-nord', 'fav-maison']);
+    // 1.2 : migré (PRD-1.2 § 2.4) : « Ma position → Maison » est devenu le lieu « Maison »
+    expect(LEGACY_11.favorites[5]).toMatchObject({ kind: 'place', id: 'fav-maison', label: 'Maison', propose: 'evening' });
+    // 1.2.2 (réglages v4) : les arrêts sont rangés dans les gares et les lignes
+    expect(PRESET_11.favorites.map((f) => f.id)).toEqual(['fav-bureau', 'fav-gand', 'fav-maison']);
+    expect(PRESET_11.stations.map((x) => x.id)).toEqual(['fav-namur']);
+    expect(PRESET_11.lines.map((x) => x.id)).toEqual(['fav-gdn-3', 'fav-gdn-4', 'fav-dl-nord']);
+  });
+
+  it('1.2.2 : réglages v4 sans arrêt favori : bureau (créneau), Gand, maison en fin (« tu y es »)', async () => {
+    const { order } = await answers('2026-11-10T07:31', POS.s1, 'noRT', PRESET_11);
+    expect(ids(order)).toEqual(['fav-bureau', 'fav-gand', 'fav-maison']);
+    expect(order.map((r) => r.rule)).toEqual([2, 4, 5]);
   });
 
   it('CA-M1.1 S1 : bureau (créneau), Namur (utilisable d’ici), le reste, maison en fin (« tu y es »)', async () => {
@@ -99,9 +121,9 @@ describe('ordre intelligent (M1.4)', () => {
   });
 
   it('« Dans mon ordre » : l’ordre du téléphone, sauf la règle 5 (CA-S3.2)', () => {
-    const mine: Settings = { ...PRESET_11, display: { ...PRESET_11.display, favOrder: 'mine' } };
+    const mine: Settings = { ...LEGACY_11, display: { ...LEGACY_11.display, favOrder: 'mine' } };
     const order = orderFavorites(POS.s2, mine, at('2026-11-10T12:10'));
-    expect(ids(order)).toEqual(PRESET_11.favorites.map((f) => f.id));
+    expect(ids(order)).toEqual(LEGACY_11.favorites.map((f) => f.id));
     const atHome = orderFavorites(POS.s1, mine, at('2026-11-10T07:31'));
     expect(ids(atHome).at(-1)).toBe('fav-maison');
     expect(atHome.slice(0, -1).every((r) => r.rule === 4)).toBe(true);
@@ -139,15 +161,20 @@ describe('réponses des favoris (M1.5)', () => {
     expect(a).toMatchObject({ kind: 'trip', state: 'ok' });
     const j = a.plan!.journeys[0];
     expect(j.label).toBe('short');
-    // 1.2.1 (le moins de marche d'abord) : même IC et même arrivée, mais le T3 depuis Bruxelles-Nord garde chaque
-    // marche sous les 10 min réglées ; l'IC direct puis 12 min à pied suit, « Sans changement »
+    // 1.2.2 (PRD-1.2.2 § 7) : même IC et même arrivée, le T3 depuis Bruxelles-Nord garde chaque marche sous les
+    // 10 min réglées ; l'IC direct puis 12 min à pied n'est plus proposé (« Sans changement » jamais avec plus de marche
+    // de trop) ; puis le suivant
     expect(j.reason).toBe('Le plus court : 1 changement, à pied 7 + 2 + 9 min');
     expect(hhmm(j.leaveAt)).toBe('07:33');
     expect(hhmm(j.arr)).toBe('08:58');
     const ride = j.legs.find((l) => l.kind === 'ride')!;
     expect(ride).toMatchObject({ cat: 'IC', platform: '4' });
     expect(hhmm(ride.dep)).toBe('07:42');
-    expect(a.plan!.journeys[1]).toMatchObject({ label: 'none', reason: 'Sans changement : à pied 7 + 12 min' });
+    // puis « Le suivant » (l'IC d'une heure plus tard ; le tram de Bruxelles-Nord suit les garde-fous de core/routing/rank.ts)
+    const next = a.plan!.journeys[1];
+    expect(next.label).toBe('next');
+    expect(next.reason).toMatch(/^Le suivant\u00a0: /);
+    expect(hhmm(next.legs.find((l) => l.kind === 'ride')!.dep)).toBe('08:42');
   });
 
   it('CA-M1.2 S1 base : +2 min et voie 6 dans la réponse', async () => {
@@ -161,7 +188,7 @@ describe('réponses des favoris (M1.5)', () => {
   it('gare de départ à distance de marche : la marche jusqu’à la gare est comprise', async () => {
     const env = makeEnv({ now: '2026-11-10T13:50' });
     // à 400 m de Bruxelles-Central : 7 min à pied
-    const a = await env.core.answer(PRESET_11.favorites[2], { lat: 50.8454, lon: 4.3628 }, PRESET_11);
+    const a = await env.core.answer(PRESET_11.favorites.find((f) => f.id === 'fav-gand')!, { lat: 50.8454, lon: 4.3628 }, PRESET_11);
     expect(a.fromStation).toBeUndefined();
     const j = a.plan!.journeys[0];
     expect(j.legs[0]).toMatchObject({ kind: 'walk', walkMin: 7, to: { areaId: 'sncb:8813003' } });
@@ -171,7 +198,7 @@ describe('réponses des favoris (M1.5)', () => {
 
   it('arrêt favori : départs filtrés ; zone fusionnée retrouvée par `aka`, puis par nom et position ; sinon introuvable', async () => {
     const env = makeEnv({ now: '2026-11-10T12:10' });
-    const gdn = PRESET_11.favorites[1] as FavoriteStop;
+    const gdn = LEGACY_11.favorites[1] as FavoriteStop;
     const ok = await env.core.answer(gdn, POS.s2, PRESET_11);
     expect(ok.state).toBe('ok');
     expect(ok.movedTo).toBeUndefined();
@@ -236,7 +263,7 @@ describe('réponses des favoris (M1.5)', () => {
     }
   });
 
-  it('arrêt de départ → adresse proche : la proposition à pied est gardée (position → destination, maintenant)', async () => {
+  it('arrêt de départ → adresse proche : les propositions partent de la position ; la marche seule de 17 min n’arrive pas plus tôt (1.2.2)', async () => {
     const env = makeEnv({ now: '2026-11-10T12:10', scene: 'noRT' });
     const fav: FavoriteTrip = {
       kind: 'trip',
@@ -248,11 +275,14 @@ describe('réponses des favoris (M1.5)', () => {
     const here = { lat: 50.8645, lon: 4.3602 };
     const a = await env.core.answer(fav, here, PRESET_11);
     expect(a.state).toBe('ok');
-    const walk = a.plan!.journeys.find((j) => !j.legs.some((l) => l.kind === 'ride'))!;
-    expect(walk.legs).toHaveLength(1);
-    expect(walk.legs[0]).toMatchObject({ kind: 'walk', from: { name: { fr: 'Ma position' } }, to: { lat: 50.8555, lon: 4.3602 }, walkMin: walkMinutes(distanceM(here, fav.to as { lat: number; lon: number })) });
-    expect(walk.dep).toBe(at('2026-11-10T12:10'));
-    expect(walk.leaveAt).toBe(walk.dep);
+    // 1.2.2 (PRD-1.2.2 § 7) : plus de raccourci « marche seule » ; 17 min à pied (7 de trop) arrivent à 12:27, le T3
+    // depuis la gare du Nord (9 + 3 min à pied) à 12:25 : la marche seule n'est pas proposée
+    expect(walkMinutes(distanceM(here, fav.to as { lat: number; lon: number }))).toBe(17);
+    const js = a.plan!.journeys;
+    expect(js.every((j) => j.legs.some((l) => l.kind === 'ride'))).toBe(true);
+    expect(js[0].legs[0]).toMatchObject({ kind: 'walk', from: { name: { fr: 'Ma position' } }, walkMin: 9 });
+    expect(js[0].legs[js[0].legs.length - 1]).toMatchObject({ kind: 'walk', to: { lat: 50.8555, lon: 4.3602 } });
+    expect(hhmm(js[0].arr)).toBe('12:25');
   });
 
   it('identifiants des propositions gardés (mémoire du réseau pour le recalcul d’une correspondance)', async () => {

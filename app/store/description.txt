@@ -1,14 +1,15 @@
 Quai affiche sur tes lunettes Even G2 les prochains départs des transports en commun belges, en temps réel : SNCB, STIB, De Lijn et TEC.
 
 Dans les lunettes :
-- Mes favoris : la réponse dès l’ouverture, quand partir, quel train ou bus, quelle voie, l’heure d’arrivée.
-- Un toucher ouvre le trajet étape par étape, un glissement montre un autre trajet. Quai propose d’abord le plus court, celui qui t’amène le plus tôt, puis ceux qui marchent ou changent moins, et dit toujours pourquoi.
+- Favoris : la réponse dès l’ouverture, quand partir, quel train ou bus, quelle voie, l’heure d’arrivée ; puis tes adresses récentes.
+- Un toucher ouvre le trajet étape par étape. Quai propose d’abord celui qui arrive le plus tôt, sans longue marche inutile : au-delà de ta marche maximale, chaque minute à pied compte triple. Puis jusqu’à deux autres choix, plus tôt, avec moins de marche ou moins de changements, et il dit toujours pourquoi.
+- Gares : tes gares, avec leur prochain train et tout leur tableau des départs.
+- Bus, tram, métro : tes lignes à ton arrêt, dans les deux sens, avec les prochains passages.
 - Autour de moi : les arrêts proches, tous réseaux confondus, avec le prochain départ.
 - Les départs d’un arrêt : en minutes pour les bus, trams et métros, avec l’heure et la voie pour les trains.
-- Aller à… : le trajet porte à porte vers tes lieux et tes adresses récentes.
-- Le suivi du trajet : changement de voie, retard ou suppression s’affichent en tête de l’écran, et le trajet en cours revient quand tu rouvres Quai.
+- Le suivi du trajet, quand tu le demandes : changement de voie, retard ou suppression s’affichent en tête de l’écran, et le trajet en cours revient quand tu rouvres Quai.
 
-Sur le téléphone, un seul champ pour une adresse, une gare ou un arrêt : vas-y, ou garde le trajet en favori. « Mes favoris » réunit tes lieux, tes arrêts et tes trajets. Tu règles aussi l’affichage et les alertes, et le bouton « Lunettes » affiche un trajet ou un favori dans les lunettes.
+Sur le téléphone, un seul champ pour une adresse, une gare ou un arrêt : vas-y, ou garde le trajet en favori. « Mes favoris » réunit tes endroits et tes trajets ; « Gares » et « Bus, tram, métro » réunissent tes gares et tes lignes. Tu règles aussi les trajets, l’affichage et les alertes, et le bouton « Lunettes » affiche un trajet dans les lunettes.
 
 Le signe ~ signale un horaire prévu, sans temps réel.
 

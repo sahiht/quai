@@ -19,7 +19,11 @@ import {
   type GeocodeAnswer,
   type PlanResult,
   type Journey,
+  type LatLon,
+  type LineBoard,
   type LineFilter,
+  type LineMatch,
+  type LineStop,
   type Mode,
   type Names,
   type NearbyItem,
@@ -45,6 +49,7 @@ import { recalcAlert, repairFollowed, touchFollowed } from './routing/repair';
 import { rankSearch, searchFileKeys } from './search';
 import { suggestOpening } from './suggest';
 import { indexDay, TrainEngine, trainLeg, type DayIndex } from './trains';
+import { findLinesIn, lineBoardAt, lineStopsIn } from './linepicks';
 import { brusselsParts, distanceM, localDate, walkMinutes } from './util';
 import { DAY_START_HOUR } from './text';
 
@@ -252,6 +257,38 @@ export function createCore(opts: CoreOptions): Core {
         out.push({ line: p.line, mode: p.mode, head: p.head, filter: { line: p.line, head: prep.headKeys[i] } });
       });
       return out.sort((a, b) => naturalCompare(a.line, b.line) || a.head.fr.localeCompare(b.head.fr, 'fr'));
+    },
+
+    /** 1.2.2 (PRD-1.2.2 § 4) : lignes par numéro (core/linepicks.ts), fichiers de ligne de la génération connue. */
+    async findLines(query: string, near?: LatLon | null): Promise<LineMatch[]> {
+      const meta = await ensure();
+      return findLinesIn({ meta, json: (p, v) => data.json(p, v) }, query ?? '', near);
+    },
+
+    async lineStops(line: Pick<LineMatch, 'op' | 'line' | 'routes'>, near?: LatLon | null): Promise<LineStop[]> {
+      const meta = await ensure();
+      return lineStopsIn({ meta, json: (p, v) => data.json(p, v) }, line, near);
+    },
+
+    /**
+     * 1.2.2 (PRD-1.2.2 § 3) : passages d'une ligne à un arrêt, par sens. Zone absente des données → missing (jamais
+     * d'exception : « introuvable ») ; serveur injoignable → QuaiError comme board().
+     */
+    async lineBoard(areaId: string, line: string, o?: { perDirection?: number }): Promise<LineBoard> {
+      const meta = await ensure();
+      const t = now();
+      const per = Math.max(1, Math.round(o?.perDirection ?? 2));
+      const id = aliasOf.get(areaId) ?? areaId;
+      let prep: PreparedArea;
+      try {
+        prep = await prepared(id);
+      } catch (e) {
+        if (!(e instanceof QuaiError && e.code === 'areaUnknown')) throw e;
+        const area = minimalSummary(areaId);
+        return { area, op: area.op, mode: 'bus', line, directions: [], state: 'missing', anyPlanned: false, rtErrors: [], updatedAt: t };
+      }
+      const area = id === areaId ? prep.summary : (summaryOf.get(id) ?? prep.summary);
+      return lineBoardAt(prep, area, line ?? '', per, t, isCovered(meta, t) ? rt : null, meta.serviceDates);
     },
 
     async search(query: string, near?: { lat: number; lon: number }): Promise<SearchItem[]> {

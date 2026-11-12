@@ -1,12 +1,14 @@
 /**
- * Classement « le moins de marche d'abord » (PRD-1.2.1 § 1, qui remplace « Le plus court d'abord » de PRD-1.2 § 1 ;
- * design-routing.md § 4.8) : cas de référence A à H du PRD 1.1 § 4.6 revus (CA-1.1), paliers de marche et garde-fou
- * (CA-121.2, dont des invariants sur des trajets tirés au hasard), noms et raisons (CA-121.3, PRD-1.2.1 § 2 : une ligne
- * des lunettes, 60 caractères et 542 px au plus) et règles des propositions.
+ * Classement des trajets (PRD-1.2.2 § 7 : le premier arrive le plus tôt, chaque minute de marche au-delà de la marche
+ * maximale compte triple ; design-routing.md § 4.8) : coût et proposition 1 (jamais dominée, jamais une marche absurde,
+ * dont des trajets tirés au hasard), cas de référence A à H du PRD 1.1 § 4.6 revus, cas réels du PRD-1.2.1 § 1.5, autres
+ * propositions et gardes ; noms et raisons (CA-121.3, PRD-1.2.1 § 2 : une ligne des lunettes, 60 caractères et 542 px
+ * au plus), inchangés.
  */
 import { describe, expect, it } from 'vitest';
 import type { Journey, JourneyLabel, Leg } from '../../../src/core/api';
-import { itemOf, longestOf, rank, walkTier } from '../../../src/core/routing/rank';
+import { P } from '../../../src/core/routing/params';
+import { costOf, itemOf, longestOf, rank, walkTier } from '../../../src/core/routing/rank';
 import { changesText, gapText, laterText, reasonsOf, reasonText, walksText } from '../../../src/core/routing/reason';
 import { gtfsTime } from '../../../src/core/util';
 import { textWidth } from '../../../src/glasses/font';
@@ -218,17 +220,129 @@ describe('CA-121.3 : noms et raisons de la 1.2.1 (§ 2.1 et § 2.2)', () => {
   });
 });
 
-describe('CA-1.1 : cas de référence du PRD 1.1 § 4.6, revus pour la 1.2.1 (le moins de marche d’abord)', () => {
-  it('A : à même arrivée, le changement qui garde chaque marche sous 10 min passe avant le direct et ses 12 min à pied', () => {
-    const X = J('X', { walks: [7, 12], rides: 1, board: '07:44', arr: '08:58' });
-    const Y = J('Y', { walks: [7, 2, 9], rides: 2, board: '07:44', arr: '08:58' });
-    expect(propose([Y, X], '07:30')).toEqual([
-      ['Y', 'short', 'Le plus court : 1 changement, à pied 7 + 2 + 9 min'],
-      ['X', 'none', 'Sans changement : à pied 7 + 12 min'],
-    ]);
+/** Même structure (« Le suivant ») : mêmes lignes et mêmes zones de montée et de descente. */
+function sameStructure(js: Journey[], line = 'L'): Journey[] {
+  for (const j of js) {
+    let i = 0;
+    for (const l of j.legs) {
+      if (l.kind !== 'ride') continue;
+      l.line = `${line}${i}`;
+      l.from.areaId = `${line}-z${i}`;
+      l.to.areaId = `${line}-a${i}`;
+      i++;
+    }
+  }
+  return js;
+}
+
+describe('PRD-1.2.2 § 7 : coût et proposition 1', () => {
+  it('palier de marche de la 1.2.1, gardé pour le faux cœur : 0 jusqu’à la marche maximale, puis un par tranche de 5 min', () => {
+    expect([0, 5, 6, 10, 11, 15, 16].map((L) => walkTier(L, 5))).toEqual([0, 0, 1, 1, 2, 2, 3]);
+    expect(longestOf(itemOf(J('X', { walks: [6, 1, 9], rides: 2, board: '08:00', arr: '09:00' })))).toBe(9);
+    expect(longestOf(itemOf(walkOnly('W', '08:00', 19)))).toBe(19);
   });
 
-  it('B : 1 changement 12 min plus tôt d’abord, puis le direct « Sans changement »', () => {
+  it('coût = arrivée + 3 × (plus longue marche au-delà de la marche maximale) + 1 × changements ; marche seule : sa durée', () => {
+    const x = itemOf(J('X', { walks: [8, 1, 3], rides: 2, board: '20:07', arr: '21:05' }));
+    expect(costOf(x, 5) - x.arr).toBe(3 * 3 + 1);
+    expect(costOf(x, 8) - x.arr).toBe(1);
+    expect(costOf(x, 10) - x.arr).toBe(1);
+    const w = itemOf(walkOnly('W', '08:00', 22));
+    expect(costOf(w, 5) - w.arr).toBe(3 * 17);
+    expect([P.walkPenalty, P.transferPenalty]).toEqual([3, 1]);
+    // garantie « jamais de marche absurde » : 6 min au-delà de la marche maximale coûtent plus que 15 min de retard et
+    // deux changements
+    expect(6 * P.walkPenalty).toBeGreaterThan(15 + 2 * P.transferPenalty);
+  });
+
+  it('à coût égal : le moins de changements, puis la plus courte plus longue marche, la marche totale, le départ le plus tard', () => {
+    // 1 changement et 09:00, ou direct et 09:01 : même coût, le direct
+    const chg = J('CHG', { walks: [2, 0, 2], rides: 2, board: '08:30', arr: '09:00' });
+    const dir = J('DIR', { walks: [2, 2], rides: 1, board: '08:30', arr: '09:01' });
+    expect(propose([chg, dir], '08:20', 5)[0][0]).toBe('DIR');
+    // même arrivée, direct, chaque marche dans la marche maximale : 3 min au plus plutôt que 5
+    const long = J('L5', { walks: [5, 0], rides: 1, board: '08:30', arr: '09:00' });
+    const short = J('L3', { walks: [2, 3], rides: 1, board: '08:31', arr: '09:00' });
+    expect(propose([long, short], '08:20', 5)[0][0]).toBe('L3');
+    // même plus longue marche : la marche totale la plus courte
+    const two = J('T6', { walks: [3, 3], rides: 1, board: '08:30', arr: '09:00' });
+    const one = J('T3', { walks: [3, 0], rides: 1, board: '08:30', arr: '09:00' });
+    expect(propose([two, one], '08:20', 5)[0][0]).toBe('T3');
+    // tout égal : le départ le plus tard
+    const early = J('E', { walks: [3, 3], rides: 1, board: '08:30', arr: '09:00' });
+    const late = J('LT', { walks: [3, 3], rides: 1, board: '08:35', arr: '09:00' });
+    expect(propose([early, late], '08:20', 5)[0][0]).toBe('LT');
+  });
+
+  it('à arrivée, marches et changements égaux, le départ le plus tard, même après l’heure demandée (jamais 52 min d’attente pour le même IC)', () => {
+    const early = J('T3-1609', { walks: [9, 1, 7], rides: 2, board: '16:09', arr: '18:16' });
+    const late = J('T3-1657', { walks: [9, 1, 7], rides: 2, board: '16:57', arr: '18:16' });
+    // demandé à 15:00 : seul le premier part dans l'heure ; le second, parti à 16:48, lui prend sa place
+    expect(propose([early, late], '15:00')).toEqual([['T3-1657', 'short', 'Le plus court : 1 changement, à pied 9 + 1 + 7 min']]);
+    // un trajet qui marche moins ne cède jamais sa place à un trajet parti plus tard qui marche plus
+    const longer = J('T3-1657b', { walks: [10, 1, 7], rides: 2, board: '16:57', arr: '18:16' });
+    expect(propose([early, longer], '15:00', 5).map((x) => x[0])).toEqual(['T3-1609']);
+  });
+
+  it('le plus tôt d’abord tant que chaque marche tient dans la marche maximale ; au-delà, chaque minute compte triple', () => {
+    // 3 min plus tôt avec 9 min à pied (marche maximale 10) : en tête ; avec 5 min réglées, 4 min de trop comptent 12 min
+    const X = J('X', { walks: [2, 0, 3], rides: 2, board: '08:05', arr: '09:00' });
+    const Y = J('Y', { walks: [9, 0, 6], rides: 2, board: '08:05', arr: '08:57' });
+    // X part 7 min plus tard et arrive 3 min plus tard : « Plus tard »
+    expect(propose([Y, X], '08:00', 10)).toEqual([
+      ['Y', 'short', 'Le plus court : 1 changement, à pied 9 + 6 min'],
+      ['X', 'later', 'Plus tard : 1 changement, départ 08:03'],
+    ]);
+    // 3 min plus tôt ne font pas un « Plus tôt » (5 min au moins)
+    expect(propose([Y, X], '08:00', 5)).toEqual([['X', 'short', 'Le plus court : 1 changement, à pied 2 + 3 min']]);
+  });
+
+  it('jamais une proposition 1 dominée, jamais une marche absurde (trajets tirés au hasard, marche 5 et 10)', () => {
+    let seed = 7;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const pickInt = (a: number, b: number) => a + Math.floor(rnd() * (b - a + 1));
+    const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    let absurdTested = 0;
+    for (const M of [5, 10]) {
+      for (let n = 0; n < 300; n++) {
+        const js: Journey[] = [];
+        for (let k = 0, count = pickInt(2, 8); k < count; k++) {
+          const rides = pickInt(1, 3);
+          const walks = Array.from({ length: rides + 1 }, (_, i) => (i === 0 || i === rides ? pickInt(0, 25) : pickInt(0, 7)));
+          const board = 8 * 60 + pickInt(0, 50);
+          js.push(J(`J${n}-${k}`, { walks, rides, board: hm(board), arr: hm(board + pickInt(15, 80) + walks[rides]) }));
+        }
+        if (rnd() < 0.3) js.push(walkOnly(`W${n}`, '08:00', pickInt(6, 30)));
+        const items = js.map(itemOf);
+        const first = rank(items, t('08:00') / MIN, M)[0].item;
+        const lw = longestOf(first);
+        const ctx = `marche ${M}, tirage ${n}`;
+        for (const x of items) {
+          expect(costOf(first, M), ctx).toBeLessThanOrEqual(costOf(x, M) + 1e-9);
+          const better = x.arr <= first.arr && longestOf(x) <= lw && x.transfers <= first.transfers;
+          expect(better && (x.arr < first.arr || longestOf(x) < lw || x.transfers < first.transfers), `${ctx} : proposition 1 dominée par ${x.id}`).toBe(false);
+          // marche absurde : plus de M + 5 min à pied alors qu'un trajet sans marche de plus de M arrive au plus 15 min après
+          if (lw > M + 5 && longestOf(x) <= M) {
+            absurdTested++;
+            expect(x.arr, `${ctx} : marche absurde`).toBeGreaterThan(first.arr + 15);
+          }
+        }
+      }
+    }
+    expect(absurdTested).toBeGreaterThan(0);
+  });
+});
+
+describe('PRD-1.2.2 § 7 : cas de référence (PRD 1.1 § 4.6, revus pour la 1.2.2)', () => {
+  it('A : même arrivée, le changement qui garde chaque marche dans les 10 min passe devant le direct et ses 12 min à pied ; le direct n’est pas « Sans changement » (il marche plus au-delà de la marche maximale)', () => {
+    const X = J('X', { walks: [7, 12], rides: 1, board: '07:44', arr: '08:58' });
+    const Y = J('Y', { walks: [7, 2, 9], rides: 2, board: '07:44', arr: '08:58' });
+    expect(propose([Y, X], '07:30')).toEqual([['Y', 'short', 'Le plus court : 1 changement, à pied 7 + 2 + 9 min']]);
+    // 15 min réglées : 12 min à pied sont dans la marche maximale, le direct passe devant (1 min par changement)
+    expect(propose([Y, X], '07:30', 15)).toEqual([['X', 'short', 'Le plus court : direct, à pied 7 + 12 min']]);
+  });
+
+  it('B : 1 changement 12 min plus tôt d’abord, puis le direct « Sans changement » (au plus 15 min après)', () => {
     const X = J('X', { walks: [5, 4], rides: 1, board: '08:05', arr: '09:10' });
     const Y = J('Y', { walks: [3, 0, 2], rides: 2, board: '08:05', arr: '08:58' });
     expect(propose([X, Y], '08:00')).toEqual([
@@ -243,41 +357,40 @@ describe('CA-1.1 : cas de référence du PRD 1.1 § 4.6, revus pour la 1.2.1 (le
     expect(propose([X, Y], '08:00')).toEqual([['Y', 'short', 'Le plus court : 1 changement, à pied 3 + 3 min']]);
   });
 
-  it('D : 3 min plus tôt ne compte pas ; à durée égale (5 min près), 5 min de marche contre 15', () => {
-    const X = J('X', { walks: [2, 0, 3], rides: 2, board: '08:05', arr: '09:00' });
-    const Y = J('Y', { walks: [9, 0, 6], rides: 2, board: '08:05', arr: '08:57' });
-    expect(propose([Y, X], '08:00')).toEqual([['X', 'short', 'Le plus court : 1 changement, à pied 2 + 3 min']]);
-  });
-
-  it('E : la marche seule de 22 min (palier 3) ne passe pas devant ; « À pied : 22 min, arrivée 09:12 »', () => {
+  it('E : la marche seule de 22 min, 2 min plus tôt : jamais proposée ; 8 min plus tôt : « Plus tôt »', () => {
     const X = J('X', { walks: [2, 2, 2], rides: 2, board: '08:52', arr: '09:14' });
     const W = walkOnly('W', '08:50', 22);
-    expect(propose([W, X], '08:50')).toEqual([
-      ['X', 'short', 'Le plus court : 1 changement, à pied 2 + 2 + 2 min'],
-      ['W', 'walk', 'À pied : 22 min, arrivée 09:12'],
+    expect(propose([W, X], '08:50')).toEqual([['X', 'short', 'Le plus court : 1 changement, à pied 2 + 2 + 2 min']]);
+    const slow = J('S', { walks: [2, 2, 2], rides: 2, board: '08:58', arr: '09:20' });
+    expect(propose([W, slow], '08:50')).toEqual([
+      ['S', 'short', 'Moins de marche : 1 changement, à pied 2 + 2 + 2 min'],
+      ['W', 'earlier', 'Plus tôt de 8 min, mais 22 min à pied'],
     ]);
   });
 
-  it('F : le saut de puce qui garde la marche sous 10 min passe d’abord (8 min plus tard) ; l’IC et ses 12 min à pied « Plus tôt »', () => {
-    // 1.2 : le changement était écarté (correspondance inutile au profit d'un trajet sans marche longue) ; 1.2.1 :
-    // jamais au profit d'un trajet de palier plus haut (§ 1.3), et le palier 0 passe d'abord (§ 1.2). Sur les vraies
-    // données, Bruxelles-Chapelle n'est toujours jamais proposé (real.test.ts, CA-M8.1) : le bus 95 fait mieux.
+  it('F : le même IC, direct puis 12 min à pied, ou un saut de puce : 2 min de trop (6 min) contre 8 min plus tôt', () => {
     const X = J('X', { walks: [8, 12], rides: 1, board: '07:44', arr: '09:04', firstTrip: 'IC-0744' });
     const Y = J('Y', { walks: [8, 0, 6], rides: 2, board: '07:44', arr: '09:12', firstTrip: 'IC-0744' });
+    // marche maximale 10 : l'IC direct d'abord, le saut de puce « Moins de marche »
     expect(propose([Y, X], '07:31')).toEqual([
+      ['X', 'short', 'Le plus court : direct, à pied 8 + 12 min'],
+      ['Y', 'lesswalk', 'Moins de marche : arrive 8 min plus tard, à pied 8 + 6 min'],
+    ]);
+    // marche maximale 5 : 7 min de trop comptent 21 min, le saut de puce d'abord, l'IC « Plus tôt »
+    expect(propose([Y, X], '07:31', 5)).toEqual([
       ['Y', 'short', 'Moins de marche : 1 changement, à pied 8 + 6 min'],
       ['X', 'earlier', 'Plus tôt de 8 min, mais 12 min à pied'],
     ]);
-    // avec 15 min de marche maximale, les deux sont au palier 0 : l'IC direct, la correspondance inutile écartée
+    // marche maximale 15 : rien de trop, l'IC direct seul
     expect(propose([Y, X], '07:31', 15)).toEqual([['X', 'short', 'Le plus court : direct, à pied 8 + 12 min']]);
   });
 
-  it('G (réel, nuit) : S1 06:20 direct ; « Plus tôt » pour le trajet parti plus de 30 min avant, avec son heure de départ', () => {
+  it('G (nuit) : le trajet qui arrive le plus tôt d’abord, même parti plus tôt ; le S1 direct de 06:20 « Plus tard »', () => {
     const X = J('X', { walks: [0, 0], rides: 1, board: '06:20', arr: '06:46', next: true });
     const Y = J('Y', { walks: [3, 0, 0], rides: 2, board: '05:02', arr: '06:30', next: true });
     expect(propose([X, Y], '23:50')).toEqual([
-      ['X', 'short', 'Le plus court : direct'],
-      ['Y', 'earlier', 'Plus tôt de 16 min, en partant à 04:59'],
+      ['Y', 'short', 'Le plus court : 1 changement, à pied 3 min'],
+      ['X', 'later', 'Plus tard : direct, départ 06:20'],
     ]);
   });
 
@@ -293,217 +406,169 @@ describe('CA-1.1 : cas de référence du PRD 1.1 § 4.6, revus pour la 1.2.1 (le
   });
 });
 
-describe('CA-121.2 : paliers de marche et garde-fou (PRD-1.2.1 § 1.1 à § 1.3)', () => {
-  it('palier : 0 jusqu’à la marche maximale, puis un par tranche de 5 min ; marche seule : sa durée', () => {
-    expect([0, 5, 6, 10, 11, 15, 16].map((L) => walkTier(L, 5))).toEqual([0, 0, 1, 1, 2, 2, 3]);
-    expect([10, 11, 15, 16, 22, 25].map((L) => walkTier(L, 10))).toEqual([0, 1, 1, 2, 3, 3]);
-    expect(longestOf(itemOf(J('X', { walks: [6, 1, 9], rides: 2, board: '08:00', arr: '09:00' })))).toBe(9);
-    expect(longestOf(itemOf(walkOnly('W', '08:00', 19)))).toBe(19);
-    expect(longestOf(itemOf(J('N', { walks: [0, 0], rides: 1, board: '08:00', arr: '09:00' })))).toBe(0);
-  });
-
-  it('palier 0 vide (cas réel Braine-l’Alleud → Schaerbeek, marche 5) : le plus rapide du palier 1, bus W puis S1 ; « Plus tôt » : 19 min à pied', () => {
-    const D = J('W+S1', { walks: [6, 1, 9], rides: 2, board: '20:07', arr: '21:11' });
-    const B = J('W+92', { walks: [6, 1, 8], rides: 2, board: '19:49', arr: '21:10' });
-    const A = J('IC+IC', { walks: [19, 0, 9], rides: 2, board: '20:08', arr: '20:58' });
-    const C = J('S1', { walks: [19, 9], rides: 1, board: '20:16', arr: '21:11' });
-    expect(propose([A, B, C, D], '19:42', 5)).toEqual([
-      ['W+S1', 'short', 'Moins de marche : 1 changement, à pied 6 + 1 + 9 min'],
-      ['IC+IC', 'earlier', 'Plus tôt de 13 min, mais 19 min à pied'],
-      ['S1', 'none', 'Sans changement : à pied 19 + 9 min'],
+describe('PRD-1.2.2 § 7 : cas réels du PRD-1.2.1 § 1.5 (marche maximale 5 min, valeurs de l’instantané du 11/11)', () => {
+  it('A, Braine-l’Alleud → Schaerbeek, 11/11 19:42 : bus W puis S1 ; les 22 min à pied et les deux IC seulement en « Plus tôt »', () => {
+    const WS1 = J('W+S1', { walks: [8, 1, 3], rides: 2, board: '20:07', arr: '21:05' });
+    const ICIC = J('IC+IC', { walks: [22, 0, 3], rides: 2, board: '20:08', arr: '20:52' });
+    const S1 = J('S1', { walks: [22, 3], rides: 1, board: '20:16', arr: '21:05' });
+    expect(propose([ICIC, S1, WS1], '19:42', 5)).toEqual([
+      ['W+S1', 'short', 'Moins de marche : 1 changement, à pied 8 + 1 + 3 min'],
+      ['IC+IC', 'earlier', 'Plus tôt de 13 min, mais 22 min à pied'],
     ]);
   });
 
-  it('garde-fou dépassé : le détour du palier 0 (bus 36 par Rixensart, 39 min après le plus tôt) n’est jamais proposé', () => {
+  it('B, Braine-l’Alleud → Madou, 12/11 07:31 : bus 36, IC 08:01, métro 2 ; l’IC après 22 min à pied jamais « Moins de changements »', () => {
+    const P1 = J('36+IC+2', { walks: [0, 4, 3, 0], rides: 3, board: '07:49', arr: '08:31' });
+    const F = J('IC+2', { walks: [22, 3, 0], rides: 2, board: '08:01', arr: '08:31' });
+    const L22 = J('S1+2', { walks: [22, 3, 0], rides: 2, board: '08:06', arr: '08:48' });
+    const L4 = J('36+S1+2', { walks: [0, 1, 3, 0], rides: 3, board: '07:54', arr: '08:48' });
+    expect(propose([P1, F, L22, L4], '07:31', 5)).toEqual([
+      ['36+IC+2', 'short', 'Le plus court : 2 changements, à pied 4 + 3 min'],
+      ['36+S1+2', 'later', 'Plus tard : 2 changements, départ 07:54'],
+    ]);
+  });
+
+  it('C, Braine-l’Alleud → Madou, 11/11 13:30 : bus W, métro 2 ; « Plus tôt » : 22 min à pied et l’IC ; jamais le bus 36 vers Rixensart', () => {
+    const W2 = J('W+2', { walks: [8, 1, 0], rides: 2, board: '13:49', arr: '14:45' });
+    const IC2 = J('IC+2', { walks: [22, 3, 0], rides: 2, board: '14:08', arr: '14:37' });
     const R = J('36', { walks: [0, 1, 4, 5], rides: 3, board: '13:40', arr: '15:18' });
-    const W = J('W+2', { walks: [8, 1, 2], rides: 2, board: '13:49', arr: '14:47' });
-    const T = J('IC+2', { walks: [22, 3, 2], rides: 2, board: '14:08', arr: '14:39' });
-    expect(propose([R, W, T], '13:30', 5)).toEqual([
-      ['W+2', 'short', 'Moins de marche : 1 changement, à pied 8 + 1 + 2 min'],
+    expect(propose([R, W2, IC2], '13:30', 5)).toEqual([
+      ['W+2', 'short', 'Moins de marche : 1 changement, à pied 8 + 1 min'],
       ['IC+2', 'earlier', 'Plus tôt de 8 min, mais 22 min à pied'],
     ]);
-    // 30 min après le plus tôt, pas plus : le palier 0 passe encore
-    const R30 = J('36b', { walks: [0, 1, 4, 5], rides: 3, board: '13:40', arr: '15:09' });
-    expect(propose([R30, W, T], '13:30', 5).map((x) => `${x[0]}:${x[1]}`)).toEqual(['36b:short', 'IC+2:earlier', 'W+2:fewer']);
+    // même 9 min plus tôt, le détour garde son coût : jamais proposé
+    const R2 = J('36b', { walks: [0, 1, 4, 5], rides: 3, board: '13:40', arr: '15:09' });
+    expect(propose([R2, W2, IC2], '13:30', 5).map((x) => x[0])).toEqual(['W+2', 'IC+2']);
   });
+});
 
-  it('garde-fou, puis « Moins de marche » : le palier plus bas qui arrive au plus 20 min après la proposition 1', () => {
+describe('PRD-1.2.2 § 7 : autres propositions', () => {
+  it('« Plus tôt » : l’arrivée la plus tôt, au moins 5 min avant la proposition 1 ; « Moins de marche » au plus 20 min après', () => {
     const T = J('T', { walks: [17, 2], rides: 1, board: '08:20', arr: '08:40' });
     const W = J('W', { walks: [8, 2], rides: 1, board: '08:15', arr: '09:05' });
     const R = J('R', { walks: [3, 0, 4], rides: 2, board: '08:10', arr: '09:15' });
-    // R (palier 0) arrive 35 min après T : garde-fou ; W (palier 1) 25 min après : proposition 1. R n'est pas écarté au
-    // profit de W, qui le domine (même départ, plus tôt, sans changement) mais marche plus (§ 1.3).
     expect(propose([T, W, R], '08:00', 5)).toEqual([
       ['W', 'short', 'Le plus court : direct, à pied 8 + 2 min'],
       ['T', 'earlier', 'Plus tôt de 25 min, mais 17 min à pied'],
       ['R', 'lesswalk', 'Moins de marche : arrive 10 min plus tard, à pied 3 + 4 min'],
     ]);
-    // au-delà de 20 min après la proposition 1 : pas de « Moins de marche »
+    // au-delà de 20 min après : pas de « Moins de marche »
     const R2 = J('R2', { walks: [3, 0, 4], rides: 2, board: '08:10', arr: '09:26' });
     expect(propose([T, W, R2], '08:00', 5).map((x) => x[1])).toEqual(['short', 'earlier']);
   });
 
-  it('repli : la nuit, aucun palier ne passe le garde-fou : le plus rapide de tous, pas le palier le plus bas', () => {
-    const X = J('X', { walks: [8, 0], rides: 1, board: '06:08', arr: '06:40', next: true });
-    const Z = J('Z', { walks: [2, 0, 3], rides: 2, board: '06:12', arr: '07:10', next: true });
-    const Y = J('Y', { walks: [18, 0], rides: 1, board: '05:18', arr: '06:00', next: true });
-    expect(propose([X, Y, Z], '23:50', 5)).toEqual([
-      ['X', 'short', 'Moins de marche : direct, à pied 8 min'],
-      ['Y', 'earlier', 'Plus tôt de 40 min, mais 18 min à pied'],
-      ['Z', 'later', 'Plus tard : 1 changement, départ 06:10'],
-    ]);
-  });
-
-  it('« Plus tôt » : à même arrivée, le palier le plus bas (réel, Bruxelles → Bruges, marche 5 : 7 min à pied plutôt que 20)', () => {
-    const P1 = J('49+IC+30', { walks: [4, 3, 3, 4], rides: 3, board: '20:49', arr: '22:51' });
-    const A7 = J('6+IC+30', { walks: [7, 3, 3, 4], rides: 3, board: '20:50', arr: '22:21' });
-    const A20 = J('6+IC', { walks: [7, 3, 20], rides: 2, board: '20:50', arr: '22:21' });
-    expect(propose([P1, A20, A7], '20:40', 5)).toEqual([
-      ['49+IC+30', 'short', 'Moins de marche : 2 changements, 14 min à pied'],
-      ['6+IC+30', 'earlier', 'Plus tôt de 30 min, mais 7 min à pied'],
-      ['6+IC', 'fewer', 'Moins de changements : 1 changement, à pied 7 + 3 + 20 min'],
-    ]);
-  });
-
-  it('filtres de la 1.1 : jamais un trajet écarté au profit d’un trajet de palier plus haut', () => {
-    // même IC : 16 min à pied à la fin, ou le tram (2 min plus tôt, palier 0) : le tram reste et passe d'abord ; le
-    // direct arrive plus tard avec un palier plus haut : pas « Sans changement »
-    const longEnd = J('L', { walks: [7, 16], rides: 1, board: '07:42', arr: '09:00', firstTrip: 'IC' });
-    const tram = J('T', { walks: [7, 2, 4], rides: 2, board: '07:42', arr: '08:58', firstTrip: 'IC' });
-    expect(propose([longEnd, tram], '07:30').map((x) => `${x[0]}:${x[1]}`)).toEqual(['T:short']);
-    // dominé sans la règle : part plus tôt, arrive plus tard, sans 5 min de marche en moins ; 15 min à pied (palier 1)
-    // font gagner 6 min : « Plus tôt »
-    const L2 = J('L2', { walks: [15, 0], rides: 1, board: '08:15', arr: '08:40' });
-    const N2 = J('N2', { walks: [6, 0, 5], rides: 2, board: '08:04', arr: '08:46' });
-    expect(propose([L2, N2], '07:55')).toEqual([
-      ['N2', 'short', 'Moins de marche : 1 changement, à pied 6 + 5 min'],
-      ['L2', 'earlier', 'Plus tôt de 6 min, mais 15 min à pied'],
-    ]);
-  });
-
-  it('invariants (trajets tirés au hasard, marche 5 et 10) : garde-fou, paliers plus bas trop lents, propositions', () => {
-    let seed = 42;
-    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
-    const pickInt = (a: number, b: number) => a + Math.floor(rnd() * (b - a + 1));
-    const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-    const seen = { emptyTier0: 0, pushed: 0, lesswalk: 0, earlier: 0, none: 0 };
-    for (const M of [5, 10]) {
-      for (let n = 0; n < 400; n++) {
-        const js: Journey[] = [];
-        const count = pickInt(2, 7);
-        for (let k = 0; k < count; k++) {
-          const rides = pickInt(1, 3);
-          const walks = Array.from({ length: rides + 1 }, (_, i) => (i === 0 || i === rides ? pickInt(0, 25) : pickInt(0, 5)));
-          const board = 8 * 60 + pickInt(0, 50);
-          js.push(J(`J${n}-${k}`, { walks, rides, board: hm(board), arr: hm(board + pickInt(20, 80) + walks[rides]) }));
-        }
-        if (rnd() < 0.3) js.push(walkOnly(`W${n}`, '08:00', pickInt(11, 35)));
-        const items = js.map(itemOf);
-        const out = rank(items, t('08:00') / MIN, M);
-        const first = out[0].item;
-        const tier = (x: (typeof items)[number]) => walkTier(longestOf(x), M);
-        // départs de 08:00 à 08:50 : tous dans l'heure demandée ; la marche seule concourt jusqu'à 30 min
-        const pool = items.filter((x) => x.rides > 0 || x.walk <= 30);
-        const E = Math.min(...pool.map((x) => x.arr));
-        const ctx = `marche ${M}, tirage ${n}`;
-        expect(first.arr, ctx).toBeLessThanOrEqual(E + 30);
-        for (const x of pool) {
-          if (tier(x) < tier(first)) expect(x.arr, `${ctx} : palier plus bas trop rapide`).toBeGreaterThan(E + 25);
-          if (tier(x) <= tier(first)) expect(x.arr, `${ctx} : même palier ou plus bas, 5 min plus tôt`).toBeGreaterThan(first.arr - 5);
-        }
-        if (!pool.some((x) => tier(x) === 0)) seen.emptyTier0++;
-        if (Math.min(...pool.map(tier)) < tier(first)) seen.pushed++;
-        for (const r of out.slice(1)) {
-          const x = r.item;
-          if (r.label === 'earlier') {
-            seen.earlier++;
-            expect(x.arr, ctx).toBe(E);
-            expect(x.arr, ctx).toBeLessThanOrEqual(first.arr - 5);
-            expect(tier(x), ctx).toBeGreaterThan(tier(first));
-          } else if (r.label === 'lesswalk') {
-            seen.lesswalk++;
-            expect(tier(x), ctx).toBeLessThan(tier(first));
-            expect(x.arr, ctx).toBeLessThanOrEqual(first.arr + 20);
-          } else if (r.label === 'none' || r.label === 'fewer') {
-            seen.none++;
-            expect(x.transfers, ctx).toBeLessThan(first.transfers);
-            expect(x.arr, ctx).toBeLessThanOrEqual(first.arr + 20);
-            expect(tier(x) <= tier(first) || x.arr <= first.arr, ctx).toBe(true);
-          } else if (r.label === 'walk') {
-            expect(x.rides, ctx).toBe(0);
-            expect(x.arr, ctx).toBeLessThanOrEqual(first.arr + 5);
-          }
-        }
-      }
-    }
-    // le tirage passe bien par chaque règle
-    for (const [k, v] of Object.entries(seen)) expect(v, k).toBeGreaterThan(0);
-  });
-});
-
-describe('règles des propositions (PRD-1.2 § 1.3, PRD-1.2.1 § 1.4)', () => {
-  it('trois au plus, jamais deux fois le même trajet, « Le suivant » sur la même structure', () => {
-    const js = [0, 1, 2, 3, 4].map((k) => J(`S${k}`, { walks: [3, 4], rides: 1, board: `08:${String(5 + 10 * k).padStart(2, '0')}`, arr: `08:${String(30 + 10 * k).padStart(2, '0')}`, line: 'L' }));
-    // même ligne, mêmes zones : une seule structure
-    for (const j of js) {
-      j.legs[1].from.areaId = 'z0';
-      j.legs[1].to.areaId = 'a0';
-    }
-    const out = propose([...js, js[0]], '08:00');
-    expect(out.map((x) => x[0])).toEqual(['S0', 'S1', 'S2']);
-    expect(out.map((x) => x[1])).toEqual(['short', 'next', 'next']);
-    expect(out[1][2]).toBe('Le suivant : même trajet, 10 min plus tard');
-    expect(new Set(out.map((x) => x[0])).size).toBe(out.length);
-  });
-
-  it('à durée égale (5 min près), le moins de changements, puis le moins de marche', () => {
-    const A = J('A', { walks: [4, 0, 2], rides: 2, board: '10:10', arr: '10:40' });
-    const B = J('B', { walks: [2, 2], rides: 1, board: '10:10', arr: '10:44' });
-    expect(propose([A, B], '10:00')[0][0]).toBe('B');
-    const C = J('C', { walks: [9, 2], rides: 1, board: '10:10', arr: '10:43' });
-    expect(propose([C, B], '10:00')[0][0]).toBe('B');
-  });
-
-  it('une correspondance qui gagne moins de 5 min sur le même premier véhicule n’est jamais proposée', () => {
-    const direct = J('D', { walks: [0, 0], rides: 1, board: '08:25', arr: '09:24', firstTrip: 'IC-0825' });
-    const via = J('V', { walks: [0, 0, 0], rides: 2, board: '08:25', arr: '09:21', firstTrip: 'IC-0825' });
-    expect(propose([direct, via], '08:00').map((x) => x[0])).toEqual(['D']);
-  });
-
-  it('marche maximale : 12 min à pied, palier 0 avec 15 réglées (le plus rapide d’abord), palier plus haut avec 10 ou 5', () => {
-    const X = J('X', { walks: [12, 0], rides: 1, board: '08:20', arr: '08:45' });
+  it('« Moins de marche » : seulement si la proposition 1 dépasse la marche maximale, et dans la marche maximale ou 5 min de moins', () => {
+    const P1 = J('P', { walks: [12, 0], rides: 1, board: '08:20', arr: '08:45' });
     const Y = J('Y', { walks: [2, 0, 3], rides: 2, board: '08:12', arr: '08:50' });
-    // avec 15 min réglées, les 12 min sont au palier 0 : X d'abord ; Y part plus tard : « Plus tard »
-    expect(propose([X, Y], '08:00', 15).map((x) => `${x[0]}:${x[1]}`)).toEqual(['X:short', 'Y:later']);
-    for (const m of [10, 5]) {
-      expect(propose([X, Y], '08:00', m), `marche ${m}`).toEqual([
-        ['Y', 'short', 'Moins de marche : 1 changement, à pied 2 + 3 min'],
-        ['X', 'earlier', 'Plus tôt de 5 min, mais 12 min à pied'],
-      ]);
-    }
+    // marche maximale 10 : 2 min de trop (6 min) contre 5 min et un changement : égalité, le direct ; Y « Moins de marche »
+    expect(propose([P1, Y], '08:00', 10)).toEqual([
+      ['P', 'short', 'Le plus court : direct, à pied 12 min'],
+      ['Y', 'lesswalk', 'Moins de marche : arrive 5 min plus tard, à pied 2 + 3 min'],
+    ]);
+    // marche maximale 15 : la proposition 1 n'en dépasse pas, Y part plus tard : « Plus tard »
+    expect(propose([P1, Y], '08:00', 15).map((x) => `${x[0]}:${x[1]}`)).toEqual(['P:short', 'Y:later']);
+    // marche maximale 5 : Y d'abord, l'IC 5 min plus tôt avec 12 min à pied « Plus tôt »
+    expect(propose([P1, Y], '08:00', 5)).toEqual([
+      ['Y', 'short', 'Moins de marche : 1 changement, à pied 2 + 3 min'],
+      ['P', 'earlier', 'Plus tôt de 5 min, mais 12 min à pied'],
+    ]);
+    // ni dans la marche maximale ni 5 min de moins : pas de « Moins de marche »
+    const Z = J('Z', { walks: [9, 0, 3], rides: 2, board: '08:12', arr: '08:58' });
+    const Q = J('Q', { walks: [12, 0], rides: 1, board: '08:20', arr: '08:40' });
+    expect(propose([Q, Z], '08:00', 5).map((x) => x[1])).toEqual(['short']);
   });
 
-  it('« Sans changement » et « Moins de changements » : arrivée au plus 20 min après', () => {
+  it('« Sans changement », « Moins de changements » : au plus 15 min après, jamais plus de marche au-delà de la marche maximale', () => {
     const S = J('S', { walks: [3, 0, 0, 3], rides: 3, board: '07:50', arr: '10:00' });
-    expect(propose([S, J('L', { walks: [3, 3], rides: 1, board: '07:50', arr: '10:21' })], '07:45').map((x) => x[0])).toEqual(['S']);
-    expect(propose([S, J('K', { walks: [3, 3], rides: 1, board: '07:50', arr: '10:20' })], '07:45')).toEqual([
+    expect(propose([S, J('L', { walks: [3, 3], rides: 1, board: '07:50', arr: '10:16' })], '07:45').map((x) => x[0])).toEqual(['S']);
+    expect(propose([S, J('K', { walks: [3, 3], rides: 1, board: '07:50', arr: '10:15' })], '07:45')).toEqual([
       ['S', 'short', 'Le plus court : 2 changements, à pied 3 + 3 min'],
       ['K', 'none', 'Sans changement : à pied 3 + 3 min'],
     ]);
     expect(propose([S, J('F', { walks: [3, 0, 3], rides: 2, board: '07:50', arr: '10:10' })], '07:45')[1]).toEqual(['F', 'fewer', 'Moins de changements : 1 changement, à pied 3 + 3 min']);
+    // même arrivée, 11 min à pied (1 min de trop) : jamais « Sans changement » d'une proposition 1 qui n'en a pas
+    const T = J('T', { walks: [3, 0, 3], rides: 2, board: '07:50', arr: '09:00' });
+    expect(propose([T, J('K2', { walks: [11, 3], rides: 1, board: '07:58', arr: '09:00' })], '07:45').map((x) => x[0])).toEqual(['T']);
+    // plusieurs : le meilleur coût
+    const D1 = J('D1', { walks: [3, 3], rides: 1, board: '07:50', arr: '10:12' });
+    const D2 = J('D2', { walks: [3, 0, 3], rides: 2, board: '07:50', arr: '10:05' });
+    expect(propose([S, D1, D2], '07:45')[1]).toEqual(['D2', 'fewer', 'Moins de changements : 1 changement, à pied 3 + 3 min']);
   });
 
-  it('« Sans changement » d’un palier plus haut que la proposition 1 : seulement s’il n’arrive pas plus tard', () => {
-    // K part avant S (jamais « Plus tard ») ; 12 min à pied : palier 1
-    const S = J('S', { walks: [3, 0, 3], rides: 2, board: '07:50', arr: '09:00' });
-    expect(propose([S, J('K', { walks: [12, 3], rides: 1, board: '07:58', arr: '09:00' })], '07:45')).toEqual([
-      ['S', 'short', 'Le plus court : 1 changement, à pied 3 + 3 min'],
-      ['K', 'none', 'Sans changement : à pied 12 + 3 min'],
+  it('une correspondance qui fait gagner 3 min sur le même premier train : proposée (1 min par changement), le direct « Sans changement »', () => {
+    const direct = J('D', { walks: [0, 0], rides: 1, board: '08:25', arr: '09:24', firstTrip: 'IC-0825' });
+    const via = J('V', { walks: [0, 0, 0], rides: 2, board: '08:25', arr: '09:21', firstTrip: 'IC-0825' });
+    expect(propose([direct, via], '08:00')).toEqual([
+      ['V', 'short', 'Le plus court : 1 changement'],
+      ['D', 'none', 'Sans changement : arrivée 09:24'],
     ]);
-    expect(propose([S, J('K', { walks: [12, 3], rides: 1, board: '07:58', arr: '09:01' })], '07:45').map((x) => x[0])).toEqual(['S']);
+    // 1 min seulement : même coût, le direct
+    const via1 = J('V1', { walks: [0, 0, 0], rides: 2, board: '08:25', arr: '09:23', firstTrip: 'IC-0825' });
+    expect(propose([direct, via1], '08:00').map((x) => x[0])).toEqual(['D']);
   });
 
-  it('« Plus tard » : la suite, départ plus tard ; jamais un trajet devancé de plus de 30 min par un trajet parti au plus 30 min avant', () => {
+  it('deux autres propositions au plus avec un gain, dans l’ordre Plus tôt, Moins de marche, Sans changement', () => {
+    const P1 = J('P', { walks: [8, 0, 2], rides: 2, board: '08:15', arr: '09:00' });
+    const E = J('E', { walks: [20, 0], rides: 1, board: '08:25', arr: '08:40' });
+    const LW = J('LW', { walks: [3, 0, 3], rides: 2, board: '08:20', arr: '09:12' });
+    const N = J('N', { walks: [4, 4], rides: 1, board: '08:20', arr: '09:12' });
+    // trois candidats avec un gain : Plus tôt, puis Moins de marche ; « Sans changement » ne passe pas
+    expect(propose([P1, E, LW, N], '08:00', 5).map((x) => `${x[0]}:${x[1]}`)).toEqual(['P:short', 'E:earlier', 'LW:lesswalk']);
+    // sans « Plus tôt » : Moins de marche, puis Sans changement
+    expect(propose([P1, LW, N], '08:00', 5).map((x) => `${x[0]}:${x[1]}`)).toEqual(['P:short', 'LW:lesswalk', 'N:none']);
+  });
+
+  it('« Le suivant » : même structure, départ suivant, une seule fois ; le départ d’après complète la liste en « Plus tard », dans l’ordre des départs ; jamais deux fois le même trajet', () => {
+    const js = sameStructure([0, 1, 2, 3, 4].map((k) => J(`S${k}`, { walks: [3, 4], rides: 1, board: `08:${String(5 + 10 * k).padStart(2, '0')}`, arr: `08:${String(30 + 10 * k).padStart(2, '0')}` })));
+    const out = propose([...js, js[0]], '08:00');
+    expect(out.map((x) => x[0])).toEqual(['S0', 'S1', 'S2']);
+    expect(out.map((x) => x[1])).toEqual(['short', 'next', 'later']);
+    expect(out[1][2]).toBe('Le suivant : même trajet, 10 min plus tard');
+    expect(out[2][2]).toBe('Plus tard : direct, départ 08:22');
+  });
+
+  it('« Plus tard » part et arrive après « Le suivant » (revue d’usage : jamais « Plus tard 08:33 → 09:57 » avant « Le suivant 08:33 → 10:02 »)', () => {
+    const [P1, next] = sameStructure([
+      J('IC+T3', { walks: [7, 2, 9], rides: 2, board: '07:42', arr: '08:58' }),
+      J('IC+T3b', { walks: [7, 2, 9], rides: 2, board: '08:42', arr: '10:02' }),
+    ]);
+    const X = J('IC+T4', { walks: [7, 1, 10], rides: 2, board: '08:42', arr: '09:57' });
+    const Y = J('S+B', { walks: [3, 0, 3], rides: 2, board: '09:05', arr: '10:20' });
+    expect(propose([P1, next, X], '07:31')).toEqual([
+      ['IC+T3', 'short', 'Le plus court : 1 changement, à pied 7 + 2 + 9 min'],
+      ['IC+T3b', 'next', 'Le suivant : même trajet, 1 h plus tard'],
+    ]);
+    expect(propose([P1, next, X, Y], '07:31')).toEqual([
+      ['IC+T3', 'short', 'Le plus court : 1 changement, à pied 7 + 2 + 9 min'],
+      ['IC+T3b', 'next', 'Le suivant : même trajet, 1 h plus tard'],
+      ['S+B', 'later', 'Plus tard : 1 changement, départ 09:02'],
+    ]);
+  });
+
+  it('garde : aucune proposition dominée par un candidat, même non affiché ; « Le suivant » cède sa place au trajet qui le domine (scénario 1 : l’IC 08:42 puis le T4)', () => {
+    const [P1, next] = sameStructure([
+      J('IC+T3', { walks: [7, 2, 9], rides: 2, board: '07:42', arr: '08:58' }),
+      J('IC+T3b', { walks: [7, 2, 9], rides: 2, board: '08:42', arr: '10:02' }),
+    ]);
+    // même départ, mêmes marches, même changement, arrivée 5 min plus tôt : il domine l'IC 08:42 puis le T3
+    const X = J('IC+T4', { walks: [7, 2, 9], rides: 2, board: '08:42', arr: '09:57' });
+    expect(propose([P1, next, X], '07:31')).toEqual([
+      ['IC+T3', 'short', 'Le plus court : 1 changement, à pied 7 + 2 + 9 min'],
+      ['IC+T4', 'next', 'Le suivant : 1 h plus tard'],
+    ]);
+    // il marche 1 min de plus : il ne domine pas, « Le suivant » reste le même trajet
+    const X2 = J('IC+T4', { walks: [7, 1, 10], rides: 2, board: '08:42', arr: '09:57' });
+    expect(propose([P1, next, X2], '07:31').map((x) => `${x[0]}:${x[1]}`)).toEqual(['IC+T3:short', 'IC+T3b:next']);
+  });
+
+  it('garde : un autre rôle aussi (« Sans changement » : à arrivée, plus longue marche et changements égaux, le départ le plus tard, même avec plus de marche totale)', () => {
+    const P1 = J('P', { walks: [2, 0, 2], rides: 2, board: '08:05', arr: '08:45' });
+    const F = J('F', { walks: [2, 1], rides: 1, board: '08:10', arr: '08:55' });
+    const G = J('G', { walks: [2, 2], rides: 1, board: '08:12', arr: '08:55' });
+    expect(propose([P1, F, G], '08:00', 5).map((x) => `${x[0]}:${x[1]}`)).toEqual(['P:short', 'G:none']);
+  });
+
+  it('« Plus tard » : le meilleur coût parmi les trajets partis et arrivés après ; jamais devancé de plus de 30 min par un trajet parti au plus 30 min avant', () => {
     const a = J('A', { walks: [3, 3], rides: 1, board: '08:05', arr: '08:40' });
     const b = J('B', { walks: [3, 0, 3], rides: 2, board: '08:20', arr: '08:55' });
     expect(propose([a, b], '08:00')).toEqual([
@@ -514,27 +579,144 @@ describe('règles des propositions (PRD-1.2 § 1.3, PRD-1.2.1 § 1.4)', () => {
     expect(propose([a, slow], '08:00').map((x) => x[0])).toEqual(['A']);
   });
 
-  it('« Plus tard » : choisi comme la proposition 1 parmi le reste, le moins de marche d’abord (cas réel Maison → Bureau, marche 5)', () => {
-    const P1 = J('36+IC+2', { walks: [4, 4, 3, 2], rides: 3, board: '07:49', arr: '08:33' });
-    const F = J('IC+2', { walks: [19, 3, 2], rides: 2, board: '08:01', arr: '08:33' });
-    const L19 = J('S1+2', { walks: [19, 3, 2], rides: 2, board: '08:06', arr: '08:50' });
-    const L4 = J('36+S1+2', { walks: [4, 1, 3, 2], rides: 3, board: '07:54', arr: '08:50' });
-    // même arrivée que S1+2 (19 min à pied, palier 3), avec 4 min de marche au plus (palier 0) : 36+S1+2 « Plus tard »
-    expect(propose([P1, F, L19, L4], '07:31', 5)).toEqual([
-      ['36+IC+2', 'short', 'Le plus court : 2 changements, 13 min à pied'],
-      ['IC+2', 'fewer', 'Moins de changements : 1 changement, à pied 19 + 3 + 2 min'],
-      ['36+S1+2', 'later', 'Plus tard : 2 changements, départ 07:50'],
+  it('gardes : aucune proposition dominée par une autre, jamais deux fois la même suite de lignes (sauf « Le suivant »)', () => {
+    // « Plus tard » dominé par « Sans changement » (parti plus tard, arrivé plus tôt, direct, moins de marche) : le
+    // suivant au coût le remplace
+    const P1 = J('P', { walks: [2, 0, 2], rides: 2, board: '08:05', arr: '08:45' });
+    const F = J('F', { walks: [2, 2], rides: 1, board: '08:15', arr: '08:55' });
+    const L = J('L', { walks: [3, 0, 3], rides: 2, board: '08:12', arr: '09:05' });
+    const L2 = J('L2', { walks: [2, 0, 2], rides: 2, board: '08:40', arr: '09:20' });
+    expect(propose([P1, F, L, L2], '08:00', 5)).toEqual([
+      ['P', 'short', 'Le plus court : 1 changement, à pied 2 + 2 min'],
+      ['F', 'none', 'Sans changement : à pied 2 + 2 min'],
+      ['L2', 'later', 'Plus tard : 1 changement, départ 08:38'],
     ]);
-    // garde-fou dans le reste : parti à 08:21 (aucun trajet ne le devance de 30 min), le palier 0 arrive 35 min après
-    // le plus tôt du reste (S1+2, 08:50) : S1+2 « Plus tard »
-    const late = J('36+S1+2b', { walks: [4, 1, 3, 2], rides: 3, board: '08:25', arr: '09:25' });
-    expect(propose([P1, F, L19, late], '07:31', 5).map((x) => `${x[0]}:${x[1]}`)).toEqual(['36+IC+2:short', 'IC+2:fewer', 'S1+2:later']);
-    // à 30 min près, il passe
-    const late30 = J('36+S1+2c', { walks: [4, 1, 3, 2], rides: 3, board: '08:25', arr: '09:20' });
-    expect(propose([P1, F, L19, late30], '07:31', 5).map((x) => `${x[0]}:${x[1]}`)).toEqual(['36+IC+2:short', 'IC+2:fewer', '36+S1+2c:later']);
+    // même ligne que la proposition 1, montée plus loin pour arriver plus tôt : pas « Plus tôt » (même suite de lignes) ;
+    // une autre ligne 7 min plus tôt l'est
+    const A = J('A', { walks: [2, 2], rides: 1, board: '08:10', arr: '08:40', line: 'L' });
+    const E = J('E', { walks: [15, 2], rides: 1, board: '08:05', arr: '08:30', line: 'L' });
+    const E2 = J('E2', { walks: [12, 0], rides: 1, board: '08:10', arr: '08:33', line: 'K' });
+    expect(propose([A, E], '08:00', 5)).toEqual([['A', 'short', 'Le plus court : direct, à pied 2 + 2 min']]);
+    expect(propose([A, E, E2], '08:00', 5)).toEqual([
+      ['A', 'short', 'Moins de marche : direct, à pied 2 + 2 min'],
+      ['E2', 'earlier', 'Plus tôt de 7 min, mais 12 min à pied'],
+    ]);
   });
 
-  it('marche seule : « Le plus court : à pied, {n} min »', () => {
+  it('marche seule : proposition 1 si elle coûte le moins, sinon seulement « Plus tôt » (5 min au moins), jamais d’autre étiquette', () => {
     expect(propose([walkOnly('W', '08:00', 9)], '08:00')).toEqual([['W', 'short', 'Le plus court : à pied, 9 min']]);
+    // 12 min à pied (2 de trop, marche 10) contre un bus 8 min plus tard : à pied d'abord, le bus « Moins de marche »
+    const bus = J('B', { walks: [1, 2], rides: 1, board: '08:05', arr: '08:20' });
+    expect(propose([walkOnly('W', '08:00', 12), bus], '08:00')).toEqual([
+      ['W', 'short', 'Le plus court : à pied, 12 min'],
+      ['B', 'lesswalk', 'Moins de marche : arrive 8 min plus tard, à pied 1 + 2 min'],
+    ]);
+    // t45, t47 du banc : la marche seule arrive après la proposition 1, ou moins de 5 min avant : jamais proposée
+    const tram = J('T', { walks: [5, 3], rides: 1, board: '08:06', arr: '08:14' });
+    expect(propose([walkOnly('W', '08:00', 18), tram], '08:00').map((x) => x[0])).toEqual(['T']);
+    const late = J('T2', { walks: [3, 3], rides: 1, board: '08:05', arr: '08:22' });
+    expect(propose([walkOnly('W', '08:00', 19), late], '08:00', 5).map((x) => x[0])).toEqual(['T2']);
+  });
+
+  it('invariants (trajets tirés au hasard, marche 5 et 10) : chaque étiquette tient sa promesse, gardes de l’ensemble affiché', () => {
+    let seed = 42;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const pickInt = (a: number, b: number) => a + Math.floor(rnd() * (b - a + 1));
+    const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const seen: Record<string, number> = { earlier: 0, lesswalk: 0, none: 0, fewer: 0, next: 0, later: 0, walkFirst: 0, walkEarlier: 0, nextOther: 0 };
+    for (const M of [5, 10]) {
+      for (let n = 0; n < 400; n++) {
+        const js: Journey[] = [];
+        const count = pickInt(2, 9);
+        for (let k = 0; k < count; k++) {
+          const rides = pickInt(1, 3);
+          const walks = Array.from({ length: rides + 1 }, (_, i) => (i === 0 || i === rides ? pickInt(0, 25) : pickInt(0, 5)));
+          const board = 8 * 60 + pickInt(0, 50);
+          js.push(J(`J${n}-${k}`, { walks, rides, board: hm(board), arr: hm(board + pickInt(20, 80) + walks[rides]), line: rnd() < 0.2 ? 'L' : undefined }));
+        }
+        // départs suivants d'une même structure
+        if (rnd() < 0.4) {
+          const rides = pickInt(1, 2);
+          const walks = Array.from({ length: rides + 1 }, () => pickInt(0, 6));
+          const b0 = 8 * 60 + pickInt(0, 20);
+          const d = pickInt(30, 60);
+          js.push(...sameStructure([0, 1, 2].map((i) => J(`S${n}-${i}`, { walks, rides, board: hm(b0 + 20 * i), arr: hm(b0 + 20 * i + d) })), `S${n}`));
+        }
+        if (rnd() < 0.3) js.push(walkOnly(`W${n}`, '08:00', pickInt(6, 35)));
+        const items = js.map(itemOf);
+        const out = rank(items, t('08:00') / MIN, M);
+        const first = out[0].item;
+        const ctx = `marche ${M}, tirage ${n}`;
+        const lw = (x: (typeof items)[number]) => longestOf(x);
+        const over = (x: (typeof items)[number]) => Math.max(0, lw(x) - M);
+        /** x domine y : départ plus tard ou égal, arrivée, plus longue marche et changements pas pires, l'un meilleur. */
+        const dominates = (x: (typeof items)[number], y: (typeof items)[number]) =>
+          x.dep >= y.dep && x.arr <= y.arr && lw(x) <= lw(y) && x.transfers <= y.transfers && (x.dep > y.dep || x.arr < y.arr || lw(x) < lw(y) || x.transfers < y.transfers);
+        expect(out.length, ctx).toBeLessThanOrEqual(3);
+        expect(out[0].label, ctx).toBe('short');
+        if (first.rides === 0) seen.walkFirst++;
+        const gains = out.filter((r) => ['earlier', 'lesswalk', 'none', 'fewer'].includes(r.label));
+        expect(gains.length, ctx).toBeLessThanOrEqual(2);
+        const seq: (typeof items)[number][] = [first];
+        let cur = first;
+        out.slice(1).forEach((r) => {
+          const x = r.item;
+          seen[r.label]++;
+          expect(r.label, ctx).not.toBe('walk');
+          if (x.rides === 0) {
+            expect(r.label, `${ctx} : marche seule`).toBe('earlier');
+            seen.walkEarlier++;
+          }
+          if (r.label === 'earlier') expect(x.arr, ctx).toBeLessThanOrEqual(first.arr - 5);
+          if (r.label === 'lesswalk') {
+            expect(lw(first), ctx).toBeGreaterThan(M);
+            expect(x.arr, ctx).toBeLessThanOrEqual(first.arr + 20);
+            expect(lw(x) <= M || lw(x) <= lw(first) - 5, ctx).toBe(true);
+          }
+          if (r.label === 'none' || r.label === 'fewer') {
+            expect(x.transfers, ctx).toBeLessThan(first.transfers);
+            expect(r.label === 'none', ctx).toBe(x.transfers === 0);
+            expect(x.arr, ctx).toBeLessThanOrEqual(first.arr + 15);
+            expect(over(x), ctx).toBeLessThanOrEqual(over(first));
+          }
+          if (r.label === 'next') {
+            // même structure que la proposition 1, sinon un trajet qui domine un départ suivant de cette structure
+            if (x.structure !== first.structure) {
+              expect(items.some((y) => y.structure === first.structure && y.dep > cur.dep && dominates(x, y)), `${ctx} : « Le suivant » remplacé`).toBe(true);
+              seen.nextOther++;
+            }
+            expect(x.dep, ctx).toBeGreaterThan(cur.dep);
+            cur = x;
+          }
+          if (r.label === 'next' || r.label === 'later') {
+            for (const s of seq) {
+              expect(x.dep, `${ctx} : ${r.label} part après`).toBeGreaterThan(s.dep);
+              expect(x.arr, `${ctx} : ${r.label} arrive après`).toBeGreaterThan(s.arr);
+            }
+            seq.push(x);
+          }
+        });
+        // gardes : aucune proposition dominée par un candidat, affiché ou non (PRD-1.2.2 § 7.4) ; pas deux fois la même
+        // suite de lignes (sauf Le suivant)
+        for (const a of out) {
+          const by = items.find((y) => dominates(y, a.item));
+          expect(by?.id, `${ctx} : ${a.label} ${a.item.id} dominé`).toBeUndefined();
+        }
+        // « Le suivant » une seule fois ; les départs suivants de même structure (ou le trajet qui en domine un) qui
+        // complètent la liste sont « Plus tard » et, comme lui, peuvent partager ses lignes
+        expect(out.filter((r) => r.label === 'next').length, ctx).toBeLessThanOrEqual(1);
+        const fromNext = (r: (typeof out)[number]) =>
+          r.label === 'next' || (r.label === 'later' && items.some((y) => y.structure === first.structure && (y === r.item || dominates(r.item, y))));
+        for (const a of out)
+          for (const b of out) {
+            if (a === b) continue;
+            const x = a.item;
+            const y = b.item;
+            if (!fromNext(a) && !fromNext(b)) expect(x.lines === y.lines && x.rides > 0, `${ctx} : mêmes lignes`).toBe(false);
+          }
+      }
+    }
+    // le tirage passe par chaque règle
+    for (const [k, v] of Object.entries(seen)) expect(v, k).toBeGreaterThan(0);
   });
 });

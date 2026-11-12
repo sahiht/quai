@@ -120,10 +120,10 @@ describe('M8.5 : panne du temps réel (CA-M8.6)', () => {
 });
 
 describe('M8.6 : lancement sans horaires (CA-M8.7)', () => {
-  it('serveur arrêté : « Horaires injoignables : nouvel essai dans 30 s » ; fichier absent : publication en cause', async () => {
+  it('serveur arrêté : « Pas de connexion aux horaires : nouvel essai dans 30 s » (1.2.2) ; fichier absent : publication en cause', async () => {
     const env = makeEnv({ now: '2026-11-10T07:31' });
     env.server.networkDown = true;
-    await expect(env.core.init()).rejects.toMatchObject({ code: 'dataUnreachable', message: 'Horaires injoignables : nouvel essai dans 30 s' });
+    await expect(env.core.init()).rejects.toMatchObject({ code: 'dataUnreachable', message: 'Pas de connexion aux horaires : nouvel essai dans 30 s' });
     env.server.networkDown = false;
     env.server.overrides.set('/quai/data/meta.json', () => new Response('Not Found', { status: 404 }));
     await expect(env.core.init()).rejects.toMatchObject({ code: 'dataUnavailable' });

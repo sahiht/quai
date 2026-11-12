@@ -10,6 +10,7 @@
  */
 import type { Names, TrainsDay } from '../../../shared/types';
 import type { Leg, Stopover } from './api';
+import { isSncbBus } from './means';
 import { Net, trainPart, trainTimes, trainTripOf, type TrainPart } from './routing/network';
 import { P } from './routing/params';
 import { raptor, type Cand } from './routing/raptor';
@@ -172,7 +173,11 @@ function toOption(net: Net, c: Cand, dayOf: Map<TrainsDay, DayIndex>): TrainOpti
   return { dep: ms(first.day, trainTimes(s0, first.i).dep), arr: ms(last.day, trainTimes(sl, last.k).arr), rides };
 }
 
-/** Trajet en train (montée → descente) sous forme d'étape, horaires prévus (temps réel appliqué ensuite). */
+/**
+ * Trajet en train (montée → descente) sous forme d'étape, horaires prévus (temps réel appliqué ensuite). 1.2.2 : bus
+ * de remplacement de la SNCB (catégorie « BUS » du fichier trains/) : mode « bus », comme les départs des gares
+ * (core/means.ts : « bus SNCB » dans les phrases) ; catégorie et ligne « BUS » gardées (code court des colonnes).
+ */
 export function trainLeg(r: TrainRide): Leg {
   const d = r.day;
   const trip = d.file.trips[r.trip];
@@ -204,7 +209,7 @@ export function trainLeg(r: TrainRide): Leg {
     schedDep: dep,
     schedArr: arr,
     op: 'sncb',
-    mode: 'train',
+    mode: isSncbBus({ op: 'sncb', cat: trip.cat }) ? 'bus' : 'train',
     line: trip.cat,
     cat: trip.cat,
     head: trip.head,

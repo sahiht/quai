@@ -1,8 +1,11 @@
 /**
  * Interface du téléphone (page web de l'appli dans l'onglet Even Hub) : routeur par ancre (#/…)
- * et contexte partagé. Écrans : accueil, bienvenue et « Tes favoris » (Config1, S1), « Mes favoris » (lieux,
- * arrêts et trajets fixes, PRD-1.2 § 2.2), affichage (Config4), alertes (Config5), données (Config6), recherche
- * (Visite3). « Mes lieux » (#/lieux) n'existe plus : son ancre mène à « Mes favoris ».
+ * et contexte partagé. Écrans : accueil, bienvenue et « Tes favoris » (Config1, S1), « Mes favoris » (endroits et
+ * trajets fixes, PRD-1.2 § 2.2), affichage (Config4), alertes (Config5), données (Config6), recherche (Visite3).
+ * « Mes lieux » (#/lieux) n'existe plus : son ancre mène à « Mes favoris ».
+ * 1.2.2 (PRD-1.2.2 § 4) : #/gares et #/lignes (Quai Web : ouverts par les lunettes) montrent la section de l'accueil,
+ * ou l'ajout si elle est vide ; #/gares/ajouter, #/lignes/ajouter (?arret=… : arrêt présélectionné) ; #/trajets
+ * (revue d'usage n° 9).
  */
 import type { Core, GlassesApi, Meta } from '../core/api';
 import type { Freshness } from '../glasses/controller';
@@ -18,8 +21,10 @@ import { favoriteEditScreen, fixedTripScreen, newFavoriteScreen } from './screen
 import { favoritesScreen } from './screens/favorites';
 import { homeScreen } from './screens/home';
 import { onboardingScreen, yourFavoritesScreen } from './screens/onboarding';
+import { addLineScreen, addStationScreen } from './screens/pick-add';
 import { searchScreen } from './screens/search';
-import { newsLines } from './text';
+import { tripsScreen } from './screens/trips';
+import { newsLines, T } from './text';
 
 export interface PhoneCtx {
   settings: SettingsStore;
@@ -45,17 +50,40 @@ export interface PhoneCtx {
   /**
    * Bannière de l'accueil après la mise à jour (T1), une fois : visible si les réglages lus au lancement venaient
    * d'une version antérieure à NEWS_SINCE (seenVersion non vide), jusqu'à « OK ». Le téléphone n'écrit pas
-   * seenVersion pour elle : les lunettes s'en servent pour leur message « Quai 1.2.1 ».
+   * seenVersion pour elle : les lunettes s'en servent pour leur message « Quai 1.2.2 ».
    */
   news?: NewsState;
 }
 
 export type Screen = (ctx: PhoneCtx, sub: string[]) => HTMLElement | Promise<HTMLElement>;
 
-const SCREENS: Record<string, { screen: Screen; grey?: boolean; title: string }> = {
+interface Route {
+  screen: Screen;
+  /** Fond gris (accueil, recherche) ; une fonction quand l'ancre mène à des écrans différents (#/gares). */
+  grey?: boolean | ((ctx: PhoneCtx, sub: string[]) => boolean);
+  title: string;
+}
+
+/**
+ * #/gares et #/lignes (PRD-1.2.2 § 1.3 et § 4, Quai Web) : la section de l'accueil, curseur sur son titre ; vide, ou
+ * #/…/ajouter : l'ajout.
+ */
+function pickRoute(kind: 'stations' | 'lines'): Route {
+  const adding = (c: PhoneCtx, s: string[]): boolean => s[0] === 'ajouter' || !c.settings.get()[kind].length;
+  return {
+    screen: (c, s) => (adding(c, s) ? (kind === 'stations' ? addStationScreen(c) : addLineScreen(c)) : homeScreen(c, [], { focus: kind })),
+    grey: (c, s) => !adding(c, s),
+    title: kind === 'stations' ? T.stations : T.lines,
+  };
+}
+
+const SCREENS: Record<string, Route> = {
   '': { screen: homeScreen, grey: true, title: 'Quai' },
   bienvenue: { screen: (c, s) => (s[0] === 'favoris' || s[0] === 'lieux' ? yourFavoritesScreen(c) : onboardingScreen(c)), title: 'Bienvenue' },
   favoris: { screen: favoritesRoute, title: 'Mes favoris' },
+  gares: pickRoute('stations'),
+  lignes: pickRoute('lines'),
+  trajets: { screen: tripsScreen, title: T.trips },
   affichage: { screen: displayScreen, title: 'Affichage' },
   alertes: { screen: alertsScreen, title: 'Alertes' },
   donnees: { screen: dataScreen, title: 'Données' },
@@ -89,8 +117,8 @@ export function parseHash(hash: string): { name: string; sub: string[]; params: 
   return { name: parts[0] ?? '', sub: parts.slice(1), params: new URLSearchParams(query) };
 }
 
-/** Version qui a apporté les nouveautés de la bannière (le moins de marche d'abord, PRD-1.2.1 § 6) : la 1.2.1. */
-export const NEWS_SINCE = '1.2.1';
+/** Version qui a apporté les nouveautés de la bannière (gares et lignes, PRD-1.2.2 § 9) : la 1.2.2. */
+export const NEWS_SINCE = '1.2.2';
 
 /** Bannière « Nouveau » de l'accueil : visible ou non, « OK », et ses lignes (newsLines). */
 export interface NewsState {
@@ -100,9 +128,9 @@ export interface NewsState {
 }
 
 /**
- * Bannière « Nouveau » : une fois, au passage d'une version antérieure (1.0, 1.1, 1.2.0) à la 1.2.1 ou plus (réglages
- * vus avant 1.2.1 au lancement), jusqu'à « OK », comme le message « Quai 1.2.1 » des lunettes ; la ligne des lieux en
- * plus depuis la 1.0 ou la 1.1 ; jamais après une installation neuve. `app` : la version de l'appli.
+ * Bannière « Nouveau » : une fois, au passage d'une version antérieure (1.1, 1.2.0, 1.2.1) à la 1.2.2 ou plus
+ * (réglages vus avant 1.2.2 au lancement), jusqu'à « OK », comme le message « Quai 1.2.2 » des lunettes ; jamais
+ * après une installation neuve. `app` : la version de l'appli.
  */
 export function newsState(seenAtStart: string, since = NEWS_SINCE, app = APP_VERSION): NewsState {
   let shown = !!seenAtStart && compareVersions(seenAtStart, since) < 0 && compareVersions(app, since) >= 0;
@@ -137,7 +165,8 @@ export function mountPhone(deps: PhoneDeps): { refresh(): void } {
         else location.hash = hash;
       },
     };
-    (deps.themeTarget ?? document.body).classList.toggle('grey', !!def.grey);
+    const grey = typeof def.grey === 'function' ? def.grey(ctx, sub) : !!def.grey;
+    (deps.themeTarget ?? document.body).classList.toggle('grey', grey);
     document.title = def.title === 'Quai' ? 'Quai' : `${def.title} · Quai`;
     let el: HTMLElement;
     try {
@@ -147,6 +176,14 @@ export function mountPhone(deps: PhoneDeps): { refresh(): void } {
     }
     if (my !== seq) return;
     deps.root.replaceChildren(el);
+    // Une section marquée data-focus (#/gares, #/lignes) : son titre reçoit le curseur, la page la montre.
+    const section = deps.root.querySelector<HTMLElement>('[data-focus]');
+    if (section) {
+      section.tabIndex = -1;
+      section.focus({ preventScroll: true });
+      section.scrollIntoView?.({ block: 'start' });
+      return;
+    }
     // Un champ marqué data-autofocus reçoit le curseur (« Où vas-tu ? » : « Arrivée ») ; sinon le titre.
     const field = deps.root.querySelector<HTMLElement>('[data-autofocus]');
     const focus = deps.root.querySelector<HTMLElement>('h1');

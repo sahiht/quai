@@ -1,12 +1,14 @@
 /**
  * Petits réseaux (design-routing.md § 8) : ligne directe ; deux lignes urbaines d'opérateurs différents reliées à
  * pied (M5b) ; urbain, train, urbain ; trois trains (M5c) ; trois lignes urbaines refusées (portée PRD) ; attente de
- * 61 min refusée ; correspondance qui ne gagne que 3 min sur le même premier train refusée ; nuit avec repli au
- * lendemain ; montée interdite (trains -1, lignes `f`) ; repli 1.0 sans fichiers de ligne.
+ * 61 min refusée ; correspondance qui fait gagner 3 min sur le même premier train (PRD-1.2.2 § 7 : proposée, le direct
+ * « Sans changement ») ; nuit avec repli au lendemain ; montée interdite (trains -1, lignes `f`) ; repli 1.0 sans
+ * fichiers de ligne ; bus de remplacement de la SNCB (un véhicule comme un autre, « bus SNCB »).
  */
 import { describe, expect, it } from 'vitest';
 import type { LineFile, Meta, TrainsDay } from '../../../../shared/types';
 import type { Endpoint as ApiEndpoint } from '../../../src/core/api';
+import { meansText, rideName } from '../../../src/core/means';
 import { hhmm } from '../../../src/core/util';
 import { at as atTime } from '../support/network';
 import { at, legsOf, miniEnv, plain, SETTINGS, summary, type MiniNet } from './support';
@@ -40,7 +42,8 @@ describe('petits réseaux', () => {
     expect(summary(r)).toEqual([
       'short: marche 1 | 07:15 1 Alpha → Beta 07:35 | marche 1',
       'next: marche 1 | 07:30 1 Alpha → Beta 07:50 | marche 1',
-      'next: marche 1 | 07:45 1 Alpha → Beta 08:05 | marche 1',
+      // « Le suivant » une seule fois : le départ d'après est « Plus tard »
+      'later: marche 1 | 07:45 1 Alpha → Beta 08:05 | marche 1',
     ]);
     expect(plain(r.journeys[0].reason)).toBe('Le plus court : direct, à pied 1 + 1 min');
     expect(plain(r.journeys[1].reason)).toBe('Le suivant : même trajet, 15 min plus tard');
@@ -192,7 +195,7 @@ describe('petits réseaux', () => {
     expect(await ko.core.trains('sncb:8000001', 'sncb:8000003', atTime('2026-11-10T07:30'))).toEqual([]);
   });
 
-  it('correspondance qui ne gagne que 3 min sur le même premier train : refusée', async () => {
+  it('correspondance qui fait gagner 3 min sur le même premier train : proposée (1 min par changement), le direct « Sans changement » (PRD-1.2.2 § 7)', async () => {
     const m: MiniNet = {
       stations: [
         { uic: '8000001', name: 'Pi', lat: 50.6, lon: 4.0 },
@@ -206,7 +209,9 @@ describe('petits réseaux', () => {
     };
     const { core } = miniEnv(m, '2026-11-10T08:00');
     const r = await core.route(station('8000001', 'Pi', 50.6, 4.0), station('8000003', 'Ro', 50.8, 4.2), atTime('2026-11-10T08:00'), SETTINGS);
-    expect(summary(r)).toEqual(['short: 08:25 IC Pi → Ro 09:24']);
+    expect(summary(r)).toEqual(['short: 08:25 IC Pi → Qu 09:16 | 09:20 S1 Qu → Ro 09:21', 'none: 08:25 IC Pi → Ro 09:24']);
+    expect(plain(r.journeys[1].reason)).toBe('Sans changement : arrivée 09:24');
+    // la recherche de trains (trains.ts) garde sa règle : jamais une correspondance qui fait gagner moins de 5 min
     const tr = await core.trains('sncb:8000001', 'sncb:8000003', atTime('2026-11-10T08:00'));
     expect(tr.map((j) => j.legs.length)).toEqual([1]);
   });
@@ -285,6 +290,32 @@ describe('petits réseaux', () => {
     expect((await ok.core.route(at({ lat: 50.8003, lon: 4.3 }), dest, atTime('2026-11-10T07:05'), SETTINGS)).journeys.length).toBeGreaterThan(0);
     const ko = miniEnv(m, '2026-11-10T07:05', noAlight);
     expect(await ko.core.route(at({ lat: 50.8003, lon: 4.3 }), dest, atTime('2026-11-10T07:05'), SETTINGS)).toMatchObject({ journeys: [], empty: 'noTrip' });
+  });
+
+  it('bus de remplacement de la SNCB (trains/, catégorie « BUS ») : un véhicule comme un autre, « bus SNCB » dans les phrases', async () => {
+    const m: MiniNet = {
+      stations: [
+        { uic: '8000001', name: 'Pi', lat: 50.6, lon: 4.0 },
+        { uic: '8000002', name: 'Qu', lat: 50.7, lon: 4.1 },
+        { uic: '8000003', name: 'Ro', lat: 50.8, lon: 4.2 },
+      ],
+      trains: [
+        { id: 'IC1', route: 'IC', service: 'DAILY', num: '2105', head: 'Qu', st: [['8000001_1', '08:00'], ['8000002_1', '08:30']] },
+        { id: 'IC2', route: 'IC', service: 'DAILY', num: '2107', head: 'Qu', st: [['8000001_1', '09:00'], ['8000002_1', '09:30']] },
+        // remplace le train de Qu à Ro, numéroté d'après lui ; correspondance de gare (4 min) tenue de justesse
+        { id: 'B1', route: 'BUS', service: 'DAILY', num: '3505', head: 'Ro', st: [['8000002_1', '08:34'], ['8000003_1', '09:05']] },
+        { id: 'B2', route: 'BUS', service: 'DAILY', num: '3507', head: 'Ro', st: [['8000002_1', '09:34'], ['8000003_1', '10:05']] },
+      ],
+    };
+    const { core } = miniEnv(m, '2026-11-10T07:50');
+    const r = await core.route(station('8000001', 'Pi', 50.6, 4.0), station('8000003', 'Ro', 50.8, 4.2), atTime('2026-11-10T07:50'), SETTINGS);
+    expect(summary(r)).toEqual(['short: 08:00 IC Pi → Qu 08:30 | 08:34 BUS Qu → Ro 09:05', 'next: 09:00 IC Pi → Qu 09:30 | 09:34 BUS Qu → Ro 10:05']);
+    const bus = r.journeys[0].legs[1];
+    // comme les départs des gares : op sncb, mode bus, ligne « BUS »
+    expect(bus).toMatchObject({ op: 'sncb', mode: 'bus', line: 'BUS', cat: 'BUS', num: '3505', tripId: 'B1' });
+    expect(meansText(r.journeys[0])).toBe('IC + bus SNCB');
+    expect(rideName(bus)).toBe('bus SNCB');
+    expect(plain(r.journeys[0].reason)).toBe('Le plus court : 1 changement');
   });
 
   it('repli 1.0 sans fichiers de ligne (meta.lines absent) : propositions étiquetées', async () => {

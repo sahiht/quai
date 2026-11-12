@@ -14,6 +14,21 @@ const line = (x: NearbyItem, now: number) => {
 };
 
 describe('nearby', () => {
+  it('1.2.2 : « Autour de moi » vide, arrêt le plus proche à 3 km : tuiles seules, au-delà des 3 × 3 tuiles du point', async () => {
+    const { core, server } = makeEnv({ now: '2026-11-10T12:10' });
+    await core.init();
+    const before = server.calls.length;
+    const items = await core.nearby(50.86004, 4.36017, 3000, { light: true });
+    const calls = server.calls.slice(before);
+    expect(calls.length).toBeGreaterThan(9);
+    expect(calls.length).toBeLessThanOrEqual(25);
+    expect(calls.every((u) => u.includes('/data/tiles/'))).toBe(true);
+    expect(items.every((x) => !x.next && x.distanceM <= 3000)).toBe(true);
+    expect(items[0].area.id).toBe('stib:6357F');
+    // Bruxelles-Luxembourg, à 2,5 km, est sur une tuile hors des 3 × 3 autour de Gare du Nord
+    expect(items.find((x) => x.area.id === 'sncb:8811304')?.distanceM).toBe(2530);
+  });
+
   it('scénario 2 (12:10, 500 m) : 4 zones dans l’ordre, avec le prochain départ', async () => {
     const { core, clock } = makeEnv({ now: '2026-11-10T12:10' });
     const items = await core.nearby(50.86, 4.359, 500);

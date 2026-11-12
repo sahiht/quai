@@ -1,0 +1,3 @@
+Gares et Bus, tram, métro sur l’accueil : tes gares avec leurs prochains trains, et tes lignes de bus, tram ou métro dans les deux sens. Tes arrêts favoris y sont rangés, rien n’est perdu.
+Trajets plus cohérents : le premier arrive le plus tôt, chaque minute à pied au-delà de ta marche maximale compte triple, puis jusqu’à deux autres choix avec un vrai avantage.
+« Aller à… » rejoint Favoris, et un trajet n’est suivi que si tu le demandes (« Suivre ce trajet »).

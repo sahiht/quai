@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Journey, JourneyLabel, Leg } from '../../src/core/api';
-import { displayLabel, easterSunday, HOLIDAY_TEXT, holidayName, longestWalk, meansText, rideName, walksMore } from '../../src/core/means';
+import { displayLabel, easterSunday, HOLIDAY_TEXT, holidayName, isSncbBus, longestWalk, meansText, rideName, SNCB_BUS_TEXT, walksMore } from '../../src/core/means';
 
 const at = (iso: string) => Date.parse(iso);
 const place = { name: { fr: 'x', nl: 'x' }, lat: 50.8, lon: 4.3 };
@@ -25,6 +25,24 @@ describe('means : comment on voyage', () => {
     expect(meansText({ legs: [walk(6), w, walk(1), s1, walk(9)] })).toBe('bus W + S1');
     expect(meansText({ legs: [w, s1, m2, t92] })).toBe('bus W + S1 + métro 2 + …');
     expect(meansText({ legs: [walk(12)] })).toBe('à pied');
+  });
+
+  it('1.2.2 : bus de remplacement de la SNCB : « bus SNCB » dans les phrases, jamais « BUS »', () => {
+    // étape d'un trajet (core/routing : mode bus) ou d'un fichier trains/ (catégorie « BUS »), départ d'une gare
+    const leg = ride({ op: 'sncb', mode: 'bus', line: 'BUS', cat: 'BUS', num: '3505' });
+    const fromTrains = ride({ op: 'sncb', mode: 'train', line: 'BUS', cat: 'BUS' });
+    const departure = { op: 'sncb' as const, mode: 'bus' as const, line: 'BUS' };
+    for (const l of [leg, fromTrains, departure]) {
+      expect(isSncbBus(l)).toBe(true);
+      expect(rideName(l)).toBe('bus SNCB');
+    }
+    expect(SNCB_BUS_TEXT).toBe('bus SNCB');
+    const ic = ride({ op: 'sncb', mode: 'train', line: 'IC', cat: 'IC' });
+    expect(meansText({ legs: [walk(3), ic, walk(1), leg, walk(2)] })).toBe('IC + bus SNCB');
+    // un bus d'un autre réseau, un train : inchangés
+    expect(isSncbBus({ op: 'tec', mode: 'bus', line: 'BUS' })).toBe(false);
+    expect(isSncbBus(ic)).toBe(false);
+    expect(rideName({ op: 'tec', mode: 'bus', line: 'W' })).toBe('bus W');
   });
 
   it('plus longue marche', () => {

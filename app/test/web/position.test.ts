@@ -71,7 +71,7 @@ describe('rubrique « Position » de Quai Web (PRD-1.2 § 3)', () => {
     input.dispatchEvent(new Event('focus'));
     await until(() => options(card.querySelector('.suggest')!).length >= 2);
     expect(options(card.querySelector('.suggest')!)).toEqual([
-      ['Bureau', 'mon lieu'],
+      ['Bureau', 'favori'],
       ['Veldstraat 1, 9000 Gent', 'récent'],
     ]);
     button(card, /^Bureau/).click();

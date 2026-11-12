@@ -47,7 +47,7 @@ describe('cartes de résultats (M3, M4.5)', () => {
     const hz = open({ params: 'de=sncb:8813003&vers=sncb:8892007' });
     await results(hz.el);
     expect(textOf(hz.el.querySelector('.live'))).toBe('3 trajets.');
-    expect(tags(hz.el)).toEqual(['Le plus court', 'Le suivant', 'Le suivant']);
+    expect(tags(hz.el)).toEqual(['Le plus court', 'Le suivant', 'Plus tard']);
     const first = cards(hz.el)[0];
     expect(textOf(first.querySelector('.time'))).toBe('14:10 → 14:39');
     expect(textOf(first.querySelector('.why'))).toBe('Arrive le plus tôt.');
@@ -66,7 +66,7 @@ describe('cartes de résultats (M3, M4.5)', () => {
     expect(radios.map((r) => r.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
     expect(radios.map((r) => r.getAttribute('tabindex'))).toEqual(['0', '-1', '-1']);
     const btns = cards(hz.el).map((c) => c.querySelector('.btn-glasses')!.getAttribute('aria-label'));
-    expect(btns).toEqual(['Afficher Le plus court dans les lunettes', 'Afficher Le suivant dans les lunettes', 'Afficher Le suivant dans les lunettes']);
+    expect(btns).toEqual(['Afficher Le plus court dans les lunettes', 'Afficher Le suivant dans les lunettes', 'Afficher Plus tard dans les lunettes']);
     (radios[2] as HTMLElement).click();
     expect(radios.map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'false', 'true']);
     radios[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
@@ -178,7 +178,8 @@ describe('adresse dans « Arrivée » (M4.4, S4) et « Garder en favori » (PRD-
     expect(hz.arr.value).toBe('Bureau');
     button(hz.el, 'Garder en favori').click();
     await until(() => textOf(hz.el.querySelector('.below-results .msg')) === 'Déjà dans tes favoris.');
-    const full = defaults({ favorites: Array.from({ length: 32 }, (_, i) => ({ kind: 'stop' as const, id: `s${i}`, areaId: `stib:${i}`, op: 'stib' as const, name: { fr: `A${i}`, nl: `A${i}` }, lat: 50, lon: 4, propose: 'never' as const })) });
+    // 32 favoris (des lieux : un arrêt favori de la 1.2.1 rejoindrait « Bus, tram, métro », PRD-1.2.2 § 5)
+    const full = defaults({ favorites: Array.from({ length: 32 }, (_, i) => ({ kind: 'place' as const, id: `p${i}`, label: `Lieu ${i}`, lat: 50 + i / 1000, lon: 4, propose: 'never' as const })) });
     const hz2 = open({ settings: full, params: 'de=sncb:8813003&vers=sncb:8892007' });
     await results(hz2.el);
     button(hz2.el, 'Garder en favori').click();

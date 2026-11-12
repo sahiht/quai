@@ -257,6 +257,34 @@ input.switch:checked::after { left: 21px; }
 .check-row { gap: 12px; border-bottom: 0; font-size: 15px; line-height: 20px; }
 .plain { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
 
+/* 1.2.2 : gares et lignes choisies (sections de l'accueil), ajout d'une gare ou d'une ligne, liens de « Un endroit » */
+.home-picks { display: flex; flex-direction: column; gap: 8px; }
+/* Annonce (ordre, retrait) en bas de la section, sans place réservée tant qu'elle est vide. */
+.home-picks > .live:empty { min-height: 0; }
+.pick-list, .opts { background: var(--card); }
+.pick-row { display: flex; flex-direction: column; padding: 8px 10px 4px 14px; }
+.pick-main { display: flex; align-items: center; gap: 12px; min-height: 48px; }
+.pick-main > .ico { width: 36px; height: 36px; border-radius: 10px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.pick-main .txt { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.pick-main .t1 { font-size: 16px; line-height: 22px; font-weight: 500; overflow-wrap: anywhere; }
+.pick-main .t2 { font-size: 13px; line-height: 18px; color: var(--muted); }
+.pick-main .btn { flex-shrink: 0; }
+.pick-near { display: flex; align-items: center; gap: 10px; min-height: 44px; padding-left: 48px; font-size: 14px; line-height: 20px; color: var(--body); cursor: pointer; }
+.pick-near input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); flex-shrink: 0; }
+.pick-row .confirm { margin: 4px 0 8px; }
+.row.opt { min-height: 56px; padding-right: 14px; }
+.row.opt .t1 { overflow-wrap: anywhere; }
+.row.opt .meta { flex-shrink: 0; font-size: 13px; line-height: 18px; color: var(--muted); white-space: nowrap; }
+.field-note.err { color: #8a2a1d; }
+.step, .after-add, .quick, .jump-box { display: flex; flex-direction: column; }
+.step { gap: 12px; }
+.after-add { gap: 8px; }
+.quick { gap: 6px; }
+.chosen { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 12px; }
+.chosen-line { margin: 0; min-width: 0; font-size: 15px; line-height: 21px; font-weight: 600; overflow-wrap: anywhere; }
+.jump { align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--accent); font-size: 15px; line-height: 20px; font-weight: 500; text-align: left; text-decoration: none; cursor: pointer; }
+.jump:hover { color: var(--accent-dark); text-decoration: underline; }
+
 /* États */
 .status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--accent); }
 .status.off { color: var(--muted); }

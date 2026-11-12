@@ -55,3 +55,37 @@ describe('§ 6.1 : « Vers … » et adresse courte', () => {
     expect(shortAddress('Namur')).toBe('Namur');
   });
 });
+
+describe('1.2.2 : bus de remplacement de la SNCB, « bus SNCB » dans les phrases', () => {
+  it('libellés, résumés, départs et alertes ; un train garde sa catégorie et sa voie', async () => {
+    const { vehicleLabel, vehicleLabelStart, rideSummary, cancelAlert, delayAlert, platformAlert } = await import('../../src/core/text');
+    const now = at(7, 30);
+    const bus = { op: 'sncb' as const, mode: 'bus' as const, line: 'BUS', cat: 'BUS' };
+    // étape d'un trajet (mode bus), étape lue d'une version antérieure (mode train, catégorie BUS), départ d'une gare
+    for (const x of [bus, { ...bus, mode: 'train' as const }, { op: 'sncb' as const, mode: 'bus' as const, line: 'BUS' }]) {
+      expect(vehicleLabel(x)).toBe('bus SNCB');
+      expect(vehicleLabelStart(x)).toBe('Bus SNCB');
+    }
+    expect([vehicleLabel({ op: 'sncb', mode: 'train', line: 'IC', cat: 'IC' }), vehicleLabelStart({ op: 'tec', mode: 'bus', line: 'W' })]).toEqual(['IC', 'W']);
+    const leg = {
+      kind: 'ride' as const,
+      ...bus,
+      from: { name: { fr: 'Remicourt', nl: 'Remicourt' }, lat: 50.68, lon: 5.32 },
+      to: { name: { fr: 'Landen', nl: 'Landen' }, lat: 50.75, lon: 5.08 },
+      dep: at(7, 44),
+      arr: at(8, 10),
+      schedDep: at(7, 42),
+      schedArr: at(8, 8),
+      delayMin: 2,
+      platform: '2',
+    };
+    expect(rideSummary(leg, now)).toBe('bus SNCB 07:44');
+    expect(rideSummary({ ...leg, mode: 'train' }, now)).toBe('bus SNCB 07:44');
+    expect(rideSummary({ ...leg, mode: 'train', line: 'IC', cat: 'IC' }, now)).toBe('IC 07:42 +2, voie 2');
+    const d: Departure = { op: 'sncb', mode: 'bus', line: 'BUS', head: { fr: 'Landen', nl: 'Landen' }, sched: at(7, 35), est: at(7, 35), rt: false, delayMin: 0, cancelled: false };
+    expect(departureSummary(d, now, 'fr', true)).toBe(`bus SNCB Landen ~5${NB}min`);
+    expect(cancelAlert(vehicleLabelStart(leg), '07:42')).toBe('! Bus SNCB 07:42 supprimé');
+    expect(delayAlert(vehicleLabelStart(leg), '07:42', 6)).toBe(`! Bus SNCB 07:42${NB}: +6${NB}min`);
+    expect(platformAlert(vehicleLabel(leg), '3')).toBe(`! Voie modifiée${NB}: le bus SNCB part de la voie 3`);
+  });
+});
