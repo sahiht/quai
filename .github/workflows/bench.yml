@@ -11,6 +11,11 @@ on:
         description: "Sources à interroger, séparées par une virgule (transitous, irail)"
         required: false
         default: 'transitous,irail'
+      journal:
+        description: "Copier aussi les résultats dans le journal du job (si l'artefact ne peut pas être téléchargé)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -51,3 +56,12 @@ jobs:
           path: bench/out/
           retention-days: 5
           if-no-files-found: error
+
+      # Copie facultative pour qui atteint l'API GitHub mais pas le stockage des artefacts :
+      # archive tar.gz de bench/out en base64 (lignes « BENCH-B64 »), avec son empreinte (ligne « BENCH-SHA256 »).
+      - name: Copier les résultats dans le journal
+        if: always() && inputs.journal
+        run: |
+          tar -czf "$RUNNER_TEMP/bench-out.tar.gz" -C bench out
+          echo "BENCH-SHA256 $(sha256sum "$RUNNER_TEMP/bench-out.tar.gz" | cut -d' ' -f1)"
+          base64 -w 4000 "$RUNNER_TEMP/bench-out.tar.gz" | sed 's/^/BENCH-B64 /'

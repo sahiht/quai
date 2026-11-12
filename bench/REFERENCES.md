@@ -4,7 +4,7 @@ Ce que proposent deux calculateurs d'itinéraires libres et gratuits, sans Googl
 
 ## Lancer
 
-- GitHub : workflow « Banc d'essai (références) », lancement manuel. Artefact `bench-references` (gardé 5 jours) : le contenu de `bench/out/`.
+- GitHub : workflow « Banc d'essai (références) », lancement manuel. Artefact `bench-references` (gardé 5 jours) : le contenu de `bench/out/`. Si le stockage des artefacts est inaccessible, cocher « journal » : la même chose est écrite dans le journal du job (archive tar.gz en base64 sur les lignes `BENCH-B64`, empreinte SHA-256 sur la ligne `BENCH-SHA256`), lisible par l'API GitHub (`actions/jobs/<id>/logs`).
 - En local, avec accès au réseau : `node bench/fetch-references.mjs` (options `--sources transitous,irail`, `--only t01,t21`, `--out <dossier>`).
 - Sans aucune requête, pour refaire le fichier commun à partir de réponses déjà reçues : `node bench/fetch-references.mjs --from-raw <dossier raw> --out <dossier>`.
 
