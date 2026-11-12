@@ -38,6 +38,21 @@ const lines = (v: ReturnType<typeof homePreview>) =>
   });
 
 describe('Affichage', () => {
+  it('CA-123.1 : plus de « Départs par arrêt » (tableaux de 2 heures) ; la valeur enregistrée reste, sans effet', async () => {
+    const hz = harness({ settings: defaults({ display: { ...defaults().display, depsPerStop: 6 } }) });
+    const el = mount(displayScreen(hz.ctx));
+    expect(textOf(el)).not.toMatch(/Départs par arrêt|départs? de (plus|moins)/i);
+    expect(el.querySelector('.stepper-row')).toBeNull();
+    // le premier réglage de la boîte, le rayon, n'a plus de trait au-dessus de lui
+    const box = el.querySelector('.box')!;
+    expect(box.firstElementChild!.classList.contains('bordered')).toBe(false);
+    expect(textOf(box.firstElementChild!.querySelector('legend'))).toBe('Rayon de « Autour de moi »');
+    // un autre réglage enregistré : depsPerStop n'est ni effacé ni changé
+    [...el.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find((r) => textOf(r.closest('label')) === 'Dans mon ordre')!.click();
+    await until(() => hz.settings.get().display.favOrder === 'mine');
+    expect(hz.settings.get().display.depsPerStop).toBe(6);
+  });
+
   it('libellés de la revue d’usage n° 11 : ouverture et ordre des favoris, sans « proposer » ni « lieu »', () => {
     const hz = harness({ settings: defaults() });
     const el = mount(displayScreen(hz.ctx));

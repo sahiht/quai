@@ -3,12 +3,14 @@
  * les réponses), contrôleur avec horloge simulée et faux port SDK, contrôle des largeurs au pixel.
  * Les textes des raisons viennent du cœur : les tests construisent leurs propres raisons, sans dépendre de celles du
  * cœur en cours de changement. 1.2.2 : gares et lignes choisies (réglages v4) sur des gares et arrêts publics.
+ * 1.2.3 : arrêts d'un départ construits (stopsOf), departureStops remplaçable dans le cœur de test.
  */
 import {
   DEFAULT_SETTINGS,
   type Board,
   type Core,
   type Departure,
+  type DepartureStops,
   type Favorite,
   type FavoriteAnswer,
   type Journey,
@@ -20,6 +22,7 @@ import {
   type NearbyItem,
   type Settings,
   type StationPick,
+  type StopCall,
 } from '../../src/core/api';
 import { gtfsTime } from '../../src/core/util';
 import { createFakeCore, dataFreshness } from '../../src/dev/fake-core';
@@ -149,6 +152,23 @@ export const LINES = {
   gdnAll: { id: 'ln-gdn', areaId: 'stib:6357F', op: 'stib', name: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86004, lon: 4.36017 } as LinePick,
 };
 
+/* ------------------------------ Arrêts d'un départ construits (1.2.3) ------------------------------ */
+
+/**
+ * Arrêts d'un départ (departureStops) : `calls` [nom, minutes après `now`, champs] dans l'ordre du trajet, le premier
+ * étant l'arrêt du tableau ; temps réel par défaut, identifiant de zone tiré du nom.
+ */
+export function stopsOf(dep: Pick<Departure, 'op' | 'mode' | 'line' | 'head'>, now: number, calls: [string, number, Partial<StopCall>?][]): DepartureStops {
+  const stops = calls.map(([name, minutes, p]): StopCall => {
+    const t = now + minutes * MIN;
+    return { areaId: `${dep.op}:${name.replace(/\W+/g, '')}`, name: { fr: name, nl: name }, sched: t, est: t + (p?.delayMin ?? 0) * MIN, rt: true, delayMin: 0, ...p };
+  });
+  return { op: dep.op, mode: dep.mode, line: dep.line, head: dep.head, stops, anyPlanned: stops.some((c) => !c.rt), state: 'ok' };
+}
+
+/** Voyage disparu des données (departureStops) : rien à montrer. */
+export const vanishedStops = (dep: Pick<Departure, 'op' | 'mode' | 'line' | 'head'>): DepartureStops => ({ op: dep.op, mode: dep.mode, line: dep.line, head: dep.head, stops: [], anyPlanned: false, state: 'missing' });
+
 /* ------------------------------ Départs construits (1.2.2) ------------------------------ */
 
 /** Un départ : `minutes` après `now`, temps réel par défaut. */
@@ -207,12 +227,16 @@ export interface StubOptions {
   plan?: (now: number) => Journey[];
   /** Nombre d'arrêts « Autour de moi ». */
   nearby?: number;
-  /** 1.2.2 : départs d'une zone (sinon ceux du faux cœur). */
-  board?: (areaId: string, now: number) => Board | undefined;
+  /** 1.2.2 : départs d'une zone (sinon ceux du faux cœur) ; 1.2.3 : `opts` de la demande (horizonMin, limit). */
+  board?: (areaId: string, now: number, opts?: { limit?: number; horizonMin?: number }) => Board | undefined;
   /** 1.2.2 : passages d'une ligne à un arrêt (sinon ceux du faux cœur). */
   lineBoard?: (areaId: string, line: string, now: number) => LineBoard | undefined;
   /** 1.2.2 : demandes reçues par le cœur (board, lineBoard, nearby), pour compter les requêtes. */
   calls?: string[];
+  /** 1.2.3 : arrêts d'un départ (sinon ceux du faux cœur). */
+  departureStops?: (areaId: string, dep: Departure, now: number) => DepartureStops | undefined;
+  /** 1.2.3 : options des demandes de tableau reçues (horizonMin, limit). */
+  boardOpts?: { areaId: string; horizonMin?: number; limit?: number }[];
 }
 
 const nearbyItems = (n: number): NearbyItem[] =>
@@ -237,9 +261,14 @@ export function stubCore(now: () => number, o: StubOptions = {}): Core {
       o.calls?.push(`nearby:${radius}${opts?.light ? ':light' : ''}`);
       return nearbyItems(o.nearby ?? 9);
     },
-    async board(areaId: string, opts?: { limit?: number }) {
+    async board(areaId: string, opts?: { limit?: number; horizonMin?: number }) {
       o.calls?.push(`board:${areaId}`);
-      return o.board?.(areaId, now()) ?? base.board(areaId, opts);
+      o.boardOpts?.push({ areaId, ...(opts?.horizonMin !== undefined ? { horizonMin: opts.horizonMin } : {}), ...(opts?.limit !== undefined ? { limit: opts.limit } : {}) });
+      return o.board?.(areaId, now(), opts) ?? base.board(areaId, opts);
+    },
+    async departureStops(areaId: string, dep: Departure) {
+      o.calls?.push(`departureStops:${areaId}`);
+      return o.departureStops?.(areaId, dep, now()) ?? base.departureStops(areaId, dep);
     },
     async lineBoard(areaId: string, line: string, opts?: { perDirection?: number }) {
       o.calls?.push(`lineBoard:${areaId}:${line}`);

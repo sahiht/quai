@@ -87,7 +87,7 @@ describe('écran des lunettes dessiné dans un canvas', () => {
     expect(LEVEL_ALPHA[2]).toBeCloseTo(197 / 255, 1);
   });
 
-  it('texte lisible pour les lecteurs d’écran : titre, heure, lignes, aides ; départs sans curseur (M6.2)', () => {
+  it('texte lisible pour les lecteurs d’écran : titre, heure, lignes, aides ; 1.2.3 : curseur sur le premier départ (PRD-1.2.3 § 1)', () => {
     const v = boardView(
       {
         area: { id: 'stib:6357F', op: 'stib', n: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 0, lon: 0, modes: ['tram'], lines: ['3'] },
@@ -99,10 +99,10 @@ describe('écran des lunettes dessiné dans un canvas', () => {
       { now: 0, settings: defaults() },
       { kept: false },
     );
-    const text = describeContainers(layoutPage(v, { sel: 0, top: 0 }).containers);
+    // tableau 1.2.3 : la ligne ★ en tête, le curseur sur le premier départ (toucher : ses arrêts)
+    const text = describeContainers(layoutPage(v, { sel: v.initialSel ?? 0, top: 0 }).containers);
     expect(text).toContain('Gare du Nord, tram (STIB)');
-    expect(text).toContain('T3, Churchill, 2 min');
-    expect(text).not.toContain('sélection');
+    expect(text).toContain('sélection : T3, Churchill, 2 min');
     expect(text).toContain('départs');
     // une liste à curseur dit la ligne choisie (liste écrite ici : les textes des écrans des lunettes changent)
     const list: GlassesView = { screen: 'favorites', layout: 'menu', title: 'Favoris', clock: '07:31', items: [{ a: 'Ajouter un favori' }, { a: 'Autre adresse', c: 'sur le téléphone' }], hints: '' };

@@ -140,6 +140,15 @@ export function padLeftTo(text: string, widthPx: number): string {
   return pad + t;
 }
 
+/**
+ * 1.2.3 : complète à droite par des espaces jusqu'à `widthPx` (précision ± 2 px, l'espace faisant 5 px), pour placer la
+ * suite d'une ligne composée sur une colonne (ligne du haut des arrêts d'un départ). Le texte n'est jamais coupé.
+ */
+export function padRightTo(text: string, widthPx: number): string {
+  const w = text ? getTextWidth(glyphSafe(text)) : 0;
+  return text + ' '.repeat(Math.max(0, Math.round((widthPx - w) / SPACE_W)));
+}
+
 /** Longueur en octets UTF-8 (limites des conteneurs : 999 octets dans le simulateur). */
 export function utf8Bytes(text: string): number {
   return new TextEncoder().encode(text).length;

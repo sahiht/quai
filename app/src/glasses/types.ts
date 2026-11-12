@@ -2,7 +2,7 @@
  * Types de l'interface des lunettes : routes (écrans), modèles de vue, intentions des gestes.
  * Tout est sérialisable en JSON (état d'arrière-plan, journal QUAI_SCREEN).
  */
-import type { Endpoint, Journey, LineFilter } from '../core/api';
+import type { Departure, Endpoint, Journey, LineFilter } from '../core/api';
 import type { Mode, Names, Op } from '../../../shared/types';
 
 /**
@@ -27,6 +27,8 @@ export type ScreenId =
   | 'others'
   /** 1.2.2 : toucher sur le trajet suivi : « Ne plus suivre » et le détail du véhicule (PRD-1.2.2 § 6). */
   | 'followed'
+  /** 1.2.3 : les arrêts d'un départ, de l'arrêt du tableau au terminus (PRD-1.2.3 § 2). */
+  | 'stops'
   | 'train'
   | 'arrival'
   | 'message';
@@ -103,6 +105,16 @@ export interface LineRoute {
   mode?: Mode;
 }
 
+/**
+ * 1.2.3 : les arrêts d'un départ (PRD-1.2.3 § 2), ouverts en touchant un départ d'un tableau ou un passage du détail
+ * d'une ligne : la zone du tableau et le départ tel qu'il y figurait (departureStops).
+ */
+export interface StopsRoute {
+  screen: 'stops';
+  areaId: string;
+  dep: Departure;
+}
+
 /** 1.2.2 : « {arrêt} : garder une ligne » (lignes de l'arrêt, core.linesAt). */
 export interface KeepLineRoute {
   screen: 'keepLine';
@@ -124,6 +136,7 @@ export type Route =
   | { screen: 'lines'; focus?: string }
   | LineRoute
   | KeepLineRoute
+  | StopsRoute
   | StepsRoute
   | OthersRoute
   /** 1.2.2 : « Ne plus suivre » et le détail du véhicule, pour le trajet suivi du moment. */
@@ -132,7 +145,7 @@ export type Route =
   | { screen: 'arrival'; journey: Journey; leg: number; trip?: { from: AreaRef; to: AreaRef } }
   | { screen: 'message'; kind: MessageKind; title: string; lines: string[] };
 
-/** news : message « Quai 1.2.2 » (une fois, après la mise à jour depuis une version antérieure ; lignes dans la route). */
+/** news : message « Quai 1.2.3 » (une fois, après la mise à jour depuis une version antérieure ; lignes dans la route). */
 export type MessageKind = 'loading' | 'error' | 'empty' | 'firstRun' | 'notConfigured' | 'info' | 'news';
 
 /** Ce que fait un toucher sur un élément. */
@@ -191,6 +204,12 @@ export interface Item {
   head?: string;
   /** 1.2.2 : lignes en retrait sous l'élément, qui en font partie (curseur sur la 1re ligne seulement). */
   sub?: SubRow[];
+  /**
+   * 1.2.3 : intitulé au-dessus de l'élément, dans la colonne a (« vers Bruxelles Midi » au-dessus du premier passage
+   * d'un sens, détail d'une ligne) ; comme `head`, il compte dans la hauteur de l'élément, défile avec lui et ne se
+   * sélectionne jamais.
+   */
+  group?: string;
   /** Fin de la colonne b jamais coupée (ex. « , dernier ») : la colonne b est raccourcie avant elle. */
   bTail?: string;
   /** Fin de la colonne c ajoutée seulement si elle tient en entier (la colonne c n'est jamais coupée pour elle). */
@@ -219,6 +238,8 @@ export type Layout =
   | 'lines'
   /** 1.2.2 : détail d'une ligne : sens, puis heure, terminus si différent, attente (§ 3). */
   | 'line'
+  /** 1.2.3 : les arrêts d'un départ : heure (retard), nom, voie ou « SUPPRIMÉ » (PRD-1.2.3 § 2). */
+  | 'stops'
   | 'nearby'
   | 'board'
   | 'boardTrain'
@@ -227,8 +248,12 @@ export type Layout =
   | 'arrival'
   | 'message';
 
-/** Ligne sous le titre : alerte (forte) ou contexte (discret). */
-export interface TopLine { text: string; strong?: boolean }
+/**
+ * Ligne sous le titre : alerte (forte) ou contexte (discret). 1.2.3 : `cols` (arrêts d'un départ : l'arrêt du tableau,
+ * « 08:42 », « Namur », « voie 2 ») : la ligne est composée sur les colonnes a, b et c du gabarit, alignée sur la liste
+ * en dessous, et journalisée colonnes séparées par trois espaces ; `text` les reprend (largeur, journal sans gabarit).
+ */
+export interface TopLine { text: string; strong?: boolean; cols?: [string, string, string] }
 
 export interface GlassesView {
   screen: ScreenId;
@@ -267,6 +292,11 @@ export interface GlassesView {
   scroll?: boolean;
   /** Écran sans curseur : ligne marquée « ▶ » (étape en cours ou prochaine du trajet suivi). */
   mark?: number;
+  /**
+   * 1.2.3 : liste à curseur qui défile par page (tableaux complets, arrêts d'un départ, détail d'une ligne) : le curseur
+   * qui sort de la page ouvre la page suivante (ou la précédente), au lieu de la décaler d'une ligne.
+   */
+  paged?: boolean;
   /** Champs ajoutés au journal QUAI_SCREEN (order, page, pages, label, followed). */
   log?: Record<string, unknown>;
 }

@@ -17,6 +17,7 @@ import type {
   Board,
   Core,
   Departure,
+  DepartureStops,
   Endpoint,
   Favorite,
   FavoriteAnswer,
@@ -49,7 +50,7 @@ import { deadline } from '../platform/queue';
 import type { Fix, Platform } from '../platform/types';
 import { LIMITS, newId, type SettingsStore } from '../settings';
 import { APP_VERSION, compareVersions } from '../version';
-import { HINTS, NB, SECTION, atTitle, catchable, departureRightText, lowerFirst, planHomeText, runningNext, shownMessage, towards, tripShort, upcoming } from './format';
+import { BOARD, HINTS, NB, SECTION, atTitle, catchable, departureRightText, lowerFirst, planHomeText, runningNext, shownMessage, towards, tripShort, upcoming } from './format';
 import { DEBOUNCE, GestureFilter, type HubSignal } from './gestures';
 import { geometry, layoutPage, shapeKey } from './layout';
 import { current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replace, replaceAt, reset, setSelection, type Gesture, type NavFrame, type NavState } from './nav';
@@ -86,6 +87,8 @@ import {
   stationsView,
   stepsMessageView,
   stepsPage,
+  stopsTitle,
+  stopsView,
   trainView,
   type FavoriteEntry,
   type HomeData,
@@ -138,10 +141,11 @@ export const WEB_DEBOUNCE: typeof DEBOUNCE = {
 export const TRIP_KEY = 'quai.trip';
 
 /**
- * Message de nouveautés « Quai 1.2.2 » : montré une fois à qui avait vu une version antérieure (PRD-1.2.2 § 9 ; 1.2.1,
- * 1.2.0 ou 1.1), jamais après une installation neuve. Ses lignes : NEWS_LINES (views.ts).
+ * Message de nouveautés « Quai 1.2.3 » : montré une fois à qui avait vu une version antérieure (PRD-1.2.3 § 4 ; 1.2.2
+ * ou avant), jamais après une installation neuve, ni tant que l'appli n'est pas en 1.2.3. Ses lignes : NEWS_LINES
+ * (views.ts).
  */
-export const NEWS_SINCE = '1.2.2';
+export const NEWS_SINCE = '1.2.3';
 
 /**
  * Date du premier lancement (PRD-1.2.1 § 4.6), en ms : clé du stockage de l'appli sur le téléphone, hors du schéma des
@@ -329,6 +333,8 @@ export function routeKey(r: Route): string {
       return `line:${r.areaId}:${r.line}`;
     case 'keepLine':
       return `keepLine:${r.areaId}`;
+    case 'stops':
+      return `stops:${r.areaId}:${r.dep.tripId ?? ''}:${r.dep.line}:${r.dep.sched}`;
     case 'steps': {
       // 1.2.1 : une proposition ouverte depuis « Autres trajets » a sa propre clé (temps réel, messages).
       const i = r.index ?? 0;
@@ -347,7 +353,7 @@ export function routeKey(r: Route): string {
   }
 }
 
-const LIVE: ReadonlySet<Route['screen']> = new Set(['home', 'nearby', 'board', 'favorites', 'stations', 'lines', 'line', 'steps', 'others', 'train', 'arrival']);
+const LIVE: ReadonlySet<Route['screen']> = new Set(['home', 'nearby', 'board', 'favorites', 'stations', 'lines', 'line', 'stops', 'steps', 'others', 'train', 'arrival']);
 const USES_POSITION: ReadonlySet<string> = new Set(['nearby']);
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e)) || 'Erreur inconnue';
@@ -538,7 +544,7 @@ export class GlassesController implements GlassesApi {
   }
 
   /**
-   * Écran d'ouverture : bienvenue (premier lancement), message « Quai 1.2.2 » (une fois après la mise à jour depuis une
+   * Écran d'ouverture : bienvenue (premier lancement), message « Quai 1.2.3 » (une fois après la mise à jour depuis une
    * version antérieure, jamais après une installation neuve), trajet en cours repris (M6.5), sinon l'accueil (et le
    * favori, la gare ou la ligne ouverts d'office selon les réglages).
    */
@@ -556,7 +562,7 @@ export class GlassesController implements GlassesApi {
     return { nav: this.homeNav(), resumed: false };
   }
 
-  /** Écrit la version vue (« Quai 1.2.2 » affiché une seule fois ; nouvelle installation : sans rien afficher). */
+  /** Écrit la version vue (« Quai 1.2.3 » affiché une seule fois ; nouvelle installation : sans rien afficher). */
   private async markSeen(): Promise<void> {
     if (this.settings().seenVersion === APP_VERSION) return;
     await this.d.settings.update((x) => ({ ...x, seenVersion: APP_VERSION }));
@@ -1816,7 +1822,13 @@ export class GlassesController implements GlassesApi {
         return { list, nearest: far[0] ?? null };
       }
       case 'board': {
-        const board = await core.board(r.areaId, { limit: s.display.depsPerStop, filter: r.filter });
+        // 1.2.3 (PRD-1.2.3 § 1) : tableau complet, tous les départs des 2 prochaines heures (40 au plus ; le réglage
+        // « Départs par arrêt » n'existe plus) ; rien dans les 2 heures : le prochain, même plus tard.
+        let board = await core.board(r.areaId, { horizonMin: BOARD.horizonMin, limit: BOARD.limit, filter: r.filter });
+        if (!board.departures.length) {
+          const next = await core.board(r.areaId, { limit: 1, filter: r.filter }).catch(() => null);
+          if (next?.departures.length) board = { ...board, departures: next.departures.slice(0, 1), anyPlanned: next.anyPlanned };
+        }
         // 1.2.2 (REVUE-USAGE n° 4) : « Travaux et déviations » sur les gares et les lignes gardées (1.2.1 : arrêts favoris).
         const works = s.alerts.works && boardKept(s, r.areaId, board.area) ? await this.worksOf(board.area.op, board.area.lines, board.area.id) : [];
         return { board, works };
@@ -1844,6 +1856,9 @@ export class GlassesController implements GlassesApi {
         }
         return { lines };
       }
+      case 'stops':
+        // 1.2.3 (§ 2) : les arrêts du départ touché, de l'arrêt du tableau au terminus (voyage disparu : missing)
+        return { stops: await core.departureStops(r.areaId, r.dep) };
       case 'steps':
         return this.fetchSteps(r);
       case 'others':
@@ -2161,6 +2176,10 @@ export class GlassesController implements GlassesApi {
         const { board, works } = value as { board: LineBoard; works: string[] };
         return lineView(r, board, ctx, works?.[0]);
       }
+      case 'stops': {
+        if (!value) return loadingView(stopsTitle(r.dep, ctx.settings.lang), 'Chargement des arrêts…', ctx, 'stops');
+        return stopsView(r, (value as { stops: DepartureStops }).stops, ctx);
+      }
       case 'keepLine': {
         if (!value) return loadingView(keepLineTitle(displayName(r.name, ctx.settings.lang)), 'Chargement des lignes…', ctx, 'keepLine');
         return keepLineView(r, (value as { lines: StopLine[] }).lines ?? [], ctx);
@@ -2260,7 +2279,8 @@ export class GlassesController implements GlassesApi {
     if (this.d.e2e) {
       // Espaces insécables (typographie française) normalisées pour faciliter les comparaisons des tests.
       const nb = (t: string): string => t.replace(/ /g, ' ');
-      const line = 'QUAI_SCREEN ' + JSON.stringify({ screen: page.screen, title: nb(page.title), lines: page.lines.map(nb), clock: page.clock, sel: page.sel, ...(view.log ?? {}) });
+      // 1.2.3 : listes par page : le premier élément visible (la page affichée, pour les tests du simulateur)
+      const line = 'QUAI_SCREEN ' + JSON.stringify({ screen: page.screen, title: nb(page.title), lines: page.lines.map(nb), clock: page.clock, sel: page.sel, ...(view.paged ? { top: page.top } : {}), ...(view.log ?? {}) });
       if (changed || line !== this.lastLog) {
         this.lastLog = line;
         this.log(line);
@@ -2479,6 +2499,8 @@ function titleFor(r: Route, ctx: ViewCtx): string {
       return keepLineTitle(displayName(r.name, ctx.settings.lang));
     case 'board':
       return r.name ? displayName(r.name, ctx.settings.lang) : 'Départs';
+    case 'stops':
+      return stopsTitle(r.dep, ctx.settings.lang);
     case 'steps':
       return r.title || towards(r.label);
     case 'others':

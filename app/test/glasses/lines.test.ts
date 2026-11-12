@@ -29,7 +29,7 @@ const partialW = (now: number): LineBoard =>
 
 describe('CA-122.4 : « Bus, tram, métro »', () => {
   it('chaque ligne à son arrêt, ses deux sens, deux passages par sens (faux cœur) ; terminus : un seul sens', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.2', lines: [LINES.w, LINES.t3, LINES.t4] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.3', lines: [LINES.w, LINES.t3, LINES.t4] }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'lines' });
     const s = await h.until(linesReady);
@@ -50,7 +50,7 @@ describe('CA-122.4 : « Bus, tram, métro »', () => {
   });
 
   it('passage partiel marqué « * » et expliqué en bas ; le détail dit « jusqu’à Waterloo Eglise » ; 4 passages par sens', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.2', lines: [LINES.w] }), core: (now) => stubCore(now, { lineBoard: (id, _l, n) => (id === LINES.w.areaId ? partialW(n) : undefined) }) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', lines: [LINES.w] }), core: (now) => stubCore(now, { lineBoard: (id, _l, n) => (id === LINES.w.areaId ? partialW(n) : undefined) }) });
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'lines' });
     const s = await h.until(linesReady);
@@ -65,37 +65,46 @@ describe('CA-122.4 : « Bus, tram, métro »', () => {
     const d = await h.until((x) => x.screen === 'line' && x.lines.length > 3);
     expect(d.title).toBe('Bus W · Braine-l’Alleud Merbraine');
     expect(d.lines.slice(0, 6)).toEqual(['vers Bruxelles Midi', '07:35  jusqu’à Waterloo Eglise   dans 4 min', '07:49   dans 18 min', '08:09   dans 38 min', '~08:29   dans 58 min', 'vers Braine-l’Alleud Gare']);
-    expect(d.sel).toBe(-1);
-    // ▼ : la suite ; le 5e passage n'est jamais montré
-    await h.gesture('down');
+    // 1.2.3 : curseur sur le premier passage (« vers … » ne se sélectionne jamais), la liste défile par page
+    expect(d.sel).toBe(0);
+    expect(d.lines.at(-1)).toBe('▲▼ passages   toucher : arrêts   double : retour');
+    // ▼ jusqu'au bout : « Tous les départs de l'arrêt » ; le 5e passage n'est jamais montré
+    for (let i = 0; i < 8; i++) await h.gesture('down');
     const end = h.last();
-    expect(end.lines.slice(-5)).toEqual(['07:40   dans 9 min', '08:00   SUPPRIMÉ', 'Tous les départs de l’arrêt', '~ horaire prévu, sans temps réel', '▲▼ passages   toucher : tous les départs   double : retour']);
+    expect(end.sel).toBe(6);
+    // la page suivante commence au curseur : rien de la page d'avant n'est répété
+    expect(end.lines).toEqual(['08:00   SUPPRIMÉ', 'Tous les départs de l’arrêt', '~ horaire prévu, sans temps réel', '▲▼ passages   toucher : arrêts   double : retour']);
     expect(end.lines.join('\n')).not.toContain('08:49');
     // toucher : le tableau de l'arrêt ; double toucher : le détail, puis la liste
     await h.gesture('tap');
     expect((await h.until((x) => x.screen === 'board')).title).toMatch(/^Braine-l’Alleud Merbraine/);
     await h.gesture('double');
-    expect(h.last().screen).toBe('line');
+    expect(h.last()).toMatchObject({ screen: 'line', sel: 6 });
     await h.gesture('double');
     expect(h.last().screen).toBe('lines');
     h.c.stop();
   });
 
   it('arrêt « toutes les lignes » : « Gare du Nord · toutes les lignes », les 2 prochains départs ; toucher : le tableau', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.2', lines: [LINES.gdnAll] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', lines: [LINES.gdnAll] }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'lines' });
     const s = await h.until(linesReady);
     expect(s.lines.slice(0, 2)).toEqual(['Gare du Nord · toutes les lignes', 'T3 Churchill 1 min · T4 Stalle 4 min']);
     await h.gesture('tap');
-    expect((await h.until((x) => x.screen === 'board' && x.lines.length > 1)).title).toBe('Gare du Nord, tram (STIB) ★');
+    // CA-123.3 (lunettes) : le tableau complet de l'arrêt, la ligne ★ en tête, le curseur sur le premier départ
+    const b = await h.until((x) => x.screen === 'board' && x.lines.length > 2);
+    expect(b.title).toBe('Gare du Nord, tram (STIB) ★');
+    expect(b.lines.slice(0, 3)).toEqual(['★ garder une ligne', 'T3   Churchill   1 min', 'T4   Stalle   4 min']);
+    expect(b.sel).toBe(1);
+    expect((b as Screen & { departures?: number }).departures).toBeGreaterThan(8);
     h.c.stop();
   });
 
   it('revue : ligne sans aucun départ à son arrêt les jours publiés (none) : « aucun passage », jamais « introuvable »', async () => {
     // le W ne passe pas à Gare du Nord (faux cœur : state none, sans sens)
     const quiet = { ...LINES.t3, id: 'ln-quiet', line: 'W', mode: undefined };
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.2', lines: [quiet] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', lines: [quiet] }), core: (now) => stubCore(now) });
     const home = await h.until((x) => x.screen === 'home' && x.lines.some((l) => /^Bus, tram, métro {3}[^…]+$/.test(l)));
     expect(home.lines.find((l) => l.startsWith('Bus, tram, métro'))).toBe('Bus, tram, métro   aucun passage');
     await h.c.replaceRoute({ screen: 'lines' });
@@ -130,7 +139,7 @@ describe('CA-122.4 : « Bus, tram, métro »', () => {
     // identifiant inconnu, et aucune zone de ce nom autour de l'endroit du choix (faux cœur : missing, sans exception)
     const lost = { ...LINES.t3, id: 'ln-lost', areaId: 'stib:0001', name: N('Arrêt supprimé'), line: 'W', mode: undefined };
     const lostAll = { ...LINES.gdnAll, id: 'ln-lost-all', areaId: 'stib:0002', name: N('Arrêt supprimé') };
-    const settings = () => settingsWith([], { seenVersion: '1.2.2', lines: [lost, lostAll] });
+    const settings = () => settingsWith([], { seenVersion: '1.2.3', lines: [lost, lostAll] });
     const h = await setup({ now: NOW, settings: settings(), core: (now) => stubCore(now) });
     const home = await h.until((x) => x.screen === 'home' && x.lines.some((l) => /^Bus, tram, métro {3}[^…]+$/.test(l)));
     expect(home.lines.find((l) => l.startsWith('Bus, tram, métro'))).toBe('Bus, tram, métro   introuvable');
@@ -156,7 +165,7 @@ describe('CA-122.4 : « Bus, tram, métro »', () => {
     // tram 3 sur l'ancien identifiant de Gare du Nord (`aka`) ; « toutes les lignes » sur un identifiant inconnu, même nom
     const old = { ...LINES.t3, areaId: 'stib:6358' };
     const renamed = { ...LINES.gdnAll, areaId: 'stib:0003' };
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.2', lines: [old, renamed] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', lines: [old, renamed] }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'lines' });
     const s = await h.until(linesReady);
@@ -229,14 +238,17 @@ describe('§ 3 : textes et largeurs', () => {
 
 describe('REVUE-USAGE n° 3 : « garder une ligne » depuis les départs d’un arrêt', () => {
   it('★ ouvre « Gare du Nord : garder une ligne » ; toucher garde la ligne (ses deux sens), la retire, annule dans les 5 s', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.2', lines: [LINES.t3] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', lines: [LINES.t3] }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: 'stib:6357F', name: N('Gare du Nord') });
     const b = await h.until((x) => x.screen === 'board' && x.lines.length > 1);
     // une ligne de l'arrêt est gardée : « ★ » en fin de titre
     expect(b.title).toBe('Gare du Nord, tram (STIB) ★');
-    expect(b.lines.at(-1)).toBe('▲▼ départs   toucher : ★ lignes   double : retour');
-    await h.gesture('tap');
+    // 1.2.3 : la ligne ★ en tête du tableau, le curseur sur le premier départ
+    expect(b.lines[0]).toBe('★ garder une ligne');
+    expect(b.sel).toBe(1);
+    expect(b.lines.at(-1)).toBe('▲▼ départs   toucher : arrêts   double : retour');
+    await h.gesture('up', 'tap');
     const k = await h.until((x) => x.screen === 'keepLine' && x.lines.length > 1);
     expect(k.title).toBe('Gare du Nord : garder une ligne');
     expect(k.lines).toEqual(['tram 3   ★', 'tram 4', '▲▼ choisir   toucher : ★ garder ou retirer   double : retour']);
@@ -255,9 +267,9 @@ describe('REVUE-USAGE n° 3 : « garder une ligne » depuis les départs d’un 
     expect(h.last().lines.at(-1)).toBe('★ Ligne rétablie');
     expect(h.settings.get().lines).toEqual(before);
     expect(h.settings.get().favorites.some((f) => f.kind === 'stop')).toBe(false);
-    // double toucher : les départs, toujours « ★ »
+    // double toucher : les départs, toujours « ★ », le curseur sur la ligne ★
     await h.gesture('double');
-    expect(h.last()).toMatchObject({ screen: 'board', title: 'Gare du Nord, tram (STIB) ★' });
+    expect(h.last()).toMatchObject({ screen: 'board', title: 'Gare du Nord, tram (STIB) ★', sel: 0 });
     // la rubrique montre les deux sens du tram 3 et le sens du tram 4
     await h.c.replaceRoute({ screen: 'lines' });
     const s = await h.until(linesReady);
@@ -268,7 +280,7 @@ describe('REVUE-USAGE n° 3 : « garder une ligne » depuis les départs d’un 
 
   it('la limite des lignes (32) : « Déjà 32 lignes : retires-en une sur le téléphone »', async () => {
     const twelve = Array.from({ length: LIMITS.lines }, (_, i) => ({ ...LINES.w, id: `ln-${i}`, line: String(100 + i) }));
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.2', lines: twelve }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', lines: twelve }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'keepLine', areaId: 'stib:6357F', op: 'stib', name: N('Gare du Nord'), lat: 50.86, lon: 4.36 });
     await h.until((x) => x.screen === 'keepLine' && x.lines.length > 1);
@@ -282,7 +294,7 @@ describe('REVUE-USAGE n° 3 : « garder une ligne » depuis les départs d’un 
 describe('REVUE-USAGE n° 4 : ligne `near` ouverte d’office, alerte travaux', () => {
   it('à moins de 300 m d’une ligne `near` : « Bus, tram, métro » s’ouvre d’office, le curseur sur elle ; toucher : son détail', async () => {
     const pos = { lat: LINES.w.lat, lon: LINES.w.lon + 0.001 };
-    const h = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.2', lines: [LINES.t3, { ...LINES.w, near: true }] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.3', lines: [LINES.t3, { ...LINES.w, near: true }] }), core: (now) => stubCore(now) });
     const s = await h.until(linesReady);
     expect(s.sel).toBe(1);
     expect(s.lines.slice(3, 6)).toEqual(['Bus W · Braine-l’Alleud Merbraine', 'vers Bruxelles Midi   20 · ~37 min', 'vers Braine-l’Alleud Gare   11 · ~31 min']);
@@ -295,7 +307,7 @@ describe('REVUE-USAGE n° 4 : ligne `near` ouverte d’office, alerte travaux', 
 
   it('arrêt favori de la 1.2.1 migré (tram 3 et tram 4 à Gare du Nord, « près ») : les deux à l’ouverture', async () => {
     const pos = { lat: LINES.t3.lat + 0.0005, lon: LINES.t3.lon };
-    const h = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.2', lines: [{ ...LINES.t3, near: true }, { ...LINES.t4, near: true }] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.3', lines: [{ ...LINES.t3, near: true }, { ...LINES.t4, near: true }] }), core: (now) => stubCore(now) });
     const s = await h.until(linesReady);
     expect(s.sel).toBe(0);
     expect(s.lines.filter((l) => !l.startsWith('vers') && !l.startsWith('▲▼') && !l.startsWith('~'))).toEqual(['Tram 3 · Gare du Nord', 'Tram 4 · Gare du Nord']);
@@ -304,12 +316,14 @@ describe('REVUE-USAGE n° 4 : ligne `near` ouverte d’office, alerte travaux', 
 
   it('« Travaux et déviations » : sur le détail d’une ligne gardée et sur les départs de son arrêt', async () => {
     const works = (core: Core): Core => Object.assign(Object.create(core) as Core, { works: async () => ['Déviation : arrêt Merbraine déplacé'] });
-    const settings = settingsWith([], { seenVersion: '1.2.2', lines: [LINES.w] });
+    const settings = settingsWith([], { seenVersion: '1.2.3', lines: [LINES.w] });
     settings.alerts.works = true;
     const h = await setup({ now: NOW, settings, core: (now) => works(stubCore(now)) });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'line', pick: LINES.w.id, areaId: LINES.w.areaId, op: 'tec', line: 'W', name: LINES.w.name });
     expect((await h.until((x) => x.screen === 'line' && x.lines.length > 3)).lines[0]).toBe('! Déviation : arrêt Merbraine déplacé');
+    // 1.2.3 : « Tous les départs de l'arrêt » (en bas du détail) : le tableau complet, avec l'alerte
+    for (let i = 0; i < 10; i++) await h.gesture('down');
     await h.gesture('tap');
     expect((await h.until((x) => x.screen === 'board' && x.lines.length > 1)).lines[0]).toBe('! Déviation : arrêt Merbraine déplacé');
     h.c.stop();

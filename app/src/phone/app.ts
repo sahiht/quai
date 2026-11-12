@@ -5,7 +5,8 @@
  * « Mes lieux » (#/lieux) n'existe plus : son ancre mène à « Mes favoris ».
  * 1.2.2 (PRD-1.2.2 § 4) : #/gares et #/lignes (Quai Web : ouverts par les lunettes) montrent la section de l'accueil,
  * ou l'ajout si elle est vide ; #/gares/ajouter, #/lignes/ajouter (?arret=… : arrêt présélectionné) ; #/trajets
- * (revue d'usage n° 9).
+ * (revue d'usage n° 9). 1.2.3 (PRD-1.2.3 § 3) : #/lignes/ajouter ouvre le choix « Une ligne » | « Un arrêt » ;
+ * #/lignes/ajouter/ligne et #/lignes/ajouter/arret, l'un ou l'autre d'emblée.
  */
 import type { Core, GlassesApi, Meta } from '../core/api';
 import type { Freshness } from '../glasses/controller';
@@ -50,7 +51,7 @@ export interface PhoneCtx {
   /**
    * Bannière de l'accueil après la mise à jour (T1), une fois : visible si les réglages lus au lancement venaient
    * d'une version antérieure à NEWS_SINCE (seenVersion non vide), jusqu'à « OK ». Le téléphone n'écrit pas
-   * seenVersion pour elle : les lunettes s'en servent pour leur message « Quai 1.2.2 ».
+   * seenVersion pour elle : les lunettes s'en servent pour leur message « Quai 1.2.3 ».
    */
   news?: NewsState;
 }
@@ -71,7 +72,7 @@ interface Route {
 function pickRoute(kind: 'stations' | 'lines'): Route {
   const adding = (c: PhoneCtx, s: string[]): boolean => s[0] === 'ajouter' || !c.settings.get()[kind].length;
   return {
-    screen: (c, s) => (adding(c, s) ? (kind === 'stations' ? addStationScreen(c) : addLineScreen(c)) : homeScreen(c, [], { focus: kind })),
+    screen: (c, s) => (adding(c, s) ? (kind === 'stations' ? addStationScreen(c) : addLineScreen(c, s[1] === 'arret' ? 'stop' : 'line')) : homeScreen(c, [], { focus: kind })),
     grey: (c, s) => !adding(c, s),
     title: kind === 'stations' ? T.stations : T.lines,
   };
@@ -117,8 +118,8 @@ export function parseHash(hash: string): { name: string; sub: string[]; params: 
   return { name: parts[0] ?? '', sub: parts.slice(1), params: new URLSearchParams(query) };
 }
 
-/** Version qui a apporté les nouveautés de la bannière (gares et lignes, PRD-1.2.2 § 9) : la 1.2.2. */
-export const NEWS_SINCE = '1.2.2';
+/** Version qui a apporté les nouveautés de la bannière (tableaux complets, arrêts d'un départ, PRD-1.2.3 § 4) : la 1.2.3. */
+export const NEWS_SINCE = '1.2.3';
 
 /** Bannière « Nouveau » de l'accueil : visible ou non, « OK », et ses lignes (newsLines). */
 export interface NewsState {
@@ -128,9 +129,9 @@ export interface NewsState {
 }
 
 /**
- * Bannière « Nouveau » : une fois, au passage d'une version antérieure (1.1, 1.2.0, 1.2.1) à la 1.2.2 ou plus
- * (réglages vus avant 1.2.2 au lancement), jusqu'à « OK », comme le message « Quai 1.2.2 » des lunettes ; jamais
- * après une installation neuve. `app` : la version de l'appli.
+ * Bannière « Nouveau » : une fois, au passage d'une version antérieure à la 1.2.3 ou plus (réglages vus avant 1.2.3
+ * au lancement), jusqu'à « OK », comme le message « Quai 1.2.3 » des lunettes ; jamais après une installation neuve.
+ * `app` : la version de l'appli.
  */
 export function newsState(seenAtStart: string, since = NEWS_SINCE, app = APP_VERSION): NewsState {
   let shown = !!seenAtStart && compareVersions(seenAtStart, since) < 0 && compareVersions(app, since) >= 0;

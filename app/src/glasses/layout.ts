@@ -6,7 +6,7 @@
  * change que les textes (textContainerUpgrade, sans clignotement) ; seule une nouvelle forme
  * (autre écran, ligne d'alerte qui apparaît) impose rebuildPageContainer.
  */
-import { LINE_H, SCREEN_H, frenchSpaces, padLeftTo, textWidth, truncate, utf8Bytes } from './font';
+import { LINE_H, SCREEN_H, frenchSpaces, padLeftTo, padRightTo, textWidth, truncate, utf8Bytes } from './font';
 import type { Brightness, ContainerSpec, GlassesView, Item, Layout, PageSpec } from './types';
 
 export const GEO = {
@@ -71,6 +71,12 @@ const TIGHT = 10;
  * (« demain 06:20 → 06:46 » = 201 px, « le 13/11 06:20 → 06:46 » = 199 px).
  */
 const WIDE_W = 212;
+/**
+ * 1.2.3 : arrêts d'un départ (PRD-1.2.3 § 2) : heure et retard (« 23:59 +45 » = 91 px, « ~08:44 » = 69 px), puis le nom ;
+ * à droite la voie (« voie 12a ! » = 80 px) ou « SUPPRIMÉ » (92 px).
+ */
+const STOP_TIME_W = 96;
+const STOP_RIGHT_W = 96;
 /** 1.2.1 : retrait des favoris sous « Favoris » sur l'accueil (PRD-1.2.1 § 4.1). */
 export const HOME_INDENT = 20;
 /** Titre : 476 px utiles avant l'heure. */
@@ -102,6 +108,11 @@ export const LAYOUTS: Record<Layout, LayoutDef> = {
    * passage en retrait, heure puis terminus s'il diffère (colonne b), attente dans la colonne d'état des étapes.
    */
   line: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT + HOME_INDENT, level: 3 }, c: { x: right(STATE_W), w: STATE_W, level: 4 }, gap: TIGHT },
+  /**
+   * 1.2.3 : arrêts d'un départ (PRD-1.2.3 § 2) : heure (retard), nom, voie ou « SUPPRIMÉ » à droite, un ton sous l'arrêt
+   * du tableau, ligne du haut au plus clair composée sur les mêmes colonnes.
+   */
+  stops: { a: { x: X_TEXT, w: STOP_TIME_W, level: 3 }, b: { x: X_TEXT + STOP_TIME_W + TIGHT, level: 3 }, c: { x: right(STOP_RIGHT_W), w: STOP_RIGHT_W, align: 'right', level: 3 }, gap: TIGHT },
   nearby: { a: { x: X_TEXT, level: 4 }, b: { x: right(NEXT_W) - GAP - 64, w: 64, level: 3 }, c: { x: right(NEXT_W), w: NEXT_W, level: 4 } },
   board: { a: { x: X_TEXT, w: 52, level: 4 }, b: { x: X_TEXT + 52 + GAP, level: 3 }, c: { x: right(96), w: 96, level: 4 } },
   boardTrain: { a: { x: X_TEXT, w: 40, level: 4 }, b: { x: X_TEXT + 40 + GAP, level: 3 }, c: { x: right(160), w: 160, level: 4 } },
@@ -128,6 +139,10 @@ export const WIDTHS = {
   wideRight: WIDE_W - GEO.SAFETY,
   /** 1.2.2 : un passage du détail d'une ligne (heure, terminus s'il diffère), à côté de l'attente. */
   lineText: right(STATE_W) - TIGHT - (X_TEXT + HOME_INDENT) - GEO.SAFETY,
+  /** 1.2.3 : arrêts d'un départ : heure et retard, nom (entre l'heure et la voie), voie ou « SUPPRIMÉ ». */
+  stopTime: STOP_TIME_W - GEO.SAFETY,
+  stopName: right(STOP_RIGHT_W) - TIGHT - (X_TEXT + STOP_TIME_W + TIGHT) - GEO.SAFETY,
+  stopRight: STOP_RIGHT_W - GEO.SAFETY,
 };
 
 export interface Frame {
@@ -139,7 +154,7 @@ export interface Frame {
  * Nombre de lignes d'un élément (1 ou 2), plus sa ligne vide (1.2.1) et sa ligne pâle (1.2.2) au-dessus, et ses lignes
  * en retrait en dessous (1.2.2).
  */
-export const itemLines = (it: Item): number => (it.gap ? 1 : 0) + (it.head ? 1 : 0) + (it.two || it.a2 || it.b2 ? 2 : 1) + (it.sub?.length ?? 0);
+export const itemLines = (it: Item): number => (it.gap ? 1 : 0) + (it.head ? 1 : 0) + (it.group ? 1 : 0) + (it.two || it.a2 || it.b2 ? 2 : 1) + (it.sub?.length ?? 0);
 
 /** Premier élément visible le plus bas possible (écrans sans curseur : la fin de la liste tient à l'écran). */
 export function maxTop(items: Item[], capacity: number): number {
@@ -196,6 +211,24 @@ export function ensureVisible(items: Item[], sel: number, top: number, capacity:
     return n;
   };
   while (t < s && linesFrom(t, s) > capacity) t++;
+  return t;
+}
+
+/**
+ * 1.2.3 : défilement par page d'une liste à curseur (GlassesView.paged : tableaux complets, arrêts d'un départ, détail
+ * d'une ligne). Curseur visible : la page ne bouge pas ; plus bas, la page suivante commence à lui (jamais une ligne
+ * déjà vue : la dernière page peut être moins pleine) ; plus haut, la page précédente finit à lui.
+ */
+export function pageTop(items: Item[], sel: number, top: number, capacity: number): number {
+  if (!items.length) return 0;
+  const s = Math.min(Math.max(0, sel), items.length - 1);
+  const t0 = Math.min(Math.max(0, Math.round(top) || 0), items.length - 1);
+  const { from, to } = visibleRange(items, t0, capacity);
+  if (s >= from && s < to) return t0;
+  if (s >= to) return s;
+  let t = s;
+  const linesFrom = (i: number): number => items.slice(i, s + 1).reduce((n, it) => n + itemLines(it), 0);
+  while (t > 0 && linesFrom(t - 1) <= capacity) t--;
   return t;
 }
 
@@ -307,7 +340,8 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   const colC: string[] = [];
   const cursor: string[] = [];
   const lines: string[] = [];
-  if (g.hasTop && v.top) lines.push(truncate(v.top.text, X_END - X_TEXT - GEO.SAFETY));
+  const topRow = g.hasTop && v.top ? composeTop(v.top, def) : null;
+  if (topRow) lines.push(topRow.log);
 
   // 1.2.1 (accueil) : nom puis réponse alignée à droite, dans le même conteneur (même luminosité) ; 1.2.2 : sens d'une
   // ligne de « Bus, tram, métro » (lignes en retrait sous l'élément).
@@ -332,6 +366,15 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
       // 1.2.2 : ligne pâle au-dessus de l'élément (« Adresses récentes »), jamais sous le curseur.
       const h = truncate(it.head, X_END - def.b.x - GEO.SAFETY);
       bOnly(h, h);
+    }
+    if (it.group) {
+      // 1.2.3 : intitulé au-dessus de l'élément, dans la colonne a (« vers Bruxelles Midi »), jamais sous le curseur.
+      const h = truncate(it.group, X_END - def.a.x - GEO.SAFETY);
+      colA.push(h);
+      colB.push('');
+      colC.push('');
+      cursor.push('');
+      lines.push(h);
     }
     const b = it.b ?? '';
     const c = it.c ?? '';
@@ -398,7 +441,7 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   const containers: ContainerSpec[] = [
     C(IDS.title, 'title', X_TEXT, GEO.TITLE_Y, titleW, LINE_H, title, 4),
     C(IDS.clock, 'clock', X_END - GEO.CLOCK_W, GEO.TITLE_Y, GEO.CLOCK_W, LINE_H, padLeftTo(v.clock, GEO.CLOCK_W - GEO.SAFETY), 3),
-    C(IDS.top, 'top', X_TEXT, GEO.TITLE_Y + LINE_H, X_END - X_TEXT, LINE_H, g.hasTop ? lines[0] : '', v.top?.strong ? 4 : 2),
+    C(IDS.top, 'top', X_TEXT, GEO.TITLE_Y + LINE_H, X_END - X_TEXT, LINE_H, topRow ? topRow.text : '', v.top?.strong ? 4 : 2),
     C(IDS.cursor, 'cursor', GEO.X_CURSOR, g.rowsY, GEO.W_CURSOR, rowsH, join(cursor), 4),
     C(IDS.colA, 'colA', def.a.x, g.rowsY, X_END - def.a.x, rowsH, join(colA), message ? 4 : def.a.level),
     C(IDS.colB, 'colB', def.b.x, g.rowsY, X_END - def.b.x, rowsH, join(colB), def.b.level),
@@ -407,6 +450,26 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     C(IDS.foot, 'foot', X_TEXT, g.footY, X_END - X_TEXT, Math.max(FOOT_MIN_H, g.footLines * LINE_H), foot.join('\n'), opts.toast ? 4 : 2),
   ];
   return { containers, lines, screen: v.screen, title: titleLog, clock: v.clock, top, visible: to - from, sel };
+}
+
+/**
+ * Ligne du haut : son texte coupé à la largeur de l'écran ; 1.2.3 (`cols`) : composée sur les colonnes du gabarit,
+ * a puis b à leur place (espaces mesurés au pixel), c alignée à droite comme la colonne c, journalisée par colonnes.
+ */
+function composeTop(t: NonNullable<GlassesView['top']>, def: LayoutDef): { text: string; log: string } {
+  const full = X_END - X_TEXT - GEO.SAFETY;
+  if (!t.cols) {
+    const text = truncate(t.text, full);
+    return { text, log: text };
+  }
+  const [a, b, c] = t.cols;
+  const gap = def.gap ?? GAP;
+  const at = truncate(a, def.b.x - gap - X_TEXT - GEO.SAFETY);
+  const ct = c ? truncate(c, Math.min(def.c.w ?? full, X_END - def.c.x) - GEO.SAFETY) : '';
+  // b commence à sa colonne (± 2 px) ; le reste de la ligne est mesuré sur ce qui précède : jamais plus large que l'écran
+  const lead = padRightTo(at, def.b.x - X_TEXT);
+  const row = spread(b, ct, full - textWidth(lead), gap);
+  return { text: lead + row.text, log: [at, row.left, row.right].filter(Boolean).join(COL_SEP) };
 }
 
 /** Hauteur d'un pied sans ligne (la documentation du SDK permet 0 ; 1 px évite un champ omis par protobuf). */

@@ -5,7 +5,7 @@
  */
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { Endpoint, Favorite, FavoriteAnswer, FavoriteStop, Journey, LineBoard, PlanResult, Settings } from '../../src/core/api';
+import type { Departure, DepartureStops, Endpoint, Favorite, FavoriteAnswer, FavoriteStop, Journey, LineBoard, PlanResult, Settings } from '../../src/core/api';
 import { displayLabel } from '../../src/core/means';
 import { createFakeCore, type FakeFlags } from '../../src/dev/fake-core';
 import { gtfsTime, hhmm } from '../../src/core/util';
@@ -281,3 +281,85 @@ describe('faux cœur 1.2.2 : lignes par numéro et passages par sens (PRD-1.2.2 
     expect(await core.lineBoard('stib:999999', '3', { near: gone })).toMatchObject({ state: 'missing', directions: [] });
   });
 });
+
+describe('1.2.3 : tableau complet et arrêts d’un départ (PRD-1.2.3 § 1, § 2)', () => {
+  const dep = (d: Departure) => `${d.line} ${hhmm(d.sched)}${d.rt ? (d.delayMin ? `+${d.delayMin}` : '') : '~'}${d.cancelled ? ' supprimé' : ''}`;
+  const calls = (s: DepartureStops) =>
+    s.stops.map((x) => `${hhmm(x.sched)} ${x.name.fr}${x.cancelled ? ' supprimé' : `${x.rt ? (x.delayMin ? ` +${x.delayMin}` : '') : ' ~'}`}${x.platform ? ` v${x.platform}` : ''}${x.newPlatform ? `→${x.newPlatform}` : ''}`);
+
+  it('horizonMin : tous les départs des 2 h, 40 au plus, dans l’ordre ; rien dans l’horizon : le prochain départ', async () => {
+    const core = fake(at(7, 31));
+    const gdn = await core.board('stib:6357F', { horizonMin: 120 });
+    expect(gdn.departures).toHaveLength(40);
+    expect(gdn.departures.every((d, i) => i === 0 || d.est >= gdn.departures[i - 1].est)).toBe(true);
+    const nord = await core.board('delijn:308611', { horizonMin: 120, limit: 40 });
+    expect(nord.departures).toHaveLength(16);
+    expect(nord.departures.every((d) => d.est <= at(9, 31))).toBe(true);
+    expect((await core.board('delijn:308611', { horizonMin: 120, limit: 5 })).departures).toHaveLength(5);
+    expect((await core.board('sncb:8863008', { horizonMin: 120 })).departures.map(dep)).toEqual(['IC 07:42+2', 'IC 08:42']);
+    // sans horizonMin : comme avant
+    expect((await core.board('stib:6357F')).departures).toHaveLength(8);
+    // 01:00 à Namur Gare (TEC) : rien avant 03:00, le prochain bus quand même
+    expect((await fake(at(1, 0)).board('tec:N508aga', { horizonMin: 120 })).departures.map(dep)).toEqual(['4 06:00~']);
+    // les supprimés restent à leur place
+    const m8 = await fake(at(8, 0)).board('tec:Bbrlmer1', { horizonMin: 60 });
+    expect(m8.departures.map(dep)).toContain('W 08:18 supprimé');
+  });
+
+  it('train : voies, retard gare par gare, voie modifiée, arrêt supprimé, jusqu’au terminus', async () => {
+    const core = fake(at(7, 31));
+    const ic = (await core.board('sncb:8863008', { horizonMin: 120 })).departures[0];
+    const s = await core.departureStops('sncb:8863008', ic);
+    expect(s).toMatchObject({ state: 'ok', op: 'sncb', mode: 'train', line: 'IC', head: { fr: 'Bruxelles-Midi' }, anyPlanned: false });
+    expect(calls(s)).toEqual([
+      '07:42 Namur +2 v4→6',
+      '07:55 Gembloux +2 v1',
+      '08:09 Ottignies +2 v2',
+      '08:31 Bruxelles-Luxembourg +2 v1',
+      '08:35 Bruxelles-Schuman supprimé v2',
+      '08:40 Bruxelles-Nord +2 v11',
+      '08:46 Bruxelles-Central +2 v3→5',
+      '08:52 Bruxelles-Midi +4 v15',
+    ]);
+    expect(s.stops[7]).toMatchObject({ areaId: 'sncb:8814001', est: at(8, 56), delayMin: 4, rt: true });
+    // même temps réel sur le tableau d'une gare du parcours
+    expect((await fake(at(8, 20)).board('sncb:8811916', { limit: 1 })).departures.map(dep)).toEqual(['IC 08:35 supprimé']);
+    // un départ d'une autre gare du même train : ses arrêts à partir de cette gare
+    const lux = (await fake(at(8, 20)).board('sncb:8811304', { limit: 1 })).departures[0];
+    expect(calls(await core.departureStops('sncb:8811304', lux)).map((x) => x.slice(6))).toEqual([
+      'Bruxelles-Luxembourg +2 v1',
+      'Bruxelles-Schuman supprimé v2',
+      'Bruxelles-Nord +2 v11',
+      'Bruxelles-Central +2 v3→5',
+      'Bruxelles-Midi +4 v15',
+    ]);
+    // et dans un trajet qui descend à Bruxelles-Midi : arrivée 08:56
+    const leg = (await core.trains('sncb:8863008', 'sncb:8814001', at(7, 31), 1))[0].legs[0];
+    expect([hhmm(leg.dep), hhmm(leg.arr), leg.newPlatform]).toEqual(['07:44', '08:56', '6']);
+  });
+
+  it('bus et tram : heures prévues décalées du retard connu au départ, sinon « ~ » ; supprimé ; voyage disparu : missing', async () => {
+    const core = fake(at(7, 31));
+    const w = (await core.board('tec:Bbrlmer1', { horizonMin: 30 })).departures.find((d) => hhmm(d.sched) === '07:48')!;
+    expect(calls(await core.departureStops('tec:Bbrlmer1', w))).toEqual(['07:48 Braine-l’Alleud Merbraine +3', '07:56 Waterloo Eglise +3', '08:41 Bruxelles Midi +3']);
+    const gdn = (await core.board('stib:6357F', { horizonMin: 120 })).departures;
+    const t3 = await core.departureStops('stib:6357F', gdn.find((d) => d.line === '3' && d.rt)!);
+    expect(t3).toMatchObject({ state: 'ok', mode: 'tram', line: '3', head: { fr: 'Churchill' }, anyPlanned: false });
+    expect(calls(t3)).toEqual(['07:32 Gare du Nord', '07:34 Rogier', '07:36 De Brouckère', '07:37 Bourse', '07:42 Gare du Midi', '07:57 Churchill']);
+    const later = await core.departureStops('stib:6357F', gdn.find((d) => d.line === '3' && !d.rt)!);
+    expect(later.anyPlanned).toBe(true);
+    expect(later.stops.every((x) => !x.rt && x.est === x.sched)).toBe(true);
+    const bus = (await core.board('delijn:308611', { horizonMin: 30 })).departures.find((d) => d.line === '270')!;
+    expect(calls(await core.departureStops('delijn:308611', bus))).toEqual(['07:52 Bruxelles-Nord ~ v4', '08:27 Gare de Kortenberg ~']);
+    // supprimé : tous ses arrêts
+    const c8 = fake(at(8, 0));
+    const x = (await c8.board('tec:Bbrlmer1', { horizonMin: 60 })).departures.find((d) => d.cancelled)!;
+    expect(calls(await c8.departureStops('tec:Bbrlmer1', x))).toEqual(['08:18 Braine-l’Alleud Merbraine supprimé', '08:26 Waterloo Eglise supprimé']);
+    // voyage disparu des données, ou départ d'une autre zone : missing, sans exception
+    const gone = await core.departureStops('stib:6357F', { ...t3Dep(gdn), tripId: 'disparu' });
+    expect(gone).toMatchObject({ state: 'missing', stops: [], line: '3', anyPlanned: false });
+    expect((await core.departureStops('tec:Bbrlmer1', gdn[0])).state).toBe('missing');
+  });
+});
+
+const t3Dep = (ds: Departure[]): Departure => ds.find((d) => d.line === '3')!;

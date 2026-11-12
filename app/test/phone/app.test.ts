@@ -81,7 +81,7 @@ describe('1.2.2 : #/gares, #/lignes (Quai Web), #/trajets', () => {
       document.body.replaceChildren();
       root = mountAt('#/lignes', defaults(), web);
       await until(() => textOf(root.querySelector('h1')) !== '');
-      expect(textOf(root.querySelector('h1'))).toBe('Ajouter une ligne');
+      expect(textOf(root.querySelector('h1'))).toBe('Ajouter une ligne ou un arrêt');
       expect(document.activeElement?.id).toBe('ligne-num');
       document.body.replaceChildren();
       root = mountAt('#/gares', defaults({ stations, lines }), web);
@@ -98,6 +98,23 @@ describe('1.2.2 : #/gares, #/lignes (Quai Web), #/trajets', () => {
       expect(root.querySelectorAll('[data-focus]')).toHaveLength(1);
     });
   }
+
+  it('1.2.3 : #/lignes/ajouter ouvre le choix (« Une ligne » d’office) ; #/lignes/ajouter/ligne, #/lignes/ajouter/arret', async () => {
+    const selected = (root: HTMLElement) => textOf(root.querySelector('[role="tab"][aria-selected="true"] .k1'));
+    for (const [hash, tab, field] of [
+      ['#/lignes/ajouter', 'Une ligne', 'ligne-num'],
+      ['#/lignes/ajouter/ligne', 'Une ligne', 'ligne-num'],
+      ['#/lignes/ajouter/arret', 'Un arrêt', 'arret-nom'],
+    ] as const) {
+      const root = mountAt(hash, defaults({ stations, lines }));
+      await until(() => textOf(root.querySelector('h1')) !== '');
+      expect(textOf(root.querySelector('h1')), hash).toBe('Ajouter une ligne ou un arrêt');
+      expect(selected(root), hash).toBe(tab);
+      expect(document.activeElement?.id, hash).toBe(field);
+      expect(document.title, hash).toBe('Bus, tram, métro · Quai');
+      document.body.replaceChildren();
+    }
+  });
 
   it('#/gares/ajouter et #/lignes/ajouter même avec des éléments ; #/lignes/ajouter?arret=… ; #/trajets', async () => {
     let root = mountAt('#/gares/ajouter', defaults({ stations, lines }));

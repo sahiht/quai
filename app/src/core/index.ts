@@ -20,6 +20,8 @@ import {
   type PlanResult,
   type Journey,
   type LatLon,
+  type Departure,
+  type DepartureStops,
   type LineBoard,
   type LineFilter,
   type LineMatch,
@@ -51,6 +53,7 @@ import { rankSearch, searchFileKeys } from './search';
 import { suggestOpening } from './suggest';
 import { indexDay, TrainEngine, trainLeg, type DayIndex } from './trains';
 import { findLinesIn, lineBoardAt, lineStopsIn, missingLineBoard, noWeekdayIn } from './linepicks';
+import { departureStopsAt, missingStops } from './stopcalls';
 import { brusselsParts, distanceM, localDate, walkMinutes } from './util';
 import { DAY_START_HOUR } from './text';
 
@@ -62,6 +65,8 @@ const NEARBY_DEPS = 4;
 const NEARBY_MAX = 20;
 /** Zone d'un favori disparue : zones candidates dans ce rayon (puis 150 m au plus, core/favorites.ts). */
 const RELOCATE_M = 300;
+/** 1.2.3 : départs d'un tableau complet (board avec `horizonMin`) sans `limit` (PRD-1.2.3 § 1 : 40 au plus). */
+const HORIZON_LIMIT = 40;
 /** S7 : à partir de cette heure, les trains du lendemain sont chargés aussi. */
 const NEXT_DAY_HOUR = 18;
 const trimSlash = (s: string) => s.replace(/\/+$/, '');
@@ -255,10 +260,12 @@ export function createCore(opts: CoreOptions): Core {
       return items;
     },
 
-    async board(areaId: string, o?: { limit?: number; filter?: LineFilter[]; near?: PickPlace | null }): Promise<Board> {
+    async board(areaId: string, o?: { limit?: number; horizonMin?: number; filter?: LineFilter[]; near?: PickPlace | null }): Promise<Board> {
       const meta = await ensure();
       const t = now();
-      const limit = Math.max(1, Math.round(o?.limit ?? 8));
+      // 1.2.3 (PRD-1.2.3 § 1) : `horizonMin` : tous les départs de l'horizon (BoardRequest.until), 40 au plus par défaut
+      const horizon = o?.horizonMin && o.horizonMin > 0 ? Math.round(o.horizonMin) : 0;
+      const limit = Math.max(1, Math.round(o?.limit ?? (horizon ? HORIZON_LIMIT : 8)));
       // M8.3 : identifiant d'une zone fusionnée (`aka`) accepté ; 1.2.2 : retrouvé aussi autour de `near` (gare ou ligne
       // choisie), la nouvelle zone dite par `movedTo` ; introuvable avec `near` : `missing`, sans exception (sauf si les
       // jours publiés n'ont aucun jour ouvrable : aucun départ, noWeekdayIn)
@@ -275,7 +282,7 @@ export function createCore(opts: CoreOptions): Core {
         if (!o?.near) throw new QuaiError('areaUnknown');
         return { area: minimalSummary(areaId), ...empty, ...lost };
       }
-      const [b] = await buildBoards([{ prep: r.prep, limit, filter: o?.filter }], rt, t);
+      const [b] = await buildBoards([{ prep: r.prep, limit, filter: o?.filter, ...(horizon ? { until: t + horizon * 60_000 } : {}) }], rt, t);
       if (r.id === areaId) return b;
       // zone fusionnée : le résumé publié (avec `aka`) de préférence au résumé tiré du fichier de zone
       return { ...b, area: summaryOf.get(r.id) ?? b.area, movedTo: r.id };
@@ -292,6 +299,21 @@ export function createCore(opts: CoreOptions): Core {
         out.push({ line: p.line, mode: p.mode, head: p.head, filter: { line: p.line, head: prep.headKeys[i] } });
       });
       return out.sort((a, b) => naturalCompare(a.line, b.line) || a.head.fr.localeCompare(b.head.fr, 'fr'));
+    },
+
+    /**
+     * 1.2.3 (PRD-1.2.3 § 2) : arrêts d'un départ (core/stopcalls.ts), de la zone du tableau au terminus. Zone ou voyage
+     * introuvables : missing, jamais d'exception ; serveur injoignable : QuaiError comme board().
+     */
+    async departureStops(areaId: string, dep: Departure): Promise<DepartureStops> {
+      const meta = await ensure();
+      const t = now();
+      const r = await resolveArea(areaId);
+      if (!r || !dep) return missingStops(dep, (areaId ?? '').startsWith('sncb:') ? 'sncb' : undefined);
+      return departureStopsAt(
+        { meta, prep: r.prep, json: (p, v) => data.json(p, v), trains: (d) => data.trains(d), rt: isCovered(meta, t) ? rt : null, now: t, area: preparedOrNull },
+        dep,
+      );
     },
 
     /** 1.2.2 (PRD-1.2.2 § 4) : lignes par numéro (core/linepicks.ts), fichiers de ligne de la génération connue. */

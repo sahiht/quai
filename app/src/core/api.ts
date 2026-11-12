@@ -197,6 +197,27 @@ export interface PickPlace { lat: number; lon: number; name?: Names }
 
 export interface NearbyItem { area: AreaSummary; distanceM: number; walkMin: number; next?: Departure }
 
+/** 1.2.3 (PRD-1.2.3 § 2) : un arrêt desservi par un départ (departureStops). */
+export interface StopCall {
+  areaId?: string;
+  name: Names;
+  sched: number;                // epoch ms, horaire prévu à cet arrêt (départ au premier, arrivée aux suivants)
+  est: number;                  // epoch ms, horaire estimé (= sched sans temps réel)
+  rt: boolean;                  // temps réel connu pour cet arrêt
+  delayMin: number;             // retard arrondi à la minute (0 si à l'heure ou inconnu)
+  platform?: string;            // voie prévue (trains)
+  newPlatform?: string;         // voie modifiée par le temps réel (seulement si différente)
+  cancelled?: boolean;          // arrêt supprimé
+}
+
+/** 1.2.3 : les arrêts d'un départ, du premier (l'arrêt du tableau) au terminus, dans l'ordre du trajet. */
+export interface DepartureStops {
+  op: Op; mode: Mode; line: string; head: Names;
+  stops: StopCall[];
+  anyPlanned: boolean;          // au moins un arrêt sans temps réel
+  state: 'ok' | 'missing';      // missing : ce voyage n'est plus dans les données (rien à montrer)
+}
+
 /** 1.2.2 : passage d'une ligne dans un sens (lineBoard). `partial` : s'arrête avant le terminus du sens (`head` dit où). */
 export interface LineDeparture extends Departure { partial?: boolean }
 
@@ -407,7 +428,20 @@ export interface Core {
    * 1.2.2 : `near` (la gare ou la ligne choisie) : zone dont l'identifiant a changé retrouvée (`movedTo`) ; introuvable :
    * `missing`, sans exception. Sans `near`, une zone introuvable lève QuaiError('areaUnknown') comme avant.
    */
-  board(areaId: string, opts?: { limit?: number; filter?: LineFilter[]; near?: PickPlace | null }): Promise<Board>;
+  /**
+   * 1.2.3 : `horizonMin` donne tous les départs des `horizonMin` prochaines minutes (le tableau complet d'une gare ou
+   * d'un arrêt, PRD-1.2.3 § 1), `limit` restant un plafond ; sans `horizonMin`, comme avant (les `limit` premiers).
+   * Avec `horizonMin` : heure estimée (un supprimé à son heure prévue, à sa place), `limit` 40 par défaut ; rien dans
+   * l'horizon : le prochain départ, même plus tard (aucun dans les 23 h : liste vide).
+   */
+  board(areaId: string, opts?: { limit?: number; horizonMin?: number; filter?: LineFilter[]; near?: PickPlace | null }): Promise<Board>;
+  /**
+   * 1.2.3 (PRD-1.2.3 § 2) : les arrêts d'un départ d'un tableau (board, lineBoard), de cet arrêt jusqu'au terminus, avec
+   * l'heure (temps réel si connu), la voie et le retard pour un train. Ne lève pas si le voyage a disparu : state 'missing'.
+   * `areaId` : la zone du tableau où le départ figure ; `dep` : le départ tel que rendu (tripId, stopSeq, stopId, heures).
+   * Bus, tram, métro : heures prévues décalées comme le départ s'il a du temps réel ; serveur injoignable : QuaiError.
+   */
+  departureStops(areaId: string, dep: Departure): Promise<DepartureStops>;
   /** Lignes et directions d'une zone, pour composer le filtre d'un favori. */
   linesAt(areaId: string): Promise<{ line: string; mode: Mode; head: Names; filter: LineFilter }[]>;
   /**

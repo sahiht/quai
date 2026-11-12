@@ -354,11 +354,11 @@ const POOL = 6;
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 const isLineIndex = (x: unknown): x is LineIndex => isObj(x) && x.v === 1 && Array.isArray(x.lines) && isObj(x.stations) && typeof x.conn === 'number';
 const isLineTile = (x: unknown): x is LineTile => isObj(x) && isObj(x.a);
-const isLineFile = (x: unknown): x is LineFile =>
+export const isLineFile = (x: unknown): x is LineFile =>
   isObj(x) && typeof x.id === 'string' && typeof x.op === 'string' && Array.isArray(x.areas) && Array.isArray(x.pats) && Array.isArray(x.conn);
 
 /** Fichier facultatif : absent ou illisible → null ; serveur injoignable → l'erreur remonte (comme les tableaux). */
-function soft<T>(p: Promise<T | null>): Promise<T | null> {
+export function soft<T>(p: Promise<T | null>): Promise<T | null> {
   return p.catch((e: unknown) => {
     if (e instanceof QuaiError && e.code === 'dataUnreachable') throw e;
     return null;
@@ -366,7 +366,7 @@ function soft<T>(p: Promise<T | null>): Promise<T | null> {
 }
 
 /** Chemin du fichier d'une ligne (LineFile.id) : lines/{op}/{routeKey}.json. */
-function linePath(key: string): string | null {
+export function linePath(key: string): string | null {
   const i = key.indexOf(':');
   if (i <= 0) return null;
   const op = key.slice(0, i);
@@ -382,7 +382,7 @@ const opRank = (key: string): number => {
 };
 
 /** Autorisations par position d'un motif de ligne (LineFile.pats[].f ; absent : montée au début, descente à la fin). */
-function flagsOf(f: string | undefined, n: number): string {
+export function flagsOf(f: string | undefined, n: number): string {
   return f && f.length === n ? f : `b${'x'.repeat(Math.max(0, n - 2))}a`.slice(0, Math.max(n, 2));
 }
 

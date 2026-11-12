@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 /**
- * Quai 1.2.2, téléphone et Quai Web (PRD-1.2.2 § 4, CA-122.5) : sections « Gares » et « Bus, tram, métro » de
+ * Quai 1.2.2 et 1.2.3, téléphone et Quai Web (PRD-1.2.2 § 4, CA-122.5 ; PRD-1.2.3 § 3, CA-123.3 : une ligne ou un
+ * arrêt) : sections « Gares » et « Bus, tram, métro » de
  * l'accueil, ajout d'une gare, ajout d'une ligne en deux temps, retrait confirmé, ordre, limites ; « Ouvrir d’office à
  * moins de 300 m » (revue d'usage n° 4) ; arrêts favoris de la 1.2.1 rangés, côté téléphone (CA-122.6). Lignes et
  * arrêts du faux cœur (findLines, lineStops) : des arrêts publics seulement.
@@ -94,28 +95,28 @@ describe('sections « Gares » et « Bus, tram, métro » de l’accueil (§ 4)'
     expect(hz.settings.get().favorites.some((f) => f.kind === 'stop')).toBe(false);
   });
 
-  it('CA-122.6 : la bannière « Quai 1.2.2 » le dit une fois après la mise à jour du préréglage 1.1 migré', () => {
+  it('préréglage 1.1 migré, mis à jour : la bannière « Quai 1.2.3 » une fois, avec « Bus, tram, métro : ajoute une ligne ou un arrêt. »', () => {
     const s = preset11();
     expect(s.seenVersion).toBe('1.1.0');
     const hz = harness({ settings: s });
-    hz.ctx.news = newsState(s.seenVersion, NEWS_SINCE, '1.2.2');
+    hz.ctx.news = newsState(s.seenVersion, NEWS_SINCE, '1.2.3');
     const el = mount(homeScreen(hz.ctx));
-    expect(plain(el.querySelectorAll('.news p')[1]?.textContent)).toBe('Tes arrêts favoris y sont rangés, rien n’est perdu.');
+    expect(plain(el.querySelectorAll('.news p')[2]?.textContent)).toBe('Bus, tram, métro : ajoute une ligne ou un arrêt.');
     button(el, 'OK').click();
     expect(mount(homeScreen(hz.ctx)).querySelector('.news')).toBeNull();
   });
 
-  it('vides : « Aucune gare pour l’instant. », « Aucune ligne pour l’instant. » ; « Ajouter une gare », « Ajouter une ligne »', () => {
+  it('vides : « Aucune gare pour l’instant. », « Aucune ligne ni arrêt pour l’instant. » ; « Ajouter une gare », « Ajouter une ligne ou un arrêt »', () => {
     const hz = harness({ settings: defaults() });
     const el = mount(homeScreen(hz.ctx));
     const gares = section(el, 'Gares');
     const lignes = section(el, 'Bus, tram, métro');
     expect(textOf(gares.querySelector('.list'))).toBe('Aucune gare pour l’instant.');
-    expect(textOf(lignes.querySelector('.list'))).toBe('Aucune ligne pour l’instant.');
+    expect(textOf(lignes.querySelector('.list'))).toBe('Aucune ligne ni arrêt pour l’instant.');
     // « Changer l’ordre » seulement à partir de 2 éléments
     expect(button(gares, 'Changer l’ordre').hidden).toBe(true);
     button(gares, 'Ajouter une gare').click();
-    button(lignes, 'Ajouter une ligne').click();
+    button(lignes, 'Ajouter une ligne ou un arrêt').click();
     expect(hz.went).toEqual(['#/gares/ajouter', '#/lignes/ajouter']);
   });
 
@@ -202,7 +203,7 @@ describe('sections « Gares » et « Bus, tram, métro » de l’accueil (§ 4)'
     const lignes = section(el, 'Bus, tram, métro');
     expect(button(gares, 'Ajouter une gare').disabled).toBe(true);
     expect(textOf(gares)).toContain(FULL_STATIONS);
-    expect(button(lignes, 'Ajouter une ligne').disabled).toBe(true);
+    expect(button(lignes, 'Ajouter une ligne ou un arrêt').disabled).toBe(true);
     expect(textOf(lignes)).toContain(FULL_LINES);
     // une de moins : plus de message
     const el2 = mount(homeScreen(harness({ settings: defaults({ stations: stations.slice(1) }) }).ctx));
@@ -340,7 +341,7 @@ describe('« Ajouter une ligne », en deux temps (§ 4)', () => {
   it('1. « Numéro de la ligne » : « Bus W TEC, … ↔ Bruxelles Midi » ; 2. « À quel arrêt ? » le plus proche d’abord, filtre ; un toucher ajoute et confirme', async () => {
     const hz = harness({ settings: defaults(), here: BRAINE_GARE });
     const el = mount(addLineScreen(hz.ctx));
-    expect(textOf(el.querySelector('h1'))).toBe('Ajouter une ligne');
+    expect(textOf(el.querySelector('h1'))).toBe('Ajouter une ligne ou un arrêt');
     expect(textOf(el.querySelector('label[for="ligne-num"]'))).toBe('Numéro de la ligne');
     expect(el.querySelector<HTMLInputElement>('#ligne-num')!.placeholder).toBe('W, 36, 71…');
     await number(el, 'w');
@@ -429,7 +430,7 @@ describe('« Ajouter une ligne », en deux temps (§ 4)', () => {
     const lines = manyLines(MAX_LINES);
     const hz = harness({ settings: defaults({ lines }), here: BRAINE_GARE });
     const el = mount(addLineScreen(hz.ctx));
-    expect(textOf(el.querySelector('.step .msg.err'))).toBe(FULL_LINES);
+    expect(textOf(el.querySelector('.screen > .msg.err'))).toBe(FULL_LINES);
     await number(el, 'w');
     el.querySelector<HTMLButtonElement>('.opts .opt')!.click();
     await until(() => opts(stopsList(el)).length > 0);
@@ -464,5 +465,150 @@ describe('« Ajouter une ligne », en deux temps (§ 4)', () => {
     el.querySelector<HTMLButtonElement>('.opts .opt')!.click();
     await until(() => opts(stopsList(el)).length > 0);
     expect(textOf(el.querySelector('#ligne-arret-etat'))).toBe('Cette ligne ne passe pas à Gare du Nord.');
+  });
+});
+
+describe('« Bus, tram, métro » : une ligne ou un arrêt (PRD-1.2.3 § 3, CA-123.3)', () => {
+  const tabs = (el: HTMLElement) => [...el.querySelectorAll<HTMLButtonElement>('[role="tablist"] [role="tab"]')];
+  const panelOf = (el: HTMLElement, tab: HTMLElement) => el.querySelector<HTMLElement>(`#${tab.getAttribute('aria-controls')}`)!;
+  /** Liste des arrêts de « Un arrêt » : [nom, type, à droite]. */
+  const stopOpts = (el: HTMLElement) => [...el.querySelectorAll('.stop-add .opt')].map((b) => [textOf(b.querySelector('.t1')).replace(/^Ajouter /, ''), textOf(b.querySelector('.t2')), textOf(b.querySelector('.meta'))]);
+  const stopButton = (el: HTMLElement, name: string) => [...el.querySelectorAll<HTMLButtonElement>('.stop-add .opt')].find((b) => textOf(b.querySelector('.t1')).replace(/^Ajouter /, '') === name)!;
+  /** Tape dans « Nom de l’arrêt » et attend la réponse (après le délai de frappe) : une autre liste ou une autre note. */
+  const search = async (el: HTMLElement, q: string): Promise<void> => {
+    const before = JSON.stringify([stopOpts(el), textOf(el.querySelector('#arret-nom-etat'))]);
+    type(el.querySelector<HTMLInputElement>('#arret-nom')!, q);
+    await new Promise((r) => setTimeout(r, 260));
+    await until(() => JSON.stringify([stopOpts(el), textOf(el.querySelector('#arret-nom-etat'))]) !== before);
+  };
+
+  it('deux choix de même taille, comme « Nouveau favori » : « Une ligne » d’office, « Un arrêt » ; chacun son formulaire', () => {
+    const hz = harness({ settings: defaults() });
+    const el = mount(addLineScreen(hz.ctx));
+    expect(textOf(el.querySelector('h1'))).toBe('Ajouter une ligne ou un arrêt');
+    expect(el.querySelector('header')!.nextElementSibling!.getAttribute('role')).toBe('tablist');
+    expect(el.querySelector('[role="tablist"]')!.getAttribute('aria-label')).toBe('Une ligne ou un arrêt');
+    const [lineTab, stopTab] = tabs(el);
+    expect([lineTab, stopTab].map((t) => [textOf(t.querySelector('.k1')), textOf(t.querySelector('.k2'))])).toEqual([
+      ['Une ligne', 'numéro, puis arrêt'],
+      ['Un arrêt', 'toutes ses lignes'],
+    ]);
+    expect([lineTab.className, lineTab.children.length]).toEqual([stopTab.className, stopTab.children.length]);
+    expect([lineTab, stopTab].map((t) => t.getAttribute('aria-selected'))).toEqual(['true', 'false']);
+    expect(panelOf(el, lineTab).querySelector('#ligne-num')).not.toBeNull();
+    expect(panelOf(el, stopTab).hidden).toBe(true);
+    // le curseur va dans le champ du choix montré, et lui seul
+    expect(el.querySelectorAll('[data-autofocus]')).toHaveLength(1);
+    expect(el.querySelector('#ligne-num')!.hasAttribute('data-autofocus')).toBe(true);
+    expect(textOf(panelOf(el, lineTab).querySelector('.lead'))).toBe('Ses passages, dans les deux sens, s’afficheront dans les lunettes.');
+    expect(textOf(panelOf(el, stopTab).querySelector('.lead'))).toBe('Tous ses départs s’afficheront dans les lunettes.');
+    stopTab.click();
+    expect(panelOf(el, stopTab).hidden).toBe(false);
+    expect(panelOf(el, lineTab).hidden).toBe(true);
+    // #/lignes/ajouter/arret : « Un arrêt » d'emblée
+    const el2 = mount(addLineScreen(hz.ctx, 'stop'));
+    expect(tabs(el2).map((t) => t.getAttribute('aria-selected'))).toEqual(['false', 'true']);
+    expect(el2.querySelectorAll('[data-autofocus]')).toHaveLength(1);
+    expect(el2.querySelector('#arret-nom')!.hasAttribute('data-autofocus')).toBe(true);
+    expect(textOf(el2.querySelector('label[for="arret-nom"]'))).toBe('Nom de l’arrêt');
+  });
+
+  it('« Un arrêt » : arrêts de bus, tram et métro seulement, jamais une gare SNCB ; leur type dessous, la distance à droite', async () => {
+    const hz = harness({ settings: defaults(), here: { lat: SCENARIO.s3.lat, lon: SCENARIO.s3.lon } });
+    const el = mount(addLineScreen(hz.ctx, 'stop'));
+    await search(el, 'bruxelles');
+    // ni Bruxelles-Central, ni Bruxelles-Nord, ni Bruxelles-Midi (gares SNCB)
+    const found = stopOpts(el);
+    expect(found.map(([n, k]) => [n, k])).toEqual([
+      ['Bruxelles-Nord', 'bus De Lijn'],
+      ['Bruxelles Midi', 'bus TEC'],
+    ]);
+    for (const [, , d] of found) expect(d).toMatch(/^\d,\d km$/);
+    await search(el, 'gare du nord');
+    await until(() => stopOpts(el)[0]?.[0] === 'Gare du Nord');
+    expect(stopOpts(el).map(([n, k]) => [n, k])).toEqual([
+      ['Gare du Nord', 'tram STIB'],
+      ['Bruxelles-Nord', 'bus De Lijn'],
+    ]);
+    // un toucher ajoute : le bouton le dit aux lecteurs d'écran
+    expect(textOf(el.querySelector('.stop-add .opt .t1'))).toBe('Ajouter Gare du Nord');
+  });
+
+  it('« Un arrêt » sans texte, la position connue : les arrêts les plus proches (sans la gare), le plus proche d’abord', async () => {
+    const hz = harness({ settings: defaults(), here: { lat: SCENARIO.s3.lat, lon: SCENARIO.s3.lon } });
+    const el = mount(addLineScreen(hz.ctx, 'stop'));
+    await until(() => stopOpts(el).length > 0);
+    expect(stopOpts(el)).toEqual([
+      ['Bourse', 'tram STIB', '610 m'],
+      ['De Brouckère', 'tram STIB', '700 m'],
+    ]);
+    expect(textOf(el.querySelector('#arret-nom-etat'))).toBe('Les plus proches de ta position.');
+  });
+
+  it('un toucher ajoute l’arrêt avec toutes ses lignes (sans line ni mode) et confirme ; doublon signalé ; « Terminé »', async () => {
+    // une ligne déjà gardée à cet arrêt n'empêche pas de garder l'arrêt entier
+    const hz = harness({ settings: defaults({ lines: [line('l-3', { line: '3', mode: 'tram' })] }), here: null });
+    const el = mount(addLineScreen(hz.ctx, 'stop'));
+    await search(el, 'gare du nord');
+    await until(() => stopOpts(el)[0]?.[0] === 'Gare du Nord');
+    expect(button(el.querySelector('.stop-add')!, 'Terminé').hidden).toBe(true);
+    stopButton(el, 'Gare du Nord').click();
+    await until(() => hz.settings.get().lines.length === 2);
+    const added = hz.settings.get().lines[1];
+    expect(added).toMatchObject({ areaId: 'stib:6357F', op: 'stib', name: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86004, lon: 4.36017 });
+    expect(added).not.toHaveProperty('line');
+    expect(added).not.toHaveProperty('mode');
+    expect(added).not.toHaveProperty('near');
+    const msg = el.querySelector('.stop-add .msg')!;
+    await until(() => textOf(msg) !== '');
+    expect(msg.textContent).toBe('Gare du Nord ajouté : tous ses départs s’afficheront dans les lunettes.');
+    // prêt pour un autre arrêt : le champ est vidé
+    expect(el.querySelector<HTMLInputElement>('#arret-nom')!.value).toBe('');
+    await search(el, 'gare du nord');
+    await until(() => stopOpts(el)[0]?.[2] === 'déjà dans tes lignes');
+    stopButton(el, 'Gare du Nord').click();
+    await until(() => textOf(msg) === 'Déjà dans tes lignes.');
+    expect(hz.settings.get().lines).toHaveLength(2);
+    button(el.querySelector('.stop-add')!, 'Terminé').click();
+    expect(hz.went).toEqual(['#/lignes']);
+    // sur l'accueil : « Gare du Nord · toutes les lignes », avec son type
+    const home = mount(homeScreen(hz.ctx));
+    const lignes = section(home, 'Bus, tram, métro');
+    await until(() => textOf(lignes.querySelector('.pick-row:last-child .t2')) !== '');
+    expect(titles(lignes)).toEqual(['Tram 3 · Gare du Nord', 'Gare du Nord · toutes les lignes']);
+    expect(textOf(lignes.querySelector('.pick-row:last-child .t2'))).toBe('tram STIB');
+  });
+
+  it('textes clairs : seulement une gare (« Pour une gare, ajoute-la dans Gares. »), recherche en panne ; limite des lignes', async () => {
+    const el = mount(addLineScreen(harness({ settings: defaults(), here: null }).ctx, 'stop'));
+    await search(el, 'ottignies');
+    expect(textOf(el.querySelector('#arret-nom-etat'))).toBe('Aucun arrêt de bus, tram ou métro ne correspond. Pour une gare, ajoute-la dans Gares.');
+    expect(stopOpts(el)).toEqual([]);
+    const down = harness({ settings: defaults(), here: null, core: (c: Core) => ({ ...c, search: async () => Promise.reject(new Error('réseau')) }) });
+    const el2 = mount(addLineScreen(down.ctx, 'stop'));
+    await search(el2, 'rogier');
+    expect(textOf(el2.querySelector('#arret-nom-etat'))).toBe('Recherche impossible pour l’instant : réessaie dans un instant.');
+    expect(el2.querySelector('#arret-nom-etat')!.classList.contains('err')).toBe(true);
+    const full = harness({ settings: defaults({ lines: manyLines(MAX_LINES) }), here: null });
+    const el3 = mount(addLineScreen(full.ctx, 'stop'));
+    expect(textOf(el3.querySelector('.screen > .msg.err'))).toBe(FULL_LINES);
+    await search(el3, 'rogier');
+    stopButton(el3, 'Rogier').click();
+    const msg = el3.querySelector('.stop-add .msg')!;
+    await until(() => textOf(msg) !== '');
+    expect(textOf(msg)).toBe(FULL_LINES);
+    expect(full.settings.get().lines).toHaveLength(MAX_LINES);
+  });
+
+  it('depuis « Un endroit » (?arret=…) : l’arrêt choisi en tête de « Un arrêt »', async () => {
+    const hz = harness({ settings: defaults(), here: null, params: 'arret=stib:6357F' });
+    const el = mount(addLineScreen(hz.ctx));
+    tabs(el)[1].click();
+    await until(() => stopOpts(el).length > 0);
+    expect(stopOpts(el)).toEqual([['Gare du Nord', 'tram STIB', 'arrêt choisi']]);
+    stopButton(el, 'Gare du Nord').click();
+    await until(() => hz.settings.get().lines.length === 1);
+    expect(hz.settings.get().lines[0]).toMatchObject({ areaId: 'stib:6357F', op: 'stib' });
+    expect(hz.settings.get().lines[0]).not.toHaveProperty('line');
   });
 });

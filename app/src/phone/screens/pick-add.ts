@@ -1,23 +1,27 @@
 /**
- * Ajout d'une gare et d'une ligne (PRD-1.2.2 § 4), sur le téléphone et dans l'onglet Réglages de Quai Web.
+ * Ajout d'une gare, d'une ligne ou d'un arrêt (PRD-1.2.2 § 4, PRD-1.2.3 § 3), sur le téléphone et dans l'onglet
+ * Réglages de Quai Web.
  *  - « Ajouter une gare » : un champ limité aux gares SNCB (core.search filtré), les plus proches d'abord si la
  *    position est connue (sans texte : les gares à moins de 2 km) ; un toucher ajoute ; une gare déjà choisie est
  *    signalée « Déjà dans tes gares ».
- *  - « Ajouter une ligne », en deux temps : « Numéro de la ligne » (core.findLines : « Bus W TEC, Braine-l’Alleud ↔
+ *  - « Ajouter une ligne ou un arrêt » (« Bus, tram, métro ») : deux choix de même taille en haut, comme « Nouveau
+ *    favori ». « Une ligne », en deux temps : « Numéro de la ligne » (core.findLines : « Bus W TEC, Braine-l’Alleud ↔
  *    Bruxelles Midi », les plus proches d'abord), puis « À quel arrêt ? » (core.lineStops, le plus proche d'abord,
- *    avec un champ pour filtrer) ; un toucher ajoute et confirme. ?arret={zone} (lien de « Un endroit », revue
- *    d'usage n° 3) : les lignes de cet arrêt proposées, l'arrêt présélectionné à la 2e étape.
+ *    avec un champ pour filtrer) ; un toucher ajoute et confirme. « Un arrêt » (1.2.3) : un champ limité aux arrêts de
+ *    bus, tram et métro (core.search sans les gares SNCB), le plus proche d'abord ; un toucher ajoute l'arrêt avec
+ *    toutes ses lignes (LinePick sans `line`). ?arret={zone} (lien de « Un endroit », revue d'usage n° 3) : les
+ *    lignes de cet arrêt proposées, l'arrêt présélectionné à la 2e étape, et en tête de « Un arrêt ».
  * Erreurs et listes vides dites en clair ; jamais de coordonnées à l'écran.
  */
 import type { AreaSummary, LatLon, LineMatch, LineStop, Mode, Names, Op, SearchItem } from '../../core/api';
 import { lineKey } from '../../core/linepicks';
-import { displayName, distanceM } from '../../core/util';
+import { displayName, distanceM, kindLabel, mainMode } from '../../core/util';
 import { LIMITS } from '../../settings';
 import { matchesQuery, normalizeForSearch } from '../../../../shared/names';
 import { header, type PhoneCtx } from '../app';
 import { debounce, h, icon } from '../dom';
-import { distanceText, lineAddedText, lineLimitText, lineMatchText, lineName, notServedText, stationAddedText, stationLimitText, stopLinesText, T, typo } from '../text';
-import { messageHub, nextId } from '../ui';
+import { distanceText, lineAddedText, lineLimitText, lineMatchText, lineName, notServedText, stationAddedText, stationLimitText, stopAddedText, stopLinesText, T, typo } from '../text';
+import { messageHub, nextId, segmentedTabs } from '../ui';
 import { withLine, withStation } from './picks';
 
 /** Gares proposées sans texte : à moins de 2 km de la position (3 × 3 tuiles autour d'elle, recherche légère). */
@@ -25,8 +29,11 @@ export const NEAR_STATIONS_M = 2000;
 export const NEAR_STATIONS_MAX = 5;
 const TYPE_DELAY_MS = 200;
 
-/** Proposition d'une liste : icône, nom, à droite la distance ou l'état ; `verb` lu avant le nom (« Ajouter »). */
-function option(o: { icon: HTMLSpanElement; label: string; meta?: string; verb?: string; onPick: () => void }): HTMLLIElement {
+/**
+ * Proposition d'une liste : icône, nom (et en dessous son type, « tram STIB »), à droite la distance ou l'état ;
+ * `verb` lu avant le nom (« Ajouter »).
+ */
+function option(o: { icon: HTMLSpanElement; label: string; sub?: string; meta?: string; verb?: string; onPick: () => void }): HTMLLIElement {
   return h(
     'li',
     null,
@@ -34,7 +41,7 @@ function option(o: { icon: HTMLSpanElement; label: string; meta?: string; verb?:
       'button',
       { type: 'button', class: 'row opt', onclick: o.onPick },
       o.icon,
-      h('span', { class: 'txt' }, h('span', { class: 't1' }, o.verb ? h('span', { class: 'sr-only' }, `${o.verb} `) : null, o.label)),
+      h('span', { class: 'txt' }, h('span', { class: 't1' }, o.verb ? h('span', { class: 'sr-only' }, `${o.verb} `) : null, o.label), o.sub ? h('span', { class: 't2' }, o.sub) : null),
       o.meta ? h('span', { class: 'meta' }, o.meta) : null,
     ),
   );
@@ -164,7 +171,7 @@ export function addStationScreen(ctx: PhoneCtx): HTMLElement {
   return h('div', { class: 'screen' }, header(ctx, T.addStation, T.stationLead, { label: 'Accueil', hash: '#/' }), field.el, msg, done, list);
 }
 
-/* ------------------------------ Ajouter une ligne ------------------------------ */
+/* ------------------------------ Ajouter une ligne ou un arrêt ------------------------------ */
 
 /** Arrêt présélectionné (?arret=…) : sa zone, et ses lignes de bus, tram et métro (« Tram 3 », « Tram 4 »). */
 interface Preset { area: AreaSummary | null; lines: { line: string; mode: Mode }[] }
@@ -176,11 +183,25 @@ export function linesOfStop(lines: readonly { line: string; mode: Mode }[]): { l
   return out;
 }
 
+/** Zone et lignes de l'arrêt présélectionné ; rien de connu si le cœur ne le trouve pas. */
+async function loadPreset(ctx: PhoneCtx, areaId: string): Promise<Preset> {
+  try {
+    const core = await ctx.core();
+    const [area, lines] = await Promise.all([
+      core.board(areaId, { limit: 1 }).then((b) => b.area).catch(() => null),
+      core.linesAt(areaId).catch(() => []),
+    ]);
+    return { area, lines: linesOfStop(lines) };
+  } catch {
+    return { area: null, lines: [] };
+  }
+}
+
 const modeIcon = (mode: Mode): HTMLSpanElement => icon(mode === 'bus' ? 'bus' : mode === 'train' ? 'train' : 'tram');
 
-export function addLineScreen(ctx: PhoneCtx): HTMLElement {
+/** « Une ligne » : le parcours de la 1.2.2, en deux temps (numéro, puis arrêt). */
+function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset> | null): HTMLElement {
   const lang = () => ctx.settings.get().lang;
-  const arret = ctx.params.get('arret');
   let preset: Preset | null = null;
   let match: LineMatch | null = null;
   let stops: LineStop[] = [];
@@ -191,10 +212,7 @@ export function addLineScreen(ctx: PhoneCtx): HTMLElement {
   const num = searchField({ id: 'ligne-num', label: T.lineField, placeholder: T.linePlaceholder, autofocus: true });
   const quick = h('div', { class: 'quick', hidden: true });
   const found = h('ul', { class: 'list box opts', 'aria-label': T.linesFound, hidden: true });
-  // Limite des lignes atteinte (LIMITS.lines) : on le dit d'emblée (le bouton de l'accueil est alors grisé, pas le lien de « Un endroit »).
-  const full = ctx.settings.get().lines.length >= LIMITS.lines;
-  const limit = full ? h('p', { class: 'msg err', role: 'status' }, typo(lineLimitText(LIMITS.lines))) : null;
-  const step1 = h('div', { class: 'step' }, limit, num.el, quick, found);
+  const step1 = h('div', { class: 'step' }, num.el, quick, found);
 
   /* --- 2. À quel arrêt ? --- */
   const titleId = nextId('arret');
@@ -338,26 +356,17 @@ export function addLineScreen(ctx: PhoneCtx): HTMLElement {
   filter.input.addEventListener('input', paintStops);
 
   // Arrêt présélectionné (« Un endroit ») : son nom, ses lignes en raccourcis ; trié depuis lui.
-  if (arret) {
-    void (async () => {
-      try {
-        const core = await ctx.core();
-        const [area, lines] = await Promise.all([
-          core.board(arret, { limit: 1 }).then((b) => b.area).catch(() => null),
-          core.linesAt(arret).catch(() => []),
-        ]);
-        preset = { area, lines: linesOfStop(lines) };
-      } catch {
-        preset = { area: null, lines: [] };
-      }
-      if (!preset.lines.length) return;
-      const where = preset.area ? displayName(preset.area.n, lang()) : '';
+  if (arret && presetP) {
+    void presetP.then((p) => {
+      preset = p;
+      if (!p.lines.length) return;
+      const where = p.area ? displayName(p.area.n, lang()) : '';
       quick.replaceChildren(
         h('p', { class: 'small' }, typo(stopLinesText(where))),
         h(
           'div',
           { class: 'shortcuts', role: 'group', 'aria-label': stopLinesText(where).replace(/ :$/, '') },
-          preset.lines.map((l) =>
+          p.lines.map((l) =>
             h('button', {
               type: 'button',
               class: 'shortcut',
@@ -365,12 +374,154 @@ export function addLineScreen(ctx: PhoneCtx): HTMLElement {
                 num.input.value = l.line;
                 void search();
               },
-            }, lineName({ op: (preset?.area?.op ?? arret.split(':')[0]) as Op, line: l.line, mode: l.mode })),
+            }, lineName({ op: (p.area?.op ?? arret.split(':')[0]) as Op, line: l.line, mode: l.mode })),
           ),
         ),
       );
       quick.hidden = false;
-    })();
+    });
   }
-  return h('div', { class: 'screen' }, header(ctx, T.addLine, T.lineLead, { label: 'Accueil', hash: '#/' }), step1, step2);
+  return h('div', { class: 'line-add' }, h('p', { class: 'lead' }, T.lineLead), step1, step2);
+}
+
+/** Arrêts proposés sans texte : les plus proches, à moins de 800 m de la position (recherche légère). */
+export const NEAR_STOPS_M = 800;
+export const NEAR_STOPS_MAX = 5;
+
+/** Arrêt de bus, tram ou métro proposé : zone, réseau, type (« tram STIB »), distance. */
+interface StopChoice { areaId: string; op: Op; name: Names; lat: number; lon: number; modes: Mode[]; kind: string; distanceM?: number }
+
+/**
+ * Arrêts de bus, tram et métro d'une recherche (search() sans les gares SNCB), dans l'ordre du cœur : mot exact, puis
+ * les plus proches par paliers de distance quand la position est connue.
+ */
+export function stopsOf(items: readonly SearchItem[], pos: LatLon | null): StopChoice[] {
+  return items
+    .filter((it) => it.op !== 'sncb' && !it.modes.every((m) => m === 'train'))
+    .map((it) => ({ areaId: it.id, op: it.op, name: it.n, lat: it.lat, lon: it.lon, modes: it.modes, kind: it.kindLabel, distanceM: pos ? distanceM(pos, it) : undefined }));
+}
+
+const ofStopArea = (a: AreaSummary, d?: number): StopChoice => ({ areaId: a.id, op: a.op, name: a.n, lat: a.lat, lon: a.lon, modes: a.modes, kind: kindLabel(a.op, a.modes), distanceM: d });
+
+/**
+ * « Un arrêt » (PRD-1.2.3 § 3) : un champ limité aux arrêts de bus, tram et métro, le plus proche d'abord (sans texte :
+ * les plus proches de la position, l'arrêt présélectionné en tête) ; un toucher ajoute l'arrêt avec toutes ses lignes
+ * (LinePick sans `line` ni `mode`) et confirme ; un arrêt déjà choisi en entier est signalé.
+ */
+function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset> | null): HTMLElement {
+  const field = searchField({ id: 'arret-nom', label: T.stopField, placeholder: T.stopSearchPlaceholder, autofocus: true });
+  const list = h('ul', { class: 'list box opts', 'aria-label': T.stopsFound, hidden: true });
+  const hub = messageHub();
+  const msg = hub.slot();
+  const done = h('button', { type: 'button', class: 'btn btn-secondary btn-block', hidden: true, onclick: () => ctx.go('#/lignes') }, T.done);
+  let preset: Preset | null = null;
+  let shown: StopChoice[] = [];
+  let seq = 0;
+
+  const paint = (): void => {
+    const s = ctx.settings.get();
+    list.replaceChildren(
+      ...shown.map((c) => {
+        const taken = s.lines.some((x) => x.areaId === c.areaId && !x.line);
+        const meta = taken ? T.lineTaken : c.areaId === arret ? T.chosenStop : c.distanceM !== undefined ? typo(distanceText(c.distanceM)) : undefined;
+        return option({ icon: modeIcon(mainMode(c.modes)), label: displayName(c.name, s.lang), sub: c.kind, meta, verb: 'Ajouter', onPick: () => void pick(c) });
+      }),
+    );
+    list.hidden = !shown.length;
+  };
+
+  const run = async (): Promise<void> => {
+    const my = ++seq;
+    const q = field.input.value.trim();
+    const pos = near(ctx);
+    let items: StopChoice[] = [];
+    let note = '';
+    try {
+      const core = await ctx.core();
+      if (normalizeForSearch(q).replace(/ /g, '').length >= 2) {
+        items = stopsOf(await core.search(q, pos ?? undefined), pos);
+        if (!items.length) note = T.stopSearchNone;
+      } else {
+        // Sans texte : l'arrêt présélectionné, puis les plus proches (recherche légère, sans départs).
+        const first = preset?.area && preset.area.op !== 'sncb' ? [ofStopArea(preset.area)] : [];
+        let around: StopChoice[] = [];
+        if (pos) {
+          around = (await core.nearby(pos.lat, pos.lon, NEAR_STOPS_M, { light: true }))
+            .filter((n) => n.area.op !== 'sncb' && !first.some((x) => x.areaId === n.area.id))
+            .slice(0, NEAR_STOPS_MAX)
+            .map((n) => ofStopArea(n.area, n.distanceM));
+          if (around.length) note = T.stationNearby;
+        }
+        items = [...first, ...around];
+      }
+    } catch {
+      if (my !== seq) return;
+      shown = [];
+      paint();
+      field.say(T.searchDown, true);
+      return;
+    }
+    if (my !== seq) return;
+    shown = items;
+    paint();
+    field.say(note);
+  };
+
+  async function pick(c: StopChoice): Promise<void> {
+    const name = displayName(c.name, ctx.settings.get().lang);
+    const stop = { areaId: c.areaId, op: c.op, name: c.name, lat: c.lat, lon: c.lon };
+    const r = withLine(ctx.settings.get(), stop, ctx.clock.now());
+    if (r === 'exists') return hub.say(msg, T.lineExists);
+    if (r === 'full') return hub.say(msg, typo(lineLimitText(LIMITS.lines)), true);
+    await ctx.settings.update((x) => {
+      const again = withLine(x, stop, ctx.clock.now());
+      return typeof again === 'object' ? again.settings : x;
+    });
+    hub.say(msg, typo(stopAddedText(name)));
+    done.hidden = false;
+    // Prêt pour un autre arrêt : le champ se vide, les arrêts proches reviennent (celui-ci « déjà dans tes lignes »).
+    field.input.value = '';
+    await run();
+  }
+
+  field.input.addEventListener('input', debounce(() => void run(), TYPE_DELAY_MS));
+  field.input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    list.querySelector<HTMLButtonElement>('button')?.focus();
+  });
+  if (presetP) {
+    void presetP.then((p) => {
+      preset = p;
+      if (!field.input.value.trim()) void run();
+    });
+  }
+  void run();
+  return h('div', { class: 'stop-add' }, h('p', { class: 'lead' }, T.stopLead), field.el, msg, done, list);
+}
+
+/** Les deux choix de l'ajout dans « Bus, tram, métro » (PRD-1.2.3 § 3). */
+export type LineAddKind = 'line' | 'stop';
+
+/**
+ * « Ajouter une ligne ou un arrêt » : en haut, « Une ligne » (« numéro, puis arrêt », choisie d'office) et « Un arrêt »
+ * (« toutes ses lignes »), de même taille, comme « Nouveau favori » ; chacun montre son formulaire. `initial` : le choix
+ * montré à l'ouverture (#/lignes/ajouter/ligne, #/lignes/ajouter/arret). « Accueil » ramène à l'accueil (revue 1.2.2).
+ */
+export function addLineScreen(ctx: PhoneCtx, initial: LineAddKind = 'line'): HTMLElement {
+  const arret = ctx.params.get('arret');
+  const presetP = arret ? loadPreset(ctx, arret) : null;
+  const kinds = segmentedTabs<LineAddKind>({
+    label: T.kindsLegend,
+    value: initial,
+    options: [
+      { value: 'line', label: T.kindLine, sub: T.kindLineSub, panel: linePanel(ctx, arret, presetP) },
+      { value: 'stop', label: T.kindStop, sub: T.kindStopSub, panel: stopPanel(ctx, arret, presetP) },
+    ],
+  });
+  // Curseur à l'ouverture : le champ du choix montré (le routeur prend le premier champ data-autofocus).
+  for (const p of kinds.panels) if (p.hidden) p.querySelectorAll('[data-autofocus]').forEach((e) => e.removeAttribute('data-autofocus'));
+  // Limite des lignes atteinte (LIMITS.lines) : on le dit d'emblée (le bouton de l'accueil est alors grisé, pas le lien de « Un endroit »).
+  const full = ctx.settings.get().lines.length >= LIMITS.lines ? h('p', { class: 'msg err', role: 'status' }, typo(lineLimitText(LIMITS.lines))) : null;
+  return h('div', { class: 'screen' }, header(ctx, T.addLine, undefined, { label: 'Accueil', hash: '#/' }), full, kinds.el, ...kinds.panels);
 }

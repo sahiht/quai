@@ -38,6 +38,17 @@
  *  - gare ou ligne choisie sur « stib:6358 » (`aka`), ou sur un identifiant inconnu avec `near` nommé « Gare du Nord » :
  *    board() et lineBoard() donnent movedTo 'stib:6357F' ; inconnu avec `near` sans zone de même nom : board() missing.
  * findLines('1') : tram 1 De Lijn (Gand) et bus 1 TEC (Mons).
+ *
+ * 1.2.3 (PRD-1.2.3 § 1, § 2) : board avec `horizonMin` (tous les départs de l'horizon, 40 au plus par défaut ; rien :
+ * le prochain départ) et departureStops. Cas utiles, le 10/11 :
+ *  - IC de 07:42 à Namur (sncb:8863008) : voies à chaque gare, +2 et voie 6 au lieu de 4 à Namur, Bruxelles-Schuman
+ *    supprimé, voie 5 au lieu de 3 à Bruxelles-Central, +4 à Bruxelles-Midi ;
+ *  - W de 07:48 à Merbraine (tec:Bbrlmer1) : +3 au départ, arrêts suivants décalés de 3 min ; à 08:00, le W de 08:18
+ *    vers Waterloo Eglise supprimé : tous ses arrêts supprimés ;
+ *  - tram 3 à Gare du Nord : temps réel dans les 30 min (arrêts suivants à l'heure), au-delà horaire prévu (« ~ ») ;
+ *    bus 270 De Lijn à Bruxelles-Nord (delijn:308611) : horaire prévu, voie 4 ;
+ *  - tripId inconnu (ex. 'disparu') ou départ d'une autre zone : state 'missing'.
+ * Tableaux complets à 07:31 : Gare du Nord 40 (plafond), Bruxelles-Central 16, Bruxelles-Nord De Lijn 16, Namur 2.
  */
 import { DEFAULT_SETTINGS } from '../core/api';
 import type {
@@ -47,6 +58,7 @@ import type {
   CoreOptions,
   CoreStatus,
   Departure,
+  DepartureStops,
   Endpoint,
   FavoriteStop,
   Journey,
@@ -61,6 +73,7 @@ import type {
   PickPlace,
   PlanResult,
   Settings,
+  StopCall,
   Stopover,
   Suggestion,
 } from '../core/api';
@@ -214,6 +227,16 @@ const TRAINS: TrainTpl[] = [
 ];
 
 interface TrainRt { rt: boolean; delay: number; platformAt?: Record<string, string>; cancelled?: boolean }
+
+/**
+ * 1.2.3 (PRD-1.2.3 § 2) : temps réel gare par gare d'un train (`${gabarit}@${départ}`) : retard à partir de cette gare
+ * (propagé ensuite), voie modifiée, arrêt supprimé. L'IC de 07:42 Namur → Bruxelles-Midi (+2, voie 6 à Namur) ne
+ * s'arrête pas à Bruxelles-Schuman, passe voie 5 au lieu de 3 à Bruxelles-Central et arrive avec 4 min de retard à
+ * Bruxelles-Midi (les trajets des scénarios, descente à Bruxelles-Nord ou Bruxelles-Central, restent ceux du vrai cœur).
+ */
+const STATION_RT: Record<string, Record<string, { delay?: number; platform?: string; cancelled?: boolean }>> = {
+  [`IC-NAM-MIDI@${hm(7, 42)}`]: { 'sncb:8811916': { cancelled: true }, 'sncb:8813003': { platform: '5' }, 'sncb:8814001': { delay: 4 } },
+};
 
 /** Temps réel « en direct » des trains (scène base) selon l'instance et l'heure actuelle. */
 function trainRtLive(t: TrainTpl, start: number, now: number): TrainRt {
@@ -517,6 +540,8 @@ const MAX_WAIT_MS = 60 * MIN;
 /** À 50 m au plus d'un arrêt, on y est : pas d'étape à pied. */
 const AT_STOP_M = 50;
 const HORIZON_MS = 23 * 3_600_000;
+/** 1.2.3 : départs d'un tableau complet (board avec `horizonMin`) sans `limit`. */
+const HORIZON_LIMIT = 40;
 const NEAR_HERE_M = 300;
 const RT_MEMORY_MS = 15 * MIN;
 
@@ -575,9 +600,24 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
    *  maintenant, comme le vrai cœur (le flux ne connaît pas la date). */
   function runRt(run: Run, k: number): TrainRt {
     if (Math.abs(run.stops[k].dep - now()) > 6 * 3_600_000) return { rt: false, delay: 0 };
-    if (run.train) return trainRt(run.train, run.start);
+    if (run.train) return stationRt(run, k, trainRt(run.train, run.start));
     const r = run.line ? lineRt(run.line, run.stops[k].areaId, run.stops[k].dep) : null;
     return r ? { rt: true, delay: r.delay, ...(r.cancelled ? { cancelled: true } : {}) } : { rt: false, delay: 0 };
+  }
+
+  /** 1.2.3 : temps réel d'un train à sa gare k (STATION_RT) : retard de la dernière gare annoncée, voie, arrêt supprimé. */
+  function stationRt(run: Run, k: number, base: TrainRt): TrainRt {
+    const at = STATION_RT[`${run.train!.key}@${run.start}`];
+    if (!at || !base.rt) return base;
+    const out: TrainRt = { ...base };
+    for (let i = 0; i <= k; i++) {
+      const x = at[run.stops[i].areaId];
+      if (x?.delay !== undefined) out.delay = x.delay;
+    }
+    const here = at[run.stops[k].areaId];
+    if (here?.platform) out.platformAt = { ...base.platformAt, [run.stops[k].areaId]: here.platform };
+    if (here?.cancelled) out.cancelled = true;
+    return out;
   }
 
   function departure(run: Run, k: number): Departure {
@@ -586,7 +626,8 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
     const st = run.stops[k];
     if (run.train) {
       const np = rt.platformAt?.[a.id];
-      const d: Departure = { op: 'sncb', mode: 'train', line: run.train.cat, head: run.train.head, sched: st.dep, est: st.dep + rt.delay * MIN, rt: rt.rt, delayMin: rt.delay, cancelled: !!rt.cancelled, tripId: run.id, stopSeq: k + 1 };
+      const delay = rt.cancelled ? 0 : rt.delay;
+      const d: Departure = { op: 'sncb', mode: 'train', line: run.train.cat, head: run.train.head, sched: st.dep, est: st.dep + delay * MIN, rt: rt.rt, delayMin: delay, cancelled: !!rt.cancelled, tripId: run.id, stopSeq: k + 1 };
       if (st.platform) d.platform = st.platform;
       if (np && np !== st.platform && !rt.cancelled) d.newPlatform = np;
       return d;
@@ -612,7 +653,44 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
     return out.sort((x, y) => x.est - y.est || x.sched - y.sched).slice(0, limit);
   }
 
+  /**
+   * 1.2.3 (PRD-1.2.3 § 1) : tous les départs des `horizonMin` prochaines minutes (heure estimée ; un supprimé à son
+   * heure prévue), `cap` au plus ; rien dans l'horizon : le prochain départ (même plus tard), comme le vrai cœur.
+   */
+  function departuresWithin(areaId: string, from: number, horizonMin: number, cap: number, filter?: LineFilter[]): Departure[] {
+    const all = departuresAt(areaId, from, Infinity, filter);
+    const until = from + horizonMin * MIN;
+    const inside = all.filter((d) => (d.cancelled ? d.sched : d.est) <= until);
+    return (inside.length ? inside : all.filter((d) => !d.cancelled).slice(0, 1)).slice(0, cap);
+  }
+
+  /**
+   * 1.2.3 (PRD-1.2.3 § 2) : les arrêts d'un départ, de son arrêt (k) au terminus. Train : heure, voie et retard gare par
+   * gare (STATION_RT), arrêt supprimé ; bus, tram, métro : heures prévues décalées du retard connu au départ, sinon « ~ ».
+   */
+  function stopCalls(run: Run, k: number): StopCall[] {
+    const first = runRt(run, k);
+    const out: StopCall[] = [];
+    for (let i = k; i < run.stops.length; i++) {
+      const s = run.stops[i];
+      const z = area(s.areaId);
+      const r = run.train ? runRt(run, i) : first;
+      const sched = i === k ? s.dep : s.arr;
+      const cancelled = !!r.cancelled;
+      const c: StopCall = { areaId: z.id, name: z.n, sched, est: cancelled ? sched : sched + r.delay * MIN, rt: r.rt, delayMin: cancelled ? 0 : r.delay };
+      if (s.platform) c.platform = s.platform;
+      const np = r.platformAt?.[z.id];
+      if (np && np !== s.platform && !cancelled) c.newPlatform = np;
+      if (cancelled) c.cancelled = true;
+      out.push(c);
+    }
+    return out;
+  }
+
   /* --- trajets --- */
+
+  /** Retard (ms) d'un voyage à son arrêt k, monté en k1 : gare par gare pour un train, sinon celui du départ. */
+  const shiftAt = (run: Run, k1: number, k: number): number => (run.train && k !== k1 ? runRt(run, k).delay : runRt(run, k1).delay) * MIN;
 
   function rideLeg(run: Run, k1: number, k2: number): Leg {
     const rt = runRt(run, k1);
@@ -626,7 +704,7 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
       const s = run.stops[k];
       const z = area(s.areaId);
       const sched = k === k1 ? s.dep : s.arr;
-      const so: Stopover = { name: z.n, areaId: z.id, sched, est: sched + shift };
+      const so: Stopover = { name: z.n, areaId: z.id, sched, est: sched + (k === k1 ? shift : shiftAt(run, k1, k)) };
       const p = k === k1 ? (rt.platformAt?.[z.id] ?? s.platform) : s.platform;
       if (p) so.platform = p;
       stops.push(so);
@@ -636,7 +714,7 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
       from: { name: fa.n, lat: fa.lat, lon: fa.lon, areaId: fa.id },
       to: { name: ta.n, lat: ta.lat, lon: ta.lon, areaId: ta.id },
       dep: a.dep + shift,
-      arr: b.arr + shift,
+      arr: b.arr + shiftAt(run, k1, k2),
       schedDep: a.dep,
       schedArr: b.arr,
       tripId: run.id,
@@ -646,7 +724,8 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
       toStop: `${ta.id.slice(ta.id.indexOf(':') + 1)}${b.platform && run.train ? `_${b.platform}` : ''}`,
       rt: rt.rt,
       delayMin: rt.delay,
-      cancelled: !!rt.cancelled,
+      // 1.2.3 : descente à une gare où le train ne s'arrête pas (STATION_RT) : trajet impossible
+      cancelled: !!rt.cancelled || (!!run.train && !!runRt(run, k2).cancelled),
       stops,
     };
     if (run.train) {
@@ -930,9 +1009,24 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
         if (!o.near) throw new QuaiError('areaUnknown');
         return { area: missingArea(areaId), departures: [], anyPlanned: false, rtErrors: [], updatedAt: now(), missing: true } satisfies Board;
       }
-      const deps = departuresAt(a.id, now(), o.limit ?? 8, o.filter);
+      // 1.2.3 : `horizonMin` : tous les départs de l'horizon, `limit` (40 par défaut) au plus
+      const deps = o.horizonMin ? departuresWithin(a.id, now(), o.horizonMin, o.limit ?? HORIZON_LIMIT, o.filter) : departuresAt(a.id, now(), o.limit ?? 8, o.filter);
       const b: Board = { area: a, departures: deps, anyPlanned: deps.some((d) => !d.rt), rtErrors: live() ? [] : [a.op], updatedAt: now() };
       return a.id === areaId ? b : { ...b, movedTo: a.id };
+    },
+    async departureStops(areaId, dep) {
+      touchRt();
+      // voyage du départ (tripId du faux cœur : gabarit, date, heure de départ) ; inconnu ou disparu : missing
+      const run = dep?.tripId ? runById(dep.tripId) : null;
+      const a = resolveArea(areaId);
+      const starts = run ? (run.train ? run.train.starts : (LINE_STARTS.get(run.line!.key) ?? [])) : [];
+      let k = run && a && starts.includes(run.start) ? Math.max(0, (dep.stopSeq ?? 0) - 1) : -1;
+      if (run && a && k >= 0 && run.stops[k]?.areaId !== a.id) k = run.stops.findIndex((s, i) => s.areaId === a.id && i < run.stops.length - 1);
+      const base = { op: dep?.op ?? a?.op ?? 'stib', mode: dep?.mode ?? 'bus', line: dep?.line ?? '', head: dep?.head ?? { fr: '', nl: '' } };
+      if (!run || k < 0 || k >= run.stops.length - 1) return { ...base, stops: [], anyPlanned: false, state: 'missing' } satisfies DepartureStops;
+      const stops = stopCalls(run, k);
+      const head = run.train?.head ?? run.line!.head;
+      return { ...base, head, stops, anyPlanned: stops.some((s) => !s.rt), state: 'ok' } satisfies DepartureStops;
     },
     async linesAt(areaId) {
       const a = area(areaId);

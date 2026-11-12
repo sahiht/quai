@@ -1,0 +1,3 @@
+Tableaux complets : une gare ou un arrêt montre tous ses départs des 2 prochaines heures, page par page.
+Touche un départ : ses arrêts jusqu’au terminus, avec l’heure, la voie et le retard pour un train.
+Bus, tram, métro : ajoute une ligne, ou un arrêt avec toutes ses lignes.

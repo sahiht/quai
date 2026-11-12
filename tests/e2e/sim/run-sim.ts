@@ -1,12 +1,13 @@
 /**
- * Quai 1.2.2, contrôle qualité : bout en bout avec le VRAI cœur, les vraies données (pipeline sur les zips de
+ * Quai 1.2.3, contrôle qualité : bout en bout avec le VRAI cœur, les vraies données (pipeline sur les zips de
  * fixtures), le vrai relais (faux portail BMC, faux service d'adresses des trois Régions) et l'appli construite :
  *   - lunettes dans le simulateur Even Hub 0.9.5 (sans affichage, xvfb) : gestes, journal QUAI_SCREEN, captures
  *     576 × 288 contrôlées au pixel (CA-M1.7), relief de l'accueil et de « Autres trajets » mesuré sur la capture
  *     (PRD-1.2.1 § 4.4 : luminosité des conteneurs, retrait des favoris) ; 1.2.2 (docs/v1.2.2/PRD-1.2.2.md) : accueil
  *     avec « Gares » et « Bus, tram, métro » (§ 1.1), « Favoris » avec les adresses récentes (§ 1.2), « Gares » (§ 2),
  *     « Bus, tram, métro », le détail d'une ligne et « garder une ligne » (§ 3, REVUE-USAGE n° 3), trajet suivi
- *     seulement sur demande, « Suivi » et « Ne plus suivre » (§ 6) ;
+ *     seulement sur demande, « Suivi » et « Ne plus suivre » (§ 6) ; 1.2.3 (docs/v1.2.3/PRD-1.2.3.md) : tableau complet
+ *     d'une gare ou d'un arrêt, ses pages (§ 1), les arrêts d'un départ et retour (§ 2), message « Quai 1.2.3 » (§ 4) ;
  *   - téléphone dans Chrome sans affichage (protocole DevTools, sim/cdp.ts) : « Mes favoris », « Nouveau favori » et
  *     ses deux onglets, champ unique, cartes (nom affiché, ligne des moyens, phrases 1.2.1), jour férié au-dessus des
  *     résultats, « Lunettes », « Garder en favori », « Trajets », données, premier lancement, et réouverture de Quai (le
@@ -18,7 +19,7 @@
  *
  *   cd tests/e2e && npm run sim                    (tout, environ 15 min)
  *   npm run sim -- --only s1,waterloo              (scénarios choisis, liste dans SCENARIOS en bas du fichier)
- *   npm run sim -- --deliver /tmp/quai-1.2.2-shots   (captures pour le propriétaire + manifest.json)
+ *   npm run sim -- --deliver /tmp/quai-1.2.3-shots   (captures pour le propriétaire + manifest.json)
  *   npm run sim -- --tour                          (rafraîchit les images de app/test/screens/, mêmes noms)
  *
  * Captures : tests/e2e/screens/<scénario>-<étape>.png ; rapport : tests/e2e/out/sim-report.json.
@@ -94,15 +95,18 @@ const H = {
   others: '▲▼ choisir   toucher : voir   double : retour',
   train: '▲▼ arrêts   double : retour',
   arrival: 'toucher : ★ garder ce trajet   double : retour',
-  /** Départs d'une gare SNCB : ★ la garde dans « Gares » ou l'en retire (REVUE-USAGE n° 3). */
-  boardStation: '▲▼ départs   toucher : ★ garder la gare   double : retour',
-  boardStationKept: '▲▼ départs   toucher : ★ retirer la gare   double : retour',
-  /** Départs d'un arrêt de bus, tram ou métro : ★ ouvre « garder une ligne ». */
-  boardStop: '▲▼ départs   toucher : ★ lignes   double : retour',
+  /**
+   * 1.2.3 (PRD-1.2.3 § 1) : tableau complet d'une gare ou d'un arrêt, curseur de départ en départ ; la ligne ★ en tête
+   * garde ou retire la gare (« Gares »), ou ouvre « garder une ligne ».
+   */
+  board: '▲▼ départs   toucher : arrêts   double : retour',
+  /** 1.2.3 (§ 2) : les arrêts d'un départ ; toucher un arrêt : son tableau. */
+  stops: '▲▼ arrêts   toucher : départs   double : retour',
   keepLine: '▲▼ choisir   toucher : ★ garder ou retirer   double : retour',
   stations: '▲▼ choisir   toucher : départs   double : retour',
   lines: '▲▼ choisir   toucher : ouvrir   double : retour',
-  line: '▲▼ passages   toucher : tous les départs   double : retour',
+  /** Détail d'une ligne ; 1.2.3 : toucher un passage, ses arrêts. */
+  line: '▲▼ passages   toucher : arrêts   double : retour',
   nearby: '▲▼ arrêt   toucher : départs   double : retour',
   nearest: 'toucher : ses départs   double : retour',
   message: 'double toucher : retour',
@@ -115,11 +119,19 @@ const FOLLOW = '   Suivre ce trajet';
 const FOLLOWED = '   Suivi';
 /** « Le suivant » vers le bureau à S1 : l'IC de 08:42 ; l'arrivée dépend du tram choisi par le classement du cœur (§ 7). */
 const NEXT_S1 = /^Le suivant {3}08:33 → (09:5\d|10:0\d)$/;
-/** Message « Quai 1.2.2 » des lunettes (PRD-1.2.2 § 9, REVUE-USAGE n° 4) : le même depuis la 1.2.1, la 1.2.0, la 1.1 ou la 1.0. */
-const NEWS_TITLE = 'Quai 1.2.2';
-const NEWS = ['Nouveau : tes gares et tes lignes sur l’accueil.', 'Tes arrêts favoris y sont rangés, rien n’est perdu.', 'Aller à… a rejoint Favoris.', 'Un trajet n’est suivi que si tu le demandes.'];
-/** Bannière « Nouveau » du téléphone (mêmes nouveautés, dites depuis le téléphone ; app/src/phone/text.ts, NEWS_122). */
-const BANNER = ['Nouveau : tes gares et tes lignes de bus, tram et métro sur l’accueil des lunettes.', 'Tes arrêts favoris y sont rangés, rien n’est perdu.', 'Dans les lunettes, Aller à… a rejoint Favoris.', 'Un trajet n’est suivi que si tu le demandes.'];
+/**
+ * Message « Quai 1.2.3 » des lunettes (PRD-1.2.3 § 4) : depuis la 1.2.2, les lignes de la 1.2.3 ; depuis une version
+ * antérieure (la 1.2.1 installée directement en 1.2.3, la 1.2.0, la 1.1, la 1.0), celles de la 1.2.2 ensuite.
+ */
+const NEWS_TITLE = 'Quai 1.2.3';
+const NEWS_123 = ['Tableaux complets : tous les départs des 2 heures à venir.', 'Touche un départ : ses arrêts jusqu’au terminus.', 'Bus, tram, métro : ajoute une ligne ou un arrêt.'];
+const NEWS_122 = ['Nouveau : tes gares et tes lignes sur l’accueil.', 'Tes arrêts favoris y sont rangés, rien n’est perdu.', 'Aller à… a rejoint Favoris.', 'Un trajet n’est suivi que si tu le demandes.'];
+/** Lignes du message selon la version vue avant la mise à jour. */
+const newsFor = (seen: string): string[] => (cmpVersion(seen, '1.2.2') < 0 ? [...NEWS_123, ...NEWS_122] : NEWS_123);
+/** Bannière « Nouveau » du téléphone (mêmes nouveautés, dites depuis le téléphone ; app/src/phone/text.ts, NEWS_123 et NEWS_122). */
+const BANNER_123 = ['Tableaux complets dans les lunettes : tous les départs des 2 prochaines heures.', 'Touche un départ : ses arrêts jusqu’au terminus, avec l’heure et la voie.', 'Bus, tram, métro : ajoute une ligne ou un arrêt.'];
+const BANNER_122 = ['Nouveau : tes gares et tes lignes de bus, tram et métro sur l’accueil des lunettes.', 'Tes arrêts favoris y sont rangés, rien n’est perdu.', 'Dans les lunettes, Aller à… a rejoint Favoris.', 'Un trajet n’est suivi que si tu le demandes.'];
+const bannerFor = (seen: string): string[] => (cmpVersion(seen, '1.2.2') < 0 ? [...BANNER_123, ...BANNER_122] : BANNER_123);
 const WELCOME = ['Bienvenue dans Quai !', 'Termine les réglages sur le téléphone :', 'appli Even Realities, onglet Even Hub, Quai.', 'Position, langue et tes favoris, en une minute.'];
 /** Panne du temps réel : avec « ~ » sur les écrans qui en montrent, sans « ~ » sur l'accueil (PRD-1.2.1 § 4.5). */
 const RT_DOWN = 'Temps réel indisponible : horaires prévus ~';
@@ -142,10 +154,10 @@ function sameRows(s: Screen, before: Screen): void {
 /** Erreur au lancement (REVUE-USAGE n° 10). */
 const DATA_DOWN = 'Pas de connexion aux horaires : nouvel essai dans 30 s';
 /**
- * Message « Quai 1.2.2 » et bannière : seulement quand l'appli construite est en 1.2.2 (app.json) ; avant la montée
+ * Message « Quai 1.2.3 » et bannière : seulement quand l'appli construite est en 1.2.3 (app.json) ; avant la montée
  * de version, ils ne paraissent pas et les étapes qui les attendent le disent dans les notes.
  */
-const V122 = cmpVersion(APP_VERSION, '1.2.2') >= 0;
+const V123 = cmpVersion(APP_VERSION, '1.2.3') >= 0;
 /** Ligne du haut de l'accueil (jamais un élément sélectionnable). */
 const TOP_HOME = /^(Temps réel indisponible|Pas de réseau|Horaires |Près de |! )/;
 /** Alpha des captures du simulateur pour chaque niveau de luminosité (mesuré : 4 → 255, 3 → 230, 2 → 197). */
@@ -166,6 +178,8 @@ const DELIVERABLES: Record<string, { file: string; caption: string }> = {
   g10: { file: 'g10-lunettes-detail-ligne.png', caption: 'Lunettes, détail du tram 3 à la gare du Nord : pour chaque sens, 4 passages (heure, attente), puis « Tous les départs de l’arrêt ».' },
   g11: { file: 'g11-lunettes-garder-une-ligne.png', caption: 'Lunettes, ★ sur les départs de la gare du Nord : « Gare du Nord : garder une ligne », les lignes de l’arrêt, « ★ » sur celles gardées dans « Bus, tram, métro ».' },
   g12: { file: 'g12-lunettes-trajet-suivi.png', caption: 'Lunettes, toucher sur un trajet suivi : « Vers Gand-Saint-Pierre : trajet suivi », « Ne plus suivre » et le détail du train.' },
+  g13: { file: 'g13-lunettes-tableau-complet.png', caption: 'Lunettes (1.2.3), tableau complet de Namur à 07:31 : « ★ retirer la gare » en tête, puis tous les départs des 2 prochaines heures, le curseur sur le premier (l’IC de 07:42, +2, voie 6 au lieu de 4). ▲▼ de départ en départ, la liste défile par page.' },
+  g14: { file: 'g14-lunettes-arrets-du-depart.png', caption: 'Lunettes (1.2.3), toucher l’IC de 07:42 : « IC vers Bruxelles-Midi », Namur en tête au plus clair (07:42 +2, voie 6 !), puis chaque gare jusqu’au terminus avec son heure et sa voie. Toucher une gare ouvre son tableau.' },
   p01: { file: 'p01-telephone-nouveau-favori-endroit.png', caption: 'Téléphone, « Nouveau favori » : en haut, deux choix de même taille, « Un endroit » (choisi d’office) et « Un trajet de A à B » ; dessous, le champ « Adresse, gare ou arrêt » avec « Ma position actuelle » en tête, puis les adresses récentes.' },
   p02: { file: 'p02-telephone-nouveau-favori-trajet.png', caption: 'Téléphone, « Nouveau favori », choix « Un trajet de A à B » : le formulaire du trajet fixe (Départ, Arrivée, nom affiché, créneau).' },
   p03: { file: 'p03-telephone-cartes-trajets.png', caption: 'Téléphone, Waterloo vers la rue du Progrès : « Moins de marche » en tête (bus W + métro 2, à pied 2 + 2 + 3 min ; « Arrive 16 min après le plus rapide, avec moins de marche. »), puis « Plus tôt » (S1, à pied 19 + 5 min ; « Plus tôt de 16 min, mais 19 min à pied. ») et « Le suivant ».' },
@@ -241,6 +255,27 @@ function homeIndex(s: { lines: string[] }, re: RegExp): number {
   check(i >= 0, `élément ${re} absent de l’accueil : ${JSON.stringify(s.lines)}`);
   return i;
 }
+/* ------------------------------ Tableaux complets, arrêts d'un départ (PRD-1.2.3 § 1, § 2) ------------------------------ */
+
+/** Lignes de la liste d'un tableau ou des arrêts d'un départ : sans la ligne du haut, la note ni l'aide. */
+function listRows(s: { screen: string; lines: string[] }): string[] {
+  const l = s.lines.slice(0, -1);
+  if (s.screen === 'stops' || /^(! |Départs de demain$)/.test(l[0] ?? '')) l.shift();
+  if (/^(~ horaire prévu|Temps réel indisponible|Pas de réseau)/.test(l[l.length - 1] ?? '')) l.pop();
+  return l;
+}
+/**
+ * Minutes depuis minuit d'une ligne de tableau ou d'arrêt : l'heure (« 07:42 », « ~07:42 ») plus son retard (« +2 ») ;
+ * un bus dans l'heure : `now` plus l'attente (« 4 min », « ~4 min », « imminent ») ; rien de lisible (« SUPPRIMÉ ») : NaN.
+ */
+function minutesOfRow(row: string, now = 0): number {
+  const m = /(\d\d):(\d\d)(?: \+(\d+))?/.exec(row);
+  if (m) return +m[1] * 60 + +m[2] + (m[3] ? +m[3] : 0);
+  const w = /~?(\d+)\u00a0?\s?min$/.exec(row);
+  if (w) return now + +w[1];
+  return /imminent$/.test(row) ? now : NaN;
+}
+
 /** Favoris montrés sur l'accueil : les lignes en retrait, entre « Favoris   n » et la ligne vide (ou « Autour de moi »). */
 function homeFavorites(s: { lines: string[] }): string[] {
   const i = s.lines.findIndex((x) => /^Favoris {3}\d+$/.test(x));
@@ -318,33 +353,35 @@ function pageUrl(params: Record<string, string | undefined>, hash = '', bases?: 
   return u.toString() + hash;
 }
 const preset = (file: string) => (p: Record<string, string>) => ({ ...p, reset: '1', preset: `${ipv4(web.url)}/${file}` });
-/** Réglages 1.1 tels quels (fixtures/app/preset-1.1.json, seenVersion 1.1.0) : migrés en v4, « Quai 1.2.2 » une fois. */
+/** Réglages 1.1 tels quels (fixtures/app/preset-1.1.json, seenVersion 1.1.0) : migrés en v4, « Quai 1.2.3 » une fois. */
 const P11 = preset('preset-1.1.json');
-/** Réglages de la 1.0 (fixtures/app/preset.json) : migrés au lancement, « Quai 1.2.2 » une fois. */
+/** Réglages de la 1.0 (fixtures/app/preset.json) : migrés au lancement, « Quai 1.2.3 » une fois. */
 const P10 = preset('preset.json');
-/** Utilisateur de la 1.2.0 (seenVersion 1.2.0) : « Quai 1.2.2 » une fois. */
+/** Utilisateur de la 1.2.0 (seenVersion 1.2.0) : « Quai 1.2.3 » une fois, avec les nouveautés de la 1.2.2. */
 const P120 = preset('p/1.2.0.json');
-/** Utilisateur de la 1.2.1 (seenVersion 1.2.1) : « Quai 1.2.2 » une fois, ses arrêts favoris rangés (PRD-1.2.2 § 5). */
+/** Utilisateur de la 1.2.1 (seenVersion 1.2.1) : « Quai 1.2.3 » une fois, ses arrêts favoris rangés (PRD-1.2.2 § 5). */
 const P121 = preset('p/1.2.1.json');
+/** Utilisateur de la 1.2.2 (seenVersion 1.2.2) : « Quai 1.2.3 » une fois, les seules nouveautés de la 1.2.3. */
+const P122 = preset('p/1.2.2.json');
 /**
- * Utilisateur de la 1.2.2 : les réglages de la 1.1 avec les nouveautés déjà vues (seenVersion 1.2.2), migrés au
+ * Utilisateur de la 1.2.3 : les réglages de la 1.1 avec les nouveautés déjà vues (seenVersion 1.2.3), migrés au
  * lancement comme ceux d'un utilisateur réel : favoris Bureau, Vers Gand-Saint-Pierre et Maison ; « Gares » : Namur ;
  * « Bus, tram, métro » : tram 3 et tram 4 à Gare du Nord (ouverts d'office à moins de 300 m) et Bruxelles-Nord De Lijn,
  * toutes les lignes. Quai déjà utilisé (date du premier lancement absente, version vue connue) : pas d'aide des
- * gestes sur l'accueil (§ 4.6).
+ * gestes sur l'accueil (§ 4.6). Jamais de message de nouveautés, quelle que soit la version construite.
  */
-const P122 = preset('p/1.2.2.json');
-/** P122 avec trois adresses récentes, des lieux publics (S4 ; PRD-1.2.2, règle de confidentialité). */
+const P123 = preset('p/1.2.3.json');
+/** P123 avec trois adresses récentes, des lieux publics (S4 ; PRD-1.2.2, règle de confidentialité). */
 const PREC = preset('p/recent.json');
-/** P122 avec un lieu au nom de ville et une adresse récente (champ unique). */
+/** P123 avec un lieu au nom de ville et une adresse récente (champ unique). */
 const PPHONE = preset('p/phone.json');
 /** Configuration faite, aucun favori, ni gare ni ligne (CA-2.3 à CA-2.5, Quai Web). */
 const PEMPTY = preset('p/empty.json');
-/** P122 avec des lieux à adresse vérifiée et deux adresses récentes (captures de « Mes favoris »). */
+/** P123 avec des lieux à adresse vérifiée et deux adresses récentes (captures de « Mes favoris »). */
 const PNICE = preset('p/nice.json');
 /**
  * Waterloo (scénario 4 des fixtures, CA-121.5) : Maison (tu y es), Bureau, Mama et la gare de Waterloo (arrêt favori
- * de la 1.2.1, rangé dans « Gares ») ; seenVersion 1.2.2.
+ * de la 1.2.1, rangé dans « Gares ») ; seenVersion 1.2.3.
  */
 const PWAT = preset('p/waterloo.json');
 
@@ -761,9 +798,107 @@ async function s1(): Promise<void> {
     await sim.input('click');
     const s = await sim.waitScreen(is('board', (x) => loaded(x) && /^Namur, train/.test(x.title)), 15_000, 'départs de Namur');
     check(s.title === 'Namur, train (SNCB) ★', `titre « ${s.title} » (★ : la gare est dans « Gares »)`);
-    check(/^IC {3}Bruxelles-Midi {3}07:42 \+2 {2}voie 6 !$/.test(s.lines[0] ?? ''), `1er départ « ${s.lines[0]} »`);
-    common(s, H.boardStationKept);
-    return { screen: s, pixels: false };
+    // PRD-1.2.3 § 1 (CA-123.1) : la ligne ★ en tête (gare gardée : « ★ retirer la gare »), le curseur sur le premier départ
+    check(s.lines[0] === '★ retirer la gare' && s.sel === 1, `ligne ★ en tête et curseur sur le 1er départ : « ${s.lines[0]} » sel ${s.sel}`);
+    check(/^IC {3}Bruxelles-Midi {3}07:42 \+2 {2}voie 6 !$/.test(s.lines[1] ?? ''), `1er départ « ${s.lines[1]} »`);
+    const n = field<number>(s, 'departures') ?? 0;
+    notes.push(`s1-station-board : Namur à 07:31, ${n} départs dans les 2 heures (données de test)`);
+    check(n >= 2, `départs au tableau de Namur : ${n}`);
+    common(s, H.board);
+    return { screen: s, deliver: 'g13', tour: ['glasses-board-full.png', 'Tableau complet de Namur (1.2.3) : la ligne ★ en tête, tous les départs des 2 prochaines heures, le curseur sur le premier'] };
+  });
+  await step('departure-stops', async () => {
+    // PRD-1.2.3 § 2 (CA-123.2) : l'IC de 07:42 : Namur en tête, au plus clair, puis ses arrêts jusqu'au terminus
+    await sim.input('click');
+    const s = await sim.waitScreen(is('stops', (x) => loaded(x) && x.lines.length > 2), 15_000, 'arrêts de l’IC de 07:42');
+    check(s.title === 'IC vers Bruxelles-Midi', `titre « ${s.title} » (le véhicule et sa destination)`);
+    check(/^07:42 \+2 {3}Namur {3}voie 6 !$/.test(s.lines[0] ?? ''), `l’arrêt du tableau en tête, retard et voie modifiée : « ${s.lines[0]} »`);
+    const rows = listRows(s);
+    check(rows.length >= 2 && rows.every((r) => /^~?\d\d:\d\d( \+\d+)? {3}\S/.test(r)), `arrêts suivants (heure, nom, voie) : ${JSON.stringify(rows)}`);
+    check(rows.some((r) => / {3}voie \S+( !)?$/.test(r)), `voies des gares : ${JSON.stringify(rows)}`);
+    check(s.sel === 0, `curseur sur le 1er arrêt suivant (sel ${s.sel})`);
+    common(s, H.stops);
+    return { screen: s, deliver: 'g14', tour: ['glasses-stops.png', 'Arrêts de l’IC de 07:42 au départ de Namur (1.2.3) : Namur en tête, au plus clair, puis chaque gare jusqu’au terminus, avec l’heure, le retard et la voie'] };
+  });
+  await step('stops-terminus', async () => {
+    // ▼ jusqu'au dernier arrêt (la liste défile par page) : le terminus, les heures dans l'ordre du trajet
+    const first = sim.last!;
+    const count = field<number>(first, 'stops') ?? 0;
+    check(count >= 3, `arrêts de l’IC : ${count}`);
+    const seen: string[] = [...listRows(first)];
+    for (let i = 1; i <= count - 2; i++) {
+      await sim.input('down');
+      const x = await sim.waitScreen(is('stops', (y) => y.sel === i), 6_000, `arrêt ${i + 1}`);
+      const top = field<number>(x, 'top') ?? 0;
+      listRows(x).forEach((r, k) => (seen[top + k] = r));
+      if (top !== field<number>(sim.screens[sim.screens.length - 2] ?? x, 'top')) check(top === i, `page suivante au curseur : top ${top}, sel ${i}`);
+    }
+    const end = sim.last!;
+    check(/ {3}Bruxelles-Midi( {3}voie \S+( !)?)?$/.test(seen[seen.length - 1] ?? ''), `terminus en dernier : ${JSON.stringify(seen)}`);
+    const times = seen.map(minutesOfRow);
+    check(times.every((t, k) => k === 0 || t >= times[k - 1]), `heures dans l’ordre du trajet : ${JSON.stringify(seen)}`);
+    common(end, H.stops);
+    return { screen: end };
+  });
+  let stopName = '';
+  await step('stop-board', async () => {
+    // toucher un arrêt : son tableau (§ 2), pour aller plus loin
+    await sim.select(0);
+    stopName = (listRows(sim.last!)[0] ?? '').split('   ')[1] ?? '';
+    await sim.input('click');
+    const b = await sim.waitScreen(is('board', (x) => loaded(x) && x.title.startsWith(`${stopName},`)), 15_000, `tableau de ${stopName}`);
+    check(b.lines[0] === '★ garder la gare' && b.sel === 1, `« ★ garder la gare » en tête, curseur sur le 1er départ : « ${b.lines[0]} » sel ${b.sel}`);
+    common(b, H.board);
+    return { screen: b };
+  });
+  await step('stop-board-stops', async () => {
+    // et l'un de ses départs : ses arrêts, cette gare en tête
+    await sim.input('click');
+    const s2 = await sim.waitScreen(is('stops', (x) => loaded(x) && x.lines.length > 1), 15_000, `arrêts d’un départ de ${stopName}`);
+    check(new RegExp(`^\\S+( \\+\\d+)? {3}${stopName}( {3}|$)`).test(s2.lines[0] ?? ''), `${stopName} en tête : « ${s2.lines[0]} » (${s2.title})`);
+    common(s2, H.stops);
+    return { screen: s2 };
+  });
+  await step('stops-back', async () => {
+    // chaque double toucher revient d'un écran, le curseur où il était : tableau, arrêts de l'IC, tableau de Namur
+    const b2 = await back(is('board', (x) => x.title.startsWith(`${stopName},`)), `double toucher : le tableau de ${stopName}`);
+    check(b2.sel === 1, `curseur gardé sur le départ (sel ${b2.sel})`);
+    const s1b = await back(is('stops', (x) => x.title === 'IC vers Bruxelles-Midi'), 'double toucher : les arrêts de l’IC');
+    check(s1b.sel === 0, `curseur gardé sur ${stopName} (sel ${s1b.sel})`);
+    const nb2 = await back(is('board', (x) => /^Namur, train/.test(x.title)), 'double toucher : le tableau de Namur');
+    check(nb2.sel === 1, `curseur gardé sur l’IC de 07:42 (sel ${nb2.sel})`);
+    return { screen: nb2 };
+  });
+  await step('board-pages', async () => {
+    // CA-123.1 : ▼ de départ en départ jusqu'au dernier ; tous les départs des 2 prochaines heures (07:31 à 09:31),
+    // dans l'ordre des heures (Namur, données de test : un train par heure ; les pages : s2-board-pages)
+    const first = sim.last!;
+    const n = field<number>(first, 'departures') ?? 0;
+    const seen: string[] = [...listRows(first)];
+    let prevTop = field<number>(first, 'top') ?? 0;
+    for (let i = 2; i <= n; i++) {
+      await sim.input('down');
+      const x = await sim.waitScreen(is('board', (y) => y.sel === i), 6_000, `départ ${i}`);
+      const top = field<number>(x, 'top') ?? 0;
+      if (top !== prevTop) check(top === i, `page suivante au curseur : top ${top}, sel ${i}`);
+      prevTop = top;
+      listRows(x).forEach((r, k) => (seen[top + k] = r));
+    }
+    const deps = seen.slice(1);
+    check(deps.length === n, `${deps.length} départs vus pour ${n} : ${JSON.stringify(seen)}`);
+    const times = deps.map(minutesOfRow);
+    check(times.every((t, k) => t >= 7 * 60 + 30 && t <= 9 * 60 + 31 && (k === 0 || t >= times[k - 1])), `départs des 2 prochaines heures, dans l’ordre : ${JSON.stringify(deps)}`);
+    // ▲ depuis le haut d'une page : la page d'avant, qui finit au curseur
+    const end = sim.last!;
+    if ((field<number>(end, 'top') ?? 0) > 0) {
+      const t = field<number>(end, 'top') ?? 0;
+      await sim.select(t);
+      await sim.input('up');
+      const up = await sim.waitScreen(is('board', (y) => y.sel === t - 1), 6_000, 'page d’avant');
+      check((field<number>(up, 'top') ?? 0) < t, `▲ : la page d’avant (top ${field<number>(up, 'top')})`);
+    }
+    common(sim.last!, H.board);
+    return { screen: sim.last! };
   });
   await step('lines', async () => {
     await back(is('stations'), 'double toucher : « Gares »');
@@ -780,6 +915,18 @@ async function s1(): Promise<void> {
     common(s, H.lines);
     return { screen: s, pixels: false };
   });
+  await step('lines-all-stop', async () => {
+    // CA-123.3 (lunettes) : un arrêt « toutes les lignes » : ses 2 prochains départs sur la ligne ; toucher : son
+    // tableau complet (ligne ★ en tête, le curseur sur le premier départ)
+    await sim.select(2);
+    await sim.input('click');
+    const b = await sim.waitScreen(is('board', (x) => loaded(x) && /De Lijn/.test(x.title)), 15_000, 'tableau de Bruxelles-Nord De Lijn');
+    check(b.title === 'Bruxelles-Nord, bus (De Lijn) ★', `titre « ${b.title} »`);
+    check(b.lines[0] === '★ garder une ligne' && b.sel === 1 && /^232 {3}Vilvorde {3}/.test(b.lines[1] ?? ''), `ligne ★, puis le 1er départ : ${JSON.stringify(b.lines.slice(0, 2))} sel ${b.sel}`);
+    check((field<number>(b, 'departures') ?? 0) > 2, `tous les départs des 2 heures : ${field<number>(b, 'departures')}`);
+    common(b, H.board);
+    return { screen: b };
+  });
   await step('exit', async () => {
     await backTo(homeReady, 'retour à l’accueil');
     const mark = sim.out.join('').length;
@@ -793,7 +940,7 @@ async function s1(): Promise<void> {
 async function s1noRT(): Promise<void> {
   await stack.scene('noRT');
   try {
-    await sim.launch(pageUrl(P122(S1)));
+    await sim.launch(pageUrl(P123(S1)));
     await step('home', async () => {
       const s = await sim.waitScreen(is('home', (x) => homeReady(x) && x.lines[0] === HOME_RT_DOWN && homeFavorites(x).length === 2), 25_000, 'accueil, temps réel indisponible');
       check(s.lines[1] === 'Favoris   3', `« ${s.lines[1]} »`);
@@ -867,7 +1014,7 @@ async function s1noRT(): Promise<void> {
 /* ------------------------------ Trajet suivi en accéléré : en cours, dans le train, descente ------------------------------ */
 
 async function s1run(): Promise<void> {
-  await sim.launch(pageUrl({ ...P122(S1), mockSpeed: '30', mockPath: PATH_S1 }));
+  await sim.launch(pageUrl({ ...P123(S1), mockSpeed: '30', mockPath: PATH_S1 }));
   await step('walking', async () => {
     await sim.waitScreen(is('home'), 20_000, 'accueil');
     await sim.input('click');
@@ -925,7 +1072,7 @@ async function s1run(): Promise<void> {
 
 /** CA-M6.5 dans une même session : l'IC part sans l'utilisateur resté à la maison, le trajet en cours prend fin. */
 async function s1stay(): Promise<void> {
-  await sim.launch(pageUrl({ ...P122(S1), mockSpeed: '30' }));
+  await sim.launch(pageUrl({ ...P123(S1), mockSpeed: '30' }));
   await step('not-left', async () => {
     await sim.waitScreen(is('home'), 20_000, 'accueil');
     await sim.input('click');
@@ -943,7 +1090,7 @@ async function s1stay(): Promise<void> {
 
 /** CA-122.7 dans une même session : un trajet ouvert, jamais suivi, ne passe jamais « En cours » ni « Dans le train ». */
 async function s1open(): Promise<void> {
-  await sim.launch(pageUrl({ ...P122(S1), mockSpeed: '30' }));
+  await sim.launch(pageUrl({ ...P123(S1), mockSpeed: '30' }));
   await step('never-followed', async () => {
     await sim.waitScreen(is('home'), 20_000, 'accueil');
     await sim.input('click');
@@ -961,7 +1108,7 @@ async function s1open(): Promise<void> {
 /* ------------------------------ Scénario 2 : gare du Nord, lignes ouvertes d'office, « garder une ligne », panne du temps réel ------------------------------ */
 
 async function s2(): Promise<void> {
-  await sim.launch(pageUrl(P122(S2)));
+  await sim.launch(pageUrl(P123(S2)));
   await step('lines-near', async () => {
     // REVUE-USAGE n° 4 : à moins de 300 m d'une ligne `near` (l'arrêt favori de la 1.2.1), « Bus, tram, métro » s'ouvre
     // seul, le curseur sur elle
@@ -978,26 +1125,52 @@ async function s2(): Promise<void> {
   await step('line-detail', async () => {
     await sim.input('click');
     const s = await sim.waitScreen(is('line', loaded), 15_000, 'détail du tram 3');
-    check(s.title === 'Tram 3 · Gare du Nord' && s.sel === -1, `« ${s.title} » sans curseur (sel ${s.sel})`);
+    // 1.2.3 : curseur sur le premier passage (« vers … » ne se sélectionne jamais), la liste défile par page
+    check(s.title === 'Tram 3 · Gare du Nord' && s.sel === 0, `« ${s.title} », curseur sur le 1er passage (sel ${s.sel})`);
     check(s.lines.filter((l) => /^vers (Churchill|Esplanade)$/.test(l)).length >= 1, `sens du tram 3 : ${JSON.stringify(s.lines)}`);
     check(s.lines.filter((l) => /^~?\d\d:\d\d( .*)? {3}(dans \d+ min|imminent)$/.test(l)).length >= 4, `4 passages par sens (heure, attente) : ${JSON.stringify(s.lines)}`);
     common(s, H.line);
     return { screen: s, deliver: 'g10', tour: ['glasses-line.png', 'Détail du tram 3 à la gare du Nord : 4 passages par sens, puis « Tous les départs de l’arrêt »'] };
   });
+  await step('passage-stops', async () => {
+    // PRD-1.2.3 § 2 : toucher un passage du détail : ses arrêts ; Gare du Nord en tête, sans voie (tram)
+    await sim.input('click');
+    const s = await sim.waitScreen(is('stops', (x) => loaded(x) && x.lines.length > 2), 15_000, 'arrêts d’un passage du tram 3');
+    check(/^Tram 3 vers (Churchill|Esplanade)$/.test(s.title), `titre « ${s.title} »`);
+    check(/^\d\d:\d\d( \+\d+)? {3}Gare du Nord$/.test(s.lines[0] ?? ''), `Gare du Nord en tête, en temps réel : « ${s.lines[0]} »`);
+    const rows = listRows(s);
+    check(rows.length >= 2 && rows.every((r) => /^~?\d\d:\d\d( \+\d+)? {3}\S/.test(r)), `arrêts suivants : ${JSON.stringify(rows)}`);
+    check(s.sel === 0, `curseur sur le 1er arrêt suivant (sel ${s.sel})`);
+    common(s, H.stops);
+    return { screen: s, tour: ['glasses-stops-tram.png', 'Arrêts d’un passage du tram 3 (1.2.3), ouverts depuis le détail de la ligne : Gare du Nord en tête, puis chaque arrêt jusqu’au terminus'] };
+  });
+  await step('passage-back', async () => {
+    const d = await back(is('line'), 'double toucher : le détail du tram 3');
+    check(d.sel === 0, `curseur gardé sur le passage (sel ${d.sel})`);
+    return { screen: d, shot: false };
+  });
   await step('board-stop', async () => {
+    // « Tous les départs de l'arrêt », en bas du détail : le tableau complet de l'arrêt (PRD-1.2.3 § 1)
+    const items = field<number>(sim.last!, 'items') ?? 0;
+    check(items >= 3, `éléments du détail : ${items}`);
+    await sim.select(items - 1);
     await sim.input('click');
     const s = await sim.waitScreen(is('board', loaded), 15_000, 'tous les départs de l’arrêt');
     check(s.title === 'Gare du Nord, tram (STIB) ★', `titre « ${s.title} » (★ : une de ses lignes est gardée)`);
+    check(s.lines[0] === '★ garder une ligne' && s.sel === 1, `« ★ garder une ligne » en tête, curseur sur le 1er départ : « ${s.lines[0]} » sel ${s.sel}`);
     const want = [/^T3 {3}Churchill {3}[12] min$/, /^T4 {3}Stalle {3}[45] min$/, /^T3 {3}Esplanade {3}[56] min$/, /^T3 {3}Churchill {3}(9|10) min$/, /^T4 {3}Stalle {3}1[23] min$/];
-    want.forEach((re, i) => check(re.test(s.lines[i] ?? ''), `départ ${i + 1} « ${s.lines[i]} »`));
-    check(!has(s, /~/), 'tout en temps réel');
+    want.forEach((re, i) => check(re.test(s.lines[i + 1] ?? ''), `départ ${i + 1} « ${s.lines[i + 1]} »`));
+    check((field<number>(s, 'departures') ?? 0) > want.length, `tous les départs des 2 heures : ${field<number>(s, 'departures')}`);
+    // ▲▼ : de départ en départ, puis la ligne ★
     await sim.input('down');
+    check((await sim.waitScreen(is('board', (x) => x.sel === 2), 6_000, '▼ : 2e départ')).sel === 2, '▼');
     await sim.input('up');
-    check(sim.last?.sel === -1, 'départs sans curseur (▲▼ font défiler)');
-    common(s, H.boardStop);
-    return { screen: s, tour: ['glasses-board.png', 'Tous les départs de l’arrêt de la gare du Nord (★ : ses lignes sont gardées)'] };
+    await sim.waitScreen(is('board', (x) => x.sel === 1), 6_000, '▲ : 1er départ');
+    common(s, H.board);
+    return { screen: s, tour: ['glasses-board.png', 'Tous les départs de l’arrêt de la gare du Nord (★ : ses lignes sont gardées ; la ligne ★ en tête)'] };
   });
   await step('keep-line-undo', async () => {
+    await sim.select(0);
     await sim.input('click', 300);
     const k = await sim.waitScreen(is('keepLine', loaded), 8_000, '« Gare du Nord : garder une ligne »');
     check(k.title === 'Gare du Nord : garder une ligne', `titre « ${k.title} »`);
@@ -1059,9 +1232,42 @@ async function s2(): Promise<void> {
     await sim.input('click');
     const s = await sim.waitScreen(is('board', (x) => loaded(x) && /De Lijn/.test(x.title)), 15_000, 'départs De Lijn');
     check(s.title === 'Bruxelles-Nord, bus (De Lijn) ★', `titre « ${s.title} » (★ : l’arrêt « toutes les lignes » est gardé)`);
-    check(s.lines[0]?.startsWith('232   Vilvorde   ~') ?? false, `1er départ « ${s.lines[0]} »`);
-    common(s, H.boardStop);
+    check(s.lines[0] === '★ garder une ligne' && (s.lines[1]?.startsWith('232   Vilvorde   ~') ?? false), `ligne ★, puis le 1er départ « ${s.lines[1]} »`);
+    common(s, H.board);
     return { screen: s, pixels: false, tour: ['glasses-board-planned.png', 'Départs De Lijn en partie en horaire prévu (~)'] };
+  });
+  await step('board-pages', async () => {
+    // CA-123.1 : tableau complet de Bruxelles-Nord De Lijn (16 départs à 12:10) : ▼ de départ en départ jusqu'au
+    // dernier ; la page suivante commence au curseur ; les départs de 12:10 à 14:10, dans l'ordre des heures ; ▲ depuis
+    // le haut d'une page : la page d'avant
+    const first = sim.last!;
+    const n = field<number>(first, 'departures') ?? 0;
+    check(n > 8, `tableau complet : ${n} départs (plus que les 8 de l’ancien réglage)`);
+    const seen: string[] = [...listRows(first)];
+    let prevTop = field<number>(first, 'top') ?? 0;
+    let flips = 0;
+    for (let i = 2; i <= n; i++) {
+      await sim.input('down');
+      const x = await sim.waitScreen(is('board', (y) => y.sel === i), 6_000, `départ ${i}`);
+      const top = field<number>(x, 'top') ?? 0;
+      if (top !== prevTop) {
+        check(top === i, `page suivante au curseur : top ${top}, sel ${i}`);
+        flips++;
+      }
+      prevTop = top;
+      listRows(x).forEach((r, k) => (seen[top + k] = r));
+    }
+    const deps = seen.slice(1);
+    check(flips >= 1 && deps.length === n, `${deps.length} départs vus pour ${n}, ${flips} page(s) suivante(s)`);
+    const times = deps.map((r) => minutesOfRow(r, 12 * 60 + 10)).filter((t) => !Number.isNaN(t));
+    check(times.length >= n - 2 && times.every((t, k) => t >= 12 * 60 + 9 && t <= 14 * 60 + 10 && (k === 0 || t >= times[k - 1])), `départs des 2 prochaines heures, dans l’ordre : ${JSON.stringify(deps)}`);
+    const t = field<number>(sim.last!, 'top') ?? 0;
+    await sim.select(t);
+    await sim.input('up');
+    const up = await sim.waitScreen(is('board', (y) => y.sel === t - 1), 6_000, 'page d’avant');
+    check((field<number>(up, 'top') ?? 0) < t && (field<number>(up, 'top') ?? 0) + listRows(up).length - 1 === t - 1, `▲ : la page d’avant, qui finit au curseur (top ${field<number>(up, 'top')})`);
+    common(up, H.board);
+    return { screen: up };
   });
   await step('board-train', async () => {
     await back(is('nearby'), 'retour à Autour de moi');
@@ -1069,19 +1275,20 @@ async function s2(): Promise<void> {
     await sim.input('click');
     const s = await sim.waitScreen(is('board', (x) => loaded(x) && /train/.test(x.title)), 15_000, 'départs des trains');
     check(s.title === 'Bruxelles-Nord, train (SNCB)', `titre « ${s.title} » (gare pas dans « Gares »)`);
-    check(/^IC {3}Anvers-Central {3}12:22 {2}voie 9$/.test(s.lines[0] ?? ''), `1er départ « ${s.lines[0]} »`);
-    check(/^S1 {3}.*12:34 {2}SUPPRIMÉ$/.test(s.lines[2] ?? ''), `S1 supprimé « ${s.lines[2]} »`);
+    check(s.lines[0] === '★ garder la gare', `ligne ★ « ${s.lines[0]} »`);
+    check(/^IC {3}Anvers-Central {3}12:22 {2}voie 9$/.test(s.lines[1] ?? ''), `1er départ « ${s.lines[1]} »`);
+    check(/^S1 {3}.*12:34 {2}SUPPRIMÉ$/.test(s.lines[3] ?? ''), `S1 supprimé, à sa place « ${s.lines[3]} »`);
     check(s.lines.filter((l) => /12:22/.test(l)).length === 1, 'IC 12:22 une seule fois');
-    common(s, H.boardStation);
+    common(s, H.board);
     return { screen: s, pixels: false };
   });
   await step('rt-outage', async () => {
     const t0 = Date.now();
     await stack.scene('noRT');
     try {
-      const s = await sim.waitScreen(is('board', (x) => /train/.test(x.title) && /~12:22/.test(x.lines[0] ?? '') && x.lines.includes(RT_DOWN)), 45_000, 'panne du temps réel dite juste');
+      const s = await sim.waitScreen(is('board', (x) => /train/.test(x.title) && /~12:22/.test(x.lines[1] ?? '') && x.lines.includes(RT_DOWN)), 45_000, 'panne du temps réel dite juste');
       notes.push(`s2 : panne du temps réel affichée après ${((Date.now() - t0) / 1000).toFixed(1)} s (rafraîchissement 30 s)`);
-      check(/^S1 {3}.*12:34 {2}SUPPRIMÉ$/.test(s.lines[2] ?? ''), `suppression gardée 15 min (CA-M8.6) : « ${s.lines[2]} »`);
+      check(/^S1 {3}.*12:34 {2}SUPPRIMÉ$/.test(s.lines[3] ?? ''), `suppression gardée 15 min (CA-M8.6) : « ${s.lines[3]} »`);
       await back(is('nearby'), 'Autour de moi');
       const h = await back(is('home', (x) => x.lines[0] === HOME_RT_DOWN), 'accueil, ligne du haut « Temps réel indisponible : horaires prévus » (sans « ~ »)');
       check(!h.lines.some((l) => /~/.test(l)), `aucun « ~ » sur l’accueil (§ 4.5) : ${JSON.stringify(h.lines)}`);
@@ -1095,7 +1302,7 @@ async function s2(): Promise<void> {
 /* ------------------------------ Scénario 3 : l'après-midi vers Gand ------------------------------ */
 
 async function s3(): Promise<void> {
-  await sim.launch(pageUrl(P122(S3)));
+  await sim.launch(pageUrl(P123(S3)));
   await step('home', async () => {
     const s = await sim.waitScreen(is('home', (x) => homeReady(x) && homeFavorites(x).length >= 2), 20_000, 'accueil');
     const favs = homeFavorites(s);
@@ -1164,7 +1371,7 @@ async function s3(): Promise<void> {
  * « ★ garder ce trajet » sur un trajet venu d'un favori : déjà gardé (PRD-1.2 § 2.3).
  */
 async function s3run(): Promise<void> {
-  await sim.launch(pageUrl({ ...P122({ ...S3, mockNow: '2026-11-10T14:05:00+01:00' }), mockSpeed: '20', mockPath: PATH_S3 }));
+  await sim.launch(pageUrl({ ...P123({ ...S3, mockNow: '2026-11-10T14:05:00+01:00' }), mockSpeed: '20', mockPath: PATH_S3 }));
   await step('train', async () => {
     await sim.waitScreen(is('home'), 20_000, 'accueil');
     await sim.input('click');
@@ -1361,25 +1568,26 @@ async function holiday(): Promise<void> {
   }
 }
 
-/* ------------------------------ Mise à jour depuis la 1.2.1, la 1.2.0, la 1.1 et la 1.0, premier lancement ------------------------------ */
+/* ------------------------------ Mise à jour depuis la 1.2.2, la 1.2.1, la 1.2.0, la 1.1 et la 1.0, premier lancement ------------------------------ */
 
 async function news(): Promise<void> {
-  const from = async (label: string, P: typeof P10, ids: string[], withDeliver: boolean) => {
+  const from = async (label: string, P: typeof P10, ids: string[], withDeliver: boolean, seen: string) => {
     await sim.launch(pageUrl(P(S1)));
     await step(`message-${label}`, async () => {
-      if (!V122) {
+      if (!V123) {
         const h = await sim.waitScreen(homeReady, 20_000, 'accueil');
         check(!sim.screens.some((x) => x.title === NEWS_TITLE), `« ${NEWS_TITLE} » avant la montée de version (app.json ${APP_VERSION})`);
         notes.push(`news-${label} : app.json en ${APP_VERSION}, message « ${NEWS_TITLE} » non vérifié`);
         return { screen: h, shot: false };
       }
       const s = await sim.waitScreen(is('message', (x) => x.title === NEWS_TITLE), 20_000, `message « ${NEWS_TITLE} »`);
-      check(sameList(s.lines.slice(0, -1), NEWS), `texte ${JSON.stringify(s.lines)} (PRD-1.2.2 § 9)`);
+      // PRD-1.2.3 § 4 : depuis la 1.2.2, la 1.2.3 seule ; d'avant, la 1.2.2 en plus, sur le même écran
+      check(sameList(s.lines.slice(0, -1), newsFor(seen)), `texte ${JSON.stringify(s.lines)} (PRD-1.2.3 § 4, depuis la ${label})`);
       common(s, H.news);
-      return { screen: s, pixels: false, ...(withDeliver ? { deliver: 'g07' as const } : {}) };
+      return { screen: s, ...(withDeliver ? { deliver: 'g07' as const } : {}) };
     });
     await step(`home-${label}`, async () => {
-      if (V122) await sim.input('click');
+      if (V123) await sim.input('click');
       const s = await sim.waitScreen(homeReady, 20_000, 'accueil');
       const order = field<string[]>(s, 'order') ?? [];
       check(sameList([...order].sort(), ids), `favoris migrés sans perte ni doublon : ${JSON.stringify(order)} (CA-2.1, CA-122.6)`);
@@ -1415,10 +1623,12 @@ async function news(): Promise<void> {
     });
   };
   const ids = ['fav-bureau', 'fav-gand', 'fav-maison'];
-  await from('1.2.1', P121, ids, true);
-  await from('1.2.0', P120, ids, false);
-  await from('1.1', P11, ids, false);
-  await from('1.0', P10, ['fav-bureau', 'fav-gand', 'maison'], false);
+  await from('1.2.2', P122, ids, false, '1.2.2');
+  await from('1.2.1', P121, ids, true, '1.2.1');
+  await from('1.2.0', P120, ids, false, '1.2.0');
+  await from('1.1', P11, ids, false, '1.1.0');
+  // réglages de la 1.0 : migrés avec la version vue 1.0.0 (settings.ts)
+  await from('1.0', P10, ['fav-bureau', 'fav-gand', 'maison'], false, '1.0.0');
 }
 
 async function firstrun(): Promise<void> {
@@ -1525,7 +1735,7 @@ async function errors(): Promise<void> {
   // au lancement à S2, Quai ouvre l'accueil, ou « Bus, tram, métro » (ligne `near` à moins de 300 m)
   const started = (x: Screen) => ['home', 'lines', 'board'].includes(x.screen);
   try {
-    await sim.launch(pageUrl(P122(S2), '', { data: proxy.url }));
+    await sim.launch(pageUrl(P123(S2), '', { data: proxy.url }));
     await step('data-unreachable', async () => {
       const s = await sim.waitScreen(is('message', (x) => x.lines[0] === DATA_DOWN), 40_000, 'horaires injoignables');
       common(s, H.errorRoot);
@@ -1538,7 +1748,7 @@ async function errors(): Promise<void> {
       return { screen: s, shot: false };
     });
     proxy.up(false);
-    await sim.launch(pageUrl(P122(S2), '', { data: proxy.url }));
+    await sim.launch(pageUrl(P123(S2), '', { data: proxy.url }));
     await step('retry-auto', async () => {
       await sim.waitScreen(is('message', (x) => x.lines[0] === DATA_DOWN), 40_000, 'horaires injoignables');
       const t0 = Date.now();
@@ -1548,7 +1758,7 @@ async function errors(): Promise<void> {
       return { screen: s, shot: false };
     });
     proxy.up(false);
-    await sim.launch(pageUrl(P122(S2), '', { data: proxy.url }));
+    await sim.launch(pageUrl(P123(S2), '', { data: proxy.url }));
     await step('error-exit', async () => {
       await sim.waitScreen(is('message', (x) => x.lines[0] === DATA_DOWN), 40_000, 'horaires injoignables');
       const mark = sim.out.join('').length;
@@ -1558,7 +1768,7 @@ async function errors(): Promise<void> {
   } finally {
     await proxy.close();
   }
-  await sim.launch(pageUrl(P122(S2), '', { relay: 'http://127.0.0.1:9' }));
+  await sim.launch(pageUrl(P123(S2), '', { relay: 'http://127.0.0.1:9' }));
   await step('relay-down', async () => {
     // « Bus, tram, métro » ouvert seul : tout en horaire prévu, la panne dite en bas
     const s = await sim.waitScreen(is('lines', (x) => loaded(x) && x.lines.includes(RT_DOWN)), 30_000, 'lignes sans relais');
@@ -1567,7 +1777,7 @@ async function errors(): Promise<void> {
     const h = await back(is('home', (x) => x.lines[0] === HOME_RT_DOWN), 'accueil, « Temps réel indisponible : horaires prévus » (pas « Pas de réseau », sans « ~ »)');
     return { screen: h, shot: false };
   });
-  await sim.launch(pageUrl({ ...P122(S2), mockLat: '50.1', mockLon: '5.2' }));
+  await sim.launch(pageUrl({ ...P123(S2), mockLat: '50.1', mockLon: '5.2' }));
   await step('nearby-empty', async () => {
     const h = await sim.waitScreen(is('home', loaded), 20_000, 'accueil');
     await sim.select(homeIndex(h, /^Autour de moi {3}/));
@@ -1579,7 +1789,7 @@ async function errors(): Promise<void> {
     return { screen: s, pixels: false, tour: ['glasses-nearby-empty.png', 'Autour de moi sans arrêt dans le rayon, ni à 3 km : où régler le rayon'] };
   });
   // à un peu plus d'un kilomètre au nord de la gare de Namur : l'arrêt le plus proche, et ses départs d'un toucher
-  await sim.launch(pageUrl({ ...P122(S1), mockLat: '50.4795', mockLon: '4.8625' }));
+  await sim.launch(pageUrl({ ...P123(S1), mockLat: '50.4795', mockLon: '4.8625' }));
   await step('nearby-nearest', async () => {
     const h = await sim.waitScreen(is('home', loaded), 20_000, 'accueil');
     await sim.select(homeIndex(h, /^Autour de moi {3}/));
@@ -1598,7 +1808,7 @@ async function stale(): Promise<void> {
   const { dir } = await buildFixtureData({ date: '2026-11-01' });
   const old = await startDataServer(dir);
   try {
-    await sim.launch(pageUrl(P122(S2), '', { data: old.url }));
+    await sim.launch(pageUrl(P123(S2), '', { data: old.url }));
     await step('home', async () => {
       const STALE = 'Horaires périmés : mise à jour arrêtée le 02/11';
       // « Bus, tram, métro » ouvert seul (ligne `near`) : aucun passage avec des horaires périmés, la raison en bas
@@ -1630,7 +1840,7 @@ async function stale(): Promise<void> {
 
 /** 23:30 : passages et départs du lendemain (S6) ; « demain » comme les tableaux ; train de 00:01 sans « demain ». */
 async function late(): Promise<void> {
-  await sim.launch(pageUrl(P122({ ...S2, mockNow: '2026-11-10T23:30:00+01:00' })));
+  await sim.launch(pageUrl(P123({ ...S2, mockNow: '2026-11-10T23:30:00+01:00' })));
   await step('lines-tomorrow', async () => {
     const s = await sim.waitScreen(is('lines', loaded), 20_000, 'lignes proches ouvertes');
     check(!s.lines.some((l) => /\(P\)/.test(l)), 'Stalle sans « (P) »');
@@ -1641,12 +1851,14 @@ async function late(): Promise<void> {
     return { screen: s, pixels: false };
   });
   await step('board-tomorrow', async () => {
-    // le tram 3, puis tous les départs de l'arrêt : « Départs de demain » en ligne du haut
+    // le tram 3, puis tous les départs de l'arrêt (en bas du détail) : « Départs de demain » en ligne du haut ; rien
+    // dans les 2 heures : le prochain départ, même demain (PRD-1.2.3 § 1)
     await sim.input('click');
-    await sim.waitScreen(is('line', loaded), 15_000, 'détail du tram 3');
+    const d = await sim.waitScreen(is('line', loaded), 15_000, 'détail du tram 3');
+    await sim.select((field<number>(d, 'items') ?? 1) - 1);
     await sim.input('click');
     const s = await sim.waitScreen(is('board', loaded), 20_000, 'départs de l’arrêt');
-    check(s.lines[0] === 'Départs de demain', `ligne du haut « ${s.lines[0]} »`);
+    check(s.lines[0] === 'Départs de demain' && s.lines[1] === '★ garder une ligne', `ligne du haut « ${s.lines[0]} », puis la ligne ★ « ${s.lines[1]} »`);
     check(!s.lines.some((l) => /demain, /.test(l)), `pas de « demain, » sur chaque ligne : ${JSON.stringify(s.lines)}`);
     check(!s.lines.some((l) => /\(P\)/.test(l)), 'Stalle sans « (P) »');
     return { screen: s, pixels: false };
@@ -1664,7 +1876,7 @@ async function late(): Promise<void> {
     await sim.select(1);
     await sim.input('click');
     const s = await sim.waitScreen(is('board', (x) => loaded(x) && /train/.test(x.title)), 15_000, 'trains');
-    check(/^IC {3}Anvers-Central {3}~?00:01 {2}voie 9$/.test(s.lines[0] ?? ''), `train de 00:01 sans « demain » (CA-S6.4) : « ${s.lines[0]} »`);
+    check(/^IC {3}Anvers-Central {3}~?00:01 {2}voie 9$/.test(s.lines[1] ?? ''), `train de 00:01 sans « demain » (CA-S6.4) : « ${s.lines[1]} »`);
     return { screen: s, pixels: false };
   });
 }
@@ -1830,10 +2042,10 @@ async function phone(): Promise<void> {
     await phoneStep(page, 'migration', async () => {
       await page.goto(pageUrl(P11(S1), '#/'));
       await page.waitFor(`!!document.querySelector('#h-lines')`, 15_000, 'accueil du téléphone');
-      if (V122) {
+      if (V123) {
         await page.waitFor(`!!document.querySelector('.news')`, 15_000, 'bannière « Nouveau » depuis la 1.1');
         const lines = await bannerLines(page);
-        check(sameList(lines, BANNER), `bannière ${JSON.stringify(lines)} (PRD-1.2.2 § 9)`);
+        check(sameList(lines, bannerFor('1.1.0')), `bannière ${JSON.stringify(lines)} (PRD-1.2.3 § 4 : la 1.2.3, puis la 1.2.2)`);
       } else notes.push(`phone-migration : app.json en ${APP_VERSION}, bannière non vérifiée`);
       const t = await page.text('main');
       check(!/Mes lieux/.test(t), '« Mes lieux » encore sur l’accueil (PRD-1.2 § 2.2)');
@@ -1846,9 +2058,9 @@ async function phone(): Promise<void> {
       check(/Namur/.test(st), `« Gares » : ${st}`);
       const at = (x: string) => li.indexOf(x);
       check(at('Tram 3 · Gare du Nord') >= 0 && at('Tram 3 · Gare du Nord') < at('Tram 4 · Gare du Nord') && at('Tram 4 · Gare du Nord') < at('Bruxelles-Nord · toutes les lignes'), `« Bus, tram, métro » : ${li}`);
-      if (V122) {
+      if (V123) {
         const g = await page.waitScreen((x) => x.screen === 'message' && x.title === NEWS_TITLE, 20_000, `message « ${NEWS_TITLE} » dans les lunettes`);
-        check(sameList(g.lines.slice(0, -1), NEWS), `message des lunettes ${JSON.stringify(g.lines)}`);
+        check(sameList(g.lines.slice(0, -1), newsFor('1.1.0')), `message des lunettes ${JSON.stringify(g.lines)}`);
         await page.clickText('OK', '.news');
         await page.waitFor(`!document.querySelector('.news')`, 5_000, 'bannière fermée par « OK »');
       }
@@ -1874,12 +2086,12 @@ async function phone(): Promise<void> {
     });
   });
 
-  // Depuis la 1.2.1 et la 1.2.0 : les mêmes nouveautés.
-  for (const [label, P] of [['1.2.1', P121], ['1.2.0', P120]] as const) {
+  // Depuis la 1.2.2 : la 1.2.3 seule ; depuis la 1.2.1 et la 1.2.0 : la 1.2.3, puis la 1.2.2 (PRD-1.2.3 § 4).
+  for (const [label, P] of [['1.2.2', P122], ['1.2.1', P121], ['1.2.0', P120]] as const) {
     await withChrome(async (page) => {
       await phoneStep(page, `banner-${label}`, async () => {
         await page.goto(pageUrl(P(S1), '#/'));
-        if (!V122) {
+        if (!V123) {
           await page.waitFor(`!!document.querySelector('#h-lines')`, 15_000, 'accueil du téléphone');
           check(!(await page.eval<boolean>(`!!document.querySelector('.news')`)), `bannière avant la montée de version (app.json ${APP_VERSION})`);
           notes.push(`phone-banner-${label} : app.json en ${APP_VERSION}, bannière non vérifiée`);
@@ -1887,9 +2099,9 @@ async function phone(): Promise<void> {
         }
         await page.waitFor(`!!document.querySelector('.news')`, 15_000, `bannière « Nouveau » depuis la ${label}`);
         const lines = await bannerLines(page);
-        check(sameList(lines, BANNER), `bannière ${JSON.stringify(lines)}`);
+        check(sameList(lines, bannerFor(label)), `bannière ${JSON.stringify(lines)}`);
         const g = await page.waitScreen((x) => x.screen === 'message' && x.title === NEWS_TITLE, 20_000, `message « ${NEWS_TITLE} »`);
-        check(sameList(g.lines.slice(0, -1), NEWS), `message des lunettes ${JSON.stringify(g.lines)}`);
+        check(sameList(g.lines.slice(0, -1), newsFor(label)), `message des lunettes ${JSON.stringify(g.lines)}`);
         return { glasses: g };
       });
     });
@@ -1897,12 +2109,12 @@ async function phone(): Promise<void> {
 
   await withChrome(async (page) => {
     await phoneStep(page, 'home', async () => {
-      await page.goto(pageUrl(P122(S1), '#/'));
+      await page.goto(pageUrl(P123(S1), '#/'));
       await page.waitFor(`document.querySelector('.home-favs')?.innerText.includes('partir à 07:35')`, 20_000, 'réponses des favoris sur l’accueil');
       const t = await page.text('main');
       check(t.includes('Où vas-tu ?') && t.includes('Adresse, gare, arrêt ou favori') && t.includes('Mes favoris') && t.includes('Gérer mes favoris'), 'accueil : champ (REVUE-USAGE n° 5 : « ou favori ») et section « Mes favoris »');
       check(t.includes('Gares') && t.includes('Ajouter une gare') && t.includes('Bus, tram, métro') && t.includes('Ajouter une ligne'), 'sections « Gares » et « Bus, tram, métro » (PRD-1.2.2 § 4)');
-      check(!(await page.eval<boolean>(`!!document.querySelector('.news')`)), 'pas de bannière pour qui a déjà vu la 1.2.2');
+      check(!(await page.eval<boolean>(`!!document.querySelector('.news')`)), 'pas de bannière pour qui a déjà vu la 1.2.3');
       const buttons = await page.eval<number>(`document.querySelectorAll('.home-favs button.btn-glasses').length`);
       check(buttons === 3, `un bouton « Lunettes » par favori, lieux compris (${buttons})`);
       const names = (await page.eval<string[]>(`[...document.querySelectorAll('.home-favs .fav-row')].map((r) => r.innerText.split('\\n')[0])`)).map(nbn);
@@ -2111,7 +2323,7 @@ async function phone(): Promise<void> {
   try {
     await withChrome(async (page) => {
       await phoneStep(page, 'results', async () => {
-        await page.goto(pageUrl(P122(S1), '#/recherche'));
+        await page.goto(pageUrl(P123(S1), '#/recherche'));
         await page.waitFor(`!!document.querySelector('#r-arrivee')`, 15_000);
         await page.type('#r-arrivee', 'rue neuve 1 bruxelles');
         await page.waitFor(`[...document.querySelectorAll('#r-arrivee-liste [role=option]')].some((b) => b.innerText.includes('Rue Neuve 1, 1000 Bruxelles'))`, 10_000, 'adresse proposée');
@@ -2162,7 +2374,7 @@ async function phone(): Promise<void> {
         return { glasses: l };
       });
       await phoneStep(page, 'results-waterloo', async () => {
-        await page.goto(pageUrl(P122(WAT), '#/recherche'));
+        await page.goto(pageUrl(P123(WAT), '#/recherche'));
         await page.waitFor(`!!document.querySelector('#r-arrivee')`, 15_000);
         await page.type('#r-arrivee', 'rue du progrès 20');
         await pick(page, 'r-arrivee', 'Rue du Progrès 20, 1210 Saint-Josse-ten-Noode', 'adresse');
@@ -2177,7 +2389,7 @@ async function phone(): Promise<void> {
       });
       await phoneStep(page, 'results-earlier', async () => {
         // « Plus tôt » qui marche plus (Waterloo à 08:30 vers Uccle) : 19 min à pied pour 8 min d'avance
-        await page.goto(pageUrl(P122({ ...WAT, mockNow: '2026-11-10T08:30:00+01:00' }), '#/recherche'));
+        await page.goto(pageUrl(P123({ ...WAT, mockNow: '2026-11-10T08:30:00+01:00' }), '#/recherche'));
         await page.waitFor(`!!document.querySelector('#r-arrivee')`, 15_000);
         await page.type('#r-arrivee', 'avenue winston churchill 100');
         await pick(page, 'r-arrivee', 'Avenue Winston Churchill 100, 1180 Uccle', 'adresse');
@@ -2194,7 +2406,7 @@ async function phone(): Promise<void> {
       });
       await phoneStep(page, 'results-none', async () => {
         // Uccle vers la rue Neuve : le direct (plus de marche, arrive plus tard) n'est plus proposé (§ 1.4)
-        await page.goto(pageUrl(P122({ mockLat: '50.808', mockLon: '4.365', mockNow: '2026-11-10T07:31:00+01:00' }), '#/recherche'));
+        await page.goto(pageUrl(P123({ mockLat: '50.808', mockLon: '4.365', mockNow: '2026-11-10T07:31:00+01:00' }), '#/recherche'));
         await page.waitFor(`!!document.querySelector('#r-arrivee')`, 15_000);
         await page.type('#r-arrivee', 'rue neuve 1 bruxelles');
         await pick(page, 'r-arrivee', 'Rue Neuve 1, 1000 Bruxelles', 'adresse');
@@ -2215,7 +2427,7 @@ async function phone(): Promise<void> {
   const days = { '2026-11-11': await dataOf('2026-11-11'), '2026-11-12': await dataOf('2026-11-12') };
   await withChrome(async (page) => {
     const search = async (when: Record<string, string>) => {
-      await page.goto(pageUrl(P122(when), '#/recherche', { data: days[when.mockNow.slice(0, 10) as keyof typeof days].url }));
+      await page.goto(pageUrl(P123(when), '#/recherche', { data: days[when.mockNow.slice(0, 10) as keyof typeof days].url }));
       await page.waitFor(`!!document.querySelector('#r-arrivee')`, 15_000);
       await page.type('#r-arrivee', 'rue du progrès 20');
       await pick(page, 'r-arrivee', 'Rue du Progrès 20, 1210 Saint-Josse-ten-Noode', 'adresse');
@@ -2320,7 +2532,7 @@ async function phone(): Promise<void> {
 
   await withChrome(async (page) => {
     await phoneStep(page, 'reorder', async () => {
-      await page.goto(pageUrl(P122(S3), '#/favoris'));
+      await page.goto(pageUrl(P123(S3), '#/favoris'));
       await waitText(page, /Changer l’ordre/, 'bouton « Changer l’ordre »');
       await page.clickText('Changer l’ordre');
       await page.waitFor(`document.querySelectorAll('.order-row').length >= 2`, 5_000, 'mode « Changer l’ordre »');
@@ -2350,22 +2562,25 @@ async function phone(): Promise<void> {
   await withChrome(async (page) => {
     await phoneStep(page, 'display-preview', async () => {
       // « Affichage » : l'aperçu de l'accueil des lunettes en 1.2.1 (« Favoris », 3 favoris en retrait, outils)
-      await page.goto(pageUrl(P122(S2), '#/affichage'));
+      await page.goto(pageUrl(P123(S2), '#/affichage'));
       await waitText(page, /Ordre des favoris/, 'écran « Affichage »', 15_000);
       // l'aperçu est dessiné (role=img) ; son texte est lu dans aria-label : « Aperçu dans les lunettes : Quai, Favoris 3, … »
       const label = nbn(await page.waitFor<string>(`document.querySelector('.preview[role=img]')?.getAttribute('aria-label')`, 8_000, 'aperçu de l’accueil'));
       // favoris d'exemple du téléphone (samples.ts), puis « Autour de moi », « Gares » et « Bus, tram, métro » (PRD-1.2.2 § 1.1)
       check(/^Aperçu dans les lunettes : Quai, Favoris 3, Bureau \S.*, Autour de moi \d+ arrêts?, Gares \S.*, Bus, tram, métro \S.*$/.test(label), `aperçu : « Favoris », les favoris, « Autour de moi », « Gares », « Bus, tram, métro » : ${label}`);
       check(!label.includes('Autres favoris') && !label.includes('Aller à'), `plus de « Autres favoris » ni de « Aller à… » : ${label}`);
+      // CA-123.1 : le réglage « Départs par arrêt » n'existe plus (les tableaux montrent les 2 prochaines heures)
+      const t = await page.text('main');
+      check(!/départs par arrêt/i.test(t), `« Départs par arrêt » encore dans « Affichage » (PRD-1.2.3 § 1) : ${t.slice(0, 300)}`);
       return { shot: true, scroll: { text: 'Aperçu dans les lunettes' } };
     });
   });
 
   await withChrome(async (page) => {
     await phoneStep(page, 'data', async () => {
-      await page.goto(pageUrl(P122(S3), '#/donnees'));
+      await page.goto(pageUrl(P123(S3), '#/donnees'));
       const t = await waitText(page, new RegExp(`Adresses\\s+Disponible\\s+Services officiels de Bruxelles, de Flandre et de Wallonie[\\s\\S]*Version de Quai\\s+${APP_VERSION.replace(/\./g, '\\.')}`), `carte « Adresses » et « Version de Quai ${APP_VERSION} » (PRD-1.2 § 4)`, 15_000);
-      if (!V122) notes.push(`phone-data : app.json en ${APP_VERSION} (la 1.2.2 attend la montée de version, PRD-1.2.2 § 9)`);
+      if (!V123) notes.push(`phone-data : app.json en ${APP_VERSION} (la 1.2.3 attend la montée de version, PRD-1.2.3 § 4)`);
       check(/Horaires officiels\s+cette nuit, 04:12/.test(t), `date des horaires : ${/Horaires officiels\s+[^\n]+\n?[^\n]*/.exec(t)?.[0]}`);
     });
     await phoneStep(page, 'data-one-region-down', async () => {
@@ -2429,7 +2644,7 @@ async function phone(): Promise<void> {
 async function keep(): Promise<void> {
   await withChrome(async (page) => {
     await phoneStep(page, 'arrival-keep', async () => {
-      await page.goto(pageUrl({ ...P122({ ...S3, mockNow: '2026-11-10T14:05:00+01:00' }), mockSpeed: '20', mockPath: PATH_S3 }, '#/recherche'));
+      await page.goto(pageUrl({ ...P123({ ...S3, mockNow: '2026-11-10T14:05:00+01:00' }), mockSpeed: '20', mockPath: PATH_S3 }, '#/recherche'));
       await page.waitFor(`!!document.querySelector('#r-arrivee')`, 15_000);
       await page.type('#r-arrivee', 'gand-saint-pierre');
       await pick(page, 'r-arrivee', 'Gand-Saint-Pierre', 'gare SNCB');
@@ -2581,21 +2796,22 @@ async function webPosition(): Promise<void> {
 /* ------------------------------ Réouverture de Quai (Chrome : stockage gardé) ------------------------------ */
 
 async function reopen(): Promise<void> {
-  for (const [name, P] of [
-    ['news-once-1.2.1', P121],
-    ['news-once-1.2.0', P120],
-    ['news-once-1.1', P11],
-    ['news-once-1.0', P10],
+  for (const [name, P, seen] of [
+    ['news-once-1.2.2', P122, '1.2.2'],
+    ['news-once-1.2.1', P121, '1.2.1'],
+    ['news-once-1.2.0', P120, '1.2.0'],
+    ['news-once-1.1', P11, '1.1.0'],
+    ['news-once-1.0', P10, '1.0.0'],
   ] as const) {
     await withChrome(async (page) => {
       await phoneStep(page, name, async () => {
         await page.goto(pageUrl(P(S1), '#/'));
-        if (V122) {
+        if (V123) {
           const g = await page.waitScreen((s) => s.screen === 'message' && s.title === NEWS_TITLE, 20_000, `message « ${NEWS_TITLE} »`);
-          check(sameList(g.lines.slice(0, -1), NEWS), `message des lunettes ${JSON.stringify(g.lines)}`);
+          check(sameList(g.lines.slice(0, -1), newsFor(seen)), `message des lunettes ${JSON.stringify(g.lines)}`);
           await page.waitFor(`!!document.querySelector('.news')`, 15_000, 'bannière du téléphone');
           const lines = await bannerLines(page);
-          check(sameList(lines, BANNER), `bannière ${JSON.stringify(lines)}`);
+          check(sameList(lines, bannerFor(seen)), `bannière ${JSON.stringify(lines)}`);
           check(!(await page.text('main')).includes('Bienvenue'), 'pas d’écran « Bienvenue » après la mise à jour');
           await page.gesture('tap');
         } else notes.push(`reopen-${name} : app.json en ${APP_VERSION}, message et bannière non vérifiés`);
@@ -2658,7 +2874,7 @@ async function reopen(): Promise<void> {
   });
   await withChrome(async (page) => {
     await phoneStep(page, 'resume', async () => {
-      await page.goto(pageUrl({ ...P122(S1), mockSpeed: '20' }, '#/'));
+      await page.goto(pageUrl({ ...P123(S1), mockSpeed: '20' }, '#/'));
       await page.waitScreen((s) => s.screen === 'home', 20_000, 'accueil');
       await page.gesture('tap');
       await page.waitScreen((s) => s.screen === 'steps' && s.followed === false, 20_000, 'étapes, pas encore suivies');
@@ -2695,7 +2911,7 @@ async function reopen(): Promise<void> {
   });
   await withChrome(async (page) => {
     await phoneStep(page, 'not-left', async () => {
-      await page.goto(pageUrl(P122(S1), '#/'));
+      await page.goto(pageUrl(P123(S1), '#/'));
       await page.waitScreen((s) => s.screen === 'home', 20_000, 'accueil');
       await page.gesture('tap');
       await page.waitScreen((s) => s.screen === 'steps' && s.followed === false, 20_000, 'étapes à 07:31, pas suivies');
@@ -2714,16 +2930,25 @@ async function reopen(): Promise<void> {
     await phoneStep(page, 'undo-identical', async () => {
       // REVUE-USAGE n° 3 : ★ des départs de la gare du Nord, « garder une ligne », le tram 3 retiré puis rétabli dans les
       // 5 s : « Bus, tram, métro » du téléphone identique (place, nom, ouverture d'office à moins de 300 m)
-      await page.goto(pageUrl(P122(S2), '#/'));
+      await page.goto(pageUrl(P123(S2), '#/'));
       const lines = `document.querySelector('#h-lines')?.closest('section')`;
       const state = () => page.eval<string>(`(() => { const s = ${lines}; return s ? s.innerText + ' | ' + [...s.querySelectorAll('.pick-near input')].map((i) => i.checked).join(',') : ''; })()`);
       await page.waitFor(`(${lines})?.innerText.includes('Tram 3 · Gare du Nord')`, 10_000, '« Bus, tram, métro » du téléphone');
       const before = await state();
       await page.waitScreen((s) => s.screen === 'lines' && loaded(s), 20_000, '« Bus, tram, métro » ouvert seul');
       await page.gesture('tap');
-      await page.waitScreen((s) => s.screen === 'line' && loaded(s), 10_000, 'détail du tram 3');
+      const d = await page.waitScreen((s) => s.screen === 'line' && loaded(s), 10_000, 'détail du tram 3');
+      // 1.2.3 : « Tous les départs de l’arrêt » en bas du détail (toucher un passage ouvre ses arrêts)
+      const items = (d.items as number | undefined) ?? 1;
+      for (let i = 1; i < items; i++) {
+        await page.gesture('down');
+        await page.waitScreen((s) => s.screen === 'line' && s.sel === i, 5_000, `passage ${i + 1}`);
+      }
       await page.gesture('tap');
-      await page.waitScreen((s) => s.screen === 'board' && /★$/.test(s.title), 10_000, 'départs de l’arrêt, ★');
+      await page.waitScreen((s) => s.screen === 'board' && /★$/.test(s.title) && s.lines[0] === '★ garder une ligne', 10_000, 'départs de l’arrêt, ★');
+      // la ligne ★ en tête du tableau (le curseur commence sur le premier départ)
+      await page.gesture('up');
+      await page.waitScreen((s) => s.screen === 'board' && s.sel === 0, 5_000, 'curseur sur la ligne ★');
       await page.gesture('tap');
       await page.waitScreen((s) => s.screen === 'keepLine' && s.lines[0] === 'tram 3   ★', 10_000, '« garder une ligne »');
       await page.gesture('tap');
@@ -2749,20 +2974,20 @@ async function tourPhone(): Promise<void> {
   const shots: Shot[] = [
     { file: 'phone-onboarding.png', params: { ...S3, reset: '1' }, hash: '#/', what: 'Premier lancement, étape « Bienvenue »' },
     { file: 'phone-home.png', params: PNICE(S3), hash: '#/', what: 'Accueil du téléphone : « Où vas-tu ? », « Mes favoris », puis « Gares » et « Bus, tram, métro »' },
-    { file: 'phone-picks.png', params: P122(S3), hash: '#/gares', what: '« Gares » et « Bus, tram, métro » sur l’accueil du téléphone (les arrêts favoris de la 1.2.1 rangés)', scroll: 'Gares' },
+    { file: 'phone-picks.png', params: P123(S3), hash: '#/gares', what: '« Gares » et « Bus, tram, métro » sur l’accueil du téléphone (les arrêts favoris de la 1.2.1 rangés)', scroll: 'Gares' },
     { file: 'phone-places.png', params: PNICE(S1), hash: '#/favoris/fav-maison', what: 'Un lieu de « Mes favoris » : nom, adresse et accès, créneau « En tête de l’accueil »' },
     { file: 'phone-favorites.png', params: PNICE(S3), hash: '#/favoris', what: 'Mes favoris : endroits et trajets fixes dans une seule liste' },
-    { file: 'phone-favorite-edit.png', params: P122(S2), hash: '#/favoris/fav-gand', what: 'Modifier un trajet fixe (en modification, pas de choix « Un endroit » ou « Un trajet de A à B »)' },
-    { file: 'phone-trips.png', params: P122(S1), hash: '#/trajets', what: '« Trajets » : marche maximale et marge avant de partir' },
-    { file: 'phone-display.png', params: P122(S2), hash: '#/affichage', what: 'Affichage : « À l’ouverture de Quai », « Ordre des favoris » et l’aperçu de l’accueil des lunettes 1.2.2 (« Favoris », « Gares », « Bus, tram, métro »)', scroll: 'À l’ouverture de Quai' },
-    { file: 'phone-alerts.png', params: P122(S1), hash: '#/alertes', what: 'Alertes' },
-    { file: 'phone-data.png', params: P122(S2), hash: '#/donnees', what: `Données, avec « Version de Quai ${APP_VERSION} » et « Adresses »` },
-    { file: 'phone-search.png', params: P122(S3), hash: '#/recherche?q=Gand', what: 'Recherche « Gand » dans le champ unique' },
-    { file: 'phone-search-results.png', params: P122(S3), hash: '#/recherche?de=sncb:8813003&vers=sncb:8892007', what: 'Trajets Bruxelles-Central vers Gand-Saint-Pierre : nom affiché, ligne des moyens, phrase' },
+    { file: 'phone-favorite-edit.png', params: P123(S2), hash: '#/favoris/fav-gand', what: 'Modifier un trajet fixe (en modification, pas de choix « Un endroit » ou « Un trajet de A à B »)' },
+    { file: 'phone-trips.png', params: P123(S1), hash: '#/trajets', what: '« Trajets » : marche maximale et marge avant de partir' },
+    { file: 'phone-display.png', params: P123(S2), hash: '#/affichage', what: 'Affichage : « À l’ouverture de Quai », « Ordre des favoris » et l’aperçu de l’accueil des lunettes 1.2.2 (« Favoris », « Gares », « Bus, tram, métro »)', scroll: 'À l’ouverture de Quai' },
+    { file: 'phone-alerts.png', params: P123(S1), hash: '#/alertes', what: 'Alertes' },
+    { file: 'phone-data.png', params: P123(S2), hash: '#/donnees', what: `Données, avec « Version de Quai ${APP_VERSION} » et « Adresses »` },
+    { file: 'phone-search.png', params: P123(S3), hash: '#/recherche?q=Gand', what: 'Recherche « Gand » dans le champ unique' },
+    { file: 'phone-search-results.png', params: P123(S3), hash: '#/recherche?de=sncb:8813003&vers=sncb:8892007', what: 'Trajets Bruxelles-Central vers Gand-Saint-Pierre : nom affiché, ligne des moyens, phrase' },
   ];
   const { dir } = await buildFixtureData({ date: '2026-11-01' });
   const old = await startDataServer(dir);
-  shots.push({ file: 'phone-data-stale.png', params: P122(S2), hash: '#/donnees', what: 'Données quand la mise à jour de nuit est en panne', data: old.url });
+  shots.push({ file: 'phone-data-stale.png', params: P123(S2), hash: '#/donnees', what: 'Données quand la mise à jour de nuit est en panne', data: old.url });
   try {
     await withChrome(
       async (page) => {
@@ -2793,17 +3018,17 @@ async function tourPhone(): Promise<void> {
 /* ------------------------------ Lancement ------------------------------ */
 
 const SCENARIOS: [string, string, () => Promise<void>][] = [
-  ['s1', 'le matin à Namur : accueil 1.2.2, étapes, « Suivre ce trajet », « Ne plus suivre », « Fin du trajet », « Autres trajets », Favoris et adresses récentes, Gares, Bus, tram, métro, sortie', s1],
+  ['s1', 'le matin à Namur : accueil 1.2.2, étapes, « Suivre ce trajet », « Ne plus suivre », « Fin du trajet », « Autres trajets », Favoris et adresses récentes, Gares, tableau complet, arrêts d’un départ et retours (1.2.3), Bus, tram, métro, sortie', s1],
   ['s1noRT', 'le matin, temps réel indisponible : ligne du haut sans « ~ », « Le plus court : 1 changement, à pied 7 + 2 + 9 min », « Sans changement », Gares en horaire prévu', s1noRT],
   ['s1run', 'trajet suivi en accéléré : en cours, dans le train, dans le tram, descente, fin', s1run],
   ['s1stay', 'l’IC part sans l’utilisateur : le trajet en cours prend fin', s1stay],
   ['s1open', 'trajet ouvert sans être suivi : jamais « En cours » ni « Dans le train » (CA-122.7)', s1open],
-  ['s2', 'gare du Nord : « Bus, tram, métro » ouvert seul, détail d’une ligne, départs, « garder une ligne » annulable, accueil, Favoris, panne du temps réel', s2],
+  ['s2', 'gare du Nord : « Bus, tram, métro » ouvert seul, détail d’une ligne, arrêts d’un passage, tableau complet et ses pages (1.2.3), « garder une ligne » annulable, accueil, Favoris, panne du temps réel', s2],
   ['s3', 'l’après-midi vers Gand : réponse, étapes, étiquettes par « Autres trajets », trajet suivi, « Ne plus suivre », détail du train', s3],
   ['s3run', 'vers Gand en accéléré : dans le train, aide à l’arrivée, « ★ garder ce trajet » déjà gardé', s3run],
   ['waterloo', 'Waterloo : accueil (Favoris 3, Maison jamais montrée, la gare dans « Gares »), trajet au milieu et au bout, « Autres trajets », « Plus tôt », retours, rubrique vide', waterloo],
   ['holiday', 'jour férié : dernière ligne de l’accueil le 11/11, rien le 12/11', holiday],
-  ['news', `mise à jour depuis la 1.2.1, la 1.2.0, la 1.1 et la 1.0 : message « ${NEWS_TITLE} », favoris migrés, arrêts rangés dans « Bus, tram, métro », « Favoris »`, news],
+  ['news', `mise à jour depuis la 1.2.2, la 1.2.1, la 1.2.0, la 1.1 et la 1.0 : message « ${NEWS_TITLE} » (avec la 1.2.2 d’avant elle), favoris migrés, arrêts rangés dans « Bus, tram, métro », « Favoris »`, news],
   ['firstrun', 'premier lancement : bienvenue, accueil sans favori avec l’aide des gestes, « Favoris » vide, rubriques à choisir, sortie', firstrun],
   ['errors', 'horaires injoignables puis nouvel essai, relais muet, aucun arrêt, l’arrêt le plus proche', errors],
   ['stale', 'horaires périmés', stale],
@@ -2846,6 +3071,7 @@ async function main(): Promise<void> {
   const p120 = { ...p11, seenVersion: '1.2.0' };
   const p121 = { ...p11, seenVersion: '1.2.1' };
   const p122 = { ...p11, seenVersion: '1.2.2' };
+  const p123 = { ...p11, seenVersion: '1.2.3' };
   // Adresses récentes : des lieux publics (PRD-1.2.2 : jamais d'adresse personnelle dans les tests ni les captures).
   const recent = [
     { label: 'Grand-Place, 1000 Bruxelles', lat: 50.8467, lon: 4.3525, at: Date.parse('2026-11-09T18:20:00+01:00') },
@@ -2858,15 +3084,16 @@ async function main(): Promise<void> {
   write('1.2.0.json', p120);
   write('1.2.1.json', p121);
   write('1.2.2.json', p122);
-  write('recent.json', { ...p122, recent });
+  write('1.2.3.json', p123);
+  write('recent.json', { ...p123, recent });
   write('phone.json', {
-    ...p122,
+    ...p123,
     places: [...p11.places, { id: 'lieu-piscine', label: 'Piscine de Bruxelles', lat: 50.852, lon: 4.3555, address: 'Rue Neuve, 1000 Bruxelles', src: 'address', approx: true }],
     recent: [{ label: 'Boulevard du Centenaire 1, 1020 Bruxelles', lat: 50.8915, lon: 4.334, at: Date.parse('2026-11-09T18:20:00+01:00') }],
   });
-  write('empty.json', { ...p122, places: [], favorites: [], recent: [] });
+  write('empty.json', { ...p123, places: [], favorites: [], recent: [] });
   write('nice.json', {
-    ...p122,
+    ...p123,
     places: [
       { id: 'maison', label: 'Maison', lat: 50.4662, lon: 4.8648, address: 'Rue de Fer 25, 5000 Namur', src: 'address' },
       { id: 'bureau', label: 'Bureau', lat: 50.8582, lon: 4.36, address: 'Rue du Progrès 20, 1210 Saint-Josse-ten-Noode', src: 'address' },
@@ -2875,7 +3102,7 @@ async function main(): Promise<void> {
   });
   // Waterloo (CA-121.5 : 4 favoris dont Maison, tu y es) : adresses des fixtures (scénario 4, CA-M5.3), gare de Waterloo
   write('waterloo.json', {
-    ...p122,
+    ...p123,
     places: [
       { id: 'maison', label: 'Maison', lat: 50.7175, lon: 4.399, address: 'Chaussée de Bruxelles 1, 1410 Waterloo', src: 'address' },
       { id: 'bureau', label: 'Bureau', lat: 50.8582, lon: 4.36, address: 'Rue du Progrès 20, 1210 Saint-Josse-ten-Noode', src: 'address' },

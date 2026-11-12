@@ -447,11 +447,11 @@ describe('scénario 2 : en ville, gare du Nord (S2, 12:10)', () => {
     expect(v.title).toBe('Gares');
     expect(check(v)).toEqual(['Namur   IC 12:42 voie 4', '▲▼ choisir   toucher : départs   double : retour']);
     expect(v.items[0].action).toEqual({ kind: 'open', route: { screen: 'board', areaId: 'sncb:8863008', name: { fr: 'Namur', nl: 'Namen' } } });
-    // le tableau de la gare : « ★ » (gardée), toucher : la retirer de « Gares »
-    const b = boardView(await core.board('sncb:8863008', { limit: 5 }), ctxOf(now, s), { kept: true });
+    // le tableau complet de la gare (1.2.3) : « ★ » (gardée), la ligne ★ en tête la retire de « Gares »
+    const b = boardView(await core.board('sncb:8863008', { horizonMin: 120, limit: 40 }), ctxOf(now, s), { kept: true });
     expect(b.title).toBe('Namur, train (SNCB) ★');
-    expect(b.tap).toEqual({ kind: 'toggleStation' });
-    expect(check(b).at(-1)).toBe('▲▼ départs   toucher : ★ retirer la gare   double : retour');
+    expect(b.items[0]).toEqual({ a: '★ retirer la gare', action: { kind: 'toggleStation' } });
+    expect(check(b).at(-1)).toBe('▲▼ départs   toucher : arrêts   double : retour');
   });
 
   it('CA-122.4 : « Bus, tram, métro » : chaque ligne à son arrêt, deux passages par sens ; « toutes les lignes » ; le détail à 4 passages', async () => {
@@ -480,23 +480,26 @@ describe('scénario 2 : en ville, gare du Nord (S2, 12:10)', () => {
     ]);
     // ouverte d'office pour une ligne `near` : le curseur sur elle
     expect(linesView(rows, ctxOf(now, s), 'fav-gdn-4').initialSel).toBe(1);
-    // le détail du tram 3 : ses deux sens, 4 passages chacun, puis « Tous les départs de l’arrêt »
+    // le détail du tram 3 : ses deux sens, 4 passages chacun, puis « Tous les départs de l’arrêt » ; 1.2.3 : curseur de
+    // passage en passage (« vers … » au-dessus du premier, jamais sous le curseur), toucher un passage : ses arrêts
     const t3 = await core.lineBoard('stib:6357F', '3', { perDirection: 5 });
     const d = lineView(lineRoute(s.lines[0]), t3, ctxOf(now, s));
     expect(d.title).toBe('Tram 3 · Gare du Nord');
-    expect(d.scroll).toBe(true);
-    expect(d.tap).toEqual({ kind: 'open', route: { screen: 'board', areaId: 'stib:6357F', name: s.lines[0].name } });
+    expect(d.scroll).toBeUndefined();
+    expect(d.paged).toBe(true);
     const block = (head: string) => {
-      const i = d.items.findIndex((x) => x.a === head);
-      return d.items.slice(i, i + 5).map((x) => [x.a, x.b ?? '', nb(x.c ?? '')]);
+      const i = d.items.findIndex((x) => x.group === head);
+      return d.items.slice(i, i + 4).map((x) => [x.b ?? '', nb(x.c ?? '')]);
     };
-    expect(block('vers Churchill')).toEqual([['vers Churchill', '', ''], ['', '12:12', 'dans 2 min'], ['', '12:20', 'dans 10 min'], ['', '12:28', 'dans 18 min'], ['', '12:36', 'dans 26 min']]);
-    expect(block('vers Esplanade')).toEqual([['vers Esplanade', '', ''], ['', '12:16', 'dans 6 min'], ['', '12:24', 'dans 14 min'], ['', '12:32', 'dans 22 min'], ['', '12:40', 'dans 30 min']]);
-    expect(d.items).toHaveLength(11);
-    expect(check(d).at(-1)).toBe('▲▼ passages   toucher : tous les départs   double : retour');
-    expect(d.items.at(-1)!.a).toBe('Tous les départs de l’arrêt');
-    expect(overflowing(layoutPage(d, { sel: -1, top: 0 }))).toEqual([]);
-    expect(overflowing(layoutPage(d, { sel: -1, top: d.items.length - 1 }))).toEqual([]);
+    expect(block('vers Churchill')).toEqual([['12:12', 'dans 2 min'], ['12:20', 'dans 10 min'], ['12:28', 'dans 18 min'], ['12:36', 'dans 26 min']]);
+    expect(block('vers Esplanade')).toEqual([['12:16', 'dans 6 min'], ['12:24', 'dans 14 min'], ['12:32', 'dans 22 min'], ['12:40', 'dans 30 min']]);
+    expect(d.items).toHaveLength(9);
+    const first = d.items.find((x) => x.group === 'vers Churchill')!;
+    expect(first.action).toEqual({ kind: 'open', route: { screen: 'stops', areaId: 'stib:6357F', dep: t3.directions.find((x) => x.head.fr === 'Churchill')!.departures[0] } });
+    expect(check(d).at(-1)).toBe('▲▼ passages   toucher : arrêts   double : retour');
+    expect(d.items.at(-1)).toEqual({ a: 'Tous les départs de l’arrêt', action: { kind: 'open', route: { screen: 'board', areaId: 'stib:6357F', name: s.lines[0].name } } });
+    expect(overflowing(layoutPage(d, { sel: 0, top: 0 }))).toEqual([]);
+    expect(overflowing(layoutPage(d, { sel: d.items.length - 1, top: d.items.length - 1 }))).toEqual([]);
   });
 
   it('REVUE-USAGE n° 3 : départs d’un arrêt de tram : « ★ » si une de ses lignes est gardée ; toucher : « Gare du Nord : garder une ligne »', async () => {
@@ -505,12 +508,12 @@ describe('scénario 2 : en ville, gare du Nord (S2, 12:10)', () => {
     const b = await core.board('stib:6357F', { limit: 5 });
     const v = boardView(b, ctxOf(now, s), { kept: true });
     expect(v.title).toBe('Gare du Nord, tram (STIB) ★');
-    expect(v.scroll).toBe(true);
-    expect(v.tap).toEqual({ kind: 'open', route: { screen: 'keepLine', areaId: 'stib:6357F', op: 'stib', name: b.area.n, lat: b.area.lat, lon: b.area.lon } });
-    expect(v.items.every((i) => !i.action)).toBe(true);
+    // 1.2.3 : la ligne ★ en tête ouvre « garder une ligne » ; chaque départ ouvre ses arrêts
+    expect(v.items[0]).toEqual({ a: '★ garder une ligne', action: { kind: 'open', route: { screen: 'keepLine', areaId: 'stib:6357F', op: 'stib', name: b.area.n, lat: b.area.lat, lon: b.area.lon } } });
+    expect(v.items.slice(1).map((i) => i.action)).toEqual(b.departures.map((dep) => ({ kind: 'open', route: { screen: 'stops', areaId: 'stib:6357F', dep } })));
     // colonnes étroites : les codes courts (REVUE-USAGE n° 8)
-    expect(check(v)).toEqual(['T3   Churchill   2 min', 'T4   Stalle   5 min', 'T3   Esplanade   6 min', 'T3   Churchill   10 min', 'T4   Stalle   13 min', '▲▼ départs   toucher : ★ lignes   double : retour']);
-    expect(page(v).sel).toBe(-1);
+    expect(check(v)).toEqual(['★ garder une ligne', 'T3   Churchill   2 min', 'T4   Stalle   5 min', 'T3   Esplanade   6 min', 'T3   Churchill   10 min', 'T4   Stalle   13 min', '▲▼ départs   toucher : arrêts   double : retour']);
+    expect(page(v).sel).toBe(1);
     expect(boardView(b, ctxOf(now, s), { kept: false }).title).toBe('Gare du Nord, tram (STIB)');
     // « garder une ligne » : les lignes de l'arrêt en toutes lettres, « ★ » sur celles gardées
     const route: KeepLineRoute = { screen: 'keepLine', areaId: 'stib:6357F', op: 'stib', name: b.area.n, lat: b.area.lat, lon: b.area.lon };
@@ -529,19 +532,19 @@ describe('scénario 2 : en ville, gare du Nord (S2, 12:10)', () => {
     const dl = boardView(await core.board('delijn:308611', { limit: 5 }), ctxOf(now, settings()), { kept: false });
     expect(dl.title).toBe('Bruxelles-Nord, bus (De Lijn)');
     const l = check(dl);
-    expect(l[0]).toBe('232   Vilvorde   ~5 min');
-    expect(l.slice(-2)).toEqual(['~ horaire prévu, sans temps réel', '▲▼ départs   toucher : ★ lignes   double : retour']);
+    expect(l.slice(0, 2)).toEqual(['★ garder une ligne', '232   Vilvorde   ~5 min']);
+    expect(l.slice(-2)).toEqual(['~ horaire prévu, sans temps réel', '▲▼ départs   toucher : arrêts   double : retour']);
     const gare = boardView(await core.board('sncb:8812005', { limit: 5 }), ctxOf(now, settings()), { kept: false });
     const lines = check(gare);
-    expect(lines.slice(0, 3)).toEqual(['IC   Anvers-Central   12:22  voie 9', 'IC   Anvers-Central   ~12:30  voie 12', 'S1   Nivelles   12:34  SUPPRIMÉ']);
-    expect(lines.at(-1)).toBe('▲▼ départs   toucher : ★ garder la gare   double : retour');
-    expect(gare.tap).toEqual({ kind: 'toggleStation' });
+    expect(lines.slice(0, 4)).toEqual(['★ garder la gare', 'IC   Anvers-Central   12:22  voie 9', 'IC   Anvers-Central   ~12:30  voie 12', 'S1   Nivelles   12:34  SUPPRIMÉ']);
+    expect(lines.at(-1)).toBe('▲▼ départs   toucher : arrêts   double : retour');
+    expect(gare.items[0].action).toEqual({ kind: 'toggleStation' });
   });
 
   it('CA-M8.6 : temps réel coupé, « Temps réel indisponible : horaires prévus ~ » ; hors ligne, « Pas de réseau »', async () => {
     const b = await fakeCore(() => now, { noRt: true }).board('stib:6357F', { limit: 4 });
     const lines = check(boardView(b, ctxOf(now, settings(), { rt: 'down' }), { kept: false }));
-    expect(lines[0]).toBe('T3   Churchill   ~2 min');
+    expect(lines[1]).toBe('T3   Churchill   ~2 min');
     expect(lines).toContain('Temps réel indisponible : horaires prévus ~');
     expect(check(boardView(b, ctxOf(now, settings(), { rt: 'offline' }), { kept: false }))).toContain('Pas de réseau : horaires prévus ~');
   });
@@ -551,7 +554,7 @@ describe('scénario 2 : en ville, gare du Nord (S2, 12:10)', () => {
     const d: Departure = { op: 'stib', mode: 'tram', line: '3', head: { fr: 'Churchill', nl: 'Churchill' }, sched: now + 20_000, est: now + 20_000, rt: true, delayMin: 0, cancelled: false };
     const v = boardView({ area, departures: [d], anyPlanned: false, rtErrors: [], updatedAt: now }, ctxOf(now, settings()), { kept: true });
     expect(v.title).toBe('Gare du Nord, tram et bus (STIB) ★');
-    expect(check(v)[0]).toBe('T3   Churchill   imminent');
+    expect(check(v)[1]).toBe('T3   Churchill   imminent');
   });
 });
 
@@ -729,7 +732,7 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     expect(page(v).visible).toBe(v.items.length);
   });
 
-  it('messages : bienvenue, « Quai 1.2.2 », erreur au lancement, attente, « Autour de moi » vide', async () => {
+  it('messages : bienvenue, « Quai 1.2.3 », erreur au lancement, attente, « Autour de moi » vide', async () => {
     const ctx = ctxOf(SCENARIO.s2.now, settings());
     expect(check(firstRunView(ctx))).toEqual([
       'Bienvenue dans Quai !',
@@ -739,20 +742,26 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
       'toucher : continuer   double : quitter',
     ]);
     expect(check(firstRunView({ ...ctx, web: true })).at(-2)).toBe('position, langue et tes favoris, en une minute.');
-    // PRD-1.2.2 § 9 : un seul message, quelle que soit la version d'avant ; espace insécable devant « : »
-    const news = newsView(ctx, newsLines('1.2.1'));
-    expect(news.title).toBe('Quai 1.2.2');
+    // PRD-1.2.3 § 4 : un seul message ; depuis la 1.2.2, les lignes de la 1.2.3 ; d'avant, celles de la 1.2.2 en plus ;
+    // espace insécable devant « : »
+    const news = newsView(ctx, newsLines('1.2.2'));
+    expect(news.title).toBe('Quai 1.2.3');
     expect(check(news)).toEqual([
+      'Tableaux complets : tous les départs des 2 heures à venir.',
+      'Touche un départ : ses arrêts jusqu’au terminus.',
+      'Bus, tram, métro : ajoute une ligne ou un arrêt.',
+      'toucher : continuer',
+    ]);
+    expect(check(newsView(ctx, newsLines('1.2.1'))).slice(3, 7)).toEqual([
       'Nouveau : tes gares et tes lignes sur l’accueil.',
       'Tes arrêts favoris y sont rangés, rien n’est perdu.',
       'Aller à… a rejoint Favoris.',
       'Un trajet n’est suivi que si tu le demandes.',
-      'toucher : continuer',
     ]);
-    expect(newsLines('1.1.0')).toEqual([...NEWS_LINES]);
+    expect(newsLines('1.1.0')).toEqual(newsLines('1.2.1'));
+    expect(newsLines('1.2.2')).toEqual([...NEWS_LINES]);
     expect(news.tap).toEqual({ kind: 'continue' });
-    expect(news.items[0].a).toBe('Nouveau : tes gares et tes lignes sur l’accueil.');
-    expect(newsView({ ...ctx, web: true }, newsLines('1.2.0')).items).toEqual(news.items);
+    expect(newsView({ ...ctx, web: true }, newsLines('1.2.0')).items).toEqual(newsView(ctx, newsLines('1.2.0')).items);
     const root = errorView('Quai', 'Pas de connexion aux horaires : nouvel essai dans 30 s', ctx, { root: true });
     expect(check(root)).toEqual(['Pas de connexion aux horaires : nouvel essai dans 30 s', 'toucher : réessayer   double : quitter']);
     expect(check(errorView('Autour de moi', 'Pas de réseau : réessaie dans un instant.', ctx)).at(-1)).toBe('toucher : réessayer   double : retour');
@@ -796,20 +805,20 @@ describe('lendemain, horaires périmés, destinations STIB', () => {
   it('tableau train : « demain, » à partir de 04:00 seulement ; tous demain : « Départs de demain » (S6)', () => {
     const b = board(nord, [train({}), train({ sched: T(0, 1, 1), est: T(0, 1, 1), rt: false }), train({ sched: T(8, 42, 1), est: T(8, 42, 1), rt: false, platform: '12', head: N('Louvain-la-Neuve-Université-Centre-Sud') })]);
     const lines = check(boardView(b, ctx(), { kept: false }));
-    expect(lines[0]).toBe('IC   Anvers-Central   23:52  voie 9');
-    expect(lines[1]).toBe('IC   Anvers-Central   ~00:01  voie 9');
-    expect(lines[2]).toMatch(/^IC   demain, Louvain-la-Neuve.*   ~08:42  voie 12$/);
+    expect(lines[0]).toBe('★ garder la gare');
+    expect(lines[1]).toBe('IC   Anvers-Central   23:52  voie 9');
+    expect(lines[2]).toBe('IC   Anvers-Central   ~00:01  voie 9');
+    expect(lines[3]).toMatch(/^IC   demain, Louvain-la-Neuve.*   ~08:42  voie 12$/);
     const tomorrow = boardView(board(nord, [train({ sched: T(6, 2, 1), est: T(6, 2, 1), rt: false }), train({ sched: T(7, 2, 1), est: T(7, 2, 1), rt: false })]), ctx(), { kept: false });
     expect(tomorrow.top).toEqual({ text: 'Départs de demain' });
-    expect(check(tomorrow).slice(0, 3)).toEqual(['Départs de demain', 'IC   Anvers-Central   ~06:02  voie 9', 'IC   Anvers-Central   ~07:02  voie 9']);
+    expect(check(tomorrow).slice(0, 4)).toEqual(['Départs de demain', '★ garder la gare', 'IC   Anvers-Central   ~06:02  voie 9', 'IC   Anvers-Central   ~07:02  voie 9']);
   });
 
   it('tableau bus : « demain, » au-delà d’une heure, compte à rebours sinon', () => {
     const dl = { ...nord, id: 'delijn:308611', op: 'delijn' as const, n: N('Bruxelles-Nord', 'Brussel Noordstation'), modes: ['bus' as const], lines: ['232'] };
     const bus = (est: number): Departure => ({ op: 'delijn', mode: 'bus', line: '232', head: N('Vilvorde', 'Vilvoorde'), sched: est, est, rt: false, delayMin: 0, cancelled: false });
     const lines = check(boardView(board(dl, [bus(T(0, 10, 1)), bus(T(6, 0, 1))]), ctx(), { kept: false }));
-    expect(lines[0]).toBe('232   Vilvorde   ~40 min');
-    expect(lines[1]).toBe('232   demain, Vilvorde   ~06:00');
+    expect(lines.slice(0, 3)).toEqual(['★ garder une ligne', '232   Vilvorde   ~40 min', '232   demain, Vilvorde   ~06:00']);
   });
 
   it('étapes, adresses récentes de « Favoris » et train : le lendemain est dit', () => {
@@ -825,10 +834,10 @@ describe('lendemain, horaires périmés, destinations STIB', () => {
     expect(trainView(door, 1, ctx()).title).toBe('IC vers Bruges, demain');
   });
 
-  it('horaires périmés : le message de fraîcheur remplace « Aucun départ… » et les listes vides', () => {
+  it('horaires périmés : le message de fraîcheur remplace « aucun départ » et les listes vides', () => {
     const stale = 'Horaires périmés : mise à jour arrêtée le 02/11';
-    expect(check(boardView(board(nord, []), ctx({ stale }), { kept: false }))[0]).toBe(stale);
-    expect(check(boardView(board(nord, []), ctx(), { kept: false }))[0]).toBe('Aucun départ dans les prochaines heures');
+    expect(check(boardView(board(nord, []), ctx({ stale }), { kept: false })).slice(0, 2)).toEqual(['★ garder la gare', stale]);
+    expect(check(boardView(board(nord, []), ctx(), { kept: false })).slice(0, 2)).toEqual(['★ garder la gare', 'aucun départ']);
     expect(check(nearbyView([{ area: nord, distanceM: 160, walkMin: 3 }], ctx({ stale })))).toContain(stale);
     const h = homeView({ stale, nearbyCount: 2 }, ctx({ stale }));
     expect(h.top).toEqual({ text: stale, strong: true });

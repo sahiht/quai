@@ -24,7 +24,7 @@ function answers(fav: Favorite, now: number): FavoriteAnswer | undefined {
 const steps = (s: Screen) => s.screen === 'steps' && s.page !== undefined;
 const homeReady = (s: Screen) => s.screen === 'home' && s.shown?.length === 2 && !s.lines.some((l) => / …$/.test(l));
 const open = (patch = {}, kv = createKV(memoryBackend())) =>
-  setup({ now: NOW, kv, settings: settingsWith([PLACES.bureau, PLACES.mama], { seenVersion: '1.2.2', ...patch }), core: (now) => stubCore(now, { answers }) });
+  setup({ now: NOW, kv, settings: settingsWith([PLACES.bureau, PLACES.mama], { seenVersion: '1.2.3', ...patch }), core: (now) => stubCore(now, { answers }) });
 
 describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
   it('ouvrir un favori ne le suit pas : « Suivre ce trajet » ; au départ, pas de « En cours » ni de « Dans le train »', async () => {

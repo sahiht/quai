@@ -10,6 +10,7 @@ import { displayLabel, HOLIDAY_TEXT, holidayName, longestWalk, meansText, rideNa
 import { NB, shortAddress } from '../core/text';
 import { displayName, hhmm, OP_NAME } from '../core/util';
 import { atTitle, durationText, journeyStart, spanText, stopAnswerLine, transfersText, tripAnswerLine, walkMinOf } from '../glasses/format';
+import { compareVersions } from '../version';
 import { normalizeForSearch } from '../../../shared/names';
 
 /** Espace insécable (U+00A0) du cœur ; adresse courte « Veldstraat 1 » (titres « Vers … »). */
@@ -105,9 +106,10 @@ export const T = {
   stations: 'Gares',
   lines: 'Bus, tram, métro',
   addStation: 'Ajouter une gare',
-  addLine: 'Ajouter une ligne',
+  /** 1.2.3 (PRD-1.2.3 § 3) : « Bus, tram, métro » reçoit une ligne (à un arrêt) ou un arrêt entier. */
+  addLine: 'Ajouter une ligne ou un arrêt',
   noStation: 'Aucune gare pour l’instant.',
-  noLine: 'Aucune ligne pour l’instant.',
+  noLine: 'Aucune ligne ni arrêt pour l’instant.',
   /** Ouverture d'office des départs à moins de 300 m (`near`, l'ancien créneau « près » d'un arrêt favori). */
   pickNear: 'Ouvrir d’office à moins de 300 m',
   removePick: 'Retirer',
@@ -122,6 +124,17 @@ export const T = {
   stationNearby: 'Les plus proches de ta position.',
   stationNone: 'Aucune gare ne correspond. Vérifie l’orthographe.',
   lineLead: 'Ses passages, dans les deux sens, s’afficheront dans les lunettes.',
+  /** 1.2.3 : les deux choix de l'ajout (comme « Nouveau favori ») et « Un arrêt », toutes ses lignes. */
+  kindsLegend: 'Une ligne ou un arrêt',
+  kindLine: 'Une ligne',
+  kindLineSub: 'numéro, puis arrêt',
+  kindStop: 'Un arrêt',
+  kindStopSub: 'toutes ses lignes',
+  stopLead: 'Tous ses départs s’afficheront dans les lunettes.',
+  stopField: 'Nom de l’arrêt',
+  stopSearchPlaceholder: 'Rogier, Gare du Nord…',
+  stopSearchNone: 'Aucun arrêt de bus, tram ou métro ne correspond. Pour une gare, ajoute-la dans Gares.',
+  stopsFound: 'Arrêts trouvés',
   lineField: 'Numéro de la ligne',
   linePlaceholder: 'W, 36, 71…',
   lineNone: 'Aucune ligne de bus, tram ou métro ne porte ce numéro. Pour un train, ajoute sa gare dans Gares.',
@@ -141,8 +154,18 @@ export const T = {
 } as const;
 
 /**
- * Bannière « Nouveau » de l'accueil du téléphone, message « Quai 1.2.2 » (PRD-1.2.2 § 9, revue d'usage n° 4) : une
- * ligne par nouveauté, les mêmes depuis la 1.2.1, la 1.2.0 ou la 1.1, comme les lunettes et Quai Web.
+ * Bannière « Nouveau » de l'accueil du téléphone, message « Quai 1.2.3 » (PRD-1.2.3 § 4) : une ligne par nouveauté,
+ * les mêmes quelle que soit la version d'avant, comme les lunettes et Quai Web.
+ */
+export const NEWS_123: readonly string[] = [
+  'Tableaux complets dans les lunettes : tous les départs des 2 prochaines heures.',
+  'Touche un départ : ses arrêts jusqu’au terminus, avec l’heure et la voie.',
+  'Bus, tram, métro : ajoute une ligne ou un arrêt.',
+];
+
+/**
+ * Nouveautés de la 1.2.2 (PRD-1.2.2 § 9, revue d'usage n° 4) : dites aussi à qui passe d'une version antérieure
+ * directement à la 1.2.3 (arrêts favoris rangés, « Aller à… » dans Favoris, trajet suivi sur demande).
  */
 export const NEWS_122: readonly string[] = [
   'Nouveau : tes gares et tes lignes de bus, tram et métro sur l’accueil des lunettes.',
@@ -151,9 +174,16 @@ export const NEWS_122: readonly string[] = [
   'Un trajet n’est suivi que si tu le demandes.',
 ];
 
-/** Lignes de la bannière « Nouveau » (NEWS_122), quelle que soit la version vue avant la mise à jour. */
-export function newsLines(_seen = ''): string[] {
-  return [...NEWS_122];
+/** Version des nouveautés NEWS_122. */
+const NEWS_122_SINCE = '1.2.2';
+
+/**
+ * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.3 ; depuis une version
+ * antérieure à la 1.2.2 (`seen` : la version vue avant la mise à jour), celles de la 1.2.2 ensuite.
+ */
+export function newsLines(seen = ''): string[] {
+  const older = !!seen && compareVersions(seen, NEWS_122_SINCE) < 0;
+  return older ? [...NEWS_123, ...NEWS_122] : [...NEWS_123];
 }
 
 /** Suppression d'un lieu utilisé par un trajet fixe (PRD-1.2 § 2.2). */
@@ -165,6 +195,8 @@ export const stationLimitText = (max: number): string => `${max} gares au plus :
 export const lineLimitText = (max: number): string => `${max} lignes au plus : retires-en une.`;
 /** 1.2.2 : gare ajoutée (« Ajouter une gare », lien de « Un endroit », revue d'usage n° 3). */
 export const stationAddedText = (name: string): string => `${name} ajoutée à Gares.`;
+/** 1.2.3 : arrêt ajouté avec toutes ses lignes (PRD-1.2.3 § 3). */
+export const stopAddedText = (name: string): string => `${name} ajouté : tous ses départs s’afficheront dans les lunettes.`;
 /** « Un endroit » (revue d'usage n° 3) : une gare SNCB choisie, ses départs dans Gares. */
 export const nextDeparturesLink = (name: string): string => `Ses prochains départs : ajouter ${name} à Gares`;
 /** Retrait d'une gare ou d'une ligne, confirmé dans la page, puis annoncé. */

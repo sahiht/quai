@@ -25,7 +25,7 @@ const stationsReady = (s: Screen) => s.screen === 'stations' && !s.lines.some((l
 
 describe('CA-122.3 : « Gares »', () => {
   it('les gares dans leur ordre, le prochain train à droite, « aucun train » ; toucher : le tableau ; double toucher : « Gares »', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.2', stations: [STATIONS.braine, STATIONS.nord, STATIONS.namur] }), core: (now) => stubCore(now, { board: boards }) });
+    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.3', stations: [STATIONS.braine, STATIONS.nord, STATIONS.namur] }), core: (now) => stubCore(now, { board: boards }) });
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'stations' });
     const s = await h.until(stationsReady);
@@ -43,7 +43,7 @@ describe('CA-122.3 : « Gares »', () => {
     // identifiant inconnu sans zone de ce nom autour (faux cœur : missing) ; identifiant inconnu, même nom à 150 m : movedTo
     const lost = { ...STATIONS.nord, id: 'st-lost', areaId: 'sncb:0000001', name: { fr: 'Gare supprimée', nl: 'Gare supprimée' } };
     const moved = { ...STATIONS.nord, areaId: 'sncb:0000002' };
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.2', stations: [lost, moved] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', stations: [lost, moved] }), core: (now) => stubCore(now) });
     const home = await h.until((x) => x.screen === 'home' && x.lines.some((l) => /^Gares {3}[^…]+$/.test(l)));
     expect(home.lines.find((l) => l.startsWith('Gares'))).toBe('Gares   introuvable');
     await h.c.replaceRoute({ screen: 'stations' });
@@ -63,7 +63,7 @@ describe('CA-122.3 : « Gares »', () => {
     let late = 0;
     const h = await setup({
       now: NOW,
-      settings: settingsWith([], { seenVersion: '1.2.2', stations: [STATIONS.braine] }),
+      settings: settingsWith([], { seenVersion: '1.2.3', stations: [STATIONS.braine] }),
       core: (now) => stubCore(now, { board: (id, n) => (id === STATIONS.braine.areaId ? boardOf(id, 'Braine-l’Alleud', [trainAt(NOW, 11, { delayMin: late, est: NOW + (11 + late) * MIN })]) : undefined) }),
     });
     await h.until((x) => x.screen === 'home');
@@ -90,20 +90,25 @@ describe('CA-122.3 : « Gares »', () => {
 
 describe('REVUE-USAGE n° 3 : ★ des départs d’une gare', () => {
   it('garder, retirer, annuler dans les 5 s à l’identique, rajouter après ; jamais d’arrêt favori', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.2', stations: [STATIONS.nord, { ...STATIONS.braine, near: true }] }), core: (now) => stubCore(now, { board: boards }) });
+    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.3', stations: [STATIONS.nord, { ...STATIONS.braine, near: true }] }), core: (now) => stubCore(now, { board: boards }) });
     await h.until((x) => x.screen === 'home');
     const before = structuredClone(h.settings.get().stations);
     await h.c.show({ screen: 'board', areaId: STATIONS.braine.areaId, name: STATIONS.braine.name });
     const b = await h.until((x) => x.screen === 'board' && x.lines.length > 1);
     expect(b.title).toBe('Braine-l’Alleud, train (SNCB) ★');
-    expect(b.lines.at(-1)).toBe('▲▼ départs   toucher : ★ retirer la gare   double : retour');
-    await h.gesture('tap');
+    // 1.2.3 : la ligne ★ en tête du tableau (le curseur commence sur le premier départ : ▲ pour l'atteindre)
+    expect(b.lines[0]).toBe('★ retirer la gare');
+    expect(b.sel).toBe(1);
+    expect(b.lines.at(-1)).toBe('▲▼ départs   toucher : arrêts   double : retour');
+    await h.gesture('up', 'tap');
     expect(h.last().lines.at(-1)).toBe('★ Retirée. Toucher encore : annuler');
     expect(h.last().title).toBe('Braine-l’Alleud, train (SNCB)');
+    expect(h.last().lines[0]).toBe('★ garder la gare');
     expect(h.settings.get().stations.map((p) => p.id)).toEqual(['st-nord']);
     h.advance(4_000);
     await h.gesture('tap');
     expect(h.last().lines.at(-1)).toBe('★ Gare rétablie');
+    expect(h.last().lines[0]).toBe('★ retirer la gare');
     // à l'identique : même identifiant, même place, `near` compris
     expect(h.settings.get().stations).toEqual(before);
     // retrait, puis toucher après 6 s : la gare revient en fin de liste, nouvelle
@@ -118,12 +123,12 @@ describe('REVUE-USAGE n° 3 : ★ des départs d’une gare', () => {
 
   it('une gare de plus que la limite (32) : « Déjà 32 gares : retires-en une sur le téléphone » ; hors de « Gares » : « ★ garder la gare »', async () => {
     const eight = Array.from({ length: LIMITS.stations }, (_, i) => ({ ...STATIONS.nord, id: `st-${i}`, areaId: `sncb:8812${String(100 + i).padStart(3, '0')}` }));
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.2', stations: eight }), core: (now) => stubCore(now, { board: boards }) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', stations: eight }), core: (now) => stubCore(now, { board: boards }) });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: STATIONS.braine.areaId, name: STATIONS.braine.name });
     const b = await h.until((x) => x.screen === 'board' && x.lines.length > 1);
-    expect(b.lines.at(-1)).toBe('▲▼ départs   toucher : ★ garder la gare   double : retour');
-    await h.gesture('tap');
+    expect(b.lines[0]).toBe('★ garder la gare');
+    await h.gesture('up', 'tap');
     expect(nb(h.last().lines.at(-1)!)).toBe(`Déjà ${LIMITS.stations} gares : retires-en une sur le téléphone`);
     expect(h.settings.get().stations).toHaveLength(LIMITS.stations);
     h.c.stop();
@@ -133,21 +138,21 @@ describe('REVUE-USAGE n° 3 : ★ des départs d’une gare', () => {
 describe('REVUE-USAGE n° 4 : migration sans perte, côté lunettes', () => {
   it('gare `near` à moins de 300 m : ses départs s’ouvrent d’office ; double toucher : l’accueil', async () => {
     const pos = { lat: STATIONS.braine.lat + 0.001, lon: STATIONS.braine.lon };
-    const h = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.2', stations: [STATIONS.nord, { ...STATIONS.braine, near: true }] }), core: (now) => stubCore(now, { board: boards }) });
+    const h = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.3', stations: [STATIONS.nord, { ...STATIONS.braine, near: true }] }), core: (now) => stubCore(now, { board: boards }) });
     const b = await h.until((x) => x.screen === 'board' && x.lines.length > 1);
     expect(b.title).toBe('Braine-l’Alleud, train (SNCB) ★');
     await h.gesture('double');
     expect((await h.until((x) => x.screen === 'home')).screen).toBe('home');
     h.c.stop();
     // sans `near`, ou à plus de 300 m : l'accueil
-    const far = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.2', stations: [STATIONS.braine] }), core: (now) => stubCore(now, { board: boards }) });
+    const far = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.3', stations: [STATIONS.braine] }), core: (now) => stubCore(now, { board: boards }) });
     expect((await far.until((x) => x.screen === 'home')).screen).toBe('home');
     far.c.stop();
   });
 
   it('« Travaux et déviations » sur les départs d’une gare gardée, comme pour un arrêt favori de la 1.2.1', async () => {
     const works = (core: Core): Core => Object.assign(Object.create(core) as Core, { works: async () => ['Travaux : pas de train entre Braine-l’Alleud et Nivelles'] });
-    const settings = settingsWith([], { seenVersion: '1.2.2', stations: [STATIONS.braine] });
+    const settings = settingsWith([], { seenVersion: '1.2.3', stations: [STATIONS.braine] });
     settings.alerts.works = true;
     const h = await setup({ now: NOW, settings, core: (now) => works(stubCore(now, { board: boards })) });
     await h.until((x) => x.screen === 'home');

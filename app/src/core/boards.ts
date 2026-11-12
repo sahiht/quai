@@ -32,6 +32,11 @@ export interface BoardRequest {
    * Un passage STIB sans motif connu, d'une des lignes `lines`, est gardé si `unknown(destination)` le dit.
    */
   pick?: { patterns: ReadonlySet<number>; lines: ReadonlySet<string>; unknown: (head: Names) => boolean };
+  /**
+   * 1.2.3 (tableau complet, PRD-1.2.3 § 1) : tous les départs jusqu'à cet instant (ms ; heure estimée, un supprimé à
+   * son heure prévue), `limit` au plus ; aucun : le prochain départ, même plus tard.
+   */
+  until?: number;
 }
 
 interface Candidate {
@@ -66,22 +71,33 @@ export function patternFilter(prep: PreparedArea, filter: LineFilter[] | undefin
   };
 }
 
-function candidates(prep: PreparedArea, now: number, limit: number, ok: (pi: number) => boolean): Candidate[] {
+function candidates(prep: PreparedArea, now: number, limit: number, ok: (pi: number) => boolean, until?: number): Candidate[] {
   const gtfsRt = prep.file.op !== 'stib';
   const from = now - PAST_MS;
   const start = gtfsRt ? now - LOOKBACK_MS : from;
   const out: Candidate[] = [];
   let ahead = 0;
+  let beyond = 0;
   for (let k = lowerBound(prep, start); k < prep.order.length && ahead < limit + EXTRA; k++) {
     const di = prep.order[k];
     const t = prep.times[di];
     if (t > now + BOARD_HORIZON_MS) break;
+    // 1.2.3 : tableau complet, jusqu'à `until` puis quelques départs de plus (le prochain, si l'horizon est vide)
+    if (until !== undefined && t > until && beyond > EXTRA) break;
     const dep = prep.file.deps[di];
     if (!ok(dep[2])) continue;
     out.push({ di, t });
     if (t >= from) ahead++;
+    if (until !== undefined && t > until) beyond++;
   }
   return out;
+}
+
+/** 1.2.3 : départs d'un tableau complet (`until`) : ceux de l'horizon, sinon le prochain qui part. */
+function withinUntil(deps: Departure[], until: number | undefined): Departure[] {
+  if (until === undefined) return deps;
+  const inside = deps.filter((d) => (d.cancelled ? d.sched : d.est) <= until);
+  return inside.length ? inside : deps.filter((d) => !d.cancelled).slice(0, 1);
 }
 
 export function staticDeparture(prep: PreparedArea, di: number, t: number): Departure {
@@ -325,7 +341,7 @@ export function applyMemory(d: Departure, mem: RtTrip, stopRt: string | undefine
 
 /** Calcule plusieurs tableaux en groupant les appels au relais (un lot par opérateur). */
 export async function buildBoards(reqs: BoardRequest[], rt: RealtimeClient, now: number): Promise<Board[]> {
-  const cands = reqs.map((r) => candidates(r.prep, now, r.limit, requestFilter(r)));
+  const cands = reqs.map((r) => candidates(r.prep, now, r.limit, requestFilter(r), r.until));
 
   const tripIds = new Map<Op, Set<string>>();
   const points = new Set<string>();
@@ -378,7 +394,7 @@ export async function buildBoards(reqs: BoardRequest[], rt: RealtimeClient, now:
       }
     }
     deps.sort(byEst);
-    const departures = uniqueDepartures(deps).slice(0, Math.max(0, r.limit));
+    const departures = withinUntil(uniqueDepartures(deps), r.until).slice(0, Math.max(0, r.limit));
     return {
       area: prep.summary,
       departures,

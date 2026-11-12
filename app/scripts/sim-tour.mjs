@@ -110,7 +110,18 @@ async function launch(url) {
   markSeq = -1;
   pending.length = 0;
   await waitLog((m) => m === 'QUAI_READY', 25_000, 'QUAI_READY');
+  // réglages de démonstration d'une version antérieure : le message « Quai 1.2.3 » d'abord (une capture), puis l'accueil
+  await sleep(300);
+  await drain();
+  if (lastScreen?.screen === 'message' && /^Quai \d/.test(lastScreen.title ?? '')) {
+    if (!newsShot) {
+      newsShot = true;
+      await shotGlasses('news', lastScreen);
+    }
+    await input('click');
+  }
 }
+let newsShot = false;
 
 async function console_() {
   const q = lastId >= 0 ? `?since_id=${lastId}` : '';
@@ -238,7 +249,7 @@ const S3 = { mockLat: 50.8454, mockLon: 4.3571, mockNow: '2026-11-10T13:55:00+01
 const withPreset = (p) => ({ ...p, reset: 1, preset: PRESET });
 
 async function glassesTour() {
-  await step('Scénario 1 : accueil, étapes, suivre, Favoris, Gares', async () => {
+  await step('Scénario 1 : accueil, étapes, suivre, Favoris, Gares, tableau complet, arrêts d’un départ', async () => {
     await launch(pageUrl(withPreset(S1)));
     const home = await waitScreen(homeReady);
     await shotGlasses('home', home);
@@ -263,7 +274,12 @@ async function glassesTour() {
     await input('click');
     await shotGlasses('stations', await waitScreen(is('stations', loaded), 15_000));
     await input('click');
+    // 1.2.3 : tableau complet (ligne ★ en tête, curseur sur le premier départ) ; toucher un départ : ses arrêts
     await shotGlasses('board-station', await waitScreen(is('board', loaded), 15_000));
+    await input('click');
+    await shotGlasses('stops', await waitScreen(is('stops', (s) => loaded(s) && s.lines.length > 2), 15_000, 'arrêts du départ'));
+    await input('double_click');
+    await waitScreen(is('board'));
   });
 
   await step('Scénario 1 en accéléré : voie modifiée, puis dans le train', async () => {
@@ -277,13 +293,21 @@ async function glassesTour() {
     await shotGlasses('train', await waitScreen(is('train', clockAtLeast('08:05')), 90_000, 'dans le train à 08:05'));
   });
 
-  await step('Scénario 2 : lignes proches, détail, garder une ligne, autour de moi, tableaux', async () => {
+  await step('Scénario 2 : lignes proches, détail, arrêts d’un passage, garder une ligne, autour de moi, tableaux', async () => {
     await launch(pageUrl(withPreset(S2)));
     await shotGlasses('lines', await waitScreen(is('lines', loaded), 15_000));
     await input('click');
-    await shotGlasses('line', await waitScreen(is('line', loaded), 15_000));
+    const line = await waitScreen(is('line', loaded), 15_000);
+    await shotGlasses('line', line);
+    // 1.2.3 : toucher un passage : ses arrêts ; « Tous les départs de l'arrêt », en bas : le tableau complet
+    await input('click');
+    await shotGlasses('stops-tram', await waitScreen(is('stops', (s) => loaded(s) && s.lines.length > 2), 15_000, 'arrêts du passage'));
+    await input('double_click');
+    await waitScreen(is('line'));
+    await select((line.items ?? 1) - 1, 15_000);
     await input('click');
     await shotGlasses('board', await waitScreen(is('board', loaded), 15_000));
+    await select(0);
     await input('click');
     await shotGlasses('keep-line', await waitScreen(is('keepLine', loaded), 15_000));
     for (let i = 0; i < 4 && lastScreen?.screen !== 'home'; i++) await input('double_click', 700);

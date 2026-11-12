@@ -19,13 +19,13 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-// Message « Quai 1.2.2 » (PRD-1.2.2 § 9) : la version de l'appli est fixée à 1.2.2 (main la passe à 1.2.2 avec la release).
-vi.mock('../../src/version', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../src/version')>()), APP_VERSION: '1.2.2' }));
+// Message « Quai 1.2.3 » (PRD-1.2.3 § 4) : la version de l'appli est fixée à 1.2.3 (la publication la passe à 1.2.3).
+vi.mock('../../src/version', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../src/version')>()), APP_VERSION: '1.2.3' }));
 import type { Core, Journey, JourneyLabel, Leg } from '../../src/core/api';
 import { textWidth } from '../../src/glasses/font';
 import { layoutPage, geometry, WIDTHS } from '../../src/glasses/layout';
 import { effectiveFrame, initNav } from '../../src/glasses/nav';
-import { NEWS_LINES, stepsPage, type StepsData } from '../../src/glasses/views';
+import { NEWS_LINES, NEWS_LINES_122, stepsPage, type StepsData } from '../../src/glasses/views';
 import { QuaiError } from '../../src/core/errors';
 import { TRIP_KEY, parseTrip, tripPhase } from '../../src/glasses/controller';
 import type { ContainerSpec } from '../../src/glasses/types';
@@ -338,13 +338,17 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     await gesture('tap');
     const d = await until((x) => x.screen === 'line' && x.lines.length > 3);
     expect(d.title).toBe('Tram 3 · Gare du Nord');
-    expect(d.sel).toBe(-1);
+    // 1.2.3 : curseur sur le premier passage ; toucher un passage : ses arrêts (PRD-1.2.3 § 2)
+    expect(d.sel).toBe(0);
     expect(d.lines.filter((l) => l.startsWith('vers ')).sort()).toEqual(['vers Churchill', 'vers Esplanade']);
-    expect(d.lines.at(-1)).toBe('▲▼ passages   toucher : tous les départs   double : retour');
+    expect(d.lines.at(-1)).toBe('▲▼ passages   toucher : arrêts   double : retour');
+    for (let i = 0; i < 9; i++) await gesture('down');
+    expect(last().lines).toContain('Tous les départs de l’arrêt');
     await gesture('tap');
     const b = await until((x) => x.screen === 'board' && x.lines.length > 2);
     expect(b.title).toBe('Gare du Nord, tram (STIB) ★');
-    expect(b.lines.at(-1)).toBe('▲▼ départs   toucher : ★ lignes   double : retour');
+    expect(b.lines[0]).toBe('★ garder une ligne');
+    expect(b.lines.at(-1)).toBe('▲▼ départs   toucher : arrêts   double : retour');
     await gesture('double');
     expect(last()).toMatchObject({ screen: 'line', title: 'Tram 3 · Gare du Nord' });
     await gesture('double');
@@ -361,7 +365,8 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     await gesture('tap');
     const namur = await until((x) => x.screen === 'board' && x.lines.length > 2);
     expect(namur.title).toBe('Namur, train (SNCB) ★');
-    expect(namur.lines.at(-1)).toBe('▲▼ départs   toucher : ★ retirer la gare   double : retour');
+    expect(namur.lines[0]).toBe('★ retirer la gare');
+    expect(namur.lines.at(-1)).toBe('▲▼ départs   toucher : arrêts   double : retour');
     await gesture('double');
     expect(last().screen).toBe('stations');
     c.stop();
@@ -613,9 +618,13 @@ describe('M6 : sans mauvaise surprise', () => {
   it('CA-M6.1, CA-M6.2 et REVUE-USAGE n° 3 : ★ d’une gare : retrait annulable dans les 5 s, à l’identique ; ensuite, un nouvel ajout en fin de « Gares »', async () => {
     const h = await setupController();
     const { c, gesture, last, settings, advance } = h;
-    expect((await openNamur(h)).title).toBe('Namur, train (SNCB) ★');
+    const namur = await openNamur(h);
+    expect(namur.title).toBe('Namur, train (SNCB) ★');
+    // 1.2.3 : la ligne ★ en tête du tableau complet, le curseur sur le premier départ
+    expect(namur).toMatchObject({ sel: 1 });
+    expect(namur.lines[0]).toBe('★ retirer la gare');
     const before = structuredClone(settings.get().stations);
-    await gesture('tap');
+    await gesture('up', 'tap');
     expect(last().lines.at(-1)).toBe('★ Retirée. Toucher encore : annuler');
     expect(last().title).toBe('Namur, train (SNCB)');
     expect(settings.get().stations.some((p) => p.id === 'fav-namur')).toBe(false);
@@ -634,11 +643,10 @@ describe('M6 : sans mauvaise surprise', () => {
     expect(stations.some((p) => p.id === 'fav-namur')).toBe(false);
     // jamais d'arrêt favori (PRD-1.2.2 § 4)
     expect(settings.get().favorites.some((f) => f.kind === 'stop')).toBe(false);
-    // ▲▼ ne déplacent aucun curseur
-    const s = last();
-    await gesture('down', 'up');
-    expect(last().sel).toBe(-1);
-    expect(last().lines.slice(0, 5)).toEqual(s.lines.slice(0, 5));
+    // 1.2.3 : ▼ va au premier départ (le curseur reste sur la ligne ★ après ses touchers)
+    expect(last().sel).toBe(0);
+    await gesture('down');
+    expect(last().sel).toBe(1);
     c.stop();
   });
 
@@ -646,12 +654,13 @@ describe('M6 : sans mauvaise surprise', () => {
     const { c, gesture, until, last, settings, advance } = await setupController({ scenario: 's2' });
     await until(linesReady);
     const before = structuredClone(settings.get().lines);
-    // le tram 3 : son détail, puis tous les départs de l'arrêt ; ★ : « Gare du Nord : garder une ligne »
+    // le tram 3 : son détail, puis tous les départs de l'arrêt (en bas du détail) ; ★ : « Gare du Nord : garder une ligne »
     await gesture('tap');
     await until((x) => x.screen === 'line' && x.lines.length > 3);
+    for (let i = 0; i < 9; i++) await gesture('down');
     await gesture('tap');
     expect((await until((x) => x.screen === 'board' && x.lines.length > 2)).title).toBe('Gare du Nord, tram (STIB) ★');
-    await gesture('tap');
+    await gesture('up', 'tap');
     const keep = await until((x) => x.screen === 'keepLine' && x.lines.length > 2);
     expect(nb(keep.title)).toBe('Gare du Nord : garder une ligne');
     expect(keep.lines).toEqual(['tram 3   ★', 'tram 4   ★', '▲▼ choisir   toucher : ★ garder ou retirer   double : retour']);
@@ -675,7 +684,7 @@ describe('M6 : sans mauvaise surprise', () => {
     const h = await setupController();
     const { c, gesture, until, last, settings } = h;
     await openNamur(h);
-    await gesture('tap', 'double');
+    await gesture('up', 'tap', 'double');
     // Namur était la seule gare : « Gares » vide dit où en choisir
     const st = await until((x) => x.screen === 'stations');
     expect(st.lines).toEqual(['Choisis tes gares dans Quai, sur le téléphone.', 'double toucher : retour']);
@@ -1015,11 +1024,14 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
   });
 });
 
-describe('S2 : message « Quai 1.2.2 », GlassesApi', () => {
-  it('CA-122.6 (et CA-3.2, CA-S2.2, CA-M7.1) : « Quai 1.2.2 » une seule fois après la mise à jour depuis la 1.0 ; T mène à l’accueil', async () => {
+describe('S2 : message « Quai 1.2.3 », GlassesApi', () => {
+  it('CA-123.4 (et CA-3.2, CA-S2.2, CA-M7.1) : « Quai 1.2.3 » une seule fois après la mise à jour depuis la 1.0, avec les nouveautés de la 1.2.2 ; T mène à l’accueil', async () => {
     const a = await setupController({ settings: preset(), keepSeen: true });
-    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.2' });
+    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.3' });
     expect(a.last().lines).toEqual([
+      'Tableaux complets : tous les départs des 2 heures à venir.',
+      'Touche un départ : ses arrêts jusqu’au terminus.',
+      'Bus, tram, métro : ajoute une ligne ou un arrêt.',
       'Nouveau : tes gares et tes lignes sur l’accueil.',
       'Tes arrêts favoris y sont rangés, rien n’est perdu.',
       'Aller à… a rejoint Favoris.',
@@ -1034,32 +1046,33 @@ describe('S2 : message « Quai 1.2.2 », GlassesApi', () => {
     a.c.stop();
     const b = await setupController({ settings: a.settings.get(), keepSeen: true });
     expect((await b.until(homeReady)).screen).toBe('home');
-    expect(b.screens().some((s) => s.title === 'Quai 1.2.2')).toBe(false);
+    expect(b.screens().some((s) => s.title === 'Quai 1.2.3')).toBe(false);
     b.c.stop();
   });
 
-  it('« Quai 1.2.2 » depuis la 1.1, la 1.2.0 et la 1.2.1, les mêmes lignes, une seule fois ; jamais avec la version vue 1.2.2', async () => {
+  it('« Quai 1.2.3 » depuis la 1.1, la 1.2.0 et la 1.2.1 : avec la 1.2.2 ; depuis la 1.2.2 : la 1.2.3 seule ; une seule fois ; jamais avec la version vue 1.2.3', async () => {
     expect(preset11().seenVersion).toBe('1.1.0');
-    for (const seen of ['1.1.0', '1.2.0', '1.2.1']) {
+    for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2']) {
       const a = await setupController({ settings: { ...preset11(), seenVersion: seen }, keepSeen: true });
-      expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.2' });
-      expect(a.last().lines).toEqual([...NEWS_LINES.map(nb), 'toucher : continuer']);
+      expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.3' });
+      const want = seen === '1.2.2' ? NEWS_LINES : [...NEWS_LINES, ...NEWS_LINES_122];
+      expect(a.last().lines).toEqual([...want.map(nb), 'toucher : continuer']);
       await a.gesture('tap');
       await a.until(homeReady);
       await a.settle();
       a.c.stop();
       const b = await setupController({ settings: a.settings.get(), keepSeen: true });
       await b.until(homeReady);
-      expect(b.screens().some((s) => s.title === 'Quai 1.2.2')).toBe(false);
+      expect(b.screens().some((s) => s.title === 'Quai 1.2.3')).toBe(false);
       b.c.stop();
     }
-    const d = await setupController({ settings: { ...preset11(), seenVersion: '1.2.2' }, keepSeen: true });
+    const d = await setupController({ settings: { ...preset11(), seenVersion: '1.2.3' }, keepSeen: true });
     await d.until(homeReady);
-    expect(d.screens().some((s) => s.title === 'Quai 1.2.2')).toBe(false);
+    expect(d.screens().some((s) => s.title === 'Quai 1.2.3')).toBe(false);
     d.c.stop();
   });
 
-  it('nouvelle installation : bienvenue, jamais « Quai 1.2.2 » ; la version vue est écrite', async () => {
+  it('nouvelle installation : bienvenue, jamais « Quai 1.2.3 » ; la version vue est écrite', async () => {
     const { c, last, gesture, until, settings, settle, screens } = await setupController({ settings: defaults({ onboarded: false }) });
     await settle();
     expect(last()).toMatchObject({ screen: 'message', title: 'Quai' });
@@ -1068,7 +1081,7 @@ describe('S2 : message « Quai 1.2.2 », GlassesApi', () => {
     expect(settings.get().seenVersion).toBe(APP_VERSION);
     await gesture('tap');
     expect((await until((s) => s.screen === 'home')).screen).toBe('home');
-    expect(screens().some((s) => s.title === 'Quai 1.2.2')).toBe(false);
+    expect(screens().some((s) => s.title === 'Quai 1.2.3')).toBe(false);
     c.stop();
   });
 

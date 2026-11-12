@@ -415,6 +415,26 @@ describe('fonctions transversales', () => {
     expect(await core.board('stib:404', { near: { ...gdn, name: { fr: 'Arrêt disparu', nl: 'Weg' } } })).toMatchObject({ missing: true, departures: [] });
   });
 
+  it('1.2.3 : tableau complet de 2 h et arrêts d’un départ, sur les données du pipeline et le vrai relais (CA-123.1, CA-123.2)', async () => {
+    const core = coreAt(T('07:31'));
+    const namur = await core.board('sncb:8863008', { horizonMin: 120 });
+    expect(namur.departures.map((d) => `${d.line} ${hhmm(d.sched)}`)).toEqual(['IC 07:42', 'IC 08:42']);
+    const ic = await core.departureStops('sncb:8863008', namur.departures[0]);
+    expect(ic).toMatchObject({ state: 'ok', op: 'sncb', mode: 'train', line: 'IC' });
+    expect(ic.stops.map((s) => s.name.fr)).toEqual(['Namur', 'Gembloux', 'Ottignies', 'Bruxelles-Luxembourg', 'Bruxelles-Schuman', 'Bruxelles-Nord', 'Bruxelles-Central', 'Bruxelles-Midi']);
+    // temps réel du relais : +2 et voie 6 à Namur, propagé gare par gare
+    expect(ic.stops[0]).toMatchObject({ rt: true, delayMin: 2, platform: '4', newPlatform: '6' });
+    expect(ic.stops.every((s) => s.rt && s.delayMin === 2 && !s.cancelled)).toBe(true);
+    // tram 3 à Gare du Nord (12:10, temps réel STIB) : arrêts jusqu'à Churchill, décalés comme le départ
+    const noon = coreAt(T('12:10'));
+    const t3 = (await noon.board('stib:6357F', { horizonMin: 120, limit: 40 })).departures.find((d) => d.line === '3' && d.rt && d.head.fr === 'Churchill')!;
+    const s = await noon.departureStops('stib:6357F', t3);
+    expect(s.stops.map((x) => x.name.fr).at(-1)).toBe('Churchill');
+    expect(s.stops[0]).toMatchObject({ areaId: 'stib:6357F', est: t3.est, rt: true });
+    // voyage disparu : missing, sans exception
+    expect((await noon.departureStops('stib:6357F', { ...t3, line: '99' })).state).toBe('missing');
+  });
+
   it('trains Namur → Gand-Saint-Pierre : une correspondance, au moins 4 min en gare', async () => {
     const now = T('07:31');
     const js = await coreAt(now).trains('sncb:8863008', 'sncb:8892007', now, 3);

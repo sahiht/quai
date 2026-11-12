@@ -201,7 +201,7 @@ export function homeScreen(ctx: PhoneCtx, _sub: string[] = [], opts: { focus?: P
       listRow({ icon: icon('lang'), title: 'Position et langue', sub: LANG_TEXT[s.lang], onClick: () => ctx.go('#/bienvenue') }),
       listRow({ icon: icon('walker'), title: T.trips, sub: typo(tripsSummary(s.maxWalkMin, s.alerts.leaveBeforeMin)), onClick: () => ctx.go('#/trajets') }),
       listRow({ icon: icon('trip'), title: T.myFavs, sub: n ? `${n} favori${n > 1 ? 's' : ''}` : 'Aucun favori', onClick: () => ctx.go('#/favoris') }),
-      listRow({ icon: icon('display'), title: 'Affichage', sub: `${s.display.depsPerStop} départs par arrêt, rayon ${typo(`${s.display.radiusM} m`)}`, onClick: () => ctx.go('#/affichage') }),
+      listRow({ icon: icon('display'), title: 'Affichage', sub: typo(`Rayon ${s.display.radiusM} m`), onClick: () => ctx.go('#/affichage') }),
       listRow({ icon: icon('alert'), title: 'Alertes', sub: alertsSummary(s.alerts), onClick: () => ctx.go('#/alertes') }),
       dataRow,
     ),

@@ -3,7 +3,7 @@
  * Gestes : glisser haut/bas = se déplacer ; toucher = ouvrir/agir ; double toucher = retour,
  * et depuis l'écran racine = quitter (boîte de confirmation système, shutDownPageContainer(1)).
  */
-import { clampTop, ensureVisible, maxTop } from './layout';
+import { clampTop, ensureVisible, maxTop, pageTop } from './layout';
 import type { GlassesView, Intent, Item, Route } from './types';
 import { selectable, tapIntent } from './views';
 
@@ -112,7 +112,7 @@ export function effectiveFrame(f: NavFrame, v: Pick<GlassesView, 'items' | 'init
 export function handleGesture(
   s: NavState,
   g: Gesture,
-  view: Pick<GlassesView, 'items' | 'layout' | 'tap' | 'initialSel' | 'initialTop' | 'scroll' | 'mark'>,
+  view: Pick<GlassesView, 'items' | 'layout' | 'tap' | 'initialSel' | 'initialTop' | 'scroll' | 'mark' | 'paged'>,
   capacity: number,
 ): { state: NavState; effect: NavEffect } {
   const f = current(s);
@@ -142,7 +142,8 @@ export function handleGesture(
       }
       if (!selectable(view as GlassesView) || !view.items.length) return { state: s, effect: { kind: 'none' } };
       const next = Math.min(Math.max(0, sel + (g === 'down' ? 1 : -1)), view.items.length - 1);
-      const nextTop = ensureVisible(view.items as Item[], next, top, capacity);
+      // 1.2.3 : listes longues (tableaux complets, arrêts d'un départ) : la liste défile par page
+      const nextTop = view.paged ? pageTop(view.items as Item[], next, top, capacity) : ensureVisible(view.items as Item[], next, top, capacity);
       if (next === sel && nextTop === top && !f.fresh) return { state: s, effect: { kind: 'none' } };
       return { state: setSelection(s, next, nextTop), effect: next === sel && nextTop === top ? { kind: 'none' } : { kind: 'render' } };
     }
@@ -155,7 +156,7 @@ export function serializeNav(s: NavState): string {
 }
 
 /** Écrans connus (un instantané de la 1.0 peut contenir un écran retiré en 1.1 : « journeys », « trip », Q6). */
-const SCREENS: ReadonlySet<string> = new Set(['home', 'nearby', 'board', 'favorites', 'stations', 'lines', 'line', 'keepLine', 'steps', 'others', 'followed', 'train', 'arrival', 'message']);
+const SCREENS: ReadonlySet<string> = new Set(['home', 'nearby', 'board', 'favorites', 'stations', 'lines', 'line', 'keepLine', 'stops', 'steps', 'others', 'followed', 'train', 'arrival', 'message']);
 
 /**
  * Lecture défensive d'un instantané ; null s'il est invalide. Les écrans inconnus sont retirés de la pile. 1.2.2 : un

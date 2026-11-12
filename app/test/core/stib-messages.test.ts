@@ -136,8 +136,9 @@ describe('tableaux STIB : mentions de service', () => {
     env.server.relay.stib.points['6357'] = [{ line: '3', dest: { fr: 'CHURCHILL', nl: 'CHURCHILL' }, times: [T('12:12')], msg: 'Dernier passage' }];
     const b = await env.core.board('stib:6357F', { limit: 1, filter: [{ line: '3', head: 'churchill' }] });
     b.departures[0].head = { fr: 'Une destination vraiment très longue pour la colonne', nl: 'x' };
+    // 1.2.3 : la ligne « ★ » est en tête du tableau, le départ ensuite
     const lines = glassesLines(boardView(b, { now: env.clock.t, settings: settings() }, { kept: false }));
-    expect(lines[0]).toMatch(/^T3 {3}Une destination vraiment.*…, dernier {3}2 min$/);
+    expect(lines.find((l) => l.startsWith('T3'))).toMatch(/^T3 {3}Une destination vraiment.*…, dernier {3}2 min$/);
   });
 });
 

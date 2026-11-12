@@ -1,6 +1,14 @@
 # Passer Quai à une nouvelle version (bêta)
 
-Ce guide sert à chaque nouvelle version de Quai. La dernière est la 1.2.2. Il faut environ 10 minutes, un ordinateur (ou le téléphone) pour le portail Even Hub, puis le téléphone.
+Ce guide sert à chaque nouvelle version de Quai. La dernière est la 1.2.3. Il faut environ 10 minutes, un ordinateur (ou le téléphone) pour le portail Even Hub, puis le téléphone.
+
+## Ce qui change avec la 1.2.3
+
+- Tableaux complets : une gare ou un arrêt montre tous ses départs des 2 prochaines heures, page par page avec ▲▼. Le réglage « Départs par arrêt » disparaît.
+- Touche un départ : ses arrêts jusqu'au terminus, avec l'heure, la voie et le retard pour un train. Touche un arrêt de la liste pour voir ses départs.
+- « Bus, tram, métro » : sur le téléphone, ajoute une ligne (son numéro, puis l'arrêt) ou un arrêt avec toutes ses lignes.
+
+Si tu passes directement de la 1.2.1 à la 1.2.3, voici aussi ce qu'apportait la 1.2.2.
 
 ## Ce qui change avec la 1.2.2
 
@@ -29,7 +37,7 @@ Quand une nouvelle version est publiée sur GitHub (page « Releases » du dép�
 
 ### 1. Télécharger le paquet
 
-Ouvre https://github.com/sahiht/quai/releases/latest. La page s'appelle « Quai v1.2.2 ». Dans « Assets » (fichiers joints), touche `quai.ehpk` pour le télécharger. L'icône ne change pas : inutile de la reprendre.
+Ouvre https://github.com/sahiht/quai/releases/latest. La page s'appelle « Quai v1.2.3 ». Dans « Assets » (fichiers joints), touche `quai.ehpk` pour le télécharger. L'icône ne change pas : inutile de la reprendre.
 
 ![Télécharger quai.ehpk](img/maj/maj-1-release.png)
 
@@ -41,13 +49,13 @@ Va sur https://hub.evenrealities.com et connecte-toi avec le même compte que da
 
 ### 3. Déposer le nouveau paquet
 
-Onglet « Builds » (paquets). Touche le bouton « + » en haut à droite et choisis le fichier `quai.ehpk` téléchargé. Une ligne « v1.2.2 » apparaît sous « Private builds » (paquets privés), avec une étiquette grise « Private » (privé).
+Onglet « Builds » (paquets). Touche le bouton « + » en haut à droite et choisis le fichier `quai.ehpk` téléchargé. Une ligne « v1.2.3 » apparaît sous « Private builds » (paquets privés), avec une étiquette grise « Private » (privé).
 
 ![Déposer le paquet](img/maj/maj-3-evenhub-builds.png)
 
 ### 4. Passer la version en bêta
 
-Sur la ligne « v1.2.2 », touche l'étiquette grise « Private ». Choisis « Beta » (bêta), puis confirme avec « Promote to Beta » (passer en bêta).
+Sur la ligne « v1.2.3 », touche l'étiquette grise « Private ». Choisis « Beta » (bêta), puis confirme avec « Promote to Beta » (passer en bêta).
 
 ![Passer en bêta](img/maj/maj-4-promote.png)
 
@@ -61,11 +69,11 @@ Dans l'appli Even Realities : onglet « Me » (moi), puis « Beta tester » (tes
 
 ### 6. Ouvrir Quai sur les lunettes
 
-À la première ouverture, les lunettes affichent une fois le message « Quai 1.2.2 » avec les nouveautés. Touche pour continuer.
+À la première ouverture, les lunettes affichent une fois le message « Quai 1.2.3 » avec les nouveautés. Touche pour continuer.
 
 ### 7. Vérifier
 
-Sur le téléphone, ouvre Quai, puis « Données » : la ligne « Version de Quai » doit dire « 1.2.2 ». Dans les lunettes, l'accueil montre « Favoris », « Autour de moi », « Gares » et « Bus, tram, métro ».
+Sur le téléphone, ouvre Quai, puis « Données » : la ligne « Version de Quai » doit dire « 1.2.3 ». Dans les lunettes, l'accueil montre « Favoris », « Autour de moi », « Gares » et « Bus, tram, métro ».
 
 ## En cas de souci
 
@@ -73,7 +81,7 @@ Sur le téléphone, ouvre Quai, puis « Données » : la ligne « Version de Qua
 |---|---|
 | Even Hub refuse le fichier | Ce numéro de version est déjà déposé. Vérifie que tu as bien pris le paquet de la dernière release. |
 | « test version expired » sur le téléphone | La version n'est pas en « Beta », ou ton invitation n'est plus « Active » dans « Testing group ». |
-| Les lunettes montrent encore l'ancienne version | Quitte Quai (double toucher à l'accueil), puis rouvre-le. Sur le téléphone, vérifie dans « Beta tester » que la version 1.2.2 est installée. |
+| Les lunettes montrent encore l'ancienne version | Quitte Quai (double toucher à l'accueil), puis rouvre-le. Sur le téléphone, vérifie dans « Beta tester » que la version 1.2.3 est installée. |
 | Un trajet propose plus de marche que ton réglage | Aucun trajet qui marche moins n'arrive assez tôt : au-delà de ta marche maximale, chaque minute à pied compte triple. Au bout des étapes, ▼ ouvre les autres trajets. Tu peux changer « Marche maximale » dans « Trajets », sur le téléphone. |
 | « Gares » ou « Bus, tram, métro » disent « à choisir » | Ajoute tes gares et tes lignes sur le téléphone, dans Quai : rubriques « Gares » et « Bus, tram, métro » de l'accueil. |
 | « Adresses indisponibles pour l'instant » | Le service d'adresses ne répond pas. Les gares et les arrêts restent utilisables ; réessaie plus tard. |

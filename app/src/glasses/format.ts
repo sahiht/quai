@@ -3,7 +3,7 @@
  * 1.1 : textes exacts du PRD § 6.1 ; jours et attentes selon core/text.ts (« demain » jamais avant 04:00,
  * « imminent »), titres des trajets par vers() du cœur, comme sur le téléphone.
  */
-import type { Departure, FavoriteAnswer, Journey, Leg, LineDeparture, NameLang, PlanResult, Settings } from '../core/api';
+import type { Departure, FavoriteAnswer, Journey, Leg, LineDeparture, NameLang, PlanResult, Settings, StopCall } from '../core/api';
 import { meansText, rideName } from '../core/means';
 import { NB as CORE_NB, dayWord as coreDayWord, timeText, vers } from '../core/text';
 import { OP_NAME, displayName, hhmm, lineLabel, mainMode, minutesUntil } from '../core/util';
@@ -19,11 +19,13 @@ export const HINTS = {
   /** Quai Web : rien à quitter, l'onglet se ferme dans le navigateur. */
   homeWeb: `▲▼ choisir   toucher${NB}: ouvrir`,
   nearby: `▲▼ arrêt   toucher${NB}: départs   double${NB}: retour`,
-  /** 1.2.2 (REVUE-USAGE n° 3) : départs d'une gare SNCB : ★ la garde dans « Gares » ou l'en retire. */
-  boardStation: `▲▼ départs   toucher${NB}: ★ garder la gare   double${NB}: retour`,
-  boardStationKept: `▲▼ départs   toucher${NB}: ★ retirer la gare   double${NB}: retour`,
-  /** 1.2.2 : départs d'un arrêt de bus, tram ou métro : ★ ouvre « garder une ligne ». */
-  boardStop: `▲▼ départs   toucher${NB}: ★ lignes   double${NB}: retour`,
+  /**
+   * 1.2.3 (PRD-1.2.3 § 1) : tableau complet d'une gare ou d'un arrêt, curseur de départ en départ ; toucher un départ :
+   * ses arrêts (la ligne ★ en tête garde ou retire la gare, ou ouvre « garder une ligne »).
+   */
+  board: `▲▼ départs   toucher${NB}: arrêts   double${NB}: retour`,
+  /** 1.2.3 (§ 2) : les arrêts d'un départ ; toucher un arrêt : son tableau. */
+  stops: `▲▼ arrêts   toucher${NB}: départs   double${NB}: retour`,
   /** 1.2.2 : « {arrêt} : garder une ligne ». */
   keepLine: `▲▼ choisir   toucher${NB}: ★ garder ou retirer   double${NB}: retour`,
   favorites: `▲▼ choisir   toucher${NB}: ouvrir   double${NB}: retour`,
@@ -31,8 +33,8 @@ export const HINTS = {
   stations: `▲▼ choisir   toucher${NB}: départs   double${NB}: retour`,
   /** 1.2.2 : « Bus, tram, métro » (§ 3) : détail d'une ligne, ou départs d'un arrêt « toutes les lignes ». */
   lines: `▲▼ choisir   toucher${NB}: ouvrir   double${NB}: retour`,
-  /** 1.2.2 : détail d'une ligne à son arrêt. */
-  line: `▲▼ passages   toucher${NB}: tous les départs   double${NB}: retour`,
+  /** 1.2.2 : détail d'une ligne à son arrêt ; 1.2.3 : toucher un passage, ses arrêts (« Tous les départs » : le tableau). */
+  line: `▲▼ passages   toucher${NB}: arrêts   double${NB}: retour`,
   /** Étapes du trajet suivi (1.2.1 : ▲▼ font défiler les étapes ; 1.2.2 : toucher propose « Ne plus suivre »). */
   steps: `▲▼ étapes   toucher${NB}: ne plus suivre   double${NB}: retour`,
   /** Étapes d'une autre proposition, ou d'un trajet ouvert et pas encore suivi (1.2.2). */
@@ -55,7 +57,7 @@ export const HINTS = {
   firstRun: `toucher${NB}: continuer   double${NB}: quitter`,
   /** Quai Web : rien à quitter, l'onglet se ferme dans le navigateur. */
   firstRunWeb: `toucher${NB}: continuer`,
-  /** Message « Quai 1.2.2 ». */
+  /** Message « Quai 1.2.3 ». */
   news: `toucher${NB}: continuer`,
   quit: `double toucher${NB}: quitter`,
 } as const;
@@ -95,6 +97,36 @@ export const SECTION = {
   /** Dernière ligne du détail d'une ligne : le tableau de l'arrêt. */
   allDepartures: 'Tous les départs de l’arrêt',
 } as const;
+
+/** 1.2.3 : textes du tableau complet et des arrêts d'un départ (PRD-1.2.3 § 1, § 2). */
+export const BOARD = {
+  /** Ligne ★ en tête du tableau d'une gare SNCB (toucher : comme le toucher de la 1.2.2). */
+  keepStation: '★ garder la gare',
+  dropStation: '★ retirer la gare',
+  /** Ligne ★ en tête du tableau d'un arrêt de bus, tram ou métro : « {arrêt} : garder une ligne ». */
+  keepLine: '★ garder une ligne',
+  /** Aucun départ dans les 2 heures, ni plus tard dans l'horizon des tableaux. */
+  none: 'aucun départ',
+  /** Arrêts d'un départ : voyage disparu des données. */
+  vanished: 'Ce départ n’est plus dans les horaires.',
+  /** Tableau complet : tous les départs des 2 prochaines heures, 40 au plus. */
+  horizonMin: 120,
+  limit: 40,
+} as const;
+
+/**
+ * 1.2.3 (§ 2) : heure d'un arrêt d'un départ, comme sur les tableaux des gares : l'heure prévue, « ~ » sans temps réel,
+ * le retard (« 08:44 +3 ») ; un arrêt supprimé garde son heure prévue, sans « ~ ».
+ */
+export function stopTimeText(c: Pick<StopCall, 'sched' | 'rt' | 'delayMin' | 'cancelled'>, markPlanned: boolean): string {
+  if (c.cancelled) return hhmm(c.sched);
+  return `${plannedMark(c.rt, markPlanned)}${hhmm(c.sched)}${delaySuffix(c.delayMin)}`;
+}
+
+/** 1.2.3 (§ 2) : à droite d'un arrêt d'un départ : « SUPPRIMÉ », sinon la voie (« voie 9 », modifiée : « voie 6 ! »). */
+export function stopRightText(c: Pick<StopCall, 'platform' | 'newPlatform' | 'cancelled'>): string {
+  return c.cancelled ? 'SUPPRIMÉ' : platformText(c.platform, c.newPlatform);
+}
 
 /**
  * 1.2.2 : passage qui s'arrête avant le terminus de son sens (PRD-1.2.2 § 3) : marqué « * » dans « Bus, tram, métro »,

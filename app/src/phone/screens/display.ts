@@ -1,11 +1,14 @@
-/** Réglage 4 sur 6 : affichage (T5), avec aperçu en direct de l'accueil des lunettes et de ses favoris. Maquette Config4. */
+/**
+ * Réglage 4 sur 6 : affichage (T5), avec aperçu en direct de l'accueil des lunettes et de ses favoris. Maquette Config4.
+ * 1.2.3 (PRD-1.2.3 § 1) : plus de « Départs par arrêt », les tableaux montrent tous les départs des 2 prochaines heures
+ * (la valeur enregistrée, display.depsPerStop, reste et n'est plus lue).
+ */
 import type { Settings } from '../../core/api';
-import { LIMITS } from '../../settings';
 import { header, type PhoneCtx } from '../app';
 import { h } from '../dom';
 import { homePreview } from '../samples';
 import { typo } from '../text';
-import { glassesPreview, radios, segmented, stepper, switchRow } from '../ui';
+import { glassesPreview, radios, segmented, switchRow } from '../ui';
 
 export function displayScreen(ctx: PhoneCtx): HTMLElement {
   const s = ctx.settings.get();
@@ -24,19 +27,9 @@ export function displayScreen(ctx: PhoneCtx): HTMLElement {
     h(
       'div',
       { class: 'box' },
-      stepper({
-        label: 'Départs par arrêt',
-        value: s.display.depsPerStop,
-        min: LIMITS.depsPerStop[0],
-        max: LIMITS.depsPerStop[1],
-        format: (v) => String(v),
-        less: 'Un départ de moins',
-        more: 'Un départ de plus',
-        onChange: (v) => set((d) => ({ ...d, depsPerStop: v })),
-      }),
       h(
         'div',
-        { class: 'bordered', style: 'padding:12px 16px' },
+        { style: 'padding:12px 16px' },
         segmented<300 | 500 | 800>({
           legend: 'Rayon de « Autour de moi »',
           value: s.display.radiusM,

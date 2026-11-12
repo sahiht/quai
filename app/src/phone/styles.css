@@ -277,6 +277,8 @@ input.switch:checked::after { left: 21px; }
 .row.opt .meta { flex-shrink: 0; font-size: 13px; line-height: 18px; color: var(--muted); white-space: nowrap; }
 .field-note.err { color: #8a2a1d; }
 .step, .after-add, .quick, .jump-box { display: flex; flex-direction: column; }
+/* 1.2.3 : « Une ligne » et « Un arrêt », les deux choix de l'ajout dans « Bus, tram, métro » */
+.line-add, .stop-add { display: flex; flex-direction: column; gap: 14px; }
 .step { gap: 12px; }
 .after-add { gap: 8px; }
 .quick { gap: 6px; }

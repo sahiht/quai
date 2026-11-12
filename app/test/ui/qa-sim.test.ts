@@ -103,7 +103,7 @@ describe('départs des trains pendant une panne du temps réel', () => {
     const at = Date.parse('2026-11-10T12:34:00+01:00');
     const d = { line: 'S1', mode: 'train', op: 'sncb', head: { fr: 'Nivelles', nl: 'Nijvel' }, sched: at, est: at, rt: false, cancelled: true, platform: '5' } as unknown as Departure;
     expect(trainCell(d, true)).toBe('12:34  SUPPRIMÉ');
-    const v: GlassesView = { screen: 'board', layout: 'boardTrain', title: 'Bruxelles-Nord, train (SNCB)', clock: '12:11', items: [{ a: 'S1', b: 'Nivelles', c: trainCell(d, true) }], hints: HINTS.boardStation, reserveNote: true, note: 'Temps réel indisponible : horaires prévus ~' };
+    const v: GlassesView = { screen: 'board', layout: 'boardTrain', title: 'Bruxelles-Nord, train (SNCB)', clock: '12:11', items: [{ a: 'S1', b: 'Nivelles', c: trainCell(d, true) }], hints: HINTS.board, reserveNote: true, note: 'Temps réel indisponible : horaires prévus ~' };
     const p = layoutPage(v, { sel: 0, top: 0 });
     expect(nb(p.lines[0])).toBe('S1   Nivelles   12:34  SUPPRIMÉ');
     expect(overflowing(p)).toEqual([]);

@@ -1,0 +1,132 @@
+/**
+ * 1.2.3 (PRD-1.2.3 § 1, § 2) : tableau complet (board avec `horizonMin`) et arrêts d'un départ (departureStops) du
+ * vrai cœur sur les fixtures (createCore). Données réelles : test/core/departure-stops-real.test.ts (QUAI_REAL).
+ */
+import { describe, expect, it } from 'vitest';
+import type { Departure, DepartureStops } from '../../src/core/api';
+import { QuaiError } from '../../src/core/errors';
+import { hhmm } from '../../src/core/util';
+import { makeEnv } from './support/env';
+
+const IC_0742 = '88____:007::8863008:8814001:10:852:20261231';
+const dep = (d: Departure) => `${d.line} ${hhmm(d.sched)}${d.rt ? (d.delayMin ? `+${d.delayMin}` : '') : '~'}${d.cancelled ? ' supprimé' : ''}`;
+const calls = (s: DepartureStops) =>
+  s.stops.map((x) => `${hhmm(x.sched)} ${x.name.fr}${x.cancelled ? ' supprimé' : x.rt ? (x.delayMin ? ` +${x.delayMin}` : '') : ' ~'}${x.platform ? ` v${x.platform}` : ''}${x.newPlatform ? `→${x.newPlatform}` : ''}`);
+
+describe('board avec horizonMin : tous les départs de l’horizon', () => {
+  it('2 h : tous les départs, dans l’ordre, 40 au plus par défaut, `limit` plafond ; sans horizonMin, comme avant', async () => {
+    const { core } = makeEnv({ now: '2026-11-10T07:31' });
+    const gdn = await core.board('stib:6357F', { horizonMin: 120 });
+    expect(gdn.departures).toHaveLength(40);
+    expect(gdn.departures.every((d, i) => i === 0 || d.est >= gdn.departures[i - 1].est)).toBe(true);
+    const nord = await core.board('delijn:308611', { horizonMin: 120, limit: 40 });
+    expect(nord.departures.length).toBe(17);
+    expect(nord.departures.every((d) => d.est <= Date.parse('2026-11-10T09:31:00+01:00'))).toBe(true);
+    expect((await core.board('delijn:308611', { horizonMin: 120, limit: 5 })).departures).toHaveLength(5);
+    expect((await core.board('delijn:308611', { horizonMin: 30 })).departures.map(dep)).toEqual(['232 07:30~', '232 07:45~', '460 07:48~', '270 07:52~', '232 08:00~']);
+    expect((await core.board('stib:6357F')).departures).toHaveLength(8);
+    expect((await core.board('sncb:8863008', { horizonMin: 120 })).departures.map(dep)).toEqual(['IC 07:42+2', 'IC 08:42~']);
+  });
+
+  it('rien dans l’horizon : le prochain départ, même plus tard ; un supprimé reste à sa place', async () => {
+    // 04:00 : rien avant 06:00 à Namur (fixtures : premier IC à 07:42)
+    const env = makeEnv({ now: '2026-11-10T04:00' });
+    expect((await env.core.board('sncb:8863008', { horizonMin: 120 })).departures.map((d) => `${d.line} ${hhmm(d.sched)}`)).toEqual(['IC 07:42']);
+    const day = makeEnv({ now: '2026-11-10T07:31' });
+    day.server.relay.rt.sncb.trips['88____:007::8863008:8814001:10:952:20261231'] = { cancelled: true, u: [] };
+    // l'IC de 08:42 n'a pas encore de temps réel (6 h au plus) : supprimé à son heure
+    expect((await day.core.board('sncb:8863008', { horizonMin: 120 })).departures.map(dep)).toEqual(['IC 07:42+2', 'IC 08:42 supprimé']);
+  });
+});
+
+describe('departureStops : les arrêts d’un départ jusqu’au terminus', () => {
+  it('train : voies, retard gare par gare, voie modifiée, arrêt sauté, jusqu’au terminus', async () => {
+    const env = makeEnv({ now: '2026-11-10T07:31' });
+    env.server.relay.rt.sncb.trips[IC_0742] = {
+      u: [
+        [1, '8863008_6', 120, null, 0],
+        [5, '8811916_2', null, null, 1],
+        [7, '8813003_5', 240, null, 0],
+        [8, '8814001_15', 300, null, 0],
+      ],
+    };
+    const [ic] = (await env.core.board('sncb:8863008', { horizonMin: 120 })).departures;
+    const s = await env.core.departureStops('sncb:8863008', ic);
+    expect(s).toMatchObject({ state: 'ok', op: 'sncb', mode: 'train', line: 'IC', head: { fr: 'Bruxelles-Midi' }, anyPlanned: false });
+    expect(calls(s)).toEqual([
+      '07:42 Namur +2 v4→6',
+      '07:55 Gembloux +2 v1',
+      '08:09 Ottignies +2 v2',
+      '08:31 Bruxelles-Luxembourg +2 v1',
+      '08:35 Bruxelles-Schuman supprimé v2',
+      '08:40 Bruxelles-Nord +2 v11',
+      '08:46 Bruxelles-Central +4 v3→5',
+      '08:52 Bruxelles-Midi +5 v15',
+    ]);
+    expect(s.stops[0]).toMatchObject({ areaId: 'sncb:8863008', sched: ic.sched, est: ic.est, delayMin: 2 });
+    expect(s.stops[4]).toMatchObject({ areaId: 'sncb:8811916', cancelled: true, est: s.stops[4].sched, delayMin: 0 });
+    // l'IC suivant : sans temps réel, horaire prévu (« ~ »)
+    const next = (await env.core.board('sncb:8863008', { horizonMin: 120 })).departures[1];
+    const n = await env.core.departureStops('sncb:8863008', next);
+    expect(n.anyPlanned).toBe(true);
+    expect(calls(n).slice(0, 2)).toEqual(['08:42 Namur ~ v5', '08:55 Gembloux ~ v1']);
+    // depuis une gare du parcours : à partir de cette gare
+    const lux = (await env.core.board('sncb:8811304', { limit: 1 })).departures[0];
+    expect(calls(await env.core.departureStops('sncb:8811304', lux))[0]).toBe('08:31 Bruxelles-Luxembourg +2 v1');
+  });
+
+  it('voyage supprimé : chaque arrêt supprimé ; relais en panne : horaire prévu', async () => {
+    const env = makeEnv({ now: '2026-11-10T07:31' });
+    env.server.relay.rt.sncb.trips[IC_0742] = { cancelled: true, u: [] };
+    const [ic] = (await env.core.board('sncb:8863008', { limit: 1 })).departures;
+    expect(ic.cancelled).toBe(true);
+    const s = await env.core.departureStops('sncb:8863008', ic);
+    expect(s.stops.every((x) => x.cancelled && x.est === x.sched)).toBe(true);
+    const down = makeEnv({ now: '2026-11-10T07:31', scene: 'noRT' });
+    const [d] = (await down.core.board('sncb:8863008', { limit: 1 })).departures;
+    const p = await down.core.departureStops('sncb:8863008', d);
+    expect(p.anyPlanned).toBe(true);
+    expect(p.stops.every((x) => !x.rt && x.est === x.sched && !x.cancelled)).toBe(true);
+    expect(p.stops.map((x) => x.name.fr).at(-1)).toBe('Bruxelles-Midi');
+  });
+
+  it('tram STIB : temps réel au départ, heures suivantes décalées ; plus loin, horaire prévu', async () => {
+    const { core } = makeEnv({ now: '2026-11-10T12:10' });
+    const board = (await core.board('stib:6357F', { horizonMin: 60 })).departures;
+    const live = board.find((d) => d.line === '3' && d.rt && d.head.fr === 'Churchill')!;
+    const s = await core.departureStops('stib:6357F', live);
+    expect(s).toMatchObject({ state: 'ok', op: 'stib', mode: 'tram', line: '3', head: { fr: 'Churchill' }, anyPlanned: false });
+    expect(calls(s)).toEqual(['12:12 Gare du Nord', '12:14 Rogier', '12:16 De Brouckere', '12:17 Bourse', '12:22 Gare du Midi', '12:37 Churchill']);
+    const planned = board.find((d) => d.line === '4' && !d.rt)!;
+    const p = await core.departureStops('stib:6357F', planned);
+    expect(p.anyPlanned).toBe(true);
+    expect(p.stops.map((x) => x.name.fr)).toEqual(['Gare du Nord', 'Rogier', 'De Brouckere', 'Bourse', 'Gare du Midi', 'Stalle']);
+    expect(p.stops.every((x) => !x.rt)).toBe(true);
+  });
+
+  it('bus TEC : retard connu au départ, arrêts suivants décalés ; bus De Lijn : horaire prévu et quai', async () => {
+    const { core } = makeEnv({ now: '2026-11-10T07:45' });
+    const five = (await core.board('tec:N509aaa', { horizonMin: 30 })).departures.find((d) => d.line === '5' && d.rt)!;
+    expect(dep(five)).toBe('5 07:50+3');
+    const s = await core.departureStops('tec:N509aaa', five);
+    expect(calls(s)).toEqual(['07:50 Namur Place Léopold +3', '07:54 Namur Gare +3', '08:05 Bouge Église +3']);
+    expect(s.stops.map((x) => hhmm(x.est))).toEqual(['07:53', '07:57', '08:08']);
+    const dl = (await core.board('delijn:308611', { horizonMin: 30 })).departures.find((d) => d.line === '270')!;
+    expect(calls(await core.departureStops('delijn:308611', dl))).toEqual(['07:52 Bruxelles-Nord ~ v4', '08:27 Gare de Kortenberg ~']);
+  });
+
+  it('voyage disparu, autre zone, zone inconnue : missing sans exception ; serveur injoignable : erreur', async () => {
+    const env = makeEnv({ now: '2026-11-10T07:31' });
+    const [ic] = (await env.core.board('sncb:8863008', { limit: 1 })).departures;
+    expect(await env.core.departureStops('sncb:8863008', { ...ic, tripId: 'disparu' })).toMatchObject({ state: 'missing', stops: [], line: 'IC', anyPlanned: false });
+    expect((await env.core.departureStops('sncb:8874005', ic)).state).toBe('missing');
+    expect((await env.core.departureStops('sncb:404', ic)).state).toBe('missing');
+    const tram = { op: 'stib', mode: 'tram', line: '99', head: { fr: 'Nulle part', nl: 'Nergens' }, sched: ic.sched, est: ic.sched, rt: false, delayMin: 0, cancelled: false } as Departure;
+    expect((await env.core.departureStops('stib:6357F', tram)).state).toBe('missing');
+    const fresh = makeEnv({ now: '2026-11-10T07:31' });
+    const [d] = (await fresh.core.board('tec:Bwategl1', { limit: 1 })).departures;
+    fresh.server.networkDown = true;
+    // fichier de ligne pas encore lu : l'erreur réseau remonte
+    await expect(fresh.core.departureStops('tec:Bwategl1', d)).rejects.toBeInstanceOf(QuaiError);
+  });
+});
