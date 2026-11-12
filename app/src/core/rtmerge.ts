@@ -126,6 +126,18 @@ export function rtAtStop(trip: RtTrip | null | undefined, ref: StopRef, ctx: Tri
   return finish({ rt: true, est: ref.sched, cancelled: false, delaySec: 0 });
 }
 
+/**
+ * 1.2.3 (revue) : temps réel d'un arrêt dont l'heure montrée (`shown`, l'arrivée) n'est pas celle que donne le flux.
+ * Le relais donne l'heure et le retard du départ quand il existe, sinon de l'arrivée (relay/lib/gtfsrt.ts) : `ref.sched`
+ * est donc le départ prévu (l'arrivée au terminus), et l'écart trouvé pour lui s'applique à l'heure montrée. Sans cela,
+ * l'arrêt en gare (arrivée 08:40, départ 08:41) passait pour du retard (« +1 » d'un train à l'heure).
+ */
+export function rtAtStopShown(trip: RtTrip | null | undefined, ref: StopRef, shown: number, ctx: TripContext = {}): RtAtStop {
+  const r = rtAtStop(trip, ref, ctx);
+  const shift = r.est - ref.sched;
+  return { ...r, est: shown + shift, delaySec: r.cancelled ? 0 : Math.round(shift / 1000) };
+}
+
 /** Retard affiché : arrondi à la minute, jamais négatif. */
 export function delayMinutes(est: number, sched: number): number {
   return Math.max(0, Math.round((est - sched) / 60_000));

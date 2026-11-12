@@ -18,7 +18,7 @@ import type { Departure, DepartureStops, StopCall } from './api';
 import type { PreparedArea } from './areas';
 import { flagsOf, isLineFile, linePath, soft } from './linepicks';
 import type { RealtimeClient, RtTrip } from './realtime';
-import { delayMinutes, headKey, headScore, rtAtStop, rtOccurrence, type TripContext } from './rtmerge';
+import { delayMinutes, headKey, headScore, rtAtStop, rtAtStopShown, rtOccurrence, type TripContext } from './rtmerge';
 import { indexDay } from './trains';
 
 const MIN = 60_000;
@@ -53,6 +53,8 @@ interface Found {
   pi: number;
   day: number;
   minutes: number;
+  /** STIB : destination absente des motifs (véhicule limité) : motif de la ligne à cet arrêt, coupé à la destination. */
+  cut?: boolean;
 }
 
 /** Le départ dans le fichier de sa zone, null s'il n'y est plus. */
@@ -74,14 +76,19 @@ export function locateDeparture(prep: PreparedArea, dep: Departure): Found | nul
   }
   if (prep.file.op !== 'stib') return null;
   // STIB (passages annoncés ou horaire prévu, sans trip_id) : même ligne, destination proche ; le départ prévu le plus
-  // proche à cet arrêt (1 h au plus) prête sa suite exacte, sinon le motif seul ; aucun motif : disparu
+  // proche à cet arrêt (1 h au plus) prête sa suite exacte, sinon le motif seul. Revue 1.2.3 : destination inconnue
+  // des motifs (véhicule limité, destination donnée par la STIB) : les motifs de la ligne à cet arrêt (même sens),
+  // coupés ensuite à la destination ; aucun : disparu.
   const fr = headKey(dep.head?.fr ?? '');
   const nl = headKey(dep.head?.nl ?? '');
-  const pats: number[] = [];
+  const si = prep.file.stops.findIndex((st) => st.id === dep.stopId);
+  let pats: number[] = [];
   prep.file.patterns.forEach((p, pi) => {
     if (p.line !== dep.line) return;
     if (Math.max(headScore(fr, prep.headKeys[pi]), headScore(nl, prep.headKeysNl[pi]), headScore(fr, prep.headKeysNl[pi]), headScore(nl, prep.headKeys[pi])) > 0) pats.push(pi);
   });
+  const cut = !pats.length;
+  if (cut) pats = si >= 0 ? (prep.patternsAtStop[si] ?? []).filter((pi) => prep.file.patterns[pi]?.line === dep.line) : [];
   if (!pats.length) return null;
   let best: Found | null = null;
   let gap = Infinity;
@@ -90,10 +97,10 @@ export function locateDeparture(prep: PreparedArea, dep: Departure): Found | nul
     const g = Math.abs(prep.times[di] - dep.sched);
     if (g < gap) [best, gap] = [{ di, pi: d[2], day: d[0], minutes: d[1] }, g];
   });
-  if (best && gap <= STIB_MATCH_MS) return best;
-  const si = prep.file.stops.findIndex((st) => st.id === dep.stopId);
+  const extra = cut ? { cut: true } : {};
+  if (best && gap <= STIB_MATCH_MS) return { ...(best as Found), ...extra };
   const atStop = si >= 0 ? pats.find((pi) => prep.patternsAtStop[si]?.includes(pi)) : undefined;
-  return { di: -1, pi: atStop ?? pats[0], day: 0, minutes: -1 };
+  return { di: -1, pi: atStop ?? pats[0], day: 0, minutes: -1, ...extra };
 }
 
 /** Les arrêts d'un départ du tableau de `env.prep`. */
@@ -154,12 +161,15 @@ async function trainCalls(env: StopCallsEnv, dep: Departure, found: Found): Prom
     const t = timesOf(x);
     const sched = day.base + (p === i ? t.dep : t.arr) * MIN;
     const platform = x[3] || undefined;
-    const ref = { seq: x[4], stopId: st ? `${uicOf(st.id)}${platform ? `_${platform}` : ''}` : undefined, sched, platform };
+    // revue 1.2.3 : le flux donne l'heure du départ quand il existe (l'arrivée au terminus) : c'est la référence ; l'heure
+    // montrée (l'arrivée) en est décalée d'autant, l'arrêt en gare n'est pas du retard
+    const refMin = p === s.length - 1 || x[2] < 0 ? t.arr : t.dep;
+    const ref = { seq: x[4], stopId: st ? `${uicOf(st.id)}${platform ? `_${platform}` : ''}` : undefined, sched: day.base + refMin * MIN, platform };
     const c: StopCall = { name: st?.n ?? { fr: '', nl: '' }, sched, est: sched, rt: false, delayMin: 0 };
     if (st) c.areaId = st.id;
     if (platform) c.platform = platform;
     if (trip) {
-      const r = rtAtStop(trip, ref, ctx);
+      const r = rtAtStopShown(trip, ref, sched, ctx);
       c.rt = r.rt;
       if (r.cancelled) c.cancelled = true;
       else {
@@ -229,6 +239,16 @@ async function urbanCalls(env: StopCallsEnv, dep: Departure, found: Found): Prom
       if (f) names.set(lacking[k], f.file.n);
     });
   }
+  // véhicule limité (STIB, Found.cut) : jusqu'à sa destination si elle est sur le parcours
+  let calls = next;
+  if (found.cut) {
+    const fr = headKey(dep.head?.fr ?? '');
+    const nl = headKey(dep.head?.nl ?? '');
+    const score = (n: Names | undefined) => Math.max(headScore(fr, headKey(n?.fr ?? '')), headScore(nl, headKey(n?.nl ?? '')));
+    const at = (min: number) => calls.findIndex(([id]) => score(names.get(id)) >= min);
+    const j = at(3) >= 0 ? at(3) : at(2);
+    if (j >= 0) calls = calls.slice(0, j + 1);
+  }
   const shift = dep.cancelled ? 0 : dep.est - dep.sched;
   const call = (areaId: string, name: Names, offsetMin: number): StopCall => {
     const sched = dep.sched + offsetMin * MIN;
@@ -239,5 +259,5 @@ async function urbanCalls(env: StopCallsEnv, dep: Departure, found: Found): Prom
   const first = call(prep.file.id, prep.file.n, 0);
   if (dep.platform) first.platform = dep.platform;
   if (dep.newPlatform && !dep.cancelled) first.newPlatform = dep.newPlatform;
-  return [first, ...next.map(([id, m]) => call(id, names.get(id) ?? { fr: id, nl: id }, m))];
+  return [first, ...calls.map(([id, m]) => call(id, names.get(id) ?? { fr: id, nl: id }, m))];
 }

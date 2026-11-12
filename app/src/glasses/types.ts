@@ -210,6 +210,11 @@ export interface Item {
    * sélectionne jamais.
    */
   group?: string;
+  /**
+   * 1.2.3 : identité de l'élément, « identité@minutes » (departureKey : un départ d'un tableau, un passage d'une ligne) :
+   * le curseur la suit quand la liste change (NavFrame.key).
+   */
+  key?: string;
   /** Fin de la colonne b jamais coupée (ex. « , dernier ») : la colonne b est raccourcie avant elle. */
   bTail?: string;
   /** Fin de la colonne c ajoutée seulement si elle tient en entier (la colonne c n'est jamais coupée pour elle). */

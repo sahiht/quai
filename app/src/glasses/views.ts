@@ -643,7 +643,7 @@ export function lineView(r: LineRoute, b: LineBoard, ctx: ViewCtx, works?: strin
       if (!d.rt && !d.cancelled) f.planned = true;
       const other = d.partial ? untilText(headText(d.head, l, b.op)) : sameHead(d.head, dir.head) ? '' : `vers ${headText(d.head, l, b.op)}`;
       // 1.2.3 (§ 2) : toucher un passage ouvre ses arrêts
-      const item: Item = { a: '', b: other ? `${passageTime(d, mp(ctx))}  ${other}` : passageTime(d, mp(ctx)), c: waitText(d, ctx.now), action: { kind: 'open', route: stopsRoute(b.area.id, d) } };
+      const item: Item = { a: '', b: other ? `${passageTime(d, mp(ctx))}  ${other}` : passageTime(d, mp(ctx)), c: waitText(d, ctx.now), action: { kind: 'open', route: stopsRoute(b.area.id, d) }, key: departureKey(d) };
       if (k === 0) item.group = group;
       const last = lastMark(d);
       if (last) item.bTail = last;
@@ -754,6 +754,17 @@ export function stopsRoute(areaId: string, d: Departure): StopsRoute {
 }
 
 /**
+ * 1.2.3 : identité d'un départ, « identité@minutes » : réseau, mode, ligne, destination (normalisée), quai et voyage
+ * (s'il est connu : jamais pour la STIB), puis l'heure prévue en minutes. Deux sens d'une même ligne à la même minute
+ * restent distincts (« M1 Stockel » et « M1 Gare de l'Ouest » à 23:20). Sert de clé au cache des arrêts d'un départ
+ * et d'ancre au curseur d'un tableau (Item.key, NavFrame.key) ; un départ dont l'heure a glissé se retrouve par son
+ * identité et l'heure la plus proche (anchorIndex).
+ */
+export function departureKey(d: Pick<Departure, 'op' | 'mode' | 'line' | 'head' | 'stopId' | 'tripId' | 'sched'>): string {
+  return `${d.op}|${d.mode}|${d.line}|${normalizeForSearch(d.head?.fr ?? '')}|${d.stopId ?? ''}|${d.tripId ?? ''}@${Math.round(d.sched / 60_000)}`;
+}
+
+/**
  * 1.2.3 (PRD-1.2.3 § 1) : tableau complet d'une gare ou d'un arrêt : tous les départs des 2 prochaines heures (le
  * contrôleur demande `horizonMin` ; rien dans les 2 heures : le prochain, même plus tard, sinon « aucun départ »), un
  * par ligne, les supprimés à leur place. Curseur de départ en départ, sur le premier à l'ouverture ; la liste défile
@@ -783,10 +794,12 @@ export function boardView(b: Board, ctx: ViewCtx, opts: { kept: boolean }): Glas
     const plain = headText(d.head, lang(ctx), d.op);
     const head = later && !allTomorrow ? withDay(plain, whenOf(d), ctx.now) : plain;
     const action: Intent = { kind: 'open', route: stopsRoute(b.area.id, d) };
+    // l'identité du départ : le curseur le suit au rafraîchissement et au retour de ses arrêts (la ligne ★ n'en a pas)
+    const key = departureKey(d);
     v.items.push(
       train
-        ? { a: d.line, b: head, c: trainCell(d, mp(ctx)), action }
-        : { a: lineLabel(d.mode, d.line), b: head, bTail: lastMark(d), c: minutesText(d, ctx.now, mp(ctx)), action },
+        ? { a: d.line, b: head, c: trainCell(d, mp(ctx)), action, key }
+        : { a: lineLabel(d.mode, d.line), b: head, bTail: lastMark(d), c: minutesText(d, ctx.now, mp(ctx)), action, key },
     );
   }
   if (!deps.length) v.items.push({ a: ctx.stale ?? BOARD.none });

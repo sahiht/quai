@@ -75,6 +75,50 @@ describe('departureStops : les arrêts d’un départ jusqu’au terminus', () =
     expect(calls(await env.core.departureStops('sncb:8811304', lux))[0]).toBe('08:31 Bruxelles-Luxembourg +2 v1');
   });
 
+  it('revue : heures du relais (départ en gare, arrivée au terminus) : un train à l’heure n’a pas de retard, un retard est exact', async () => {
+    // Bruxelles-Nord : arrivée 08:40, départ 08:41 ; le relais donne l'heure du départ quand il existe
+    const s = (hm: string) => Date.parse(`2026-11-10T${hm}:00+01:00`) / 1000;
+    const onTime = makeEnv({ now: '2026-11-10T07:31' });
+    onTime.server.relay.rt.sncb.trips[IC_0742] = {
+      u: [
+        [1, '8863008_4', 0, s('07:42'), 0],
+        [6, '8812005_11', 0, s('08:41'), 0],
+        [8, '8814001_15', 0, s('08:52'), 0],
+      ],
+    };
+    const [ic] = (await onTime.core.board('sncb:8863008', { limit: 1 })).departures;
+    const a = await onTime.core.departureStops('sncb:8863008', ic);
+    expect(calls(a)).toEqual([
+      '07:42 Namur v4',
+      '07:55 Gembloux v1',
+      '08:09 Ottignies v2',
+      '08:31 Bruxelles-Luxembourg v1',
+      '08:35 Bruxelles-Schuman v2',
+      '08:40 Bruxelles-Nord v11',
+      '08:46 Bruxelles-Central v3',
+      '08:52 Bruxelles-Midi v15',
+    ]);
+    expect(a.stops.every((x) => x.rt && x.delayMin === 0 && x.est === x.sched)).toBe(true);
+    // le trajet qui descend à Bruxelles-Nord arrive à 08:40, à l'heure, comme ses arrêts
+    const [j] = await onTime.core.trains('sncb:8863008', 'sncb:8812005', Date.parse('2026-11-10T07:31:00+01:00'), 1);
+    expect([hhmm(j.legs[0].arr), j.legs[0].stops!.every((x) => x.est === x.sched)]).toEqual(['08:40', true]);
+
+    // retard réel : +3 au départ de Bruxelles-Nord (08:44), propagé ; +4 à l'arrivée au terminus (heure d'arrivée seule)
+    const late = makeEnv({ now: '2026-11-10T07:31' });
+    late.server.relay.rt.sncb.trips[IC_0742] = {
+      u: [
+        [6, '8812005_11', 180, s('08:44'), 0],
+        [8, '8814001_15', 240, s('08:56'), 0],
+      ],
+    };
+    const [d] = (await late.core.board('sncb:8863008', { limit: 1 })).departures;
+    const b = await late.core.departureStops('sncb:8863008', d);
+    expect(calls(b).slice(4)).toEqual(['08:35 Bruxelles-Schuman v2', '08:40 Bruxelles-Nord +3 v11', '08:46 Bruxelles-Central +3 v3', '08:52 Bruxelles-Midi +4 v15']);
+    expect(b.stops.slice(5).map((x) => hhmm(x.est))).toEqual(['08:43', '08:49', '08:56']);
+    const [k] = await late.core.trains('sncb:8863008', 'sncb:8812005', Date.parse('2026-11-10T07:31:00+01:00'), 1);
+    expect(hhmm(k.legs[0].arr)).toBe('08:43');
+  });
+
   it('voyage supprimé : chaque arrêt supprimé ; relais en panne : horaire prévu', async () => {
     const env = makeEnv({ now: '2026-11-10T07:31' });
     env.server.relay.rt.sncb.trips[IC_0742] = { cancelled: true, u: [] };
@@ -102,6 +146,23 @@ describe('departureStops : les arrêts d’un départ jusqu’au terminus', () =
     expect(p.anyPlanned).toBe(true);
     expect(p.stops.map((x) => x.name.fr)).toEqual(['Gare du Nord', 'Rogier', 'De Brouckere', 'Bourse', 'Gare du Midi', 'Stalle']);
     expect(p.stops.every((x) => !x.rt)).toBe(true);
+  });
+
+  it('revue : passage STIB limité (destination absente des motifs) : la ligne depuis cet arrêt, coupée à sa destination', async () => {
+    const { core } = makeEnv({ now: '2026-11-10T12:10' });
+    const t3 = (await core.board('stib:6357F', { horizonMin: 60 })).departures.find((d) => d.line === '3' && d.head.fr === 'Churchill')!;
+    // destination sur le parcours : jusqu'à elle
+    const midi = await core.departureStops('stib:6357F', { ...t3, head: { fr: 'Gare du Midi', nl: 'Zuidstation' } });
+    expect(midi).toMatchObject({ state: 'ok', head: { fr: 'Gare du Midi' } });
+    expect(midi.stops.map((x) => x.name.fr)).toEqual(['Gare du Nord', 'Rogier', 'De Brouckere', 'Bourse', 'Gare du Midi']);
+    // destination hors du parcours connu : tout le parcours, jamais « n'est plus dans les horaires »
+    const albert = await core.departureStops('stib:6357F', { ...t3, head: { fr: 'Albert', nl: 'Albert' } });
+    expect(albert.stops.map((x) => x.name.fr).at(-1)).toBe('Churchill');
+    // l'autre quai de Gare du Nord : le sens Esplanade
+    const other = await core.departureStops('stib:6357F', { ...t3, stopId: '6358', head: { fr: 'Heysel', nl: 'Heizel' } });
+    expect(other.stops.map((x) => x.name.fr)).toEqual(['Gare du Nord', 'Esplanade']);
+    // ligne absente de cet arrêt : disparu
+    expect((await core.departureStops('stib:6357F', { ...t3, line: '4', stopId: '6358', head: { fr: 'Albert', nl: 'Albert' } })).state).toBe('missing');
   });
 
   it('bus TEC : retard connu au départ, arrêts suivants décalés ; bus De Lijn : horaire prévu et quai', async () => {

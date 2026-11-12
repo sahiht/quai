@@ -15,7 +15,7 @@ import type { PreparedArea } from './areas';
 import { stibPassages, type StibPassage } from './boards';
 import type { RealtimeClient, RtTrip, StibEntry } from './realtime';
 import { stibPoint } from './realtime';
-import { delayMinutes, headKey, headScore, platformOfStopId, RT_MAX_SHIFT_MS, rtAtStop, rtOccurrence, sameStop, type TripContext } from './rtmerge';
+import { delayMinutes, headKey, headScore, platformOfStopId, RT_MAX_SHIFT_MS, rtAtStop, rtAtStopShown, rtOccurrence, sameStop, type TripContext } from './rtmerge';
 import { locateTrip, type DayIndex } from './trains';
 import { hhmm, fit } from './util';
 import { cancelAlert, delayAlert, leaveAlert, platformAlert, vehicleLabel, vehicleLabelStart, worksAlert } from './text';
@@ -103,6 +103,11 @@ function applyTrip(l: Leg, trip: RtTrip | null | undefined, days: DayIndex[]): v
   const ctx: TripContext = {};
   let s: [number, number, number, string, number][] | undefined;
   let i0 = -1;
+  /**
+   * 1.2.3 (revue) : départ prévu (ms) d'un arrêt du train, que le flux donne quand il existe (l'arrivée au terminus) ;
+   * référence du temps réel de l'arrivée montrée (core/rtmerge.ts, rtAtStopShown), l'arrêt en gare n'est pas du retard.
+   */
+  let refOfSeq: (seq: number | undefined, shown: number) => number = (_seq, shown) => shown;
   if (loc) {
     const d = loc.day;
     s = d.file.trips[loc.trip].s;
@@ -117,13 +122,22 @@ function applyTrip(l: Leg, trip: RtTrip | null | undefined, days: DayIndex[]): v
       const p = seqs.findIndex((x) => x[4] === seq);
       return p >= 0 ? d.base + seqs[p][2] * 60_000 : undefined;
     };
+    refOfSeq = (seq, shown) => {
+      const p = seqs.findIndex((x) => x[4] === seq);
+      return p >= 0 && p < seqs.length - 1 && seqs[p][2] >= 0 ? d.base + seqs[p][2] * 60_000 : shown;
+    };
     i0 = s.findIndex((x) => x[4] === l.fromSeq);
   }
   const lastStop = l.stops?.[l.stops.length - 1];
   const dep = rtAtStop(trip, { seq: l.fromSeq, stopId: l.op === 'sncb' ? stopIdOf(l.from.areaId, l.platform) : undefined, sched: l.schedDep, platform: l.platform }, ctx);
   const arr =
     l.toSeq !== undefined
-      ? rtAtStop(trip, { seq: l.toSeq, stopId: l.op === 'sncb' ? stopIdOf(l.to.areaId, lastStop?.platform) : undefined, sched: l.schedArr, platform: lastStop?.platform }, ctx)
+      ? rtAtStopShown(
+          trip,
+          { seq: l.toSeq, stopId: l.op === 'sncb' ? stopIdOf(l.to.areaId, lastStop?.platform) : undefined, sched: refOfSeq(l.toSeq, l.schedArr), platform: lastStop?.platform },
+          l.schedArr,
+          ctx,
+        )
       : { rt: dep.rt, est: l.schedArr + (dep.est - l.schedDep), cancelled: false, delaySec: dep.delaySec };
   l.rt = dep.rt;
   l.cancelled = dep.cancelled || arr.cancelled;
@@ -138,7 +152,7 @@ function applyTrip(l: Leg, trip: RtTrip | null | undefined, days: DayIndex[]): v
     else if (q === stops.length - 1) so.est = l.arr;
     else if (s && i0 >= 0 && s[i0 + q]) {
       const x = s[i0 + q];
-      so.est = rtAtStop(trip, { seq: x[4], stopId: stopIdOf(so.areaId, x[3] || undefined), sched: so.sched, platform: x[3] || undefined }, ctx).est;
+      so.est = rtAtStopShown(trip, { seq: x[4], stopId: stopIdOf(so.areaId, x[3] || undefined), sched: refOfSeq(x[4], so.sched), platform: x[3] || undefined }, so.sched, ctx).est;
     } else so.est = so.sched + (dep.est - l.schedDep);
   });
 }

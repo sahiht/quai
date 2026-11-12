@@ -72,10 +72,11 @@ const TIGHT = 10;
  */
 const WIDE_W = 212;
 /**
- * 1.2.3 : arrêts d'un départ (PRD-1.2.3 § 2) : heure et retard (« 23:59 +45 » = 91 px, « ~08:44 » = 69 px), puis le nom ;
- * à droite la voie (« voie 12a ! » = 80 px) ou « SUPPRIMÉ » (92 px).
+ * 1.2.3 : arrêts d'un départ (PRD-1.2.3 § 2) : heure et retard, jusqu'à un retard de 3 chiffres (la pire au pixel,
+ * « 00:00 +444 » = 104 px ; « 23:59 +120 » = 98 px, « ~08:44 » = 69 px), puis le nom ; à droite la voie
+ * (« voie 12a ! » = 80 px) ou « SUPPRIMÉ » (92 px).
  */
-const STOP_TIME_W = 96;
+const STOP_TIME_W = 106;
 const STOP_RIGHT_W = 96;
 /** 1.2.1 : retrait des favoris sous « Favoris » sur l'accueil (PRD-1.2.1 § 4.1). */
 export const HOME_INDENT = 20;

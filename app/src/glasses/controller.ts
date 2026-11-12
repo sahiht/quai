@@ -53,8 +53,8 @@ import { APP_VERSION, compareVersions } from '../version';
 import { BOARD, HINTS, NB, SECTION, atTitle, catchable, departureRightText, lowerFirst, planHomeText, runningNext, shownMessage, towards, tripShort, upcoming } from './format';
 import { DEBOUNCE, GestureFilter, type HubSignal } from './gestures';
 import { geometry, layoutPage, shapeKey } from './layout';
-import { current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replace, replaceAt, reset, setSelection, type Gesture, type NavFrame, type NavState } from './nav';
-import type { AreaRef, GlassesView, Intent, Item, KeepLineRoute, LineRoute, OthersRoute, PageSpec, Route, StepsRoute } from './types';
+import { anchorIndex, current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replace, replaceAt, reset, setSelection, type Gesture, type NavFrame, type NavState } from './nav';
+import type { AreaRef, GlassesView, Intent, Item, KeepLineRoute, LineRoute, OthersRoute, PageSpec, Route, StepsRoute, StopsRoute } from './types';
 import {
   alreadyThereView,
   arrivalView,
@@ -86,6 +86,7 @@ import {
   recentShown,
   stationsView,
   stepsMessageView,
+  departureKey,
   stepsPage,
   stopsTitle,
   stopsView,
@@ -334,7 +335,8 @@ export function routeKey(r: Route): string {
     case 'keepLine':
       return `keepLine:${r.areaId}`;
     case 'stops':
-      return `stops:${r.areaId}:${r.dep.tripId ?? ''}:${r.dep.line}:${r.dep.sched}`;
+      // 1.2.3 : l'identité du départ (destination et quai compris : la STIB n'a pas d'identifiant de voyage)
+      return `stops:${r.areaId}:${departureKey(r.dep)}`;
     case 'steps': {
       // 1.2.1 : une proposition ouverte depuis « Autres trajets » a sa propre clé (temps réel, messages).
       const i = r.index ?? 0;
@@ -1858,7 +1860,7 @@ export class GlassesController implements GlassesApi {
       }
       case 'stops':
         // 1.2.3 (§ 2) : les arrêts du départ touché, de l'arrêt du tableau au terminus (voyage disparu : missing)
-        return { stops: await core.departureStops(r.areaId, r.dep) };
+        return { stops: await core.departureStops(r.areaId, await this.freshDeparture(r)) };
       case 'steps':
         return this.fetchSteps(r);
       case 'others':
@@ -1875,6 +1877,25 @@ export class GlassesController implements GlassesApi {
       }
       default:
         return null;
+    }
+  }
+
+  /**
+   * 1.2.3 : le départ des arrêts d'un départ, à jour. Bus, tram, métro : relu au tableau de l'arrêt à chaque
+   * rafraîchissement (son retard du moment décale les heures des arrêts suivants), retrouvé par son identité (voyage,
+   * sinon ligne, destination, quai et l'heure prévue la plus proche, 2 min au plus) ; introuvable (parti, tableau en
+   * panne) : celui du toucher. Trains : celui du toucher (la SNCB donne l'heure et la voie gare par gare).
+   */
+  private async freshDeparture(r: StopsRoute): Promise<Departure> {
+    const d = r.dep;
+    if (d.op === 'sncb') return d;
+    const until = Math.max(15, Math.ceil((d.est - this.d.clock.now()) / 60_000) + 15);
+    try {
+      const b = await this.d.core.board(r.areaId, { horizonMin: until, limit: BOARD.limit });
+      const i = anchorIndex(b.departures.map(departureKey), departureKey(d), 2);
+      return i >= 0 ? b.departures[i] : d;
+    } catch {
+      return d;
     }
   }
 
