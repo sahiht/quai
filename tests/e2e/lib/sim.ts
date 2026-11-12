@@ -197,10 +197,18 @@ export class Sim {
   }
 
   async input(action: 'up' | 'down' | 'click' | 'double_click', pause = 450): Promise<void> {
-    await this.drain();
-    this.mark = this.screens.length ? this.screens[this.screens.length - 1].id : -1;
-    await this.call('/api/input', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }) });
-    await sleep(pause);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await this.drain();
+      this.mark = this.screens.length ? this.screens[this.screens.length - 1].id : -1;
+      const from = this.entries.length;
+      await this.call('/api/input', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }) });
+      await sleep(pause);
+      // Un glissement reçu dans les 80 ms d'un rendu (horloge accélérée du simulateur, rafraîchissement) est écarté par
+      // l'anti-rebond des lunettes (journal QUAI_GESTURE « écarté : après un rendu ») : une personne le referait.
+      if (action !== 'up' && action !== 'down') return;
+      await this.drain();
+      if (!this.entries.slice(from).some((e) => e.message.startsWith(`QUAI_GESTURE ${action} écarté : après un rendu`))) return;
+    }
   }
 
   /** Déplace la sélection jusqu'à `index`. */

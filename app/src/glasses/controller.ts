@@ -50,7 +50,7 @@ import { deadline } from '../platform/queue';
 import type { Fix, Platform } from '../platform/types';
 import { LIMITS, newId, type SettingsStore } from '../settings';
 import { APP_VERSION, compareVersions } from '../version';
-import { BOARD, HINTS, NB, SECTION, atTitle, catchable, departureRightText, lowerFirst, planHomeText, runningNext, shownMessage, towards, tripShort, upcoming } from './format';
+import { BOARD, HINTS, NB, SECTION, atTitle, catchable, lowerFirst, planHomeText, runningNext, shownMessage, towards, tripShort, upcoming } from './format';
 import { DEBOUNCE, GestureFilter, type HubSignal } from './gestures';
 import { geometry, layoutPage, shapeKey } from './layout';
 import { anchorIndex, current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replace, replaceAt, reset, setSelection, type Gesture, type NavFrame, type NavState } from './nav';
@@ -70,6 +70,7 @@ import {
   keepLineTitle,
   keepLineView,
   linePickTitle,
+  linesInOrder,
   linesView,
   lineView,
   loadingView,
@@ -94,7 +95,6 @@ import {
   type FavoriteEntry,
   type HomeData,
   type LineRow,
-  type SectionNext,
   type StationRow,
   type StopLine,
   type ViewCtx,
@@ -146,7 +146,7 @@ export const TRIP_KEY = 'quai.trip';
  * ou avant), jamais après une installation neuve, ni tant que l'appli n'est pas en 1.2.3. Ses lignes : NEWS_LINES
  * (views.ts).
  */
-export const NEWS_SINCE = '1.2.3';
+export const NEWS_SINCE = '1.2.4';
 
 /**
  * Date du premier lancement (PRD-1.2.1 § 4.6), en ms : clé du stockage de l'appli sur le téléphone, hors du schéma des
@@ -430,18 +430,10 @@ export class GlassesController implements GlassesApi {
   /** 1.2.2 : réponses des adresses récentes de « Favoris » (clé recentKey), et heure du calcul. */
   private recents = new Map<string, { result: PlanResult | null; at: number }>();
   private recentsLoading: Promise<void> | null = null;
-  /**
-   * 1.2.2 (REVUE-USAGE n° 6) : prochain départ de la gare et de la ligne choisies les plus proches (droite de l'accueil) ;
-   * `id` : élément choisi ; une requête par rubrique et par rafraîchissement.
-   */
-  private sections: { stations?: SectionData; lines?: SectionData } = {};
-  private sectionsLoading: Promise<void> | null = null;
-  private picksSig = '';
 
   constructor(private d: ControllerDeps) {
     this.filter = new GestureFilter(d.web ? WEB_DEBOUNCE : DEBOUNCE);
     this.favSig = favSignature(d.settings.get());
-    this.picksSig = picksSignature(d.settings.get());
     d.settings.subscribe(() => this.onSettingsChanged());
   }
 
@@ -564,7 +556,7 @@ export class GlassesController implements GlassesApi {
     return { nav: this.homeNav(), resumed: false };
   }
 
-  /** Écrit la version vue (« Quai 1.2.3 » affiché une seule fois ; nouvelle installation : sans rien afficher). */
+  /** Écrit la version vue (« Quai 1.2.4 » affiché une seule fois ; nouvelle installation : sans rien afficher). */
   private async markSeen(): Promise<void> {
     if (this.settings().seenVersion === APP_VERSION) return;
     await this.d.settings.update((x) => ({ ...x, seenVersion: APP_VERSION }));
@@ -626,8 +618,9 @@ export class GlassesController implements GlassesApi {
         // Un lieu part de « Ma position » : jamais « à moins de 300 m » de son départ.
         if (f?.propose === 'near') offer(f.kind === 'stop' ? f : endpointPoint(asTrip(f).from, s), () => this.favoriteRoute(f));
       }
-      for (const p of s.stations) if (p.near) offer(p, () => ({ screen: 'board', areaId: p.areaId, name: p.name }));
-      for (const p of s.lines) if (p.near) offer(p, (): Route => (p.line ? { screen: 'lines', focus: p.id } : { screen: 'board', areaId: p.areaId, name: p.name }));
+      // 1.2.4 : le tableau d'une gare ou d'un arrêt gardé porte son choix (`pick`) : zone retrouvée si elle a changé
+      for (const p of s.stations) if (p.near) offer(p, () => ({ screen: 'board', areaId: p.areaId, name: p.name, pick: p.id }));
+      for (const p of s.lines) if (p.near) offer(p, (): Route => (p.line ? { screen: 'lines', focus: p.id } : { screen: 'board', areaId: p.areaId, name: p.name, pick: p.id }));
       const chosen = best as { d: number; route: () => Route } | null;
       if (chosen) return reset([home, chosen.route()]);
     }
@@ -938,7 +931,8 @@ export class GlassesController implements GlassesApi {
    */
   private refreshHome(force: boolean): Promise<void> {
     const shown = this.homeShown();
-    const p = Promise.all([this.refreshAnswers(shown, force), this.refreshNearby(force), this.refreshSections(force)]).then(() => undefined);
+    // 1.2.4 (PRD-1.2.4 § 3) : plus de départ à droite de « Gares » et « Bus, tram, métro » (leur contenu, sans requête).
+    const p = Promise.all([this.refreshAnswers(shown, force), this.refreshNearby(force)]).then(() => undefined);
     void p.then(() => {
       const others = this.settings().favorites.map((f) => f.id).filter((id) => !shown.includes(id));
       return this.refreshAnswers(others, false, WARM_MS);
@@ -986,65 +980,7 @@ export class GlassesController implements GlassesApi {
     return this.recentsLoading;
   }
 
-  /* ------------------------------ 1.2.2 : rubriques de l'accueil ------------------------------ */
-
-  /**
-   * Prochain départ de la gare et de la ligne choisies les plus proches (REVUE-USAGE n° 6) : une requête par rubrique
-   * et par rafraîchissement (30 s), seulement pour l'élément montré ; sans position, le premier de la liste.
-   */
-  private refreshSections(force: boolean): Promise<void> {
-    if (this.sectionsLoading) return this.sectionsLoading;
-    const s = this.settings();
-    const here = this.hereLL();
-    const now = this.d.clock.now();
-    const stale = (x: SectionData | undefined, id: string | undefined): boolean => !!id && (force || !x || x.id !== id || now - x.at >= REFRESH_MS);
-    const station = nearestPick(s.stations, here);
-    const line = nearestPick(s.lines, here);
-    if (!station) delete this.sections.stations;
-    if (!line) delete this.sections.lines;
-    const jobs: Promise<void>[] = [];
-    if (station && stale(this.sections.stations, station.id)) jobs.push(this.sectionOf(station, true).then((x) => void (this.sections.stations = x)));
-    if (line && stale(this.sections.lines, line.id)) jobs.push(this.sectionOf(line, false).then((x) => void (this.sections.lines = x)));
-    if (!jobs.length) return Promise.resolve();
-    this.sectionsLoading = Promise.all(jobs)
-      .catch((e: unknown) => console.warn('[Quai] rubriques de l’accueil', errText(e)))
-      .then(() => {
-        this.sectionsLoading = null;
-        if (this.ready && current(this.nav).route.screen === 'home') void this.render();
-      });
-    return this.sectionsLoading;
-  }
-
-  /**
-   * Prochain départ d'une gare (tableau) ou d'une ligne à son arrêt (le plus tôt de ses sens). La zone dont
-   * l'identifiant a changé est retrouvée autour du choix (`near`, le choix suit : pickMoved) ; introuvable :
-   * « introuvable », jamais « … » pour toujours (revue indépendante, PRD-1.2.2 § 1.1).
-   */
-  private async sectionOf(p: StationPick | LinePick, station: boolean): Promise<SectionData> {
-    const at = this.d.clock.now();
-    const prev = (station ? this.sections.stations : this.sections.lines)?.id === p.id ? (station ? this.sections.stations : this.sections.lines) : undefined;
-    const kind = station ? 'stations' : 'lines';
-    try {
-      const line = !station ? (p as LinePick).line : undefined;
-      if (line) {
-        const b = await deadline(this.d.core.lineBoard(p.areaId, line, { perDirection: 1, near: pickPlace(p) }), CORE_TIMEOUT_MS, 'ligne trop lente');
-        this.pickMoved(kind, p, b.movedTo, b.area);
-        if (b.state === 'missing') return { id: p.id, at, state: 'missing' };
-        const next = b.directions.flatMap((d) => d.departures).filter((d) => d.est >= at - 30_000).sort((x, y) => x.est - y.est)[0];
-        return next ? { id: p.id, at, state: 'ok', next } : { id: p.id, at, state: 'none' };
-      }
-      const b = await deadline(this.d.core.board(p.areaId, { limit: 3, near: pickPlace(p) }), CORE_TIMEOUT_MS, 'départs trop lents');
-      this.pickMoved(kind, p, b.movedTo, b.area);
-      if (b.missing) return { id: p.id, at, state: 'missing' };
-      const next = upcoming(b.departures, at)[0];
-      return next ? { id: p.id, at, state: 'ok', next } : { id: p.id, at, state: 'none' };
-    } catch (e) {
-      if (areaUnknown(e)) return { id: p.id, at, state: 'missing' };
-      // la valeur déjà montrée reste (« … » sinon), nouvel essai au prochain rafraîchissement
-      console.warn('[Quai] prochain départ', p.areaId, errText(e));
-      return prev ? { ...prev, at: 0 } : { id: p.id, at: 0, state: 'unknown' };
-    }
-  }
+  /* ------------------------------ 1.2.2 : gares et lignes choisies ------------------------------ */
 
   /**
    * 1.2.2 : gare ou ligne choisie dont la zone a changé d'identifiant (`movedTo` de board et lineBoard : zone fusionnée,
@@ -1056,20 +992,6 @@ export class GlassesController implements GlassesApi {
     const found = area.id === to ? { name: area.n, lat: area.lat, lon: area.lon } : {};
     const move = <T extends StationPick | LinePick>(x: T): T => (x.id === p.id && x.areaId === p.areaId ? { ...x, areaId: to, ...found } : x);
     void this.d.settings.update((s) => (kind === 'stations' ? { ...s, stations: s.stations.map(move) } : { ...s, lines: s.lines.map(move) }));
-  }
-
-  /**
-   * Texte de droite d'une rubrique de l'accueil (sans « ~ », comme l'accueil 1.2.1) ; une ligne sans passage : « aucun
-   * passage », jamais « introuvable » (lineBoard `none`, même sans service les jours publiés).
-   */
-  private sectionNext(kind: 'stations' | 'lines'): SectionNext | undefined {
-    const x = this.sections[kind];
-    const now = this.d.clock.now();
-    if (!x || x.state === 'unknown') return undefined;
-    if (x.state === 'missing') return { text: SECTION.missingStation };
-    if (x.state === 'none' || !x.next) return { text: kind === 'lines' ? SECTION.noPassage : SECTION.noDeparture };
-    if (x.next.est < now - 30_000) return undefined;
-    return departureRightText(x.next, now);
   }
 
   /** Nombre d'arrêts « Autour de moi » sans charger les départs (M8.7) et lieu proche (« Près de … »). */
@@ -1117,10 +1039,6 @@ export class GlassesController implements GlassesApi {
       data.running = { title: t.title, next: runningNext(this.journeyOf(t.journey), this.d.clock.now()) };
       if (t.favoriteId) data.running.favoriteId = t.favoriteId;
     }
-    const st = this.sectionNext('stations');
-    const li = this.sectionNext('lines');
-    if (st) data.stationsNext = st;
-    if (li) data.linesNext = li;
     return data;
   }
 
@@ -1446,8 +1364,8 @@ export class GlassesController implements GlassesApi {
   }
 
   /** Message quand une rubrique est pleine (LIMITS) : où en retirer. */
-  private full(what: string): void {
-    this.showToast(`Déjà ${what}${NB}: retires-en une ${this.d.web ? 'dans l’onglet Réglages' : 'sur le téléphone'}`);
+  private full(what: string, one = 'une'): void {
+    this.showToast(`Déjà ${what}${NB}: retires-en ${one} ${this.d.web ? 'dans l’onglet Réglages' : 'sur le téléphone'}`);
   }
 
   /**
@@ -1523,7 +1441,8 @@ export class GlassesController implements GlassesApi {
       return;
     }
     this.undo = null;
-    if (s.lines.length >= PICK_MAX.lines) return this.full(`${PICK_MAX.lines} lignes`);
+    // 1.2.4 : la limite compte les lignes et les arrêts, comme le dit le téléphone
+    if (s.lines.length >= PICK_MAX.lines) return this.full(`${PICK_MAX.lines} lignes et arrêts`, 'un');
     const pick: LinePick = { id: newId('ln', pickIds(s)), areaId: r.areaId, op: r.op, name: r.name, lat: r.lat, lon: r.lon, line, mode };
     await this.d.settings.update((x) => ({ ...x, lines: [...x.lines, pick] }));
     this.showToast('★ Ajoutée à Bus, tram, métro');
@@ -1665,12 +1584,6 @@ export class GlassesController implements GlassesApi {
     const keep = new Set(this.nav.stack.map((f) => routeKey(f.route)));
     for (const k of [...this.cache.keys()]) if (!keep.has(k) && !k.startsWith('steps:') && !k.startsWith('train:')) this.cache.delete(k);
     this.nearbyLight = null;
-    const picks = picksSignature(s);
-    if (picks !== this.picksSig) {
-      // 1.2.2 : gares ou lignes ajoutées, retirées ou réordonnées : les rubriques de l'accueil suivent.
-      this.picksSig = picks;
-      this.sections = {};
-    }
     const sig = favSignature(s);
     if (sig !== this.favSig) {
       this.favSig = sig;
@@ -1826,9 +1739,19 @@ export class GlassesController implements GlassesApi {
       case 'board': {
         // 1.2.3 (PRD-1.2.3 § 1) : tableau complet, tous les départs des 2 prochaines heures (40 au plus ; le réglage
         // « Départs par arrêt » n'existe plus) ; rien dans les 2 heures : le prochain, même plus tard.
-        let board = await core.board(r.areaId, { horizonMin: BOARD.horizonMin, limit: BOARD.limit, filter: r.filter });
+        // 1.2.4 : ouvert d'office pour une gare ou un arrêt gardé (`pick`) : sa zone retrouvée si son identifiant a
+        // changé (le choix suit, pickMoved), comme l'accueil le faisait avant la 1.2.4 et comme « Gares » le fait.
+        const station = r.pick ? s.stations.find((p) => p.id === r.pick) : undefined;
+        const kept = station ?? (r.pick ? s.lines.find((p) => p.id === r.pick && !p.line) : undefined);
+        let board = await core.board(kept?.areaId ?? r.areaId, { horizonMin: BOARD.horizonMin, limit: BOARD.limit, filter: r.filter, ...(kept ? { near: pickPlace(kept) } : {}) });
+        if (kept) {
+          this.pickMoved(station ? 'stations' : 'lines', kept, board.movedTo, board.area);
+          // introuvable même autour de son endroit (le cœur dit `missing` au lieu de lever) : l'écran d'erreur d'avant,
+          // « Arrêt introuvable dans les données du jour », jamais un tableau vide au titre brut
+          if (board.missing) throw new QuaiError('areaUnknown');
+        }
         if (!board.departures.length) {
-          const next = await core.board(r.areaId, { limit: 1, filter: r.filter }).catch(() => null);
+          const next = await core.board(board.movedTo ?? kept?.areaId ?? r.areaId, { limit: 1, filter: r.filter }).catch(() => null);
           if (next?.departures.length) board = { ...board, departures: next.departures.slice(0, 1), anyPlanned: next.anyPlanned };
         }
         // 1.2.2 (REVUE-USAGE n° 4) : « Travaux et déviations » sur les gares et les lignes gardées (1.2.1 : arrêts favoris).
@@ -1937,7 +1860,8 @@ export class GlassesController implements GlassesApi {
    */
   private async fetchLines(r: Route): Promise<Record<string, LineData>> {
     const out: Record<string, LineData> = {};
-    await this.progressive(r, this.settings().lines, async (p) => {
+    // 1.2.4 : dans l'ordre de l'écran (les arrêts d'abord) : le haut de la liste se remplit en premier
+    await this.progressive(r, linesInOrder(this.settings().lines), async (p) => {
       try {
         const near = pickPlace(p);
         if (p.line) {
@@ -2400,40 +2324,10 @@ const pickPlace = (p: StationPick | LinePick): PickPlace => ({ lat: p.lat, lon: 
 /** Zone inconnue du cœur (board sans `near`, cœur plus ancien) : « introuvable ». */
 const areaUnknown = (e: unknown): boolean => e instanceof QuaiError && e.code === 'areaUnknown';
 
-/** 1.2.2 : la gare ou la ligne choisie la plus proche (REVUE-USAGE n° 6) ; sans position, la première de la liste. */
-export function nearestPick<T extends { lat: number; lon: number }>(picks: readonly T[], here: LatLon | null): T | undefined {
-  if (!here) return picks[0];
-  let best: T | undefined;
-  let d = Infinity;
-  for (const p of picks) {
-    const x = distanceM(here, p);
-    if (x < d) {
-      d = x;
-      best = p;
-    }
-  }
-  return best;
-}
-
-/** 1.2.2 : prochain départ d'une rubrique de l'accueil (gare ou ligne choisie la plus proche). */
-interface SectionData {
-  /** Gare ou ligne choisie. */
-  id: string;
-  at: number;
-  /** unknown : pas encore obtenu (erreur) ; none : rien dans l'horizon des tableaux ; missing : introuvable. */
-  state: 'ok' | 'none' | 'missing' | 'unknown';
-  next?: Departure;
-}
-
 /** 1.2.2 : « Gares » : prochain train d'une gare. */
 type StationData = Pick<StationRow, 'next' | 'state'>;
 /** 1.2.2 : « Bus, tram, métro » : sens d'une ligne ou départs d'un arrêt (ou arrêt introuvable). */
 type LineData = Pick<LineRow, 'board' | 'stop' | 'missing'>;
-
-/** 1.2.2 : signature des gares et lignes choisies (les rubriques de l'accueil se recalculent quand elle change). */
-function picksSignature(s: Settings): string {
-  return JSON.stringify([s.stations.map((p) => p.id + p.areaId), s.lines.map((p) => `${p.id}${p.areaId}${p.line ?? ''}`)]);
-}
 
 /**
  * Pile restaurable d'un instantané : jamais l'écran « Chargement… » ni une erreur (l'ouverture normale les remplace,

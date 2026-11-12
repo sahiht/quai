@@ -25,12 +25,12 @@ const stationsReady = (s: Screen) => s.screen === 'stations' && !s.lines.some((l
 
 describe('CA-122.3 : « Gares »', () => {
   it('les gares dans leur ordre, le prochain train à droite, « aucun train » ; toucher : le tableau ; double toucher : « Gares »', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.3', stations: [STATIONS.braine, STATIONS.nord, STATIONS.namur] }), core: (now) => stubCore(now, { board: boards }) });
+    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.4', stations: [STATIONS.braine, STATIONS.nord, STATIONS.namur] }), core: (now) => stubCore(now, { board: boards }) });
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'stations' });
     const s = await h.until(stationsReady);
     expect(s.title).toBe('Gares');
-    expect(s.lines).toEqual(['Braine-l’Alleud   IC 07:42 voie 1', 'Bruxelles-Nord   S1 07:55 +3 voie 12 !', 'Namur   aucun train', '▲▼ choisir   toucher : départs   double : retour']);
+    expect(s.lines).toEqual(['Braine-l’Alleud   IC 07:42 voie 1', 'Bruxelles-Nord   S1 07:55 +3 voie 12 !', 'Namur   aucun train', '△▽ choisir   toucher : départs   double : retour']);
     await h.gesture('down', 'tap');
     const b = await h.until((x) => x.screen === 'board' && x.lines.length > 1);
     expect(b.title).toBe('Bruxelles-Nord, train (SNCB) ★');
@@ -39,13 +39,14 @@ describe('CA-122.3 : « Gares »', () => {
     h.c.stop();
   });
 
-  it('revue : gare introuvable : « introuvable » (accueil, « Gares »), jamais « … » ; retrouvée sous un autre identifiant : le choix suit', async () => {
+  it('revue : gare introuvable : « introuvable » (« Gares »), jamais « … » ; retrouvée sous un autre identifiant : le choix suit', async () => {
     // identifiant inconnu sans zone de ce nom autour (faux cœur : missing) ; identifiant inconnu, même nom à 150 m : movedTo
     const lost = { ...STATIONS.nord, id: 'st-lost', areaId: 'sncb:0000001', name: { fr: 'Gare supprimée', nl: 'Gare supprimée' } };
     const moved = { ...STATIONS.nord, areaId: 'sncb:0000002' };
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', stations: [lost, moved] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.4', stations: [lost, moved] }), core: (now) => stubCore(now) });
     const home = await h.until((x) => x.screen === 'home' && x.lines.some((l) => /^Gares {3}[^…]+$/.test(l)));
-    expect(home.lines.find((l) => l.startsWith('Gares'))).toBe('Gares   introuvable');
+    // 1.2.4 (PRD-1.2.4 § 3) : l'accueil dit le contenu ; « introuvable » se dit dans « Gares »
+    expect(home.lines.find((l) => l.startsWith('Gares'))).toBe('Gares   2 gares');
     await h.c.replaceRoute({ screen: 'stations' });
     const s = await h.until(stationsReady);
     expect(s.lines[0]).toBe('Gare supprimée   introuvable');
@@ -63,7 +64,7 @@ describe('CA-122.3 : « Gares »', () => {
     let late = 0;
     const h = await setup({
       now: NOW,
-      settings: settingsWith([], { seenVersion: '1.2.3', stations: [STATIONS.braine] }),
+      settings: settingsWith([], { seenVersion: '1.2.4', stations: [STATIONS.braine] }),
       core: (now) => stubCore(now, { board: (id, n) => (id === STATIONS.braine.areaId ? boardOf(id, 'Braine-l’Alleud', [trainAt(NOW, 11, { delayMin: late, est: NOW + (11 + late) * MIN })]) : undefined) }),
     });
     await h.until((x) => x.screen === 'home');
@@ -80,7 +81,7 @@ describe('CA-122.3 : « Gares »', () => {
 
   it('vue : « … » pendant le calcul, « ~ » et la note sans temps réel, gare introuvable ; rubrique vide : où les choisir', () => {
     const v = stationsView([{ pick: STATIONS.braine }, { pick: STATIONS.nord, state: 'missing' }, { pick: STATIONS.namur, next: trainAt(NOW, 11, { rt: false }) }], ctx());
-    expect(lines(v)).toEqual(['Braine-l’Alleud   …', 'Bruxelles-Nord   introuvable', 'Namur   IC ~07:42 voie 1', '~ horaire prévu, sans temps réel', '▲▼ choisir   toucher : départs   double : retour']);
+    expect(lines(v)).toEqual(['Braine-l’Alleud   …', 'Bruxelles-Nord   introuvable', 'Namur   IC ~07:42 voie 1', '~ horaire prévu, sans temps réel', '△▽ choisir   toucher : départs   double : retour']);
     expect(lines(stationsView([], ctx()))).toEqual(['Choisis tes gares dans Quai, sur le téléphone.', 'double toucher : retour']);
     const web = stationsView([], { ...ctx(), web: true });
     expect(lines(web)[0]).toBe('Choisis tes gares dans l’onglet Réglages.');
@@ -90,7 +91,7 @@ describe('CA-122.3 : « Gares »', () => {
 
 describe('REVUE-USAGE n° 3 : ★ des départs d’une gare', () => {
   it('garder, retirer, annuler dans les 5 s à l’identique, rajouter après ; jamais d’arrêt favori', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.3', stations: [STATIONS.nord, { ...STATIONS.braine, near: true }] }), core: (now) => stubCore(now, { board: boards }) });
+    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.4', stations: [STATIONS.nord, { ...STATIONS.braine, near: true }] }), core: (now) => stubCore(now, { board: boards }) });
     await h.until((x) => x.screen === 'home');
     const before = structuredClone(h.settings.get().stations);
     await h.c.show({ screen: 'board', areaId: STATIONS.braine.areaId, name: STATIONS.braine.name });
@@ -99,7 +100,7 @@ describe('REVUE-USAGE n° 3 : ★ des départs d’une gare', () => {
     // 1.2.3 : la ligne ★ en tête du tableau (le curseur commence sur le premier départ : ▲ pour l'atteindre)
     expect(b.lines[0]).toBe('★ retirer la gare');
     expect(b.sel).toBe(1);
-    expect(b.lines.at(-1)).toBe('▲▼ départs   toucher : arrêts   double : retour');
+    expect(b.lines.at(-1)).toBe('△▽ départs   toucher : arrêts   double : retour');
     await h.gesture('up', 'tap');
     expect(h.last().lines.at(-1)).toBe('★ Retirée. Toucher encore : annuler');
     expect(h.last().title).toBe('Braine-l’Alleud, train (SNCB)');
@@ -123,7 +124,7 @@ describe('REVUE-USAGE n° 3 : ★ des départs d’une gare', () => {
 
   it('une gare de plus que la limite (32) : « Déjà 32 gares : retires-en une sur le téléphone » ; hors de « Gares » : « ★ garder la gare »', async () => {
     const eight = Array.from({ length: LIMITS.stations }, (_, i) => ({ ...STATIONS.nord, id: `st-${i}`, areaId: `sncb:8812${String(100 + i).padStart(3, '0')}` }));
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', stations: eight }), core: (now) => stubCore(now, { board: boards }) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.4', stations: eight }), core: (now) => stubCore(now, { board: boards }) });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: STATIONS.braine.areaId, name: STATIONS.braine.name });
     const b = await h.until((x) => x.screen === 'board' && x.lines.length > 1);
@@ -138,21 +139,44 @@ describe('REVUE-USAGE n° 3 : ★ des départs d’une gare', () => {
 describe('REVUE-USAGE n° 4 : migration sans perte, côté lunettes', () => {
   it('gare `near` à moins de 300 m : ses départs s’ouvrent d’office ; double toucher : l’accueil', async () => {
     const pos = { lat: STATIONS.braine.lat + 0.001, lon: STATIONS.braine.lon };
-    const h = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.3', stations: [STATIONS.nord, { ...STATIONS.braine, near: true }] }), core: (now) => stubCore(now, { board: boards }) });
+    const h = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.4', stations: [STATIONS.nord, { ...STATIONS.braine, near: true }] }), core: (now) => stubCore(now, { board: boards }) });
     const b = await h.until((x) => x.screen === 'board' && x.lines.length > 1);
     expect(b.title).toBe('Braine-l’Alleud, train (SNCB) ★');
     await h.gesture('double');
     expect((await h.until((x) => x.screen === 'home')).screen).toBe('home');
     h.c.stop();
     // sans `near`, ou à plus de 300 m : l'accueil
-    const far = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.3', stations: [STATIONS.braine] }), core: (now) => stubCore(now, { board: boards }) });
+    const far = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.4', stations: [STATIONS.braine] }), core: (now) => stubCore(now, { board: boards }) });
     expect((await far.until((x) => x.screen === 'home')).screen).toBe('home');
     far.c.stop();
   });
 
+  it('1.2.4 (revue) : gare `near` dont la zone a changé d’identifiant, ouverte d’office : ses départs, et le choix suit', async () => {
+    // identifiant inconnu, même nom à 150 m (faux cœur : movedTo) ; avant, « introuvable » à chaque lancement
+    const moved = { ...STATIONS.nord, areaId: 'sncb:0000002', near: true as const };
+    const pos = { lat: STATIONS.nord.lat + 0.001, lon: STATIONS.nord.lon };
+    const h = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.4', stations: [moved] }), core: (now) => stubCore(now) });
+    const b = await h.until((x) => x.screen === 'board' && x.lines.length > 1);
+    expect(b.title).toMatch(/^Bruxelles-Nord, train \(SNCB\)/);
+    expect(b.lines.join('\n')).not.toMatch(/introuvable/i);
+    await h.until(() => h.settings.get().stations[0]?.areaId === STATIONS.nord.areaId);
+    expect(h.settings.get().stations[0]).toMatchObject({ id: STATIONS.nord.id, areaId: STATIONS.nord.areaId, near: true });
+    h.c.stop();
+    // introuvable même autour de son endroit : « Arrêt introuvable dans les données du jour », jamais un tableau vide
+    // au titre brut ; le choix n'est pas touché
+    const gone = { id: 'st-gone', areaId: 'sncb:8800000', name: { fr: 'Gare fermée', nl: 'Gesloten station' }, lat: 50.2, lon: 3.9, near: true as const };
+    const g = await setup({ now: NOW, pos: { lat: 50.2, lon: 3.9 }, settings: settingsWith([], { seenVersion: '1.2.4', stations: [gone] }), core: (now) => stubCore(now) });
+    const e = await g.until((x) => x.lines.some((l) => /Arrêt introuvable dans les données du jour/.test(l)));
+    expect(e.lines.some((l) => /Arrêt introuvable dans les données du jour/.test(l))).toBe(true);
+    expect(e.title).not.toMatch(/sncb:/);
+    expect(e.lines.join('\n')).not.toMatch(/★ garder|aucun départ/);
+    expect(g.settings.get().stations).toEqual([gone]);
+    g.c.stop();
+  });
+
   it('« Travaux et déviations » sur les départs d’une gare gardée, comme pour un arrêt favori de la 1.2.1', async () => {
     const works = (core: Core): Core => Object.assign(Object.create(core) as Core, { works: async () => ['Travaux : pas de train entre Braine-l’Alleud et Nivelles'] });
-    const settings = settingsWith([], { seenVersion: '1.2.3', stations: [STATIONS.braine] });
+    const settings = settingsWith([], { seenVersion: '1.2.4', stations: [STATIONS.braine] });
     settings.alerts.works = true;
     const h = await setup({ now: NOW, settings, core: (now) => works(stubCore(now, { board: boards })) });
     await h.until((x) => x.screen === 'home');

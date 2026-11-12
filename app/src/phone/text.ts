@@ -110,14 +110,20 @@ export const T = {
   addLine: 'Ajouter une ligne ou un arrêt',
   noStation: 'Aucune gare pour l’instant.',
   noLine: 'Aucune ligne ni arrêt pour l’instant.',
+  /** 1.2.4 (PRD-1.2.4 § 2) : les deux blocs de « Bus, tram, métro », comme dans les lunettes. */
+  stopsGroup: 'Arrêts',
+  linesGroup: 'Lignes',
   /** Ouverture d'office des départs à moins de 300 m (`near`, l'ancien créneau « près » d'un arrêt favori). */
   pickNear: 'Ouvrir d’office à moins de 300 m',
   removePick: 'Retirer',
   stationExists: 'Déjà dans tes gares.',
   lineExists: 'Déjà dans tes lignes.',
+  /** 1.2.4 : un arrêt (toutes ses lignes) déjà gardé, comme le dit son retrait (« de tes arrêts »). */
+  stopExists: 'Déjà dans tes arrêts.',
   /** Type à droite d'une proposition déjà choisie. */
   stationTaken: 'déjà dans tes gares',
   lineTaken: 'déjà dans tes lignes',
+  stopTaken: 'déjà dans tes arrêts',
   stationLead: 'Ses prochains trains s’afficheront dans les lunettes.',
   stationField: 'Nom de la gare',
   stationPlaceholder: 'Namur, Gand-Saint-Pierre…',
@@ -154,9 +160,17 @@ export const T = {
 } as const;
 
 /**
- * Bannière « Nouveau » de l'accueil du téléphone, message « Quai 1.2.3 » (PRD-1.2.3 § 4) : une ligne par nouveauté,
- * les mêmes quelle que soit la version d'avant, comme les lunettes et Quai Web.
+ * Bannière « Nouveau » de l'accueil du téléphone, message « Quai 1.2.4 » (PRD-1.2.4 § 5) : une ligne par nouveauté,
+ * comme les lunettes et Quai Web.
  */
+export const NEWS_124: readonly string[] = [
+  'Dans les étapes, l’arrêt ou la gare où aller est écrit en entier.',
+  'Bus, tram, métro : tes arrêts et tes lignes en deux blocs.',
+  'L’accueil des lunettes dit combien de gares, d’arrêts et de lignes tu suis.',
+  'Dans les lunettes, des heures alignées et des aides plus discrètes.',
+];
+
+/** Nouveautés de la 1.2.3 (PRD-1.2.3 § 4) : dites aussi à qui passe d'une version antérieure directement à la 1.2.4. */
 export const NEWS_123: readonly string[] = [
   'Tableaux complets dans les lunettes : tous les départs des 2 prochaines heures.',
   'Touche un départ : ses arrêts jusqu’au terminus, avec l’heure et la voie.',
@@ -165,7 +179,7 @@ export const NEWS_123: readonly string[] = [
 
 /**
  * Nouveautés de la 1.2.2 (PRD-1.2.2 § 9, revue d'usage n° 4) : dites aussi à qui passe d'une version antérieure
- * directement à la 1.2.3 (arrêts favoris rangés, « Aller à… » dans Favoris, trajet suivi sur demande).
+ * directement à la 1.2.4 (arrêts favoris rangés, « Aller à… » dans Favoris, trajet suivi sur demande).
  */
 export const NEWS_122: readonly string[] = [
   'Nouveau : tes gares et tes lignes de bus, tram et métro sur l’accueil des lunettes.',
@@ -174,16 +188,16 @@ export const NEWS_122: readonly string[] = [
   'Un trajet n’est suivi que si tu le demandes.',
 ];
 
-/** Version des nouveautés NEWS_122. */
-const NEWS_122_SINCE = '1.2.2';
-
 /**
- * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.3 ; depuis une version
- * antérieure à la 1.2.2 (`seen` : la version vue avant la mise à jour), celles de la 1.2.2 ensuite.
+ * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.4 ; depuis une version
+ * antérieure à la 1.2.3 (`seen` : la version vue avant la mise à jour), celles de la 1.2.3 ensuite, et d'avant la
+ * 1.2.2, celles de la 1.2.2.
  */
 export function newsLines(seen = ''): string[] {
-  const older = !!seen && compareVersions(seen, NEWS_122_SINCE) < 0;
-  return older ? [...NEWS_123, ...NEWS_122] : [...NEWS_123];
+  const out = [...NEWS_124];
+  if (seen && compareVersions(seen, '1.2.3') < 0) out.push(...NEWS_123);
+  if (seen && compareVersions(seen, '1.2.2') < 0) out.push(...NEWS_122);
+  return out;
 }
 
 /** Suppression d'un lieu utilisé par un trajet fixe (PRD-1.2 § 2.2). */
@@ -192,7 +206,8 @@ export const removeUsedPlaceText = (name: string): string => `Supprimer « ${nam
 export const limitText = (max: number): string => `${max} favoris au plus : supprimes-en un.`;
 /** 1.2.2 : limites des gares et des lignes atteintes (LIMITS.stations, LIMITS.lines de settings.ts). */
 export const stationLimitText = (max: number): string => `${max} gares au plus : retires-en une.`;
-export const lineLimitText = (max: number): string => `${max} lignes au plus : retires-en une.`;
+/** 1.2.4 : la limite des lignes compte aussi les arrêts (une seule liste, deux blocs). */
+export const lineLimitText = (max: number): string => `${max} lignes et arrêts au plus : retires-en un.`;
 /** 1.2.2 : gare ajoutée (« Ajouter une gare », lien de « Un endroit », revue d'usage n° 3). */
 export const stationAddedText = (name: string): string => `${name} ajoutée à Gares.`;
 /** 1.2.3 : arrêt ajouté avec toutes ses lignes (PRD-1.2.3 § 3). */
@@ -204,6 +219,9 @@ export const removeStationText = (name: string): string => `Retirer ${name} de t
 export const removeLineText = (name: string): string => `Retirer ${name} de tes lignes ?`;
 export const stationGoneText = (name: string): string => `${name} n’est plus dans tes gares.`;
 export const lineGoneText = (name: string): string => `${name} n’est plus dans tes lignes.`;
+/** 1.2.4 : un arrêt (toutes ses lignes) de « Bus, tram, métro ». */
+export const removeStopText = (name: string): string => `Retirer ${name} de tes arrêts ?`;
+export const stopGoneText = (name: string): string => `${name} n’est plus dans tes arrêts.`;
 /** « Ajouter une ligne » depuis un arrêt (?arret=…) : ses lignes en raccourcis, et une ligne qui n'y passe pas. */
 export const stopLinesText = (stop: string): string => (stop ? `Lignes à ${stop} :` : 'Lignes de cet arrêt :');
 export const notServedText = (stop: string): string => `Cette ligne ne passe pas à ${stop}.`;

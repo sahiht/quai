@@ -27,7 +27,7 @@ export function onboardingScreen(ctx: PhoneCtx): HTMLElement {
     if (fix) live.say(typo('Position autorisée : « Autour de moi » est prêt.'));
     else live.say(typo('Position indisponible : autorise-la pour Quai dans l’appli Even Realities. Quai fonctionne sans, mais « Autour de moi » restera vide.'), true);
   });
-  const save = h('button', { type: 'button', class: 'btn btn-dark btn-block', style: 'margin-top:8px' }, first ? 'Continuer' : 'Enregistrer');
+  const save = h('button', { type: 'button', class: 'btn btn-primary btn-block btn-tall', style: 'margin-top:8px' }, first ? 'Continuer' : 'Enregistrer');
   save.addEventListener('click', async () => {
     // La version vue est celle-ci : pas de message « Quai 1.1 » après une nouvelle installation (S2).
     await ctx.settings.update((x) => ({ ...x, lang, onboarded: true, seenVersion: first ? APP_VERSION : x.seenVersion }));
@@ -120,7 +120,7 @@ export function yourFavoritesScreen(ctx: PhoneCtx): HTMLElement {
   const bureau = field('bureau', 'Bureau', 'Adresse de ton travail ou de ton école');
   maison.input.setAttribute('data-autofocus', '');
   const slots = h('input', { type: 'checkbox', checked: true });
-  const done = h('button', { type: 'button', class: 'btn btn-dark btn-block' }, 'Terminer');
+  const done = h('button', { type: 'button', class: 'btn btn-primary btn-block btn-tall' }, 'Terminer');
   const later = h('button', { type: 'button', class: 'btn btn-secondary btn-block' }, 'Plus tard');
   const finish = async (create: boolean): Promise<void> => {
     if (create) {

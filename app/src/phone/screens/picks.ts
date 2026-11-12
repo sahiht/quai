@@ -13,7 +13,7 @@ import { displayName, kindLabel } from '../../core/util';
 import { LIMITS, newId } from '../../settings';
 import type { PhoneCtx } from '../app';
 import { h, icon, ICON, liveRegion, svgNode } from '../dom';
-import { linePickTitle, lineGoneText, lineLimitText, rankText, removeLineText, removeStationText, stationGoneText, stationLimitText, T, typo } from '../text';
+import { linePickTitle, lineGoneText, lineLimitText, rankText, removeLineText, removeStationText, removeStopText, stationGoneText, stationLimitText, stopGoneText, T, typo } from '../text';
 import { nextId } from '../ui';
 
 export type PickKind = 'stations' | 'lines';
@@ -54,6 +54,31 @@ export function moveById<P extends { id: string }>(list: P[], id: string, dir: -
   const out = [...list];
   [out[i], out[j]] = [out[j], out[i]];
   return out;
+}
+
+/** 1.2.4 : un bloc d'une section (« Arrêts », « Lignes » dans « Bus, tram, métro ») : son intitulé, ses éléments. */
+export interface PickGroup<P> {
+  label: string;
+  has: (p: P) => boolean;
+}
+
+/** Éléments rangés par bloc, dans l'ordre des blocs, chacun dans son ordre (le reste, s'il y en a, à la fin). */
+export function inGroups<P>(list: readonly P[], groups: readonly PickGroup<P>[]): P[] {
+  const out = groups.flatMap((g) => list.filter((p) => g.has(p)));
+  return [...out, ...list.filter((p) => !out.includes(p))];
+}
+
+/**
+ * 1.2.4 (PRD-1.2.4 § 2) : déplacement dans son bloc seulement ; la liste enregistrée est rangée par bloc (l'ordre que
+ * montrent les lunettes). Aux bornes du bloc, la liste rangée telle quelle.
+ */
+export function moveInGroup<P extends { id: string }>(list: P[], id: string, dir: -1 | 1, groups: readonly PickGroup<P>[]): P[] {
+  const ordered = inGroups(list, groups);
+  const i = ordered.findIndex((x) => x.id === id);
+  const j = i + dir;
+  const group = groups.find((g) => i >= 0 && g.has(ordered[i]));
+  if (i < 0 || j < 0 || j >= ordered.length || !group || !group.has(ordered[j])) return ordered;
+  return moveById(ordered, id, dir);
 }
 
 /** Ouverture d'office à moins de 300 m : `near: true`, ou rien (jamais `near: false` dans les réglages). */
@@ -104,12 +129,16 @@ function completeLine(ctx: Pick<PhoneCtx, 'core' | 'settings'>, p: LinePick, app
     if (p.line) {
       const mode = lines.find((l) => lineKey(l.line) === lineKey(p.line!))?.mode;
       if (mode && mode !== 'train') apply(linePickTitle(p, lang, mode));
-    } else if (modes.length) apply(linePickTitle(p, lang), kindLabel(p.op, modes));
+    } else if (modes.length) apply(linePickName(p, lang), kindLabel(p.op, modes));
   });
 }
 
-/** Icône d'une ligne : bus ou tram (métro compris), selon son mode, sinon son réseau. */
+/** 1.2.4 : nom d'un élément de « Bus, tram, métro » : « Bus W · Merbraine » ; un arrêt (toutes les lignes) : son nom seul. */
+export const linePickName = (p: LinePick, lang: NameLang): string => (p.line ? linePickTitle(p, lang) : displayName(p.name, lang));
+
+/** Icône d'une ligne : bus ou tram (métro compris), selon son mode, sinon son réseau ; 1.2.4 : un arrêt, l'épingle. */
 function lineIcon(p: LinePick): HTMLSpanElement {
+  if (!p.line) return icon('pin');
   if (p.mode) return icon(p.mode === 'bus' ? 'bus' : 'tram');
   return icon(p.op === 'stib' ? 'tram' : 'bus');
 }
@@ -124,13 +153,15 @@ interface SectionSpec<P extends StationPick | LinePick> {
   addHash: string;
   max: number;
   limit: (max: number) => string;
-  question: (name: string) => string;
-  gone: (name: string) => string;
+  question: (name: string, p: P) => string;
+  gone: (name: string, p: P) => string;
   list: (s: Settings) => P[];
   set: (s: Settings, list: P[]) => Settings;
   name: (p: P, lang: NameLang) => string;
   icon: (p: P) => HTMLSpanElement;
   complete?: (ctx: PhoneCtx, p: P, apply: (title: string, sub?: string) => void) => void;
+  /** 1.2.4 : blocs de la section, chacun sous son intitulé et dans son ordre (« Arrêts », puis « Lignes »). */
+  groups?: readonly PickGroup<P>[];
 }
 
 const STATIONS: SectionSpec<StationPick> = {
@@ -157,13 +188,17 @@ const LINES: SectionSpec<LinePick> = {
   addHash: '#/lignes/ajouter',
   max: LIMITS.lines,
   limit: lineLimitText,
-  question: removeLineText,
-  gone: lineGoneText,
+  question: (name, p) => (p.line ? removeLineText(name) : removeStopText(name)),
+  gone: (name, p) => (p.line ? lineGoneText(name) : stopGoneText(name)),
   list: (s) => s.lines,
   set: (s, lines) => ({ ...s, lines }),
-  name: (p, lang) => linePickTitle(p, lang),
+  name: linePickName,
   icon: lineIcon,
   complete: completeLine,
+  groups: [
+    { label: T.stopsGroup, has: (p) => !p.line },
+    { label: T.linesGroup, has: (p) => !!p.line },
+  ],
 };
 
 /** Ce qui se voit d'une liste (ordre et noms) : un changement venu d'ailleurs (lunettes de Quai Web) la redessine. */
@@ -171,7 +206,8 @@ const shape = (list: readonly (StationPick | LinePick)[]): string => JSON.string
 
 function pickSection<P extends StationPick | LinePick>(ctx: PhoneCtx, spec: SectionSpec<P>, focus: boolean): HTMLElement {
   const headingId = `h-${spec.kind}`;
-  const list = h('ul', { class: 'list box pick-list' });
+  // 1.2.4 : une liste par bloc (« Arrêts », « Lignes »), chacune sous son intitulé ; une seule sans blocs (« Gares »).
+  const list = h('div', { class: 'pick-lists' });
   const live = liveRegion();
   let ordering = false;
   let drawn = '';
@@ -187,7 +223,7 @@ function pickSection<P extends StationPick | LinePick>(ctx: PhoneCtx, spec: Sect
     const qid = nextId('confirm');
     const yes = h('button', { type: 'button', class: 'btn btn-danger-solid' }, T.removePick);
     const no = h('button', { type: 'button', class: 'btn btn-secondary' }, T.cancel);
-    const box = h('div', { class: 'confirm', role: 'group', 'aria-labelledby': qid }, h('p', { id: qid, class: 'confirm-q' }, typo(spec.question(title()))), h('div', { class: 'confirm-actions' }, yes, no));
+    const box = h('div', { class: 'confirm', role: 'group', 'aria-labelledby': qid }, h('p', { id: qid, class: 'confirm-q' }, typo(spec.question(title(), p))), h('div', { class: 'confirm-actions' }, yes, no));
     const close = (): void => {
       box.remove();
       trigger.hidden = false;
@@ -204,11 +240,12 @@ function pickSection<P extends StationPick | LinePick>(ctx: PhoneCtx, spec: Sect
     yes.addEventListener('click', async () => {
       yes.disabled = true;
       const name = title();
-      const at = spec.list(ctx.settings.get()).findIndex((x) => x.id === p.id);
+      // rang à l'écran (1.2.4 : les blocs « Arrêts » puis « Lignes »), pas dans l'ordre des réglages
+      const at = [...list.querySelectorAll<HTMLElement>('.pick-row')].indexOf(li);
       openBox = null;
       await ctx.settings.update((x) => spec.set(x, spec.list(x).filter((y) => y.id !== p.id)));
       paint();
-      live.say(typo(spec.gone(name)));
+      live.say(typo(spec.gone(name, p)));
       // Le curseur passe à la ligne suivante (ou à la précédente), sinon au bouton d'ajout.
       const rows = [...list.querySelectorAll<HTMLElement>('.pick-row')];
       (rows[Math.min(at, rows.length - 1)]?.querySelector<HTMLButtonElement>('.pick-main .btn') ?? add).focus();
@@ -234,7 +271,7 @@ function pickSection<P extends StationPick | LinePick>(ctx: PhoneCtx, spec: Sect
     };
     if (ordering) {
       const move = (dir: -1 | 1) => async () => {
-        await ctx.settings.update((x) => spec.set(x, moveById(spec.list(x), p.id, dir)));
+        await ctx.settings.update((x) => spec.set(x, spec.groups ? moveInGroup(spec.list(x), p.id, dir, spec.groups) : moveById(spec.list(x), p.id, dir)));
         live.say(typo(rankText(title, i + dir + 1, all.length)));
         paint({ id: p.id, dir });
       };
@@ -260,11 +297,18 @@ function pickSection<P extends StationPick | LinePick>(ctx: PhoneCtx, spec: Sect
     const items = spec.list(ctx.settings.get());
     drawn = shape(items);
     openBox = null;
-    if (items.length < 2) ordering = false;
-    list.classList.toggle('ordering', ordering);
-    list.replaceChildren(...items.map((p, i) => row(p, i, items)));
-    if (!items.length) list.appendChild(h('li', { class: 'small empty-row' }, spec.empty));
-    reorder.hidden = items.length < 2;
+    const parts = spec.groups ? spec.groups.map((g) => ({ label: g.label, list: items.filter((p) => g.has(p)) })).filter((x) => x.list.length) : [{ label: '', list: items }];
+    // « Changer l'ordre » : dans un bloc d'au moins deux éléments
+    const movable = parts.some((x) => x.list.length > 1);
+    if (!movable) ordering = false;
+    const els: HTMLElement[] = [];
+    for (const part of parts) {
+      if (part.label) els.push(h('h3', { class: 'pick-group' }, part.label));
+      els.push(h('ul', { class: `list box pick-list${ordering ? ' ordering' : ''}` }, ...part.list.map((p, i) => row(p, i, part.list))));
+    }
+    if (!items.length) els.splice(0, els.length, h('ul', { class: 'list box pick-list' }, h('li', { class: 'small empty-row' }, spec.empty)));
+    list.replaceChildren(...els);
+    reorder.hidden = !movable;
     reorder.textContent = ordering ? T.done : T.reorder;
     reorder.classList.toggle('btn-primary', ordering);
     reorder.classList.toggle('btn-secondary', !ordering);

@@ -114,9 +114,9 @@ export function overflowing(p: PageSpec): string[] {
   return bad;
 }
 
-/** Lignes journalisées d'une vue, après contrôle : rien ne dépasse, jamais de tiret long. */
-export function lines(v: GlassesView): string[] {
-  const p = page(v);
+/** Lignes journalisées d'une vue, après contrôle : rien ne dépasse, jamais de tiret long ; `sel` : curseur posé là. */
+export function lines(v: GlassesView, sel?: number): string[] {
+  const p = sel === undefined ? page(v) : layoutPage(v, { sel, top: 0 });
   const bad = overflowing(p);
   if (bad.length) throw new Error(bad.join('\n'));
   for (const l of [p.title, ...p.lines]) if (/—/.test(l)) throw new Error(`tiret long : ${l}`);

@@ -6,7 +6,7 @@
  * change que les textes (textContainerUpgrade, sans clignotement) ; seule une nouvelle forme
  * (autre écran, ligne d'alerte qui apparaît) impose rebuildPageContainer.
  */
-import { LINE_H, SCREEN_H, frenchSpaces, padLeftTo, padRightTo, textWidth, truncate, utf8Bytes } from './font';
+import { LINE_H, SCREEN_H, SPACE_W, frenchSpaces, padLeftTo, padRightTo, textWidth, truncate, utf8Bytes } from './font';
 import type { Brightness, ContainerSpec, GlassesView, Item, Layout, PageSpec } from './types';
 
 export const GEO = {
@@ -33,6 +33,11 @@ interface Col {
   /** Largeur allouée (fixe) ; sinon jusqu'à la colonne suivante non vide de la ligne. */
   w?: number;
   align?: 'left' | 'right';
+  /**
+   * 1.2.4 : case de l'heure en tête de colonne (px), où l'heure d'Item.aLead / bLead / cLead s'aligne à droite (« ~ »
+   * compris : 68 px pour « ~08:48 »).
+   */
+  lead?: number;
   level: Brightness;
 }
 interface LayoutDef {
@@ -41,6 +46,11 @@ interface LayoutDef {
   c: Col;
   /** Écart entre deux colonnes (marge de sécurité en plus) ; 12 px par défaut. */
   gap?: number;
+  /**
+   * 1.2.4 : retrait des lignes en retrait (`sub`), en px, fait d'espaces (5 px chacune) : la colonne b commence alors au
+   * bord, où se placent les intitulés pâles (`head` : « ARRÊTS », « LIGNES »).
+   */
+  subIndent?: number;
 }
 
 const { X_TEXT, X_END, GAP } = GEO;
@@ -77,6 +87,18 @@ const WIDE_W = 212;
  * (« voie 12a ! » = 80 px) ou « SUPPRIMÉ » (92 px).
  */
 const STOP_TIME_W = 106;
+/**
+ * 1.2.4 (PRD-1.2.4 § 4) : case d'une heure alignée à droite, « ~ » compris (« ~08:48 » : 68 px ; une heure seule : 52 px
+ * au plus). Le « ~ » (16 px) dépasse à gauche des chiffres ; le détail d'une ligne le laisse dans le retrait (TILDE_W).
+ */
+const TIME_SLOT = 68;
+export const TILDE_W = 16;
+/**
+ * 1.2.4 : colonne de l'heure d'un tableau de gare : la case (68 px) puis le retard et la voie, entiers même au plus long
+ * (« +12  voie 12 ! » = 113 px ; «   SUPPRIMÉ » = 102 px) ; la destination garde 294 px (« Bruxelles-Aéroport-Zaventem »
+ * = 261 px).
+ */
+const TRAIN_CELL_W = 184;
 const STOP_RIGHT_W = 96;
 /** 1.2.1 : retrait des favoris sous « Favoris » sur l'accueil (PRD-1.2.1 § 4.1). */
 export const HOME_INDENT = 20;
@@ -101,25 +123,26 @@ export const LAYOUTS: Record<Layout, LayoutDef> = {
   stations: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(WIDE_W), w: WIDE_W, align: 'right', level: 4 }, gap: TIGHT },
   /**
    * 1.2.2 : « Bus, tram, métro » (§ 3) : titre de la ligne au plus clair (colonne a) ; ses sens en retrait, plus pâles,
-   * le terminus puis les passages alignés à droite (colonne b, comme les favoris de l'accueil).
+   * le terminus puis les passages alignés à droite (colonne b, comme les favoris de l'accueil). 1.2.4 (PRD-1.2.4 § 2) :
+   * la colonne b commence au bord pour les intitulés « ARRÊTS » et « LIGNES » ; le retrait des sens est fait d'espaces.
    */
-  lines: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT + HOME_INDENT, level: 2 }, c: { x: right(WIDE_W), w: WIDE_W, align: 'right', level: 4 }, gap: TIGHT },
+  lines: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 2 }, c: { x: right(WIDE_W), w: WIDE_W, align: 'right', level: 4 }, gap: TIGHT, subIndent: HOME_INDENT },
   /**
    * 1.2.2 : détail d'une ligne (§ 3) : « vers … » et « Tous les départs de l'arrêt » au plus clair (colonne a) ; chaque
    * passage en retrait, heure puis terminus s'il diffère (colonne b), attente dans la colonne d'état des étapes.
    */
-  line: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT + HOME_INDENT, level: 3 }, c: { x: right(STATE_W), w: STATE_W, level: 4 }, gap: TIGHT },
+  line: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT + HOME_INDENT - TILDE_W, lead: TIME_SLOT, level: 3 }, c: { x: right(STATE_W), w: STATE_W, level: 4 }, gap: TIGHT },
   /**
    * 1.2.3 : arrêts d'un départ (PRD-1.2.3 § 2) : heure (retard), nom, voie ou « SUPPRIMÉ » à droite, un ton sous l'arrêt
    * du tableau, ligne du haut au plus clair composée sur les mêmes colonnes.
    */
-  stops: { a: { x: X_TEXT, w: STOP_TIME_W, level: 3 }, b: { x: X_TEXT + STOP_TIME_W + TIGHT, level: 3 }, c: { x: right(STOP_RIGHT_W), w: STOP_RIGHT_W, align: 'right', level: 3 }, gap: TIGHT },
+  stops: { a: { x: X_TEXT, w: STOP_TIME_W, lead: TIME_SLOT, level: 3 }, b: { x: X_TEXT + STOP_TIME_W + TIGHT, level: 3 }, c: { x: right(STOP_RIGHT_W), w: STOP_RIGHT_W, align: 'right', level: 3 }, gap: TIGHT },
   nearby: { a: { x: X_TEXT, level: 4 }, b: { x: right(NEXT_W) - GAP - 64, w: 64, level: 3 }, c: { x: right(NEXT_W), w: NEXT_W, level: 4 } },
-  board: { a: { x: X_TEXT, w: 52, level: 4 }, b: { x: X_TEXT + 52 + GAP, level: 3 }, c: { x: right(96), w: 96, level: 4 } },
-  boardTrain: { a: { x: X_TEXT, w: 40, level: 4 }, b: { x: X_TEXT + 40 + GAP, level: 3 }, c: { x: right(160), w: 160, level: 4 } },
-  steps: { a: { x: X_TEXT, w: TIME_W, level: 4 }, b: { x: X_TEXT + 70 + TIGHT, level: 3 }, c: { x: right(STATE_W), w: STATE_W, level: 4 }, gap: TIGHT },
-  train: { a: { x: X_TEXT, level: 4 }, b: { x: right(96) - GAP - TIME_W, w: TIME_W, level: 4 }, c: { x: right(96), w: 96, level: 3 } },
-  arrival: { a: { x: X_TEXT, w: 96, level: 4 }, b: { x: X_TEXT + 96 + GAP, level: 3 }, c: { x: right(96), w: 96, level: 4 } },
+  board: { a: { x: X_TEXT, w: 52, level: 4 }, b: { x: X_TEXT + 52 + GAP, level: 3 }, c: { x: right(96), w: 96, align: 'right', level: 4 } },
+  boardTrain: { a: { x: X_TEXT, w: 40, level: 4 }, b: { x: X_TEXT + 40 + GAP, level: 3 }, c: { x: right(TRAIN_CELL_W), w: TRAIN_CELL_W, lead: TIME_SLOT, level: 4 } },
+  steps: { a: { x: X_TEXT, w: TIME_W, align: 'right', level: 4 }, b: { x: X_TEXT + 70 + TIGHT, level: 3 }, c: { x: right(STATE_W), w: STATE_W, level: 4 }, gap: TIGHT },
+  train: { a: { x: X_TEXT, level: 4 }, b: { x: right(96) - GAP - TIME_W, w: TIME_W, align: 'right', level: 4 }, c: { x: right(96), w: 96, level: 3 } },
+  arrival: { a: { x: X_TEXT, w: 96, level: 4 }, b: { x: X_TEXT + 96 + GAP, level: 3 }, c: { x: right(96), w: 96, align: 'right', level: 4 } },
   message: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(96), w: 96, level: 3 } },
 };
 
@@ -233,6 +256,22 @@ export function pageTop(items: Item[], sel: number, top: number, capacity: numbe
   return t;
 }
 
+/**
+ * 1.2.4 : début de la page qui précède `top` (écrans sans curseur) : elle finit juste avant `top` et prend autant
+ * d'éléments que la capacité en lignes le permet (au moins un).
+ */
+export function prevPageTop(items: Item[], top: number, capacity: number): number {
+  const t0 = Math.min(Math.max(0, Math.round(top) || 0), items.length);
+  if (t0 <= 0) return 0;
+  let t = t0 - 1;
+  let used = itemLines(items[t]);
+  while (t > 0 && used + itemLines(items[t - 1]) <= capacity) {
+    t--;
+    used += itemLines(items[t]);
+  }
+  return t;
+}
+
 /** Éléments visibles à partir de `top` dans la capacité donnée. */
 export function visibleRange(items: Item[], top: number, capacity: number): { from: number; to: number } {
   let used = 0;
@@ -276,6 +315,17 @@ export function wrapLines(lines: string[], maxPx: number): string[] {
   return out;
 }
 
+/**
+ * 1.2.4 : texte aligné à droite dans la largeur propre de sa colonne (Col.w), jamais jusqu'au bord de l'écran quand la
+ * colonne suivante est vide (« Dans le train » : l'heure d'un arrêt sans état reste sous les autres). Plus large que la
+ * colonne, ou colonne sans largeur : laissé tel quel.
+ */
+function alignRight(text: string, c: Col): string {
+  if (c.w === undefined) return text;
+  const w = Math.min(c.w, X_END - c.x) - GEO.SAFETY;
+  return textWidth(text) <= w ? padLeftTo(text, w) : text;
+}
+
 /** Largeur disponible pour une colonne d'une ligne : jusqu'à la prochaine colonne remplie. */
 function room(def: LayoutDef, col: 'a' | 'b' | 'c', next: { b?: string; c?: string }): number {
   const c = def[col];
@@ -286,6 +336,34 @@ function room(def: LayoutDef, col: 'a' | 'b' | 'c', next: { b?: string; c?: stri
   if (col === 'a' && next.b && def.b.x > c.x) return def.b.x - gap - c.x - GEO.SAFETY;
   if ((col === 'a' || col === 'b') && next.c) return def.c.x - gap - c.x - GEO.SAFETY;
   return X_END - c.x - GEO.SAFETY;
+}
+
+/**
+ * 1.2.4 (PRD-1.2.4 § 4) : une heure alignée à droite dans sa case de `slot` px (le « ~ » d'un horaire prévu dépasse à
+ * gauche, les chiffres restent alignés d'une ligne à l'autre), puis la suite (`rest`, ses espaces de tête gardés ;
+ * `tail` jamais coupée ; sans texte, la fin seule collée à l'heure : « 23:38, dernier »), le tout dans `maxPx`. La case
+ * n'est abandonnée que si elle seule ferait couper la suite (rien n'est coupé pour l'alignement) ; une suite coupée de
+ * toute façon (« vers » un long terminus) garde l'heure à sa place. `log` : sans les espaces d'alignement.
+ */
+export function leadCell(lead: string, rest: string, tail: string | undefined, slot: number, maxPx: number): { text: string; log: string } {
+  const time = truncate(lead, maxPx);
+  const sep = /^[  ]*/.exec(rest)?.[0] ?? '';
+  const body = rest.trim();
+  const fit = (room: number): string => {
+    if (body) return sep + withTail(body, tail, room - textWidth(sep));
+    if (!tail) return '';
+    const tl = /^[  ]*/.exec(tail)?.[0] ?? '';
+    return sep + tl + truncate(tail, room - textWidth(sep + tl));
+  };
+  if (!time) {
+    const r = body || tail ? withTail(body, tail, maxPx) : '';
+    return { text: r, log: r };
+  }
+  const padded = padLeftTo(time, Math.min(slot, maxPx));
+  const all = body || tail ? `${sep}${body}${tail ?? ''}` : '';
+  const head = textWidth(padded + all) <= maxPx || textWidth(time + all) > maxPx ? padded : time;
+  const r = fit(maxPx - textWidth(head));
+  return { text: head + r, log: time + r };
 }
 
 /** Colonne b avec une fin protégée : le début est coupé (« … ») pour que `tail` tienne toujours en entier. */
@@ -379,21 +457,34 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     }
     const b = it.b ?? '';
     const c = it.c ?? '';
-    const bAny = b || it.bTail ? `${b}${it.bTail ?? ''}` : '';
-    const a = truncate(it.a, room(def, 'a', { b: bAny, c }));
-    let bt = bAny ? withTail(b, it.bTail, room(def, 'b', { c })) : '';
-    let bLog = bt;
+    const bAny = b || it.bTail || it.bLead ? `${it.bLead ?? ''}${b}${it.bTail ?? ''}` : '';
+    const cAny = c || it.cLead ? `${it.cLead ?? ''}${c}` : '';
+    const aRoom = room(def, 'a', { b: bAny, c: cAny });
+    // 1.2.4 (PRD-1.2.4 § 4) : heures alignées à droite dans leur case (Col.lead) ou dans leur colonne (Col.align : sa
+    // largeur propre, que la colonne suivante soit remplie ou non)
+    const aCell = it.aLead && def.a.lead ? leadCell(it.aLead, it.a, undefined, def.a.lead, aRoom) : null;
+    const aLog = aCell ? aCell.log : truncate(it.a, aRoom);
+    const a = aCell ? aCell.text : aLog && def.a.align === 'right' && (bAny || cAny) ? alignRight(aLog, def.a) : aLog;
+    const bRoom = room(def, 'b', { c: cAny });
+    const bCell = it.bLead && def.b.lead ? leadCell(it.bLead, b, it.bTail, def.b.lead, bRoom) : null;
+    // sans heure (« aucun passage » d'un sens) : le texte d'une case d'heure commence avec les chiffres, après le « ~ »
+    const bPad = !bCell && def.b.lead && bAny ? ' '.repeat(Math.round(TILDE_W / SPACE_W)) : '';
+    let bLog = bCell ? bCell.log : bAny ? withTail(b, it.bTail, bRoom - textWidth(bPad)) : '';
+    let bt = bCell ? bCell.text : bLog ? bPad + bLog : '';
+    if (!bCell && bt && def.b.align === 'right') bt = alignRight(bt, def.b);
     if (it.bRight) {
       const row = rightRow(b, it.bRight, it.bRightTail);
       bt = row.text;
       bLog = [row.left, row.right].filter(Boolean).join(COL_SEP);
     }
-    const ctext = c ? withOptionalTail(c, it.cTail, room(def, 'c', {})) : '';
+    const cRoom = room(def, 'c', {});
+    const cCell = it.cLead && def.c.lead ? leadCell(it.cLead, c, undefined, def.c.lead, cRoom) : null;
+    const ctext = cCell ? cCell.log : c ? withOptionalTail(c, it.cTail, cRoom) : '';
     colA.push(a);
     colB.push(bt);
-    colC.push(ctext && def.c.align === 'right' ? padLeftTo(ctext, Math.min(def.c.w ?? 0, X_END - def.c.x) - GEO.SAFETY) : ctext);
+    colC.push(cCell ? cCell.text : ctext && def.c.align === 'right' ? padLeftTo(ctext, Math.min(def.c.w ?? 0, X_END - def.c.x) - GEO.SAFETY) : ctext);
     cursor.push(!message && i === sel ? CURSOR : '');
-    lines.push([a, bLog, ctext].filter(Boolean).join(COL_SEP));
+    lines.push([aLog, bLog, ctext].filter(Boolean).join(COL_SEP));
     if (it.two || it.a2 || it.b2) {
       const a2 = it.a2 ? truncate(it.a2, X_END - def.a.x - GEO.SAFETY) : '';
       const b2 = it.b2 ? truncate(it.b2, X_END - def.b.x - GEO.SAFETY) : '';
@@ -405,10 +496,14 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
       if (a2 || b2) lines.push([a2, b2].filter(Boolean).join(COL_SEP));
     }
     for (const s of it.sub ?? []) {
-      // 1.2.2 : lignes en retrait sous l'élément (sens d'une ligne), le texte de droite aligné au bord.
-      const row = s.bRight ? rightRow(s.b, s.bRight, s.bRightTail) : null;
-      const text = row ? row.text : truncate(s.b, X_END - def.b.x - GEO.SAFETY);
-      bOnly(text, row ? [row.left, row.right].filter(Boolean).join(COL_SEP) : text);
+      // 1.2.2 : lignes en retrait sous l'élément (sens d'une ligne), le texte de droite aligné au bord. 1.2.4 : retrait
+      // fait d'espaces quand la colonne b commence au bord (subIndent) ; le journal reste sans retrait.
+      const ind = def.subIndent ?? 0;
+      const pad = ' '.repeat(Math.round(ind / SPACE_W));
+      const w = X_END - def.b.x - ind - GEO.SAFETY;
+      const row = s.bRight ? spread(s.b, withOptionalTail(s.bRight, s.bRightTail, Math.min(def.c.w ?? 0, X_END - def.c.x) - GEO.SAFETY), w, def.gap ?? GAP) : null;
+      const text = row ? row.text : truncate(s.b, w);
+      bOnly(text ? pad + text : '', row ? [row.left, row.right].filter(Boolean).join(COL_SEP) : text);
     }
   }
 
@@ -465,12 +560,15 @@ function composeTop(t: NonNullable<GlassesView['top']>, def: LayoutDef): { text:
   }
   const [a, b, c] = t.cols;
   const gap = def.gap ?? GAP;
-  const at = truncate(a, def.b.x - gap - X_TEXT - GEO.SAFETY);
+  const aRoom = def.b.x - gap - X_TEXT - GEO.SAFETY;
+  // 1.2.4 : l'heure en tête, alignée comme celles des lignes dessous (Col.lead)
+  const cell = t.lead && def.a.lead ? leadCell(t.lead, a, undefined, def.a.lead, aRoom) : null;
+  const at = cell ? cell.text : truncate(a, aRoom);
   const ct = c ? truncate(c, Math.min(def.c.w ?? full, X_END - def.c.x) - GEO.SAFETY) : '';
   // b commence à sa colonne (± 2 px) ; le reste de la ligne est mesuré sur ce qui précède : jamais plus large que l'écran
   const lead = padRightTo(at, def.b.x - X_TEXT);
   const row = spread(b, ct, full - textWidth(lead), gap);
-  return { text: lead + row.text, log: [at, row.left, row.right].filter(Boolean).join(COL_SEP) };
+  return { text: lead + row.text, log: [cell ? cell.log : at, row.left, row.right].filter(Boolean).join(COL_SEP) };
 }
 
 /** Hauteur d'un pied sans ligne (la documentation du SDK permet 0 ; 1 px évite un champ omis par protobuf). */

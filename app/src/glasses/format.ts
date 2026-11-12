@@ -13,39 +13,39 @@ import { textWidth, truncate } from './font';
 /** Espace insécable : devant « : ; ! ? » et entre un nombre et son unité. */
 export const NB = CORE_NB;
 
-/** Aides de gestes (PRD § 6.1, liste S2). */
+/** Aides de gestes (PRD § 6.1, liste S2). 1.2.4 (PRD-1.2.4 § 4) : triangles vides « △▽ », plus discrets que le contenu. */
 export const HINTS = {
-  home: `▲▼ choisir   toucher${NB}: ouvrir   double${NB}: quitter`,
+  home: `△▽ choisir   toucher${NB}: ouvrir   double${NB}: quitter`,
   /** Quai Web : rien à quitter, l'onglet se ferme dans le navigateur. */
-  homeWeb: `▲▼ choisir   toucher${NB}: ouvrir`,
-  nearby: `▲▼ arrêt   toucher${NB}: départs   double${NB}: retour`,
+  homeWeb: `△▽ choisir   toucher${NB}: ouvrir`,
+  nearby: `△▽ arrêt   toucher${NB}: départs   double${NB}: retour`,
   /**
    * 1.2.3 (PRD-1.2.3 § 1) : tableau complet d'une gare ou d'un arrêt, curseur de départ en départ ; toucher un départ :
    * ses arrêts (la ligne ★ en tête garde ou retire la gare, ou ouvre « garder une ligne »).
    */
-  board: `▲▼ départs   toucher${NB}: arrêts   double${NB}: retour`,
+  board: `△▽ départs   toucher${NB}: arrêts   double${NB}: retour`,
   /** 1.2.3 (§ 2) : les arrêts d'un départ ; toucher un arrêt : son tableau. */
-  stops: `▲▼ arrêts   toucher${NB}: départs   double${NB}: retour`,
+  stops: `△▽ arrêts   toucher${NB}: départs   double${NB}: retour`,
   /** 1.2.2 : « {arrêt} : garder une ligne ». */
-  keepLine: `▲▼ choisir   toucher${NB}: ★ garder ou retirer   double${NB}: retour`,
-  favorites: `▲▼ choisir   toucher${NB}: ouvrir   double${NB}: retour`,
+  keepLine: `△▽ choisir   toucher${NB}: ★ garder ou retirer   double${NB}: retour`,
+  favorites: `△▽ choisir   toucher${NB}: ouvrir   double${NB}: retour`,
   /** 1.2.2 : « Gares » (PRD-1.2.2 § 2). */
-  stations: `▲▼ choisir   toucher${NB}: départs   double${NB}: retour`,
+  stations: `△▽ choisir   toucher${NB}: départs   double${NB}: retour`,
   /** 1.2.2 : « Bus, tram, métro » (§ 3) : détail d'une ligne, ou départs d'un arrêt « toutes les lignes ». */
-  lines: `▲▼ choisir   toucher${NB}: ouvrir   double${NB}: retour`,
+  lines: `△▽ choisir   toucher${NB}: ouvrir   double${NB}: retour`,
   /** 1.2.2 : détail d'une ligne à son arrêt ; 1.2.3 : toucher un passage, ses arrêts (« Tous les départs » : le tableau). */
-  line: `▲▼ passages   toucher${NB}: arrêts   double${NB}: retour`,
+  line: `△▽ passages   toucher${NB}: arrêts   double${NB}: retour`,
   /** Étapes du trajet suivi (1.2.1 : ▲▼ font défiler les étapes ; 1.2.2 : toucher propose « Ne plus suivre »). */
-  steps: `▲▼ étapes   toucher${NB}: ne plus suivre   double${NB}: retour`,
+  steps: `△▽ étapes   toucher${NB}: ne plus suivre   double${NB}: retour`,
   /** Étapes d'une autre proposition, ou d'un trajet ouvert et pas encore suivi (1.2.2). */
-  stepsOther: `▲▼ étapes   toucher${NB}: suivre ce trajet   double${NB}: retour`,
+  stepsOther: `△▽ étapes   toucher${NB}: suivre ce trajet   double${NB}: retour`,
   /** Trajet entièrement à pied. */
-  stepsWalk: `▲▼ étapes   double${NB}: retour`,
+  stepsWalk: `△▽ étapes   double${NB}: retour`,
   /** 1.2.2 : « Ne plus suivre » et le détail du véhicule. */
-  followed: `▲▼ choisir   toucher${NB}: valider   double${NB}: retour`,
+  followed: `△▽ choisir   toucher${NB}: valider   double${NB}: retour`,
   /** 1.2.1 : « Autres trajets ». */
-  others: `▲▼ choisir   toucher${NB}: voir   double${NB}: retour`,
-  train: `▲▼ arrêts   double${NB}: retour`,
+  others: `△▽ choisir   toucher${NB}: voir   double${NB}: retour`,
+  train: `△▽ arrêts   double${NB}: retour`,
   arrival: `toucher${NB}: ★ garder ce trajet   double${NB}: retour`,
   /** 1.2.2 (REVUE-USAGE n° 10) : « Autour de moi » vide, l'arrêt le plus proche. */
   nearest: `toucher${NB}: ses départs   double${NB}: retour`,
@@ -57,7 +57,7 @@ export const HINTS = {
   firstRun: `toucher${NB}: continuer   double${NB}: quitter`,
   /** Quai Web : rien à quitter, l'onglet se ferme dans le navigateur. */
   firstRunWeb: `toucher${NB}: continuer`,
-  /** Message « Quai 1.2.3 ». */
+  /** Message « Quai 1.2.4 ». */
   news: `toucher${NB}: continuer`,
   quit: `double toucher${NB}: quitter`,
 } as const;
@@ -90,10 +90,16 @@ export const SECTION = {
   /** Arrêt d'une ligne choisie introuvable dans les données (§ 3, lineBoard `missing`) ; Quai Web : dans l'onglet Réglages. */
   missing: `introuvable${NB}: modifie-la sur le téléphone`,
   missingWeb: `introuvable${NB}: modifie-la dans Réglages`,
+  /** 1.2.4 : sous « ARRÊTS », un arrêt (toutes ses lignes) introuvable. */
+  missingStop: `introuvable${NB}: modifie-le sur le téléphone`,
+  missingStopWeb: `introuvable${NB}: modifie-le dans Réglages`,
   /** Accueil, « Gares » : gare ou arrêt introuvable dans les données du jour (zone ni retrouvée ni déplacée). */
   missingStation: 'introuvable',
   /** Arrêt sans filtre (arrêt favori de la 1.2.1 migré) : « Gare du Nord · toutes les lignes ». */
   allLines: 'toutes les lignes',
+  /** 1.2.4 (PRD-1.2.4 § 2) : intitulés pâles des deux blocs de « Bus, tram, métro », jamais sous le curseur. */
+  stopsHead: 'ARRÊTS',
+  linesHead: 'LIGNES',
   /** Dernière ligne du détail d'une ligne : le tableau de l'arrêt. */
   allDepartures: 'Tous les départs de l’arrêt',
 } as const;
@@ -119,8 +125,23 @@ export const BOARD = {
  * le retard (« 08:44 +3 ») ; un arrêt supprimé garde son heure prévue, sans « ~ ».
  */
 export function stopTimeText(c: Pick<StopCall, 'sched' | 'rt' | 'delayMin' | 'cancelled'>, markPlanned: boolean): string {
-  if (c.cancelled) return hhmm(c.sched);
-  return `${plannedMark(c.rt, markPlanned)}${hhmm(c.sched)}${delaySuffix(c.delayMin)}`;
+  const p = stopTimeParts(c, markPlanned);
+  return p.lead + p.rest;
+}
+
+/**
+ * 1.2.4 (PRD-1.2.4 § 4) : une heure en deux parties, pour l'aligner dans sa case (Item.aLead, bLead, cLead) : l'heure
+ * (« ~ » compris) et ce qui la suit (retard, voie), ses espaces de tête compris.
+ */
+export interface TimeParts {
+  lead: string;
+  rest: string;
+}
+
+/** 1.2.4 : stopTimeText en deux parties (« ~08:44 », « +3 »). */
+export function stopTimeParts(c: Pick<StopCall, 'sched' | 'rt' | 'delayMin' | 'cancelled'>, markPlanned: boolean): TimeParts {
+  if (c.cancelled) return { lead: hhmm(c.sched), rest: '' };
+  return { lead: `${plannedMark(c.rt, markPlanned)}${hhmm(c.sched)}`, rest: delaySuffix(c.delayMin) };
 }
 
 /** 1.2.3 (§ 2) : à droite d'un arrêt d'un départ : « SUPPRIMÉ », sinon la voie (« voie 9 », modifiée : « voie 6 ! »). */
@@ -207,12 +228,17 @@ export function delaySuffix(delayMin: number | undefined): string {
 
 /** Colonne horaire d'un train sur un tableau : « 12:22  voie 9 », « ~12:30  voie 12 », « 18:04 +4  voie 11 », « 12:34  SUPPRIMÉ ». */
 export function trainCell(d: Departure, markPlanned: boolean): string {
+  const p = trainCellParts(d, markPlanned);
+  return p.lead + p.rest;
+}
+
+/** 1.2.4 : trainCell en deux parties : l'heure (« ~12:30 ») et la suite (« +4  voie 11 », «   SUPPRIMÉ »). */
+export function trainCellParts(d: Departure, markPlanned: boolean): TimeParts {
   // Une suppression est une information du temps réel (gardée 15 min pendant une panne, M8.5) : jamais de « ~ »,
   // qui coupait la colonne (« ~12:34  SUPPRI… »).
-  if (d.cancelled) return `${hhmm(d.sched)}  SUPPRIMÉ`;
-  const time = `${plannedMark(d.rt, markPlanned)}${hhmm(d.sched)}`;
+  if (d.cancelled) return { lead: hhmm(d.sched), rest: '  SUPPRIMÉ' };
   const plat = platformText(d.platform, d.newPlatform);
-  return `${time}${delaySuffix(d.delayMin)}${plat ? '  ' + plat : ''}`;
+  return { lead: `${plannedMark(d.rt, markPlanned)}${hhmm(d.sched)}`, rest: `${delaySuffix(d.delayMin)}${plat ? '  ' + plat : ''}` };
 }
 
 /** Prochain départ dans « Autour de moi » et les arrêts favoris : « T3 2 min », « 232 ~4 min », « IC 12:22 v.9 », « T3 imminent ». */
@@ -684,7 +710,14 @@ export function stopPassagesText(deps: readonly Departure[], now: number, lang: 
 
 /** Détail d'une ligne : l'heure prévue d'un passage (« 07:48 », « ~08:08 », « 07:48 +3 »). */
 export function passageTime(d: Departure, markPlanned: boolean): string {
-  return `${d.cancelled ? '' : plannedMark(d.rt, markPlanned)}${hhmm(d.sched)}${d.cancelled ? '' : delaySuffix(d.delayMin)}`;
+  const p = passageParts(d, markPlanned);
+  return p.lead + p.rest;
+}
+
+/** 1.2.4 : passageTime en deux parties (« ~08:08 », « +3 »). */
+export function passageParts(d: Departure, markPlanned: boolean): TimeParts {
+  if (d.cancelled) return { lead: hhmm(d.sched), rest: '' };
+  return { lead: `${plannedMark(d.rt, markPlanned)}${hhmm(d.sched)}`, rest: delaySuffix(d.delayMin) };
 }
 
 /** Détail d'une ligne : l'attente (« dans 3 min », « imminent », « dans 1 h 05 », « SUPPRIMÉ »). */

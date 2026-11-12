@@ -4,12 +4,11 @@
  * 1.2.2 : réglages v4, les arrêts favoris de l'exemple rangés dans `stations` (Namur) et `lines` (tram 3 à Gare du
  * Nord) ; des gares, des arrêts et des lieux publics seulement.
  */
-import type { Departure, Favorite, FavoriteAnswer, Journey, LinePick, Settings, StationPick } from '../core/api';
+import type { Favorite, FavoriteAnswer, Journey, LinePick, Settings, StationPick } from '../core/api';
 import { delayAlert, leaveAlert, platformAlert } from '../core/text';
 import { gtfsTime } from '../core/util';
 import type { AreaSummary, Mode, Names, Op } from '../../../shared/types';
-import { stopHomeText } from '../glasses/format';
-import { homeView, stepsView, type FavoriteEntry, type SectionNext } from '../glasses/views';
+import { homeView, stepsView, type FavoriteEntry } from '../glasses/views';
 import type { GlassesView } from '../glasses/types';
 
 const DAY = '2026-11-10';
@@ -93,26 +92,6 @@ function trainJourney(id: string, from: AreaSummary, to: AreaSummary, dep: numbe
   return { id, dep: start, arr, leaveAt: start - 2 * 60_000, transfers: 0, rt: true, alerts: [], legs, label: 'short' };
 }
 
-const dep = (op: Op, mode: Mode, line: string, head: Names, t: number, opts: Partial<Departure> = {}): Departure => ({ op, mode, line, head, sched: t, est: t, rt: true, delayMin: 0, cancelled: false, ...opts });
-const departuresAt = (a: AreaSummary, departures: Departure[]): FavoriteAnswer => ({
-  favoriteId: a.id,
-  kind: 'stop',
-  state: 'ok',
-  board: { area: a, departures, anyPlanned: departures.some((d) => !d.rt), rtErrors: [], updatedAt: HOME_NOW },
-  updatedAt: HOME_NOW,
-});
-
-/**
- * À droite de « Gares » et de « Bus, tram, métro » (revue d'usage n° 6) : le prochain départ de la gare d'exemple (IC de
- * 07:42, +2 min, voie 6 au lieu de 4) et le prochain passage du tram 3 à Gare du Nord, au format de l'accueil.
- */
-function sampleNext(): { stationsNext: SectionNext; linesNext: SectionNext } {
-  const ic = (t: number, opts: Partial<Departure>) => dep('sncb', 'train', 'IC', n('Bruxelles-Midi', 'Brussel-Zuid'), t, { platform: '4', ...opts });
-  const namur = departuresAt(NAMUR, [ic(at(7, 42), { est: at(7, 44), delayMin: 2, newPlatform: '6' }), ic(at(8, 42), { rt: false })]);
-  const tram3 = departuresAt(GDN, [dep('stib', 'tram', '3', n('Churchill'), at(7, 37)), dep('stib', 'tram', '3', n('Esplanade'), at(7, 41))]);
-  return { stationsNext: stopHomeText(namur, HOME_NOW), linesNext: stopHomeText(tram3, HOME_NOW) };
-}
-
 function sampleAnswers(): Map<string, FavoriteAnswer> {
   const j = morningJourney(true, true);
   return new Map<string, FavoriteAnswer>([
@@ -141,5 +120,5 @@ export function homePreview(settings: Settings): GlassesView {
   const order = settings.display.favOrder === 'mine' ? SAMPLE_FAVORITES.map((f) => f.id) : smart;
   const entries: FavoriteEntry[] = order.map((id) => ({ fav: SAMPLE_FAVORITES.find((f) => f.id === id)!, answer: answers.get(id) }));
   const nearbyCount = settings.display.radiusM <= 300 ? 2 : settings.display.radiusM <= 500 ? 3 : 4;
-  return homeView({ favorites: entries, order, noFavorites: settings.display.opening === 'home', nearbyCount, ...sampleNext() }, { now: HOME_NOW, settings: s });
+  return homeView({ favorites: entries, order, noFavorites: settings.display.opening === 'home', nearbyCount }, { now: HOME_NOW, settings: s });
 }

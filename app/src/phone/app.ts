@@ -51,7 +51,7 @@ export interface PhoneCtx {
   /**
    * Bannière de l'accueil après la mise à jour (T1), une fois : visible si les réglages lus au lancement venaient
    * d'une version antérieure à NEWS_SINCE (seenVersion non vide), jusqu'à « OK ». Le téléphone n'écrit pas
-   * seenVersion pour elle : les lunettes s'en servent pour leur message « Quai 1.2.3 ».
+   * seenVersion pour elle : les lunettes s’en servent pour leur message « Quai 1.2.4 ».
    */
   news?: NewsState;
 }
@@ -118,8 +118,8 @@ export function parseHash(hash: string): { name: string; sub: string[]; params: 
   return { name: parts[0] ?? '', sub: parts.slice(1), params: new URLSearchParams(query) };
 }
 
-/** Version qui a apporté les nouveautés de la bannière (tableaux complets, arrêts d'un départ, PRD-1.2.3 § 4) : la 1.2.3. */
-export const NEWS_SINCE = '1.2.3';
+/** Version qui a apporté les nouveautés de la bannière (arrêt où aller, arrêts et lignes séparés, PRD-1.2.4 § 5) : la 1.2.4. */
+export const NEWS_SINCE = '1.2.4';
 
 /** Bannière « Nouveau » de l'accueil : visible ou non, « OK », et ses lignes (newsLines). */
 export interface NewsState {
@@ -129,8 +129,8 @@ export interface NewsState {
 }
 
 /**
- * Bannière « Nouveau » : une fois, au passage d'une version antérieure à la 1.2.3 ou plus (réglages vus avant 1.2.3
- * au lancement), jusqu'à « OK », comme le message « Quai 1.2.3 » des lunettes ; jamais après une installation neuve.
+ * Bannière « Nouveau » : une fois, au passage d’une version antérieure à la 1.2.4 ou plus (réglages vus avant 1.2.4
+ * au lancement), jusqu’à « OK », comme le message « Quai 1.2.4 » des lunettes ; jamais après une installation neuve.
  * `app` : la version de l'appli.
  */
 export function newsState(seenAtStart: string, since = NEWS_SINCE, app = APP_VERSION): NewsState {

@@ -27,7 +27,7 @@ function answers(bureauIn: number) {
 }
 
 /** Ligne de l'élément sous le curseur (lignes de l'accueil sans la ligne vide ni l'aide des gestes). */
-const selected = (s: Screen): string => s.lines.filter((l) => l !== '' && !l.startsWith('▲▼'))[s.sel];
+const selected = (s: Screen): string => s.lines.filter((l) => l !== '' && !l.startsWith('△▽'))[s.sel];
 const ready = (s: Screen) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l));
 
 /** Ouvre le trajet du bureau depuis l'accueil et le suit (1.2.2 : un toucher de plus, « Suivre ce trajet »). */

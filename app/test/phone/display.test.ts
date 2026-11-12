@@ -85,7 +85,7 @@ describe('Affichage', () => {
     expect(s.lines.map((x) => [x.id, x.areaId, x.line, x.mode])).toEqual([['ex-gdn', 'stib:6357F', '3', 'tram']]);
   });
 
-  it('aperçu : l’accueil 1.2.2 (PRD-1.2.2 § 1.1, revue d’usage n° 6), 3 favoris, puis la gare et la ligne avec leur prochain départ', () => {
+  it('aperçu : l’accueil 1.2.2 (PRD-1.2.2 § 1.1), 3 favoris, puis la gare et la ligne ; 1.2.4 (PRD-1.2.4 § 3) : leur nombre à droite', () => {
     expect(lines(homePreview(defaults()))).toEqual([
       'Favoris | 3',
       'Bureau | dans 4 min → 09:00',
@@ -93,8 +93,8 @@ describe('Affichage', () => {
       'Vers Gand-Saint-Pierre | 08:58 → 09:30',
       '',
       'Autour de moi | 3 arrêts',
-      'Gares | IC 07:42 +2 voie 6 !',
-      'Bus, tram, métro | T3 6 min',
+      'Gares | 1 gare',
+      'Bus, tram, métro | 1 ligne',
     ]);
   });
 
@@ -126,6 +126,6 @@ describe('Affichage', () => {
     }
     const el = mount(displayScreen(harness({ settings: defaults() }).ctx));
     const label = el.querySelector('.preview')!.getAttribute('aria-label')!.replace(/\u00a0/g, ' ');
-    expect(label).toBe('Aperçu dans les lunettes : Quai, Favoris 3, Bureau dans 4 min → 09:00, Vers Mons dans 14 min → 09:04, Vers Gand-Saint-Pierre 08:58 → 09:30, Autour de moi 3 arrêts, Gares IC 07:42 +2 voie 6 !, Bus, tram, métro T3 6 min');
+    expect(label).toBe('Aperçu dans les lunettes : Quai, Favoris 3, Bureau dans 4 min → 09:00, Vers Mons dans 14 min → 09:04, Vers Gand-Saint-Pierre 08:58 → 09:30, Autour de moi 3 arrêts, Gares 1 gare, Bus, tram, métro 1 ligne');
   });
 });

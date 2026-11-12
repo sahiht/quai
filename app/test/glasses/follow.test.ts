@@ -24,7 +24,7 @@ function answers(fav: Favorite, now: number): FavoriteAnswer | undefined {
 const steps = (s: Screen) => s.screen === 'steps' && s.page !== undefined;
 const homeReady = (s: Screen) => s.screen === 'home' && s.shown?.length === 2 && !s.lines.some((l) => / …$/.test(l));
 const open = (patch = {}, kv = createKV(memoryBackend())) =>
-  setup({ now: NOW, kv, settings: settingsWith([PLACES.bureau, PLACES.mama], { seenVersion: '1.2.3', ...patch }), core: (now) => stubCore(now, { answers }) });
+  setup({ now: NOW, kv, settings: settingsWith([PLACES.bureau, PLACES.mama], { seenVersion: '1.2.4', ...patch }), core: (now) => stubCore(now, { answers }) });
 
 describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
   it('ouvrir un favori ne le suit pas : « Suivre ce trajet » ; au départ, pas de « En cours » ni de « Dans le train »', async () => {
@@ -34,7 +34,7 @@ describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
     const s = await h.until(steps);
     expect(nb(s.title)).toBe('Vers le bureau : 07:33 → 08:46   Suivre ce trajet');
     expect(s).toMatchObject({ followed: false, sel: -1 });
-    expect(s.lines.at(-1)).toBe('▲▼ étapes   toucher : suivre ce trajet   double : retour');
+    expect(s.lines.at(-1)).toBe('△▽ étapes   toucher : suivre ce trajet   double : retour');
     expect(h.c.followed).toBeNull();
     // l'heure du départ passe : rien ne se met à suivre tout seul
     h.advance(10 * MIN);
@@ -60,7 +60,7 @@ describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
     expect(saved).toMatchObject({ explicit: true, favoriteId: 'fav-bureau' });
     h.advance(3_000);
     await h.c.render();
-    expect(h.last().lines.at(-1)).toBe('▲▼ étapes   toucher : ne plus suivre   double : retour');
+    expect(h.last().lines.at(-1)).toBe('△▽ étapes   toucher : ne plus suivre   double : retour');
     // l'heure du départ : « En cours » sur l'accueil, et le favori du trajet n'y est pas répété
     h.advance(3 * MIN);
     await h.gesture('double');
@@ -79,7 +79,7 @@ describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
     await h.gesture('tap');
     const menu = await h.until((x) => x.screen === 'followed');
     expect(nb(menu.title)).toBe('Vers le bureau : trajet suivi');
-    expect(menu.lines).toEqual(['Ne plus suivre', 'Arrêts : Bus W vers Bruxelles Midi', '▲▼ choisir   toucher : valider   double : retour']);
+    expect(menu.lines).toEqual(['Ne plus suivre', 'Arrêts : Bus W vers Bruxelles Midi', '△▽ choisir   toucher : valider   double : retour']);
     expect(menu.sel).toBe(0);
     // double toucher : rien ne change
     await h.gesture('double');
@@ -116,7 +116,7 @@ describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
     await h.gesture('tap');
     const s = await h.until(steps);
     expect(nb(s.title)).toMatch(/   Suivre ce trajet$/);
-    expect(s.lines.some((l) => l.startsWith('▲▼'))).toBe(false);
+    expect(s.lines.some((l) => l.startsWith('△▽'))).toBe(false);
     await h.gesture('tap');
     expect(nb(h.last().title)).toMatch(/   Suivi$/);
     h.c.stop();

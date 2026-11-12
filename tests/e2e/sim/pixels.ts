@@ -17,11 +17,16 @@
  * « Autres trajets » : nom à gauche et heures à droite, puis la 2e ligne (moyens, pourquoi) à la marge.
  * 1.2.3 : tableau complet (la ligne ★ à la marge, puis ligne, destination, heure dans leurs colonnes) et les arrêts
  * d'un départ (ligne du haut composée sur les colonnes : heure, nom, voie calée à droite ; puis un arrêt par ligne).
+ * 1.2.4 (PRD-1.2.4 § 4) : heures alignées à droite (étapes ; case d'heure des arrêts d'un départ, du tableau d'une gare
+ * et du détail d'une ligne, le « ~ » dépassant à gauche ; attente des tableaux de bus), mesurées comme layout.ts les
+ * pose (espaces de 5 px) ; le nom de l'arrêt ou de la gare sous « Partir à pied » dans la colonne du texte ;
+ * « Bus, tram, métro » : intitulés, noms d'arrêts et titres de lignes à la marge, leurs lignes en retrait ; « Dans le
+ * train » : l'heure de chaque arrêt sous les autres, même sans état.
  * `levels()` mesure aussi la luminosité de chaque bande (relief : favoris un ton plus pâles que leur titre).
  */
 import { PNG } from 'pngjs';
-import { textWidth } from '../../../app/src/glasses/font';
-import { GEO, HOME_INDENT, LAYOUTS, WIDTHS } from '../../../app/src/glasses/layout';
+import { padLeftTo, textWidth } from '../../../app/src/glasses/font';
+import { GEO, HOME_INDENT, LAYOUTS, TILDE_W, WIDTHS } from '../../../app/src/glasses/layout';
 
 const LINE_H = 27;
 const SCREEN_H = 288;
@@ -41,7 +46,7 @@ type Seg = { from: number; to: number; text: string };
 
 /** Écrans en liste à une colonne de droite (gabarit de chacun, layout.ts). */
 const MENU: Record<string, keyof typeof LAYOUTS> = { favorites: 'favorites', stations: 'stations', keepLine: 'menu', followed: 'menu' };
-const CHECKED = new Set(['home', 'steps', 'others', 'lines', 'line', 'board', 'stops', ...Object.keys(MENU)]);
+const CHECKED = new Set(['home', 'steps', 'others', 'lines', 'line', 'board', 'stops', 'train', ...Object.keys(MENU)]);
 /** 1.2.3 : ligne du haut d'un tableau (message de l'opérateur, « Départs de demain ») ; sa note, jamais une ligne de liste. */
 const TOP_BOARD = /^(! |Départs de demain$)/;
 const NOTE_BOARD = /^(~ horaire prévu|Temps réel indisponible|Pas de réseau)/;
@@ -49,13 +54,15 @@ const NOTE_BOARD = /^(~ horaire prévu|Temps réel indisponible|Pas de réseau)/
 const VANISHED = 'Ce départ n’est plus dans les horaires.';
 const TOP_STEPS = /^(! |Le plus court|Le plus simple|Le plus rapide|Moins de marche|Plus tôt|Sans changement|Moins de changements|À pied|Le suivant|Plus tard)/;
 const TOP_HOME = /^(Temps réel indisponible|Pas de réseau|Horaires |Près de |! )/;
-const NOTE = /^(~ horaire prévu|\* s’arrête avant le terminus|Temps réel indisponible|Pas de réseau|Horaires |▼ |Fin du trajet\.|▲ trajet précédent|Pas d’autre trajet pour l’instant$)/;
+const NOTE = /^(~ horaire prévu|\* s’arrête avant le terminus|Temps réel indisponible|Pas de réseau|Horaires |[▼▽] |Fin du trajet\.|[▲△] trajet précédent|Pas d’autre trajet pour l’instant$)/;
+/** 1.2.4 : « Dans le tram » (bus, tram, métro) : la descente en ligne du haut. */
+const TOP_TRAIN = /^Descente (au prochain arrêt|dans \d+ arrêts)$/;
 /** Accueil : les lignes qui suivent les favoris (jamais en retrait, même sans ligne vide). */
 const HOME_TOOLS = /^(Autour de moi|Gares|Bus, tram, métro)( {3}|$)/;
 /** « Bus, tram, métro » : titre d'une ligne choisie (à la marge) ; le reste, ses sens, en retrait. */
 const LINE_TITLE = /^((Bus SNCB|Bus|Tram|Métro|Ligne) \S+ · |.+ · toutes les lignes$)/;
 /** Ligne d'aide (ou message temporaire de l'accueil) : jamais une ligne de la liste. */
-const HINT = /^(▲▼ |toucher |double |★ )/;
+const HINT = /^([▲△][▼▽] |toucher |double |★ )/;
 /** Note de l'accueil (1.2.1 § 4.7) : le jour férié, dernière ligne quand l'aide est masquée. */
 const HOME_NOTE = /^Jour férié /;
 
@@ -75,8 +82,35 @@ function rightSeg(def: { c: { x: number; w?: number } }, text: string): Seg {
   return { from: end - width(text) - 5, to: end, text };
 }
 
+/** 1.2.4 : texte aligné à droite dans `room` px depuis `x`, par les mêmes espaces que layout.ts (padLeftTo). */
+function padSeg(x: number, room: number, text: string): Seg {
+  const from = x + width(padLeftTo(text, room)) - width(text);
+  return { from, to: from + width(text), text };
+}
+
+const TIME = /^(~?\d\d:\d\d)(.*)$/;
+
+/**
+ * 1.2.4 : case d'heure (Col.lead, leadCell) : l'heure alignée à droite dans `slot` px, le « ~ » dépassant à gauche,
+ * puis la suite ; sans décalage si le tout ne tient pas avec la case. Sans heure (« aucun passage »), le texte commence
+ * avec les chiffres, après la place du « ~ ». Le journal est sans les espaces d'alignement.
+ */
+function leadSeg(x: number, slot: number, room: number, cell: string): Seg {
+  const m = TIME.exec(cell);
+  let pad = width(' '.repeat(Math.round(TILDE_W / 5)));
+  if (m) {
+    const padded = padLeftTo(m[1], Math.min(slot, room));
+    pad = width(padded + m[2]) <= room ? width(padded) - width(m[1]) : 0;
+  }
+  return { from: x + pad, to: x + pad + width(cell), text: cell };
+}
+
+/** Place d'une colonne jusqu'à la suivante (layout.ts, room) : bord de la colonne c, moins l'écart et la marge. */
+const roomTo = (def: { c: { x: number }; gap?: number }, x: number): number => def.c.x - (def.gap ?? GEO.GAP) - x - GEO.SAFETY;
+const roomIn = (c: { x: number; w?: number }): number => Math.min(c.w ?? 0, GEO.X_END - c.x) - GEO.SAFETY;
+
 /** Segments attendus d'une ligne de liste selon le gabarit (colonnes séparées par 3 espaces dans le journal). */
-function rowSegments(screen: string, line: string): Seg[] {
+function rowSegments(screen: string, line: string, indented = false): Seg[] {
   const parts = line.split('   ');
   if (MENU[screen]) {
     const def = LAYOUTS[MENU[screen]];
@@ -85,44 +119,86 @@ function rowSegments(screen: string, line: string): Seg[] {
     return [{ from: def.a.x, to: def.a.x + width(a), text: a }, rightSeg(def, parts[parts.length - 1])];
   }
   if (screen === 'lines') {
-    // titre de la ligne à la marge ; ses sens en retrait, les passages calés au bord droit (comme les favoris)
-    if (LINE_TITLE.test(line)) return [{ from: LAYOUTS.lines.a.x, to: LAYOUTS.lines.a.x + width(line), text: line }];
-    return indentedSegments(LAYOUTS.lines.b.x, line);
+    // intitulés, noms d'arrêts et titres de lignes à la marge ; leurs lignes en retrait (espaces de 5 px, subIndent),
+    // les passages d'un sens calés au bord droit (comme les favoris)
+    const def = LAYOUTS.lines;
+    if (!indented) return [{ from: def.a.x, to: def.a.x + width(line), text: line }];
+    return indentedSegments(def.b.x + width(' '.repeat(Math.round((def.subIndent ?? 0) / 5))), line);
   }
   if (screen === 'board' || screen === 'boardTrain') {
-    // 1.2.3 : la ligne ★ (ou « aucun départ ») à la marge ; un départ : ligne, destination, heure dans leurs colonnes
+    // 1.2.3 : la ligne ★ (ou « aucun départ ») à la marge ; un départ : ligne, destination, heure dans leurs colonnes.
+    // 1.2.4 : l'attente d'un bus calée à droite ; l'heure d'un train dans sa case (« ~ » à gauche), puis la voie.
     const def = LAYOUTS[screen];
     if (parts.length === 1) return [{ from: def.a.x, to: def.a.x + width(line), text: line }];
     const [a, b, c] = parts;
     const out: Seg[] = [{ from: def.a.x, to: def.a.x + width(a), text: a }];
     if (b !== undefined) out.push({ from: def.b.x, to: def.b.x + width(b), text: b });
-    if (c !== undefined) out.push({ from: def.c.x, to: def.c.x + width(c), text: c });
+    if (c !== undefined) out.push(def.c.lead ? leadSeg(def.c.x, def.c.lead, roomIn(def.c), c) : padSeg(def.c.x, roomIn(def.c), c));
     return out;
   }
   if (screen === 'stops') {
-    // 1.2.3 : un arrêt : heure (retard), nom, puis la voie ou « SUPPRIMÉ » calée au bord droit de sa colonne
+    // 1.2.3 : un arrêt : heure (retard), nom, puis la voie ou « SUPPRIMÉ » calée au bord droit de sa colonne.
+    // 1.2.4 : l'heure dans sa case (« ~ » à gauche).
     const def = LAYOUTS.stops;
     const [a, b, c] = parts;
-    const out: Seg[] = [{ from: def.a.x, to: def.a.x + width(a), text: a }];
+    const out: Seg[] = [leadSeg(def.a.x, def.a.lead ?? 0, roomIn(def.a), a)];
     if (b !== undefined) out.push({ from: def.b.x, to: def.b.x + width(b), text: b });
     if (c !== undefined) out.push(rightSeg(def, c));
     return out;
   }
+  if (screen === 'train') {
+    // 1.2.4 : « Dans le train » : l'arrêt, son heure calée à droite de sa colonne (même sans état), puis l'état
+    const def = LAYOUTS.train;
+    const [a, b, c] = parts;
+    const out: Seg[] = [{ from: def.a.x, to: def.a.x + width(a), text: a }];
+    if (b !== undefined) out.push(padSeg(def.b.x, roomIn(def.b), b));
+    if (c !== undefined) out.push({ from: def.c.x, to: def.c.x + width(c), text: c });
+    return out;
+  }
   if (screen === 'line') {
-    // détail : « vers … » et « Tous les départs de l’arrêt » à la marge ; un passage en retrait (heure, terminus s'il
-    // diffère), son attente dans la colonne d'état
+    // détail : « vers … » et « Tous les départs de l’arrêt » à la marge ; un passage (heure dans sa case, « ~ » dans le
+    // retrait ; terminus s'il diffère), son attente dans la colonne d'état
     const def = LAYOUTS.line;
     if (parts.length === 1 && !/^(~?\d\d:\d\d|aucun passage$)/.test(line)) return [{ from: def.a.x, to: def.a.x + width(line), text: line }];
-    const out: Seg[] = [{ from: def.b.x, to: def.b.x + width(parts[0]), text: parts[0] }];
+    const room = parts[1] !== undefined ? roomTo(def, def.b.x) : GEO.X_END - def.b.x - GEO.SAFETY;
+    const out: Seg[] = [leadSeg(def.b.x, def.b.lead ?? 0, room, parts[0])];
     if (parts[1] !== undefined) out.push({ from: def.c.x, to: def.c.x + width(parts[1]), text: parts[1] });
     return out;
   }
   const def = LAYOUTS.steps;
+  // 1.2.4 : sous « Partir à pied vers l'arrêt » (ou un trajet qui commence à bord), le nom seul, dans la colonne du texte
+  if (parts.length === 1 && !TIME.test(line)) return [{ from: def.b.x, to: def.b.x + width(line), text: line }];
   const [a, b, c] = parts;
-  const out: Seg[] = [{ from: def.a.x, to: def.a.x + width(a), text: a }];
+  // 1.2.4 : l'heure calée à droite de sa colonne (« ~ » à gauche) dès qu'un texte la suit
+  const out: Seg[] = [b !== undefined || c !== undefined ? padSeg(def.a.x, roomIn(def.a), a) : { from: def.a.x, to: def.a.x + width(a), text: a }];
   if (b !== undefined) out.push({ from: def.b.x, to: def.b.x + width(b), text: b });
   if (c !== undefined) out.push({ from: def.c.x, to: def.c.x + width(c), text: c });
   return out;
+}
+
+/**
+ * 1.2.4 : « Bus, tram, métro » : lignes en retrait de la page, d'après leur ordre. « ARRÊTS » : un nom d'arrêt (à la
+ * marge) puis sa ligne de départs (en retrait) ; « LIGNES » : un titre de ligne puis ses sens. Une page commence
+ * toujours par un élément entier (ou son intitulé).
+ */
+function linesIndented(lines: string[]): boolean[] {
+  let block: 'stops' | 'lines' | undefined;
+  let named = false;
+  return lines.map((l) => {
+    if (l === 'ARRÊTS' || l === 'LIGNES') {
+      block = l === 'ARRÊTS' ? 'stops' : 'lines';
+      named = false;
+      return false;
+    }
+    if (LINE_TITLE.test(l)) {
+      block = 'lines';
+      return false;
+    }
+    block ??= 'stops';
+    if (block === 'lines') return true;
+    named = !named;
+    return !named;
+  });
 }
 
 /** Ligne en retrait (favori de l'accueil, sens d'une ligne) : texte à gauche, et le reste calé au bord droit. */
@@ -179,7 +255,15 @@ function bands(s: LoggedScreen): Band[] | null {
   const home = s.screen === 'home';
   const board = s.screen === 'board';
   const hasTop =
-    s.screen === 'steps' ? TOP_STEPS.test(lines[0] ?? '') : home ? TOP_HOME.test(lines[0] ?? '') : board ? TOP_BOARD.test(lines[0] ?? '') : s.screen === 'stops' || (s.screen === 'line' && /^! /.test(lines[0] ?? ''));
+    s.screen === 'steps'
+      ? TOP_STEPS.test(lines[0] ?? '')
+      : home
+        ? TOP_HOME.test(lines[0] ?? '')
+        : board
+          ? TOP_BOARD.test(lines[0] ?? '')
+          : s.screen === 'train'
+            ? TOP_TRAIN.test(lines[0] ?? '')
+            : s.screen === 'stops' || (s.screen === 'line' && /^! /.test(lines[0] ?? ''));
   const top = hasTop ? lines.shift()! : undefined;
   let hint: string | undefined;
   let note: string | undefined;
@@ -192,30 +276,32 @@ function bands(s: LoggedScreen): Band[] | null {
   } else {
     hint = lines.pop();
     note = lines.length && (board ? NOTE_BOARD : NOTE).test(lines[lines.length - 1]) ? lines.pop() : undefined;
-    // ligne de note réservée (layout.ts, reserveNote) : partout sauf « Autres trajets » et les menus
-    const reserve = !['others', 'keepLine', 'followed'].includes(s.screen);
+    // ligne de note réservée (layout.ts, reserveNote) : partout sauf « Autres trajets », les menus et « Dans le train »
+    const reserve = !['others', 'keepLine', 'followed', 'train'].includes(s.screen);
     footLines = (reserve || note ? 1 : 0) + 1;
   }
   const footY = SCREEN_H - GEO.BOTTOM_MARGIN - footLines * LINE_H;
   const rowsY = GEO.TITLE_Y + LINE_H + (hasTop ? LINE_H : 0) + 3;
 
   const out: Band[] = [];
-  const clockW = s.clock ? width(s.clock) : 0;
-  const clockEnd = GEO.X_END - GEO.SAFETY;
+  // l'heure du titre, calée à droite de son conteneur par les mêmes espaces que layout.ts
+  const clockSeg = s.clock ? padSeg(GEO.X_END - GEO.CLOCK_W, GEO.CLOCK_W - GEO.SAFETY, s.clock) : undefined;
   // 1.2.2 : l'état d'un trajet (« Suivi », « Suivre ce trajet ») calé à droite de la ligne du titre
   const [tLeft, tRight] = s.screen === 'steps' ? s.title.split('   ') : [s.title];
   const titleEnd = GEO.X_TEXT + WIDTHS.title;
   const titleSegs: Seg[] = [{ from: GEO.X_TEXT, to: GEO.X_TEXT + width(tLeft), text: tLeft }];
   if (tRight) titleSegs.push({ from: titleEnd - width(tRight) - 5, to: titleEnd, text: tRight });
-  out.push({ y: GEO.TITLE_Y, label: 'titre', text: s.title, segs: [...titleSegs, ...(s.clock ? [{ from: clockEnd - clockW, to: clockEnd, text: s.clock }] : [])] });
+  out.push({ y: GEO.TITLE_Y, label: 'titre', text: s.title, segs: [...titleSegs, ...(clockSeg ? [clockSeg] : [])] });
   if (top !== undefined) {
-    // 1.2.3 : arrêts d'un départ : l'arrêt du tableau composé sur les colonnes de la liste (voie calée au bord droit)
+    // 1.2.3 : arrêts d'un départ : l'arrêt du tableau composé sur les colonnes de la liste (voie calée au bord droit) ;
+    // 1.2.4 : son heure dans la case, comme celles dessous
     const tp = top.split('   ');
+    const st = LAYOUTS.stops;
     const segs =
       s.screen === 'stops' && tp.length > 1
         ? [
-            { from: GEO.X_TEXT, to: GEO.X_TEXT + width(tp[0]), text: tp[0] },
-            { from: LAYOUTS.stops.b.x, to: LAYOUTS.stops.b.x + width(tp[1]), text: tp[1] },
+            leadSeg(GEO.X_TEXT, st.a.lead ?? 0, st.b.x - (st.gap ?? GEO.GAP) - GEO.X_TEXT - GEO.SAFETY, tp[0]),
+            { from: st.b.x, to: st.b.x + width(tp[1]), text: tp[1] },
             ...(tp[2] !== undefined ? [{ from: GEO.X_END - GEO.SAFETY - width(tp[2]) - 5, to: GEO.X_END - GEO.SAFETY, text: tp[2] }] : []),
           ]
         : [{ from: GEO.X_TEXT, to: GEO.X_TEXT + width(top), text: top }];
@@ -223,6 +309,7 @@ function bands(s: LoggedScreen): Band[] | null {
   }
   // accueil : les favoris en retrait sont les lignes entre « Favoris » et la ligne vide
   let underFavorites = false;
+  const indented = s.screen === 'lines' ? linesIndented(lines) : [];
   lines.forEach((l, i) => {
     let segs: Seg[];
     if (home) {
@@ -235,7 +322,7 @@ function bands(s: LoggedScreen): Band[] | null {
       } else segs = homeSegments(l, underFavorites);
     } else if (s.screen === 'others') segs = othersSegments(l, i % 2 === 1);
     else if (board) segs = rowSegments(/\(SNCB\)( ★)?$/.test(s.title) ? 'boardTrain' : 'board', l);
-    else segs = rowSegments(s.screen, l);
+    else segs = rowSegments(s.screen, l, indented[i]);
     out.push({ y: rowsY + i * LINE_H, label: `ligne ${i + 1}`, text: l, segs });
   });
   if (note !== undefined) out.push({ y: footY, label: 'note', text: note, segs: [{ from: GEO.X_TEXT, to: GEO.X_TEXT + width(note), text: note }] });

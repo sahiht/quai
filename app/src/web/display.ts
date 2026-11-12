@@ -101,9 +101,34 @@ function drawSymbol(ctx: Ctx2D, ch: string, x: number, baseline: number, adv: nu
     ctx.fill();
     return true;
   };
+  /** 1.2.4 : triangle vide (aides des gestes « △▽ ») : le contour seul, une bande de 2 px (pair-impair). */
+  const ring = (pts: [number, number][]): true => {
+    const cx = pts.reduce((t, p) => t + p[0], 0) / pts.length;
+    const cy = pts.reduce((t, p) => t + p[1], 0) / pts.length;
+    const inner = pts.map(([px, py]): [number, number] => [cx + (px - cx) * 0.66, cy + (py - cy) * 0.66]);
+    ctx.beginPath();
+    for (const path of [pts, inner]) {
+      path.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+      ctx.closePath();
+    }
+    ctx.fill('evenodd');
+    return true;
+  };
   const w = Math.max(4, adv - 4);
   const l = x + (adv - w) / 2;
   switch (ch) {
+    case '△':
+      return ring([
+        [l + w / 2, baseline - 15],
+        [l + w, baseline],
+        [l, baseline],
+      ]);
+    case '▽':
+      return ring([
+        [l, baseline - 15],
+        [l + w, baseline - 15],
+        [l + w / 2, baseline],
+      ]);
     case '▶': {
       const top = baseline - 17;
       const bottom = baseline + 1;

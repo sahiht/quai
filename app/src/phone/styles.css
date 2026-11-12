@@ -63,7 +63,8 @@ body.grey .box { background: var(--card); }
 .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
 .btn-primary { border: 0; background: var(--accent); color: #fff; }
 .btn-primary:hover:not([disabled]) { background: var(--accent-dark); color: #fff; }
-.btn-dark { border: 0; background: var(--text); color: #fff; min-height: 52px; font-size: 16px; }
+/* 1.2.4 : le bouton principal est vert partout, premier lancement compris (« Continuer », « Terminer », un peu plus haut). */
+.btn-tall { min-height: 52px; font-size: 16px; }
 .btn-secondary { border: 1px solid var(--btn-border); background: var(--card); color: var(--accent); min-height: 48px; }
 .btn-danger { border: 1px solid var(--btn-border); background: var(--card); color: #8a2a1d; }
 .btn-big { min-height: 52px; font-size: 16px; }
@@ -321,3 +322,6 @@ dl { margin: 0; }
 .g-screen-wrap .g-screen { position: absolute; left: 0; top: 0; width: 576px; height: 288px; transform-origin: 0 0; }
 .g-emu-buttons { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .g-emu-buttons button { min-height: 44px; border: 1px solid var(--btn-border); border-radius: 12px; background: var(--card); cursor: pointer; }
+/* 1.2.4 : blocs « Arrêts » et « Lignes » de « Bus, tram, métro », chacun sous son intitulé */
+.pick-lists { display: flex; flex-direction: column; gap: 8px; }
+.pick-group { margin: 6px 0 0; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--muted); }

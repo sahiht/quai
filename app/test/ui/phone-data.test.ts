@@ -34,10 +34,10 @@ describe('écran Données : état de chaque réseau', () => {
 
 describe('écran Données 1.1 : version, adresses, temps réel (M7, M8, T6)', () => {
   const health = (geocode?: Record<string, { ok: boolean }>) => ({ ok: true, time: '', sources: { sncb: { ok: true }, stib: { ok: true }, delijn: { ok: true }, tec: { ok: true } }, ...(geocode ? { geocode } : {}) });
-  it('version de Quai : celle de app.json (1.2.2, puis 1.2.3 à la publication, PRD-1.2.3 § 4)', () => {
+  it('version de Quai : celle de app.json (1.2.4 à la publication, PRD-1.2.4 § 5)', () => {
     const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../app.json', import.meta.url)), 'utf8'));
     expect(APP_VERSION).toBe(manifest.version);
-    expect(APP_VERSION).toMatch(/^1\.2\.[23]$/);
+    expect(APP_VERSION).toBe('1.2.4');
   });
   it('services d’adresses : disponibles, indisponibles, ou sauf une Région', () => {
     expect(addressStatus(null, false)).toEqual({ ok: false, text: '…' });

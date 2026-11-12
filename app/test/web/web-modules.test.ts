@@ -23,7 +23,7 @@ afterEach(() => {
 
 describe('écran des lunettes dessiné dans un canvas', () => {
   it('abscisses des caractères identiques au micrologiciel (crénage compris)', () => {
-    for (const line of ['Gare du Nord, tram (STIB)', 'T3   Churchill   2 min', 'AVAWTo', '▲▼ départs   toucher : ★ favori', '           12:10']) {
+    for (const line of ['Gare du Nord, tram (STIB)', 'T3   Churchill   2 min', 'AVAWTo', '△▽ départs   toucher : ★ favori', '           12:10']) {
       const pos = glyphPositions(line);
       const cps = [...line];
       expect(pos).toHaveLength(cps.length);
@@ -85,6 +85,12 @@ describe('écran des lunettes dessiné dans un canvas', () => {
     expect(LEVEL_ALPHA[4]).toBe(1);
     expect(LEVEL_ALPHA[3]).toBeCloseTo(230 / 255, 1);
     expect(LEVEL_ALPHA[2]).toBeCloseTo(197 / 255, 1);
+    // 1.2.4 (PRD-1.2.4 § 4) : « △▽ » des aides, triangles vides dessinés (contour pair-impair), jamais un caractère
+    const fills: unknown[][] = [];
+    const ctx2 = { ...ctx, fillText: (...a: unknown[]) => fills.push(['text', ...a]), fill: (...a: unknown[]) => fills.push(['fill', ...a]) };
+    drawContainers(ctx2 as typeof ctx, [{ id: 8, name: 'foot', x: 28, y: 258, w: 544, h: 27, content: '△▽', level: 2, capture: false }]);
+    expect(fills.filter((f) => f[0] === 'text')).toEqual([]);
+    expect(fills.filter((f) => f[0] === 'fill' && f[1] === 'evenodd')).toHaveLength(2);
   });
 
   it('texte lisible pour les lecteurs d’écran : titre, heure, lignes, aides ; 1.2.3 : curseur sur le premier départ (PRD-1.2.3 § 1)', () => {

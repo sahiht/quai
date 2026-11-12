@@ -128,7 +128,11 @@ export interface KeepLineRoute {
 export type Route =
   | { screen: 'home' }
   | { screen: 'nearby' }
-  | { screen: 'board'; areaId: string; filter?: LineFilter[]; name?: Names }
+  /**
+   * `pick` (1.2.4) : gare ou arrêt gardé ouvert d'office (`near`) : StationPick.id ou LinePick.id, pour retrouver sa zone
+   * si son identifiant a changé (le choix suit, comme dans « Gares » et « Bus, tram, métro »).
+   */
+  | { screen: 'board'; areaId: string; filter?: LineFilter[]; name?: Names; pick?: string }
   /** 1.2.2 : « Favoris » : favoris, adresses récentes, « Autre adresse » (PRD-1.2.2 § 1.2). */
   | { screen: 'favorites' }
   | { screen: 'stations' }
@@ -145,7 +149,7 @@ export type Route =
   | { screen: 'arrival'; journey: Journey; leg: number; trip?: { from: AreaRef; to: AreaRef } }
   | { screen: 'message'; kind: MessageKind; title: string; lines: string[] };
 
-/** news : message « Quai 1.2.3 » (une fois, après la mise à jour depuis une version antérieure ; lignes dans la route). */
+/** news : message « Quai 1.2.4 » (une fois, après la mise à jour depuis une version antérieure ; lignes dans la route). */
 export type MessageKind = 'loading' | 'error' | 'empty' | 'firstRun' | 'notConfigured' | 'info' | 'news';
 
 /** Ce que fait un toucher sur un élément. */
@@ -217,6 +221,14 @@ export interface Item {
   key?: string;
   /** Fin de la colonne b jamais coupée (ex. « , dernier ») : la colonne b est raccourcie avant elle. */
   bTail?: string;
+  /**
+   * 1.2.4 (PRD-1.2.4 § 4) : une heure en tête de la colonne, alignée à droite dans la case de l'heure du gabarit
+   * (Col.lead) : le « ~ » d'un horaire prévu dépasse à gauche, les chiffres restent alignés. Le texte de la colonne
+   * (a, b ou c) la suit, ses espaces de tête compris ; si le tout ne tient pas, l'heure n'est pas décalée.
+   */
+  aLead?: string;
+  bLead?: string;
+  cLead?: string;
   /** Fin de la colonne c ajoutée seulement si elle tient en entier (la colonne c n'est jamais coupée pour elle). */
   cTail?: string;
   /**
@@ -258,7 +270,13 @@ export type Layout =
  * « 08:42 », « Namur », « voie 2 ») : la ligne est composée sur les colonnes a, b et c du gabarit, alignée sur la liste
  * en dessous, et journalisée colonnes séparées par trois espaces ; `text` les reprend (largeur, journal sans gabarit).
  */
-export interface TopLine { text: string; strong?: boolean; cols?: [string, string, string] }
+export interface TopLine {
+  text: string;
+  strong?: boolean;
+  cols?: [string, string, string];
+  /** 1.2.4 : heure en tête de la colonne a de `cols`, alignée comme Item.aLead. */
+  lead?: string;
+}
 
 export interface GlassesView {
   screen: ScreenId;

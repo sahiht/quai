@@ -423,7 +423,7 @@ function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
     list.replaceChildren(
       ...shown.map((c) => {
         const taken = s.lines.some((x) => x.areaId === c.areaId && !x.line);
-        const meta = taken ? T.lineTaken : c.areaId === arret ? T.chosenStop : c.distanceM !== undefined ? typo(distanceText(c.distanceM)) : undefined;
+        const meta = taken ? T.stopTaken : c.areaId === arret ? T.chosenStop : c.distanceM !== undefined ? typo(distanceText(c.distanceM)) : undefined;
         return option({ icon: modeIcon(mainMode(c.modes)), label: displayName(c.name, s.lang), sub: c.kind, meta, verb: 'Ajouter', onPick: () => void pick(c) });
       }),
     );
@@ -471,7 +471,7 @@ function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
     const name = displayName(c.name, ctx.settings.get().lang);
     const stop = { areaId: c.areaId, op: c.op, name: c.name, lat: c.lat, lon: c.lon };
     const r = withLine(ctx.settings.get(), stop, ctx.clock.now());
-    if (r === 'exists') return hub.say(msg, T.lineExists);
+    if (r === 'exists') return hub.say(msg, T.stopExists);
     if (r === 'full') return hub.say(msg, typo(lineLimitText(LIMITS.lines)), true);
     await ctx.settings.update((x) => {
       const again = withLine(x, stop, ctx.clock.now());
@@ -479,7 +479,7 @@ function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
     });
     hub.say(msg, typo(stopAddedText(name)));
     done.hidden = false;
-    // Prêt pour un autre arrêt : le champ se vide, les arrêts proches reviennent (celui-ci « déjà dans tes lignes »).
+    // Prêt pour un autre arrêt : le champ se vide, les arrêts proches reviennent (celui-ci « déjà dans tes arrêts »).
     field.input.value = '';
     await run();
   }

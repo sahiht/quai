@@ -79,8 +79,8 @@ describe('CA-123.1 : tableau complet d’une gare ou d’un arrêt', () => {
     expect(v.initialSel).toBe(1);
     expect(v.paged).toBe(true);
     expect(v.hints).toBe(HINTS.board);
-    expect(nb(HINTS.board)).toBe('▲▼ départs   toucher : arrêts   double : retour');
-    expect(v.items.slice(1).map((i) => nb(i.c ?? ''))).toEqual([
+    expect(nb(HINTS.board)).toBe('△▽ départs   toucher : arrêts   double : retour');
+    expect(v.items.slice(1).map((i) => nb(`${i.cLead ?? ''}${i.c ?? ''}`))).toEqual([
       '07:34  voie 5',
       '07:42 +2  voie 6 !',
       '07:47  voie 3',
@@ -105,16 +105,16 @@ describe('CA-123.1 : tableau complet d’une gare ou d’un arrêt', () => {
     const area = { id: 'stib:6357F', op: 'stib' as const, n: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86, lon: 4.36, modes: ['tram' as const], lines: ['3', '4'] };
     const tram = dep(NOW, 2, { op: 'stib', mode: 'tram', line: '3', head: N('Churchill') });
     const v = boardView({ area, departures: [tram], anyPlanned: false, rtErrors: [], updatedAt: NOW }, ctx(), { kept: false });
-    expect(lines(v)).toEqual(['★ garder une ligne', 'T3   Churchill   2 min', '▲▼ départs   toucher : arrêts   double : retour']);
+    expect(lines(v)).toEqual(['★ garder une ligne', 'T3   Churchill   2 min', '△▽ départs   toucher : arrêts   double : retour']);
     expect(v.items[0].action).toEqual({ kind: 'open', route: { screen: 'keepLine', areaId: 'stib:6357F', op: 'stib', name: area.n, lat: 50.86, lon: 4.36 } });
     expect(lines(boardView({ area, departures: [], anyPlanned: false, rtErrors: [], updatedAt: NOW }, ctx(), { kept: false })).slice(0, 2)).toEqual(['★ garder une ligne', 'aucun départ']);
     expect(lines(boardView(boardOf(STATIONS.namur.areaId, 'Namur', []), ctx(), { kept: true })).slice(0, 2)).toEqual(['★ retirer la gare', 'aucun départ']);
     for (const t of [BOARD.keepStation, BOARD.dropStation, BOARD.keepLine, BOARD.none, HINTS.board]) expect(textWidth(t)).toBeLessThanOrEqual(WIDTHS.full);
   });
 
-  it('le contrôleur demande les 2 prochaines heures (40 au plus) ; curseur sur le premier départ ; ▲▼ de départ en départ, par page', async () => {
+  it('le contrôleur demande les 2 prochaines heures (40 au plus) ; curseur sur le premier départ ; △▽ de départ en départ, par page', async () => {
     const { core: c, boardOpts } = core(() => NOW);
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', stations: [STATIONS.namur] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.4', stations: [STATIONS.namur] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: STATIONS.namur.areaId, name: STATIONS.namur.name });
     const b = await h.until(boardReady);
@@ -123,9 +123,9 @@ describe('CA-123.1 : tableau complet d’une gare ou d’un arrêt', () => {
     expect(b.lines[0]).toBe('★ retirer la gare');
     expect(b.lines[1]).toBe('S6   Charleroi-Central   07:34  voie 5');
     expect(b.sel).toBe(1);
-    expect(b.lines.at(-1)).toBe('▲▼ départs   toucher : arrêts   double : retour');
+    expect(b.lines.at(-1)).toBe('△▽ départs   toucher : arrêts   double : retour');
     // éléments visibles (la ligne ★ et les départs de la 1re page), sans l'aide ni la note
-    const rows = b.lines.filter((l) => !l.startsWith('▲▼') && !l.startsWith('~')).length;
+    const rows = b.lines.filter((l) => !l.startsWith('△▽') && !l.startsWith('~')).length;
     // ▼ jusqu'au bas de la page : la page ne bouge pas ; un ▼ de plus : la page suivante commence au curseur
     for (let i = 1; i < rows - 1; i++) await h.gesture('down');
     expect(h.last()).toMatchObject({ sel: rows - 1 });
@@ -141,7 +141,7 @@ describe('CA-123.1 : tableau complet d’une gare ou d’un arrêt', () => {
     // le dernier départ, puis ▼ : rien ne bouge
     for (let i = 0; i < 20; i++) await h.gesture('down');
     expect(h.last().sel).toBe(NAMUR_DEPS.length);
-    expect(h.last().lines.filter((l) => !l.startsWith('▲▼') && l).at(-1)).toBe('IC   Liège-Guillemins   09:27  voie 2');
+    expect(h.last().lines.filter((l) => !l.startsWith('△▽') && l).at(-1)).toBe('IC   Liège-Guillemins   09:27  voie 2');
     h.c.stop();
   });
 
@@ -153,7 +153,7 @@ describe('CA-123.1 : tableau complet d’une gare ou d’un arrêt', () => {
       [empty, ['★ garder une ligne', 'aucun départ']],
     ] as const) {
       const c = stubCore(() => NOW, { board: (id, n, o) => (id === 'tec:Bbrlmer1' ? (o?.horizonMin ? empty(n) : next(n)) : undefined) });
-      const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3' }), core: () => c });
+      const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.4' }), core: () => c });
       await h.until((x) => x.screen === 'home');
       await h.c.show({ screen: 'board', areaId: 'tec:Bbrlmer1', name: N('Braine-l’Alleud Merbraine') });
       const b = await h.until((x) => x.screen === 'board' && x.lines.length > 1);
@@ -163,7 +163,7 @@ describe('CA-123.1 : tableau complet d’une gare ou d’un arrêt', () => {
   });
 
   it('le faux cœur : un tableau complet de Gare du Nord (40 au plus) ; tous les départs sont touchables', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3' }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.4' }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: 'stib:6357F', name: { fr: 'Gare du Nord', nl: 'Noordstation' } });
     const b = await h.until(boardReady);
@@ -187,7 +187,7 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
       '08:31 +3   Liège-Guillemins   voie 5',
       '08:37 +3   Liège-Carré   voie 1',
       '08:43 +3   Herstal   voie 1',
-      '▲▼ arrêts   toucher : départs   double : retour',
+      '△▽ arrêts   toucher : départs   double : retour',
     ]);
     // l'arrêt du tableau sur la ligne du haut, au plus clair ; les suivants un ton plus pâles
     const p = page(v);
@@ -219,7 +219,7 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
       ctx(),
     );
     expect(bus.title).toBe('Bus W vers Bruxelles Midi');
-    expect(lines(bus)).toEqual(['07:48 +3   Braine-l’Alleud Merbraine', '07:56 +3   Waterloo Eglise', '08:41 +3   Bruxelles Midi', '▲▼ arrêts   toucher : départs   double : retour']);
+    expect(lines(bus)).toEqual(['07:48 +3   Braine-l’Alleud Merbraine', '07:56 +3   Waterloo Eglise', '08:41 +3   Bruxelles Midi', '△▽ arrêts   toucher : départs   double : retour']);
     const t3 = dep(NOW, 40, { op: 'stib', mode: 'tram', line: '3', head: N('Churchill'), rt: false });
     const tram = stopsView(
       { screen: 'stops', areaId: 'stib:6357F', dep: t3 },
@@ -231,7 +231,7 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
       ctx(),
     );
     expect(tram.title).toBe('Tram 3 vers Churchill');
-    expect(lines(tram)).toEqual(['~08:11   Gare du Nord', '~08:13   Rogier', '~08:36   Churchill', '~ horaire prévu, sans temps réel', '▲▼ arrêts   toucher : départs   double : retour']);
+    expect(lines(tram)).toEqual(['~08:11   Gare du Nord', '~08:13   Rogier', '~08:36   Churchill', '~ horaire prévu, sans temps réel', '△▽ arrêts   toucher : départs   double : retour']);
     // départ du lendemain (le prochain, même plus tard) : le titre le dit
     const late = at('2026-11-10', 23, 40);
     const ic = trainAt(late, 400, { line: 'IC', head: N('Herstal'), platform: '4' });
@@ -280,12 +280,12 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
       ctx(),
     );
     expect(bus.title).toBe('Bus 36 vers Wavre');
-    expect(lines(bus)).toEqual(['~07:37   Braine-l’Alleud Côté du Collège', '~07:42   Braine-l’Alleud Gare', '~07:53   Waterloo Gare', '~08:29   Wavre Gare', '~ horaire prévu, sans temps réel', '▲▼ arrêts   toucher : départs   double : retour']);
+    expect(lines(bus)).toEqual(['~07:37   Braine-l’Alleud Côté du Collège', '~07:42   Braine-l’Alleud Gare', '~07:53   Waterloo Gare', '~08:29   Wavre Gare', '~ horaire prévu, sans temps réel', '△▽ arrêts   toucher : départs   double : retour']);
   });
 
   it('du tableau aux arrêts, d’un arrêt à son tableau, et retour : chaque double toucher revient d’un écran, curseur gardé', async () => {
     const { core: c } = core(() => NOW);
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', stations: [STATIONS.namur] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.4', stations: [STATIONS.namur] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: STATIONS.namur.areaId, name: STATIONS.namur.name });
     await h.until(boardReady);
@@ -317,7 +317,7 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
 
   it('voyage disparu, et départ sans arrêts connus : le message, double toucher revient au tableau', async () => {
     const { core: c } = core(() => NOW, { stops: (_id, d) => vanishedStops(d) });
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', stations: [STATIONS.namur] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.4', stations: [STATIONS.namur] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: STATIONS.namur.areaId, name: STATIONS.namur.name });
     await h.until(boardReady);
@@ -339,13 +339,13 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
       lineBoard: (id, _l, n) => (id === LINES.w.areaId ? w(n) : undefined),
       departureStops: (_id, d, n) => (d.tripId === 'w-1' ? stopsOf(d, n, [['Braine-l’Alleud Merbraine', 17, { delayMin: 3 }], ['Waterloo Eglise', 25, { delayMin: 3 }], ['Bruxelles Midi', 70, { delayMin: 3 }]]) : undefined),
     });
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', lines: [LINES.w] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.4', lines: [LINES.w] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'line', pick: LINES.w.id, areaId: LINES.w.areaId, op: 'tec', line: 'W', name: LINES.w.name, mode: 'bus' });
     const d = await h.until((x) => x.screen === 'line' && x.lines.length > 3);
     expect(d.lines.slice(0, 5)).toEqual(['vers Bruxelles Midi', '07:48 +3   dans 20 min', '08:08   dans 37 min', 'vers Braine-l’Alleud Gare', '07:42   dans 11 min']);
     expect(d.sel).toBe(0);
-    expect(d.lines.at(-1)).toBe('▲▼ passages   toucher : arrêts   double : retour');
+    expect(d.lines.at(-1)).toBe('△▽ passages   toucher : arrêts   double : retour');
     await h.gesture('tap');
     const s = await h.until(stopsReady);
     expect(s).toMatchObject({ title: 'Bus W vers Bruxelles Midi' });
@@ -373,7 +373,7 @@ describe('revue 1.2.3 : un départ reste le même (clé des arrêts, curseur, ra
       board: (id) => (id === 'stib:ARTSLOI' ? artsLoi() : undefined),
       departureStops: (_id, d, n) => stopsOf(d, n, d.head.fr === 'Stockel' ? [['Arts-Loi', 6], ['Mérode', 9], ['Stockel', 22]] : [['Arts-Loi', 6], ['De Brouckère', 9], ['Gare de l’Ouest', 16]]),
     });
-    const h = await setup({ now: LATE, settings: settingsWith([], { seenVersion: '1.2.3' }), core: () => c });
+    const h = await setup({ now: LATE, settings: settingsWith([], { seenVersion: '1.2.4' }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: 'stib:ARTSLOI', name: N('Arts-Loi') });
     const b = await h.until((x) => x.screen === 'board' && x.lines.length > 2);
@@ -391,7 +391,7 @@ describe('revue 1.2.3 : un départ reste le même (clé des arrêts, curseur, ra
     let deps = NAMUR_DEPS.slice(0, 6);
     const board = (now: number) => boardOf(STATIONS.namur.areaId, 'Namur', deps.map(([m, line, head, platform, p]) => trainAt(now, m, { line, head: N(head), platform, tripId: `t-${m}`, ...p, ...(p?.delayMin ? { est: now + (m + p.delayMin) * MIN } : {}) })));
     const c = stubCore(() => NOW, { board: (id, n) => (id === STATIONS.namur.areaId ? board(n) : undefined), departureStops: (_id, d, n) => stopsOf(d, n, [['Namur', 0], ['Andenne', 16]]) });
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', stations: [STATIONS.namur] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.4', stations: [STATIONS.namur] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: STATIONS.namur.areaId, name: STATIONS.namur.name });
     await h.until((x) => x.screen === 'board' && x.lines.length > 3);
@@ -438,7 +438,7 @@ describe('revue 1.2.3 : un départ reste le même (clé des arrêts, curseur, ra
         { head: 'Braine-l’Alleud Gare', departures: [dep(now, 9, { tripId: 'w-r9', head: N('Braine-l’Alleud Gare') })] },
       ]);
     const c = stubCore(() => NOW, { lineBoard: (id, _l, n) => (id === LINES.w.areaId ? w(n) : undefined) });
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', lines: [LINES.w] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.4', lines: [LINES.w] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'line', pick: LINES.w.id, areaId: LINES.w.areaId, op: 'tec', line: 'W', name: LINES.w.name, mode: 'bus' });
     await h.until((x) => x.screen === 'line' && x.lines.length > 3);
@@ -462,7 +462,7 @@ describe('revue 1.2.3 : un départ reste le même (clé des arrêts, curseur, ra
       // le cœur décale les arrêts suivants du retard du départ qu'on lui passe
       departureStops: (_id, d, n) => stopsOf(d, n, [['Braine-l’Alleud Merbraine', 17, { delayMin: d.delayMin }], ['Waterloo Eglise', 25, { delayMin: d.delayMin }]]),
     });
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.3', stations: [STATIONS.namur] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.4', stations: [STATIONS.namur] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: 'tec:Bbrlmer1', name: N('Braine-l’Alleud Merbraine') });
     await h.until((x) => x.screen === 'board' && x.lines.length > 2);

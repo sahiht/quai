@@ -3,7 +3,7 @@
  * Gestes : glisser haut/bas = se déplacer ; toucher = ouvrir/agir ; double toucher = retour,
  * et depuis l'écran racine = quitter (boîte de confirmation système, shutDownPageContainer(1)).
  */
-import { clampTop, ensureVisible, maxTop, pageTop } from './layout';
+import { clampTop, ensureVisible, maxTop, pageTop, prevPageTop, visibleRange } from './layout';
 import type { GlassesView, Intent, Item, Route } from './types';
 import { selectable, tapIntent } from './views';
 
@@ -173,10 +173,11 @@ export function handleGesture(
     case 'up':
     case 'down': {
       if (view.scroll && view.layout !== 'message') {
-        // Sans curseur : ▼ montre les lignes cachées en dessous (toutes si elles tiennent), ▲ celles du dessus.
-        const max = maxTop(view.items as Item[], capacity);
-        const step = Math.max(1, capacity);
-        const next = g === 'down' ? Math.min(max, top + step) : Math.max(0, top - step);
+        // Sans curseur : ▼ montre les lignes cachées en dessous (toutes si elles tiennent), ▲ celles du dessus. 1.2.4 :
+        // une page se compte en lignes (une étape peut en prendre deux) : ▼ commence à la première étape cachée.
+        const items = view.items as Item[];
+        const max = maxTop(items, capacity);
+        const next = g === 'down' ? Math.min(max, Math.max(top + 1, visibleRange(items, top, capacity).to)) : prevPageTop(items, top, capacity);
         if (next === top) return { state: setSelection(s, f.sel, top), effect: { kind: 'edge', dir: g } };
         return { state: setSelection(s, f.sel, next), effect: { kind: 'render' } };
       }

@@ -17,7 +17,7 @@ import { LINES, MIN, PLACES, STATIONS, at, boardOf, container, dep, journey, lin
 
 const DAY = '2026-11-12';
 const NOW = at(DAY, 20, 47);
-const HINTS_HOME = '▲▼ choisir   toucher : ouvrir   double : quitter';
+const HINTS_HOME = '△▽ choisir   toucher : ouvrir   double : quitter';
 
 /** Trajet vers un lieu : marche, bus, marche ; départ conseillé `leave`, arrivée `arr`. */
 function door(id: string, leave: number, arr: number): Journey {
@@ -58,12 +58,12 @@ const sections = (calls?: string[]) => ({
 const FOUR = [PLACES.maison, PLACES.bureau, PLACES.mama, PLACES.ecole];
 const full = (patch = {}) => settingsWith(FOUR, { stations: [STATIONS.braine], lines: [LINES.w], ...patch });
 const ready = (s: Screen) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l)) && s.lines.includes('Autour de moi   9 arrêts');
-const HOME = ['Favoris   4', 'Bureau   maintenant → 21:34', 'Mama   dans 4 min → 21:58', 'École   21:07 → 21:37', '', 'Autour de moi   9 arrêts', 'Gares   IC 21:07 voie 1', 'Bus, tram, métro   W 4 min'];
+const HOME = ['Favoris   4', 'Bureau   maintenant → 21:34', 'Mama   dans 4 min → 21:58', 'École   21:07 → 21:37', '', 'Autour de moi   9 arrêts', 'Gares   1 gare', 'Bus, tram, métro   1 ligne'];
 
 describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () => {
   it('« Favoris   4 », 3 favoris en retrait, ligne vide, « Autour de moi », « Gares » et « Bus, tram, métro » ; « Aller à… » n’existe plus', async () => {
-    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.3' }), core: (now) => stubCore(now, { answers, ...sections() }) });
-    const s = await h.until((x) => ready(x) && x.shown?.length === 3 && x.lines.at(-1) === 'Bus, tram, métro   W 4 min');
+    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.4' }), core: (now) => stubCore(now, { answers, ...sections() }) });
+    const s = await h.until((x) => ready(x) && x.shown?.length === 3 && x.lines.at(-1) === 'Bus, tram, métro   1 ligne');
     expect(s.title).toBe('Quai');
     // Quai déjà utilisé (mise à jour) : pas d'aide des gestes, pas de pied du tout (9 lignes sous le titre)
     expect(s.lines).toEqual(HOME);
@@ -80,13 +80,13 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
   });
 
   it('relief de la 1.2.1 : titres et textes de droite au plus clair, favoris en retrait au niveau 2', async () => {
-    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.3' }), core: (now) => stubCore(now, { answers, ...sections() }) });
-    await h.until((x) => ready(x) && x.shown?.length === 3 && x.lines.at(-1) === 'Bus, tram, métro   W 4 min');
+    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.4' }), core: (now) => stubCore(now, { answers, ...sections() }) });
+    await h.until((x) => ready(x) && x.shown?.length === 3 && x.lines.at(-1) === 'Bus, tram, métro   1 ligne');
     const cs = h.sent();
     const by = (n: string) => cs.find((c) => c.name === n)!;
     expect(rowsOf(by('colA'))).toEqual(['Favoris', '', '', '', '', 'Autour de moi', 'Gares', 'Bus, tram, métro']);
     expect(by('colA')).toMatchObject({ x: GEO.X_TEXT, level: 4 });
-    expect(rowsOf(by('colC')).map((l) => l.trim())).toEqual(['4', '', '', '', '', '9 arrêts', 'IC 21:07 voie 1', 'W 4 min']);
+    expect(rowsOf(by('colC')).map((l) => l.trim())).toEqual(['4', '', '', '', '', '9 arrêts', '1 gare', '1 ligne']);
     expect(by('colC').level).toBe(4);
     const favs = rowsOf(by('colB'));
     expect(favs.slice(1, 4).map((l) => l.replace(/ {2,}/g, ' | '))).toEqual(['Bureau | maintenant → 21:34', 'Mama | dans 4 min → 21:58', 'École | 21:07 → 21:37']);
@@ -101,7 +101,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
   });
 
   it('toucher « Gares » et « Bus, tram, métro » ouvre leur écran ; la ligne vide ne se sélectionne pas', async () => {
-    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.3' }), core: (now) => stubCore(now, { answers, ...sections() }) });
+    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.4' }), core: (now) => stubCore(now, { answers, ...sections() }) });
     await h.until((x) => ready(x) && x.shown?.length === 3);
     // École, puis « Autour de moi » (la ligne vide est sautée), « Gares », « Bus, tram, métro »
     await h.gesture('down', 'down', 'down');
@@ -119,7 +119,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
     // aide des gestes passée : l'accueil n'a pas de ligne de pied ; une ligne ajoutée ferait sortir la dernière (revue)
     const kv = createKV(memoryBackend());
     await kv.set(FIRST_USE_KEY, String(NOW - 8 * 86_400_000));
-    const h = await setup({ now: NOW, kv, settings: settingsWith(FOUR, { seenVersion: '1.2.3' }), core: (now) => stubCore(now, { answers }) });
+    const h = await setup({ now: NOW, kv, settings: settingsWith(FOUR, { seenVersion: '1.2.4' }), core: (now) => stubCore(now, { answers }) });
     const s = await h.until((x) => ready(x) && x.shown?.length === 3);
     expect(s.lines.slice(-2)).toEqual(['Gares   à choisir', 'Bus, tram, métro   à choisir']);
     expect(s.title).toBe('Quai');
@@ -139,7 +139,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
 
   it('§ 1.3, Quai Web : le toucher ouvre directement l’ajout dans l’onglet Réglages (#/gares/ajouter, #/lignes/ajouter)', async () => {
     const opened: string[] = [];
-    const h = await setup({ now: NOW, web: true, opened, settings: settingsWith(FOUR, { seenVersion: '1.2.3' }), core: (now) => stubCore(now, { answers }) });
+    const h = await setup({ now: NOW, web: true, opened, settings: settingsWith(FOUR, { seenVersion: '1.2.4' }), core: (now) => stubCore(now, { answers }) });
     const s = await h.until((x) => ready(x) && x.shown?.length === 3);
     expect(s.lines.slice(-2)).toEqual(['Gares   à choisir', 'Bus, tram, métro   à choisir']);
     await h.gesture('down', 'down', 'down', 'down', 'tap', 'down', 'tap');
@@ -148,35 +148,29 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
     h.c.stop();
   });
 
-  it('REVUE-USAGE n° 6 : la gare et la ligne les plus proches, une requête par rubrique et par rafraîchissement', async () => {
+  it('PRD-1.2.4 § 3 : à droite, le contenu des rubriques ; l’accueil ne demande aucun départ de gare ni de ligne', async () => {
     const calls: string[] = [];
-    const far = { ...STATIONS.namur };
-    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.3', stations: [far, STATIONS.braine] }), core: (now) => stubCore(now, { answers, ...sections(calls) }) });
-    const s = await h.until((x) => ready(x) && x.lines.at(-2) === 'Gares   IC 21:07 voie 1');
-    // Namur est en tête de liste, mais Braine-l'Alleud est la plus proche de la position (Maison)
-    expect(s.lines.at(-2)).toBe('Gares   IC 21:07 voie 1');
-    expect(calls.filter((c) => c.startsWith('board:'))).toEqual([`board:${STATIONS.braine.areaId}`]);
-    expect(calls.filter((c) => c.startsWith('lineBoard:'))).toEqual([`lineBoard:${LINES.w.areaId}:W`]);
-    calls.length = 0;
+    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.4', stations: [STATIONS.namur, STATIONS.braine] }), core: (now) => stubCore(now, { answers, ...sections(calls) }) });
+    const s = await h.until((x) => ready(x) && x.shown?.length === 3);
+    expect(s.lines.slice(-2)).toEqual(['Gares   2 gares', 'Bus, tram, métro   1 ligne']);
     h.advance(30_000);
     await h.c.refreshCurrent();
     await h.settle(60);
-    expect(calls.filter((c) => c.startsWith('board:') || c.startsWith('lineBoard:'))).toEqual([`board:${STATIONS.braine.areaId}`, `lineBoard:${LINES.w.areaId}:W`]);
+    expect(calls.filter((c) => c.startsWith('board:') || c.startsWith('lineBoard:'))).toEqual([]);
     h.c.stop();
-    // sans position : la première de la liste
-    const n = await setup({ now: NOW, pos: null, settings: full({ seenVersion: '1.2.3', stations: [far, STATIONS.braine] }), core: (now) => stubCore(now, { answers, ...sections() }) });
-    await n.until((x) => x.screen === 'home' && x.lines.includes('Autour de moi   sans position'));
-    await n.settle(80);
-    expect(n.last().lines.find((l) => l.startsWith('Gares'))).toMatch(/^Gares {3}IC \d\d:\d\d/);
+    // sans position : le même contenu, rien à calculer
+    const n = await setup({ now: NOW, pos: null, settings: full({ seenVersion: '1.2.4', stations: [STATIONS.namur, STATIONS.braine] }), core: (now) => stubCore(now, { answers, ...sections() }) });
+    const ns = await n.until((x) => x.screen === 'home' && x.lines.includes('Autour de moi   sans position'));
+    expect(ns.lines.slice(-2)).toEqual(['Gares   2 gares', 'Bus, tram, métro   1 ligne']);
     n.c.stop();
   });
 
-  it('« … » pendant le calcul, « aucun départ » sans rien dans l’horizon des tableaux', () => {
-    const ctx = ctxAt(NOW, FOUR, { stations: [STATIONS.braine], lines: [LINES.w] });
-    const v = homeView({ favorites: [], nearbyCount: 9, gestureHelp: false }, ctx);
-    expect(lines(v).slice(-2)).toEqual(['Gares   …', 'Bus, tram, métro   …']);
-    const none = homeView({ favorites: [], nearbyCount: 9, gestureHelp: false, stationsNext: { text: 'aucun départ' }, linesNext: { text: 'aucun départ' } }, ctx);
-    expect(lines(none).slice(-2)).toEqual(['Gares   aucun départ', 'Bus, tram, métro   aucun départ']);
+  it('contenu : « 1 gare », « 2 arrêts · 1 ligne », un bloc vide n’est pas dit, jamais « … » ; vide : « à choisir »', () => {
+    const right = (patch: Partial<ViewCtx['settings']>) => lines(homeView({ favorites: [], nearbyCount: 9, gestureHelp: false }, ctxAt(NOW, FOUR, patch))).slice(-2);
+    expect(right({ stations: [STATIONS.braine], lines: [LINES.w] })).toEqual(['Gares   1 gare', 'Bus, tram, métro   1 ligne']);
+    expect(right({ stations: [STATIONS.braine, STATIONS.namur], lines: [LINES.w, LINES.gdnAll, LINES.t3] })).toEqual(['Gares   2 gares', 'Bus, tram, métro   1 arrêt · 2 lignes']);
+    expect(right({ stations: [STATIONS.braine], lines: [LINES.gdnAll, { ...LINES.gdnAll, id: 'ln-gdn-2', areaId: 'stib:6358' }] })).toEqual(['Gares   1 gare', 'Bus, tram, métro   2 arrêts']);
+    expect(right({ stations: [], lines: [] })).toEqual(['Gares   à choisir', 'Bus, tram, métro   à choisir']);
   });
 });
 
@@ -269,7 +263,7 @@ describe('aide des gestes les 7 premiers jours, Quai Web', () => {
     const kv = createKV(memoryBackend());
     const fresh = full({ seenVersion: '' });
     const day0 = await setup({ now: NOW, settings: fresh, kv, core: (now) => stubCore(now, { answers, ...sections() }) });
-    const s0 = await day0.until((x) => ready(x) && x.shown?.length === 3 && x.lines.at(-2) === 'Bus, tram, métro   W 4 min');
+    const s0 = await day0.until((x) => ready(x) && x.shown?.length === 3 && x.lines.at(-2) === 'Bus, tram, métro   1 ligne');
     // aide des gestes : une ligne de pied ; les 3 favoris tiennent
     expect(s0.lines).toEqual([...HOME, HINTS_HOME]);
     expect(await kv.get(FIRST_USE_KEY)).toBe(String(NOW));
@@ -277,20 +271,20 @@ describe('aide des gestes les 7 premiers jours, Quai Web', () => {
     day0.c.stop();
     const day8 = await setup({ now: NOW + 8 * 86_400_000, settings: day0.settings.get(), kv, core: (now) => stubCore(now, { answers, ...sections() }) });
     const s8 = await day8.until((x) => ready(x) && x.shown?.length === 3);
-    expect(s8.lines.some((l) => l.startsWith('▲▼'))).toBe(false);
+    expect(s8.lines.some((l) => l.startsWith('△▽'))).toBe(false);
     // du premier favori : Mama, École, puis « Autour de moi », qui garde son aide
     await day8.gesture('down', 'down', 'down', 'tap');
-    expect((await day8.until((x) => x.screen === 'nearby')).lines.at(-1)).toBe('▲▼ arrêt   toucher : départs   double : retour');
+    expect((await day8.until((x) => x.screen === 'nearby')).lines.at(-1)).toBe('△▽ arrêt   toucher : départs   double : retour');
     day8.c.stop();
   });
 
   it('Quai Web : pas de « double : quitter », et le double toucher ne dit rien', async () => {
     const h = await setup({ now: NOW, web: true, settings: full({ seenVersion: '' }), core: (now) => stubCore(now, { answers, ...sections() }) });
     const s = await h.until((x) => ready(x) && x.shown?.length === 3);
-    expect(s.lines.at(-1)).toBe('▲▼ choisir   toucher : ouvrir');
+    expect(s.lines.at(-1)).toBe('△▽ choisir   toucher : ouvrir');
     await h.gesture('double');
     await h.settle(60);
-    expect(h.last().lines.at(-1)).toBe('▲▼ choisir   toucher : ouvrir');
+    expect(h.last().lines.at(-1)).toBe('△▽ choisir   toucher : ouvrir');
     expect(h.calls.some((x) => x.op === 'exit')).toBe(false);
     h.c.stop();
   });
@@ -317,14 +311,14 @@ describe('une ligne par favori : départ conseillé puis arrivée (PRD-1.2.1 § 
   });
 
   it('largeurs : noms longs coupés dans leur colonne, réponses entières, rubriques entières', () => {
-    const long: Favorite = { kind: 'place', id: 'fav-long', label: 'Chez la grand-mère de Louisa à Woluwe', lat: 50.84, lon: 4.42, propose: 'never' };
+    const long: Favorite = { kind: 'place', id: 'fav-long', label: 'Bibliothèque communale de Woluwe-Saint-Lambert', lat: 50.84, lon: 4.42, propose: 'never' };
     const v = homeView(
-      { favorites: [{ fav: long, answer: tripAnswer(long, door('j-l', at('2026-11-13', 6, 20), at('2026-11-13', 6, 46))) }], nearbyCount: 9, gestureHelp: false, stationsNext: { text: 'IC 21:08 +12 v.12 !' }, linesNext: { text: 'T3 imminent', tail: ', dernier' } },
+      { favorites: [{ fav: long, answer: tripAnswer(long, door('j-l', at('2026-11-13', 6, 20), at('2026-11-13', 6, 46))) }], nearbyCount: 9, gestureHelp: false },
       ctxAt(NOW, [long], { stations: [STATIONS.braine], lines: [LINES.t3] }),
     );
     const l = lines(v);
-    expect(l[1]).toMatch(/^Chez la grand-mère.*…   demain 06:20 → 06:46$/);
-    expect(l.slice(-2)).toEqual(['Gares   IC 21:08 +12 v.12 !', 'Bus, tram, métro   T3 imminent, dernier']);
+    expect(l[1]).toMatch(/^Bibliothèque communale.*…   demain 06:20 → 06:46$/);
+    expect(l.slice(-2)).toEqual(['Gares   1 gare', 'Bus, tram, métro   1 ligne']);
     for (const row of rowsOf(container(page(v), 'colB'))) expect(textWidth(row)).toBeLessThanOrEqual(WIDTHS.homeRow);
   });
 });

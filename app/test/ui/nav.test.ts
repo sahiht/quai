@@ -68,7 +68,7 @@ describe('machine d’états des gestes', () => {
     expect(current(s).top).toBe(5);
   });
 
-  it('écran sans curseur (étapes, départs) : ▲▼ font défiler, puis « edge » au bout ; toucher = action de l’écran', () => {
+  it('écran sans curseur (étapes, départs) : △▽ font défiler, puis « edge » au bout ; toucher = action de l’écran', () => {
     const rows = (n: number): Item[] => Array.from({ length: n }, (_, i) => ({ a: `Étape ${i}` }));
     const v = view(8, { layout: 'steps', screen: 'steps', items: rows(8), scroll: true, tap: { kind: 'follow' } });
     let s: NavState = initNav({ screen: 'home' });

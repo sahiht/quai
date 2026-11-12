@@ -1,6 +1,6 @@
 /**
- * Quai 1.2.1, écran d'un trajet et page « Autres trajets » (docs/v1.2.1/PRD-1.2.1.md § 3, CA-121.4) : ▲▼ font défiler
- * les étapes du trajet affiché seulement ; ligne du bas « ▼ suite du trajet : n étapes » puis « Fin du trajet. ▼ 2
+ * Quai 1.2.1, écran d'un trajet et page « Autres trajets » (docs/v1.2.1/PRD-1.2.1.md § 3, CA-121.4) : △▽ font défiler
+ * les étapes du trajet affiché seulement ; ligne du bas « ▽ suite du trajet : n étapes » puis « Fin du trajet. ▽ 2
  * autres trajets » ; ▼ au bout ouvre « Autres trajets » ; toucher ouvre une entrée ; double toucher revient à la liste,
  * puis aux étapes du premier trajet, à leur fin. Trajet suivi, « ▶ » et « Dans le train » inchangés.
  * 1.2.2 (PRD-1.2.2 § 6, REVUE-USAGE n° 8) : « Suivi » ou « Suivre ce trajet » sur la ligne du titre ; sur le trajet
@@ -54,9 +54,9 @@ const j3 = journey(
 );
 const ALL = [j1, j2, j3];
 
-const HINT_FOLLOWED = '▲▼ étapes   toucher : ne plus suivre   double : retour';
-const HINT_OTHER = '▲▼ étapes   toucher : suivre ce trajet   double : retour';
-const HINT_LIST = '▲▼ choisir   toucher : voir   double : retour';
+const HINT_FOLLOWED = '△▽ étapes   toucher : ne plus suivre   double : retour';
+const HINT_OTHER = '△▽ étapes   toucher : suivre ce trajet   double : retour';
+const HINT_LIST = '△▽ choisir   toucher : voir   double : retour';
 const LIST = ['Plus tôt   07:36 → 08:20', 'IC, 13 min plus tôt, mais 19 min à pied', 'Le suivant   08:08 → 09:03', 'bus 36 + IC + métro 2, à pied 5 + 4 + 2 min', HINT_LIST];
 
 const bottom = (s: Screen) => s.lines.at(-2);
@@ -85,14 +85,16 @@ async function shown(journeys: Journey[], index = 0, opts: { core?: (now: () => 
 }
 
 describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
-  it('▼ fait défiler jusqu’à « Fin du trajet. ▼ 2 autres trajets » sans jamais changer de trajet', async () => {
+  it('▼ fait défiler jusqu’à « Fin du trajet. ▽ 2 autres trajets » sans jamais changer de trajet', async () => {
     const h = await shown(ALL);
     const first = h.last();
     expect(first).toMatchObject({ screen: 'steps', page: 1, pages: 3, followed: true, sel: 0 });
     expect(nb(first.title)).toBe('Vers le bureau : 07:38 → 08:33   Suivi');
     expect(first.lines[0]).toBe('Moins de marche : 2 changements, à pied 5 + 4 + 2 min');
     expect(first.lines[1]).toBe('07:38   Partir à pied vers l’arrêt (5 min)   dans 7 min');
-    expect(first.lines.slice(-2)).toEqual(['▼ suite du trajet : 3 étapes', HINT_FOLLOWED]);
+    // 1.2.4 (PRD-1.2.4 § 1) : l'arrêt où aller, en entier, sous le départ à pied (2 lignes) : 4 étapes cachées
+    expect(first.lines[2]).toBe('Maison Arrêt');
+    expect(first.lines.slice(-2)).toEqual(['▽ suite du trajet : 4 étapes', HINT_FOLLOWED]);
     await h.gesture('down');
     const end = h.last();
     expect(end).toMatchObject({ screen: 'steps', page: 1, title: first.title, followed: true });
@@ -104,7 +106,7 @@ describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
       '08:31   Descendre à Madou',
       '08:33   Arrivée au bureau (2 min à pied)',
     ]);
-    expect(end.lines.slice(-2)).toEqual(['Fin du trajet. ▼ 2 autres trajets', HINT_FOLLOWED]);
+    expect(end.lines.slice(-2)).toEqual(['Fin du trajet. ▽ 2 autres trajets', HINT_FOLLOWED]);
     // jamais un autre trajet pendant le défilement
     expect(h.screens().filter((s) => s.screen === 'steps').every((s) => s.page === 1 && s.title === first.title)).toBe(true);
     h.c.stop();
@@ -123,26 +125,26 @@ describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
     expect(other).toMatchObject({ page: 2, label: 'earlier', followed: false, sel: -1 });
     expect(nb(other.title)).toBe('Vers le bureau : 07:36 → 08:20   Suivre ce trajet');
     expect(other.lines[0]).toBe('Plus tôt de 13 min, mais 19 min à pied');
-    expect(other.lines.slice(-2)).toEqual(['Fin du trajet. ▼ autres trajets', HINT_OTHER]);
+    expect(other.lines.slice(-2)).toEqual(['Fin du trajet. ▽ autres trajets', HINT_OTHER]);
     // double toucher : la liste, curseur sur la même entrée
     await h.gesture('double');
     expect(h.last()).toMatchObject({ screen: 'others', sel: 0 });
     // le suivant : ses 9 étapes défilent, puis ▼ au bout revient à la liste
     await h.gesture('down', 'tap');
     const next = await h.until((s) => steps(s) && s.page === 3);
-    expect(next.lines.slice(-2)).toEqual(['▼ suite du trajet : 3 étapes', HINT_OTHER]);
+    expect(next.lines.slice(-2)).toEqual(['▽ suite du trajet : 4 étapes', HINT_OTHER]);
     await h.gesture('down');
-    expect(bottom(h.last())).toBe('Fin du trajet. ▼ autres trajets');
+    expect(bottom(h.last())).toBe('Fin du trajet. ▽ autres trajets');
     await h.gesture('down');
     expect(h.last()).toMatchObject({ screen: 'others', sel: 1 });
     // double toucher sur la liste : les étapes du 1er trajet, à leur fin
     await h.gesture('double');
     const back = h.last();
     expect(back).toMatchObject({ screen: 'steps', page: 1, followed: true });
-    expect(back.lines.slice(-2)).toEqual(['Fin du trajet. ▼ 2 autres trajets', HINT_FOLLOWED]);
+    expect(back.lines.slice(-2)).toEqual(['Fin du trajet. ▽ 2 autres trajets', HINT_FOLLOWED]);
     // ▲ remonte les étapes, ▲ en haut ne change rien (jamais un autre trajet)
     await h.gesture('up');
-    expect(bottom(h.last())).toBe('▼ suite du trajet : 3 étapes');
+    expect(bottom(h.last())).toBe('▽ suite du trajet : 4 étapes');
     const top = h.last();
     await h.gesture('up');
     expect(h.last()).toEqual(top);
@@ -234,7 +236,7 @@ describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
   it('la liste suit la reprise du trajet suivi : ouverte depuis la 2e proposition, elle montre la 1re', async () => {
     const h = await shown(ALL, 1);
     expect(h.last()).toMatchObject({ page: 2, followed: true });
-    expect(bottom(h.last())).toBe('Fin du trajet. ▼ 2 autres trajets');
+    expect(bottom(h.last())).toBe('Fin du trajet. ▽ 2 autres trajets');
     await h.gesture('down');
     const list = await h.until((s) => s.screen === 'others');
     expect(list.lines.slice(0, 2)).toEqual(['Moins de marche   07:38 → 08:33', 'bus 36 + IC + métro 2, à pied 5 + 4 + 2 min']);
@@ -251,13 +253,13 @@ const route = (patch: Partial<OthersRoute> = {}): OthersRoute => ({ screen: 'oth
 describe('§ 3 : textes et largeurs', () => {
   it('ligne du bas : « 1 étape », « 1 autre trajet » ; aides des étapes suivies, d’une autre proposition, à pied', () => {
     const short = journey('s', [{ walk: 5, to: 'Arrêt' }, { ride: '36', mode: 'bus', dep: T(7, 43), arr: T(7, 55), from: 'Arrêt', to: 'Gare' }, { walk: 4, to: 'Gare' }, { ride: 'IC', mode: 'train', dep: T(8, 1), arr: T(8, 24), from: 'Gare', to: 'Central' }, { walk: 2 }], { reason: 'r' });
-    // 7 étapes, 6 lignes : une cachée
+    // 7 étapes, 6 lignes, la 1re étape sur 2 lignes (1.2.4) : deux cachées
     const v = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [short, j2], index: 0, followedId: 's', fresh: true }, ctx());
-    expect(lines(v).slice(-2)).toEqual(['▼ suite du trajet : 1 étape', HINT_FOLLOWED]);
+    expect(lines(v).slice(-2)).toEqual(['▽ suite du trajet : 2 étapes', HINT_FOLLOWED]);
     const end = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [short, j2], index: 0, followedId: 's', top: 5 }, ctx());
-    expect(lines(end).slice(-2)).toEqual(['Fin du trajet. ▼ 1 autre trajet', HINT_FOLLOWED]);
+    expect(lines(end).slice(-2)).toEqual(['Fin du trajet. ▽ 1 autre trajet', HINT_FOLLOWED]);
     const other = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [short, j2], index: 1, followedId: 's', fromList: true }, ctx());
-    expect(lines(other).slice(-2)).toEqual(['Fin du trajet. ▼ autres trajets', HINT_OTHER]);
+    expect(lines(other).slice(-2)).toEqual(['Fin du trajet. ▽ autres trajets', HINT_OTHER]);
     expect(other.tap).toEqual({ kind: 'follow' });
     const walk = journey('w', [{ walk: 9 }], { label: 'walk', reason: 'À pied : 9 min, arrivée 07:49' });
     walk.dep = NOW;
@@ -265,7 +267,7 @@ describe('§ 3 : textes et largeurs', () => {
     walk.leaveAt = NOW;
     walk.legs[0] = { ...walk.legs[0], dep: NOW, arr: NOW + 9 * MIN, schedDep: NOW, schedArr: NOW + 9 * MIN };
     const w = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [walk], index: 0, followedId: 'w', fresh: true }, ctx());
-    expect(lines(w).slice(-2)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', '▲▼ étapes   double : retour']);
+    expect(lines(w).slice(-2)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', '△▽ étapes   double : retour']);
   });
 
   it('ligne du titre : « Suivre ce trajet », ou « Suivre » plutôt que de couper la destination ; coupée en dernier recours', () => {

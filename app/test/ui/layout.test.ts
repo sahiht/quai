@@ -12,7 +12,7 @@ const view = (patch: Partial<GlassesView> = {}): GlassesView => ({
   title: 'Gare du Nord, tram (STIB)',
   clock: '12:10',
   items: Array.from({ length: 12 }, (_, i): Item => ({ a: 'T3', b: `Churchill ${i}`, c: `${i + 2} min` })),
-  hints: '▲▼ départs   toucher : ★ favori   double : retour',
+  hints: '△▽ départs   toucher : ★ favori   double : retour',
   reserveNote: true,
   ...patch,
 });
@@ -133,7 +133,7 @@ describe('1.1 : largeurs du PRD (§ 6.0), écrans sans curseur, deux lignes rés
     expect(textWidth('dans 30\u00a0min')).toBeLessThanOrEqual(WIDTHS.stepsState);
     expect(textWidth('~07:42')).toBeLessThanOrEqual(WIDTHS.stepsTime);
     // le plus long des textes du PRD
-    expect(textWidth('▲▼ autre trajet   toucher\u00a0: suivre ce trajet   double\u00a0: retour')).toBeLessThanOrEqual(WIDTHS.full);
+    expect(textWidth('△▽ autre trajet   toucher\u00a0: suivre ce trajet   double\u00a0: retour')).toBeLessThanOrEqual(WIDTHS.full);
   });
 
   it('sans curseur : ▶ seulement sur la ligne marquée, défilement borné à la fin de la liste', () => {
