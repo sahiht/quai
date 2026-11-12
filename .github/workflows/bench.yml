@@ -1,0 +1,53 @@
+# Banc d'essai : itinéraires de référence chez Transitous (moteur MOTIS) et iRail pour les cas de bench/trips.json.
+# Déclenchement manuel uniquement (jamais planifié : Transitous demande d'être prévenu avant un usage automatisé régulier).
+# Lecture seule, aucun secret : les deux services sont publics et sans clé. Débit limité par le script (voir bench/REFERENCES.md).
+# Résultat : artefact « bench-references », contenu de bench/out/ (references.json et réponses brutes), gardé 5 jours.
+name: Banc d'essai (références)
+
+on:
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: "Sources à interroger, séparées par une virgule (transitous, irail)"
+        required: false
+        default: 'transitous,irail'
+
+permissions:
+  contents: read
+
+# Un seul lancement à la fois, pour ne jamais doubler la charge chez les deux services.
+concurrency:
+  group: bench-references
+  cancel-in-progress: false
+
+jobs:
+  references:
+    name: Interroger Transitous et iRail
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Installer Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # Le choix des sources passe par une variable d'environnement, jamais directement dans la commande.
+      - name: Interroger les références
+        env:
+          SOURCES: ${{ inputs.sources }}
+        run: node bench/fetch-references.mjs --sources "${SOURCES:-transitous,irail}" --out bench/out
+
+      # Même en cas d'échec partiel : les réponses brutes déjà reçues restent utiles.
+      - name: Déposer les résultats
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-references
+          path: bench/out/
+          retention-days: 5
+          if-no-files-found: error
