@@ -5,6 +5,11 @@ name: Instantané des données (tests)
 
 on:
   workflow_dispatch:
+    inputs:
+      date:
+        description: "Premier jour de service, AAAA-MM-JJ (vide : aujourd'hui). Le lendemain est inclus."
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -46,6 +51,7 @@ jobs:
         working-directory: pipeline
         env:
           BMC_KEY: ${{ secrets.BMC_KEY }}
+          QUAI_DATE: ${{ inputs.date }}
         run: npm run build-data -- --out ../snapshot/data
       - name: Publier l'instantané
         env:

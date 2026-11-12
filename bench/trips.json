@@ -1,0 +1,994 @@
+{
+ "v": 1,
+ "about": "Banc d'essai de Quai : 50 trajets × 3 moments. Uniquement des gares, des arrêts et des lieux publics ; aucune adresse personnelle.",
+ "moments": [
+  {
+   "id": "ven-0730",
+   "label": "vendredi 13/11 07:30",
+   "at": "2026-11-13T07:30:00+01:00"
+  },
+  {
+   "id": "ven-1730",
+   "label": "vendredi 13/11 17:30",
+   "at": "2026-11-13T17:30:00+01:00"
+  },
+  {
+   "id": "sam-1100",
+   "label": "samedi 14/11 11:00",
+   "at": "2026-11-14T11:00:00+01:00"
+  }
+ ],
+ "trips": [
+  {
+   "id": "t01",
+   "from": {
+    "area": "sncb:8814258",
+    "name": "Braine-l'Alleud",
+    "lat": 50.68478,
+    "lon": 4.37553
+   },
+   "to": {
+    "area": "sncb:8813003",
+    "name": "Bruxelles-Central",
+    "lat": 50.84566,
+    "lon": 4.3568
+   },
+   "tags": [
+    "train",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t02",
+   "from": {
+    "area": "sncb:8814258",
+    "name": "Braine-l'Alleud",
+    "lat": 50.68478,
+    "lon": 4.37553
+   },
+   "to": {
+    "area": "stib:1508",
+    "name": "Madou",
+    "lat": 50.84969,
+    "lon": 4.36949
+   },
+   "tags": [
+    "train",
+    "metro",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t03",
+   "from": {
+    "area": "tec:tec:s-brainelalleudmerbraine",
+    "name": "Braine-l’Alleud Merbraine",
+    "lat": 50.68331,
+    "lon": 4.38912
+   },
+   "to": {
+    "area": "stib:1508",
+    "name": "Madou",
+    "lat": 50.84969,
+    "lon": 4.36949
+   },
+   "tags": [
+    "bus",
+    "train",
+    "metro",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t04",
+   "from": {
+    "area": "tec:tec:s-brainelalleudroutedemontsaintjean",
+    "name": "Braine-l’Alleud Route de Mont-Saint-Jean",
+    "lat": 50.68637,
+    "lon": 4.38588
+   },
+   "to": {
+    "area": "sncb:8811007",
+    "name": "Schaerbeek",
+    "lat": 50.87851,
+    "lon": 4.37864
+   },
+   "tags": [
+    "bus",
+    "train",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t05",
+   "from": {
+    "point": "Waterloo, Butte du Lion",
+    "name": "Waterloo, Butte du Lion",
+    "lat": 50.6781,
+    "lon": 4.4044
+   },
+   "to": {
+    "area": "sncb:8814258",
+    "name": "Braine-l'Alleud",
+    "lat": 50.68478,
+    "lon": 4.37553
+   },
+   "tags": [
+    "premier-kilometre",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t06",
+   "from": {
+    "area": "sncb:8814266",
+    "name": "Waterloo",
+    "lat": 50.71542,
+    "lon": 4.38349
+   },
+   "to": {
+    "area": "sncb:8811304",
+    "name": "Bruxelles-Luxembourg",
+    "lat": 50.83894,
+    "lon": 4.37368
+   },
+   "tags": [
+    "train",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t07",
+   "from": {
+    "area": "tec:tec:s-waterloomontsaintjeanchdebruxelles",
+    "name": "Waterloo Mont-Saint-Jean (Ch. de Bruxelles)",
+    "lat": 50.69035,
+    "lon": 4.4065
+   },
+   "to": {
+    "area": "sncb:8814001",
+    "name": "Bruxelles-Midi",
+    "lat": 50.83571,
+    "lon": 4.33653
+   },
+   "tags": [
+    "bus",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t08",
+   "from": {
+    "area": "stib:1508",
+    "name": "Madou",
+    "lat": 50.84969,
+    "lon": 4.36949
+   },
+   "to": {
+    "area": "sncb:8814258",
+    "name": "Braine-l'Alleud",
+    "lat": 50.68478,
+    "lon": 4.37553
+   },
+   "tags": [
+    "metro",
+    "train",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t09",
+   "from": {
+    "area": "stib:1508",
+    "name": "Madou",
+    "lat": 50.84969,
+    "lon": 4.36949
+   },
+   "to": {
+    "area": "sncb:8814266",
+    "name": "Waterloo",
+    "lat": 50.71542,
+    "lon": 4.38349
+   },
+   "tags": [
+    "metro",
+    "train",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t10",
+   "from": {
+    "area": "sncb:8811007",
+    "name": "Schaerbeek",
+    "lat": 50.87851,
+    "lon": 4.37864
+   },
+   "to": {
+    "area": "tec:tec:s-brainelalleudmerbraine",
+    "name": "Braine-l’Alleud Merbraine",
+    "lat": 50.68331,
+    "lon": 4.38912
+   },
+   "tags": [
+    "train",
+    "bus",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t11",
+   "from": {
+    "area": "stib:2898",
+    "name": "Verboekhoven",
+    "lat": 50.87117,
+    "lon": 4.37587
+   },
+   "to": {
+    "area": "stib:1508",
+    "name": "Madou",
+    "lat": 50.84969,
+    "lon": 4.36949
+   },
+   "tags": [
+    "tram",
+    "metro",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t12",
+   "from": {
+    "area": "stib:1508",
+    "name": "Madou",
+    "lat": 50.84969,
+    "lon": 4.36949
+   },
+   "to": {
+    "area": "stib:24",
+    "name": "Ceria",
+    "lat": 50.81645,
+    "lon": 4.2902
+   },
+   "tags": [
+    "metro",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t13",
+   "from": {
+    "area": "stib:24",
+    "name": "Ceria",
+    "lat": 50.81645,
+    "lon": 4.2902
+   },
+   "to": {
+    "area": "sncb:8814258",
+    "name": "Braine-l'Alleud",
+    "lat": 50.68478,
+    "lon": 4.37553
+   },
+   "tags": [
+    "metro",
+    "train",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t14",
+   "from": {
+    "area": "sncb:8863008",
+    "name": "Namur",
+    "lat": 50.46879,
+    "lon": 4.86222
+   },
+   "to": {
+    "area": "sncb:8811304",
+    "name": "Bruxelles-Luxembourg",
+    "lat": 50.83894,
+    "lon": 4.37368
+   },
+   "tags": [
+    "train",
+    "namur"
+   ]
+  },
+  {
+   "id": "t15",
+   "from": {
+    "area": "sncb:8863008",
+    "name": "Namur",
+    "lat": 50.46879,
+    "lon": 4.86222
+   },
+   "to": {
+    "area": "stib:1508",
+    "name": "Madou",
+    "lat": 50.84969,
+    "lon": 4.36949
+   },
+   "tags": [
+    "train",
+    "metro",
+    "namur"
+   ]
+  },
+  {
+   "id": "t16",
+   "from": {
+    "area": "stib:1508",
+    "name": "Madou",
+    "lat": 50.84969,
+    "lon": 4.36949
+   },
+   "to": {
+    "area": "sncb:8863008",
+    "name": "Namur",
+    "lat": 50.46879,
+    "lon": 4.86222
+   },
+   "tags": [
+    "metro",
+    "train",
+    "namur"
+   ]
+  },
+  {
+   "id": "t17",
+   "from": {
+    "area": "tec:tec:s-lasnevillageruedeleglise",
+    "name": "Lasne Village (Rue de l'Eglise)",
+    "lat": 50.68612,
+    "lon": 4.48419
+   },
+   "to": {
+    "area": "sncb:8814258",
+    "name": "Braine-l'Alleud",
+    "lat": 50.68478,
+    "lon": 4.37553
+   },
+   "tags": [
+    "bus",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t18",
+   "from": {
+    "area": "sncb:8811726",
+    "name": "Wavre",
+    "lat": 50.71627,
+    "lon": 4.60478
+   },
+   "to": {
+    "area": "sncb:8814258",
+    "name": "Braine-l'Alleud",
+    "lat": 50.68478,
+    "lon": 4.37553
+   },
+   "tags": [
+    "train",
+    "bus",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t19",
+   "from": {
+    "area": "sncb:8811601",
+    "name": "Ottignies",
+    "lat": 50.67367,
+    "lon": 4.56936
+   },
+   "to": {
+    "area": "sncb:8814266",
+    "name": "Waterloo",
+    "lat": 50.71542,
+    "lon": 4.38349
+   },
+   "tags": [
+    "train",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t20",
+   "from": {
+    "area": "sncb:8811676",
+    "name": "Louvain-la-Neuve",
+    "lat": 50.6698,
+    "lon": 4.61575
+   },
+   "to": {
+    "area": "tec:p_wavpr",
+    "name": "Wavre, Gare",
+    "lat": 50.71573,
+    "lon": 4.60572
+   },
+   "tags": [
+    "train",
+    "bus",
+    "brabant-wallon"
+   ]
+  },
+  {
+   "id": "t21",
+   "from": {
+    "area": "sncb:8813003",
+    "name": "Bruxelles-Central",
+    "lat": 50.84566,
+    "lon": 4.3568
+   },
+   "to": {
+    "area": "sncb:8821006",
+    "name": "Anvers-Central",
+    "lat": 51.2172,
+    "lon": 4.4211
+   },
+   "tags": [
+    "train",
+    "intercity"
+   ]
+  },
+  {
+   "id": "t22",
+   "from": {
+    "area": "sncb:8892007",
+    "name": "Gand-Saint-Pierre",
+    "lat": 51.0359,
+    "lon": 3.71067
+   },
+   "to": {
+    "area": "sncb:8891009",
+    "name": "Bruges",
+    "lat": 51.19723,
+    "lon": 3.21673
+   },
+   "tags": [
+    "train",
+    "intercity"
+   ]
+  },
+  {
+   "id": "t23",
+   "from": {
+    "area": "sncb:8841004",
+    "name": "Liège-Guillemins",
+    "lat": 50.62455,
+    "lon": 5.5667
+   },
+   "to": {
+    "area": "sncb:8863008",
+    "name": "Namur",
+    "lat": 50.46879,
+    "lon": 4.86222
+   },
+   "tags": [
+    "train",
+    "intercity"
+   ]
+  },
+  {
+   "id": "t24",
+   "from": {
+    "area": "sncb:8833001",
+    "name": "Louvain",
+    "lat": 50.88228,
+    "lon": 4.71587
+   },
+   "to": {
+    "area": "sncb:8819406",
+    "name": "Brussels Airport-Zaventem",
+    "lat": 50.89682,
+    "lon": 4.48549
+   },
+   "tags": [
+    "train",
+    "aeroport"
+   ]
+  },
+  {
+   "id": "t25",
+   "from": {
+    "area": "sncb:8872009",
+    "name": "Charleroi-Central",
+    "lat": 50.40471,
+    "lon": 4.43857
+   },
+   "to": {
+    "area": "sncb:8881000",
+    "name": "Mons",
+    "lat": 50.45386,
+    "lon": 3.94254
+   },
+   "tags": [
+    "train",
+    "intercity"
+   ]
+  },
+  {
+   "id": "t26",
+   "from": {
+    "area": "sncb:8814001",
+    "name": "Bruxelles-Midi",
+    "lat": 50.83571,
+    "lon": 4.33653
+   },
+   "to": {
+    "area": "sncb:8841004",
+    "name": "Liège-Guillemins",
+    "lat": 50.62455,
+    "lon": 5.5667
+   },
+   "tags": [
+    "train",
+    "intercity"
+   ]
+  },
+  {
+   "id": "t27",
+   "from": {
+    "area": "sncb:8821006",
+    "name": "Anvers-Central",
+    "lat": 51.2172,
+    "lon": 4.4211
+   },
+   "to": {
+    "area": "sncb:8892007",
+    "name": "Gand-Saint-Pierre",
+    "lat": 51.0359,
+    "lon": 3.71067
+   },
+   "tags": [
+    "train",
+    "intercity"
+   ]
+  },
+  {
+   "id": "t28",
+   "from": {
+    "area": "sncb:8831005",
+    "name": "Hasselt",
+    "lat": 50.93083,
+    "lon": 5.32763
+   },
+   "to": {
+    "area": "sncb:8833001",
+    "name": "Louvain",
+    "lat": 50.88228,
+    "lon": 4.71587
+   },
+   "tags": [
+    "train",
+    "intercity"
+   ]
+  },
+  {
+   "id": "t29",
+   "from": {
+    "area": "sncb:8812005",
+    "name": "Bruxelles-Nord",
+    "lat": 50.85966,
+    "lon": 4.36085
+   },
+   "to": {
+    "area": "sncb:8822004",
+    "name": "Malines",
+    "lat": 51.01765,
+    "lon": 4.48279
+   },
+   "tags": [
+    "train",
+    "intercity"
+   ]
+  },
+  {
+   "id": "t30",
+   "from": {
+    "area": "sncb:8891702",
+    "name": "Ostende",
+    "lat": 51.22821,
+    "lon": 2.92581
+   },
+   "to": {
+    "area": "sncb:8813003",
+    "name": "Bruxelles-Central",
+    "lat": 50.84566,
+    "lon": 4.3568
+   },
+   "tags": [
+    "train",
+    "intercity",
+    "long"
+   ]
+  },
+  {
+   "id": "t31",
+   "from": {
+    "area": "stib:0631",
+    "name": "Gare du Midi",
+    "lat": 50.83703,
+    "lon": 4.3376
+   },
+   "to": {
+    "area": "stib:1280B",
+    "name": "Flagey",
+    "lat": 50.82773,
+    "lon": 4.37189
+   },
+   "tags": [
+    "tram",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t32",
+   "from": {
+    "area": "stib:11",
+    "name": "Schuman",
+    "lat": 50.84276,
+    "lon": 4.38183
+   },
+   "to": {
+    "area": "stib:52",
+    "name": "Louise",
+    "lat": 50.83518,
+    "lon": 4.35462
+   },
+   "tags": [
+    "metro",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t33",
+   "from": {
+    "area": "stib:2741",
+    "name": "Heysel",
+    "lat": 50.8968,
+    "lon": 4.33654
+   },
+   "to": {
+    "area": "stib:6",
+    "name": "De Brouckère",
+    "lat": 50.84982,
+    "lon": 4.35249
+   },
+   "tags": [
+    "metro",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t34",
+   "from": {
+    "area": "stib:2283",
+    "name": "Montgomery",
+    "lat": 50.83768,
+    "lon": 4.40685
+   },
+   "to": {
+    "area": "stib:63",
+    "name": "Bourse",
+    "lat": 50.84807,
+    "lon": 4.34944
+   },
+   "tags": [
+    "metro",
+    "tram",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t35",
+   "from": {
+    "area": "stib:3514",
+    "name": "Cimetière d'Ixelles",
+    "lat": 50.81599,
+    "lon": 4.39064
+   },
+   "to": {
+    "area": "stib:1000",
+    "name": "Gare Centrale",
+    "lat": 50.84586,
+    "lon": 4.35798
+   },
+   "tags": [
+    "bus",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t36",
+   "from": {
+    "area": "stib:6420G",
+    "name": "Vanderkindere",
+    "lat": 50.81364,
+    "lon": 4.34801
+   },
+   "to": {
+    "area": "stib:64",
+    "name": "Gare du Nord",
+    "lat": 50.86073,
+    "lon": 4.36051
+   },
+   "tags": [
+    "tram",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t37",
+   "from": {
+    "area": "stib:1355",
+    "name": "Roodebeek",
+    "lat": 50.8478,
+    "lon": 4.43626
+   },
+   "to": {
+    "area": "stib:57",
+    "name": "Rogier",
+    "lat": 50.85556,
+    "lon": 4.35832
+   },
+   "tags": [
+    "metro",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t38",
+   "from": {
+    "area": "stib:6",
+    "name": "De Brouckère",
+    "lat": 50.84982,
+    "lon": 4.35249
+   },
+   "to": {
+    "area": "stib:1000",
+    "name": "Gare Centrale",
+    "lat": 50.84586,
+    "lon": 4.35798
+   },
+   "tags": [
+    "court",
+    "marche",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t39",
+   "from": {
+    "point": "Atomium",
+    "name": "Atomium",
+    "lat": 50.8947,
+    "lon": 4.3406
+   },
+   "to": {
+    "area": "sncb:8813003",
+    "name": "Bruxelles-Central",
+    "lat": 50.84566,
+    "lon": 4.3568
+   },
+   "tags": [
+    "premier-kilometre",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t40",
+   "from": {
+    "point": "ULB Solbosch",
+    "name": "ULB Solbosch",
+    "lat": 50.8128,
+    "lon": 4.3819
+   },
+   "to": {
+    "area": "stib:11",
+    "name": "Schuman",
+    "lat": 50.84276,
+    "lon": 4.38183
+   },
+   "tags": [
+    "premier-kilometre",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t41",
+   "from": {
+    "point": "Parc du Cinquantenaire",
+    "name": "Parc du Cinquantenaire",
+    "lat": 50.8403,
+    "lon": 4.3928
+   },
+   "to": {
+    "area": "stib:0631",
+    "name": "Gare du Midi",
+    "lat": 50.83703,
+    "lon": 4.3376
+   },
+   "tags": [
+    "premier-kilometre",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t42",
+   "from": {
+    "area": "stib:1",
+    "name": "Gare de l'Ouest",
+    "lat": 50.849,
+    "lon": 4.32095
+   },
+   "to": {
+    "area": "stib:9",
+    "name": "Arts-Loi",
+    "lat": 50.84533,
+    "lon": 4.36962
+   },
+   "tags": [
+    "metro",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t43",
+   "from": {
+    "area": "delijn:200552",
+    "name": "Korenmarkt, Gand",
+    "lat": 51.05378,
+    "lon": 3.72264
+   },
+   "to": {
+    "area": "sncb:8892007",
+    "name": "Gand-Saint-Pierre",
+    "lat": 51.0359,
+    "lon": 3.71067
+   },
+   "tags": [
+    "tram",
+    "flandre"
+   ]
+  },
+  {
+   "id": "t44",
+   "from": {
+    "area": "delijn:303124",
+    "name": "Louvain",
+    "lat": 50.88228,
+    "lon": 4.71471
+   },
+   "to": {
+    "area": "delijn:302868",
+    "name": "Heverlee Campus Arenberg",
+    "lat": 50.86452,
+    "lon": 4.67952
+   },
+   "tags": [
+    "bus",
+    "flandre"
+   ]
+  },
+  {
+   "id": "t45",
+   "from": {
+    "area": "delijn:102679",
+    "name": "Malines",
+    "lat": 51.01855,
+    "lon": 4.48345
+   },
+   "to": {
+    "area": "delijn:109485",
+    "name": "Grote Markt, Malines",
+    "lat": 51.02804,
+    "lon": 4.47917
+   },
+   "tags": [
+    "court",
+    "bus",
+    "flandre"
+   ]
+  },
+  {
+   "id": "t46",
+   "from": {
+    "area": "sncb:8811189",
+    "name": "Vilvorde",
+    "lat": 50.92458,
+    "lon": 4.43283
+   },
+   "to": {
+    "area": "stib:11",
+    "name": "Schuman",
+    "lat": 50.84276,
+    "lon": 4.38183
+   },
+   "tags": [
+    "train",
+    "metro",
+    "flandre",
+    "bruxelles"
+   ]
+  },
+  {
+   "id": "t47",
+   "from": {
+    "area": "delijn:102665",
+    "name": "Groenplaats, Anvers",
+    "lat": 51.21872,
+    "lon": 4.40142
+   },
+   "to": {
+    "point": "Antwerpen, MAS",
+    "name": "Antwerpen, MAS",
+    "lat": 51.2289,
+    "lon": 4.4048
+   },
+   "tags": [
+    "tram",
+    "dernier-kilometre",
+    "flandre"
+   ]
+  },
+  {
+   "id": "t48",
+   "from": {
+    "area": "tec:p_lgLAM",
+    "name": "Liège, place St-Lambert",
+    "lat": 50.6456,
+    "lon": 5.5727
+   },
+   "to": {
+    "area": "sncb:8841004",
+    "name": "Liège-Guillemins",
+    "lat": 50.62455,
+    "lon": 5.5667
+   },
+   "tags": [
+    "bus",
+    "wallonie"
+   ]
+  },
+  {
+   "id": "t49",
+   "from": {
+    "area": "tec:p_1mssnc",
+    "name": "Mons SNCB",
+    "lat": 50.45478,
+    "lon": 3.94316
+   },
+   "to": {
+    "area": "tec:tec:s-monsgrandplace",
+    "name": "Mons Grand-Place",
+    "lat": 50.45453,
+    "lon": 3.95198
+   },
+   "tags": [
+    "court",
+    "bus",
+    "wallonie"
+   ]
+  },
+  {
+   "id": "t50",
+   "from": {
+    "area": "sncb:8872009",
+    "name": "Charleroi-Central",
+    "lat": 50.40471,
+    "lon": 4.43857
+   },
+   "to": {
+    "point": "Charleroi, Hôtel de Ville",
+    "name": "Charleroi, Hôtel de Ville",
+    "lat": 50.4113,
+    "lon": 4.4446
+   },
+   "tags": [
+    "dernier-kilometre",
+    "wallonie"
+   ]
+  }
+ ]
+}
