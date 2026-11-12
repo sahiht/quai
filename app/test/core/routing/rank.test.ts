@@ -160,7 +160,7 @@ describe('raisons (PRD-1.2 § 1.3, règles de la 1.1)', () => {
 });
 
 describe('CA-121.3 : noms et raisons de la 1.2.1 (§ 2.1 et § 2.2)', () => {
-  // cas réel Maison → Mama (§ 1.5), 11/11 19:42, marche maximale 5 min
+  // cas réel Braine-l’Alleud → Schaerbeek (§ 1.5), 11/11 19:42, marche maximale 5 min
   const busS1 = J('W+S1', { walks: [6, 1, 9], rides: 2, board: '20:07', arr: '21:11' });
   const icIc = J('IC+IC', { walks: [19, 0, 9], rides: 2, board: '20:08', arr: '20:58' });
 
@@ -302,7 +302,7 @@ describe('CA-121.2 : paliers de marche et garde-fou (PRD-1.2.1 § 1.1 à § 1.3)
     expect(longestOf(itemOf(J('N', { walks: [0, 0], rides: 1, board: '08:00', arr: '09:00' })))).toBe(0);
   });
 
-  it('palier 0 vide (cas réel Maison → Mama, marche 5) : le plus rapide du palier 1, bus W puis S1 ; « Plus tôt » : 19 min à pied', () => {
+  it('palier 0 vide (cas réel Braine-l’Alleud → Schaerbeek, marche 5) : le plus rapide du palier 1, bus W puis S1 ; « Plus tôt » : 19 min à pied', () => {
     const D = J('W+S1', { walks: [6, 1, 9], rides: 2, board: '20:07', arr: '21:11' });
     const B = J('W+92', { walks: [6, 1, 8], rides: 2, board: '19:49', arr: '21:10' });
     const A = J('IC+IC', { walks: [19, 0, 9], rides: 2, board: '20:08', arr: '20:58' });

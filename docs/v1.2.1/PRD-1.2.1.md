@@ -39,10 +39,13 @@ palier plus haut (remplace la règle « marche longue » actuelle).
 - « Sans changement » / « Moins de changements », « À pied », « Le suivant », « Plus tard » : règles 1.2 inchangées,
   mais tout critère « marche longue » devient « palier plus haut que la proposition 1 ».
 
-1.5 Cas réels à tenir (instantané /home/claude/real-data-11/data, marche maximale 5 min) :
-- Maison (50.68579, 4.39175) → Mama (50.87677, 4.38584), 11/11 à 19:42 : proposition 1 = bus W puis S1 (départ 19:59,
-  arrivée 21:11) ; « Plus tôt » = 19 min à pied, IC 20:08, IC 20:33 (arrivée 20:58).
-- Maison → Bureau (50.8504, 4.3707), 12/11 à 07:31 : proposition 1 = bus 36, IC 08:01, métro 2 (07:43 → 08:33).
+1.5 Cas réels à tenir (instantané /home/claude/real-data-11/data, marche maximale 5 min ; uniquement des arrêts publics,
+jamais d'adresse personnelle dans le dépôt) :
+- Braine-l'Alleud Côté du Collège (50.68634, 4.39427) → Schaerbeek Gare (STIB, 50.87755, 4.37966), 11/11 à 19:42 :
+  proposition 1 = bus W puis S1 (départ 19:57, arrivée 21:05) ; « Plus tôt » = 22 min à pied, IC 20:08, IC 20:33
+  (arrivée 20:52).
+- Braine-l'Alleud Côté du Collège → Madou (50.8504, 4.3707), 12/11 à 07:31 : proposition 1 = bus 36, IC 08:01, métro 2
+  (07:49 → 08:33).
 - Braine-l'Alleud Côté du Collège (50.68634, 4.39427) → Madou, 11/11 à 13:30 : proposition 1 = bus W, métro 2
   (13:39 → 14:47) ; « Plus tôt » = 22 min à pied et IC (arrivée 14:39) ; jamais le bus 36 vers Rixensart.
 

@@ -113,12 +113,12 @@ export const settingsWith = (favorites: Favorite[], patch: Partial<Settings> = {
   ...patch,
 });
 
-/** Lieux et arrêt des cas réels du PRD-1.2.1 (§ 1.5) ; Maison est la position de départ des tests. */
-export const MAISON = { lat: 50.68579, lon: 4.39175 };
+/** Lieux des tests, sur des arrêts publics (jamais d'adresse personnelle dans le dépôt) ; Maison est la position de départ. */
+export const MAISON = { lat: 50.68634, lon: 4.39427 };
 export const PLACES = {
   maison: { kind: 'place', id: 'fav-maison', label: 'Maison', lat: MAISON.lat, lon: MAISON.lon, propose: 'never' } as Favorite,
   bureau: { kind: 'place', id: 'fav-bureau', label: 'Bureau', lat: 50.8504, lon: 4.3707, propose: 'never' } as Favorite,
-  mama: { kind: 'place', id: 'fav-mama', label: 'Mama', lat: 50.87677, lon: 4.38584, propose: 'never' } as Favorite,
+  mama: { kind: 'place', id: 'fav-mama', label: 'Mama', lat: 50.87755, lon: 4.37966, propose: 'never' } as Favorite,
   gare: { kind: 'stop', id: 'fav-gare', areaId: 'sncb:8814266', op: 'sncb', name: N('Braine-l’Alleud'), lat: 50.6833, lon: 4.3747, propose: 'never' } as Favorite,
 };
 

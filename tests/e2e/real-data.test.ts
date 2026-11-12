@@ -1,7 +1,7 @@
 /**
  * Données réelles, à la demande seulement (DECISIONS Q13) : l'instantané publié par le pipeline 1.1, servi en HTTP par
  * serve-data, le vrai relais branché sur le faux portail en scène noRT (sans temps réel), un vrai cœur neuf par
- * recherche. Cas du propriétaire : PRD-1.2.1 § 1.5 (CA-121.1, le moins de marche d'abord, marche maximale 5 min) et
+ * recherche. Cas réels : PRD-1.2.1 § 1.5 (CA-121.1, le moins de marche d'abord, marche maximale 5 min) et
  * contrôles de PRD-1.2 § 5 (CA-1.7, CA-1.8, CA-1.10) revus pour la 1.2.1, réglages v3 (marche maximale 10 min, ou
  * 5 min).
  *
@@ -29,10 +29,8 @@ const MADOU = pt('Madou', 50.8504, 4.3707);
 const BRAINE = pt('Braine-l’Alleud Côté du Collège', 50.68634, 4.39427);
 const WATERLOO = pt('Waterloo', 50.7175, 4.399);
 const MAISON = pt('Namur Place Léopold', 50.4655, 4.859);
-/** PRD-1.2.1 § 1.5 : la maison du propriétaire, sa mère, son bureau. */
-const HOME = pt('Maison', 50.68579, 4.39175);
-const MAMA = pt('Mama', 50.87677, 4.38584);
-const BUREAU = pt('Bureau', 50.8504, 4.3707);
+/** PRD-1.2.1 § 1.5 : cas réels, toujours avec des arrêts publics (jamais d'adresse personnelle dans le dépôt). */
+const SCHAERBEEK = pt('Schaerbeek Gare', 50.87755, 4.37966);
 const settings = (maxWalkMin = 10): Settings => ({ ...DEFAULT_SETTINGS, onboarded: true, maxWalkMin });
 const plain = (s?: string) => (s ?? '').replace(/\u00a0/g, ' ');
 const summary = (r: PlanResult) => r.journeys.map((j) => `${j.label} ${hhmm(j.dep)} → ${hhmm(j.arr)}`);
@@ -57,7 +55,7 @@ async function route(name: string, from: Endpoint, to: Endpoint, after: number, 
   return r;
 }
 
-describe.skipIf(!enabled)('données réelles (instantané 1.1 servi en HTTP) : cas du propriétaire, PRD-1.2.1 § 1.5 et PRD-1.2 § 5', () => {
+describe.skipIf(!enabled)('données réelles (instantané 1.1 servi en HTTP) : cas réels, PRD-1.2.1 § 1.5 et PRD-1.2 § 5', () => {
   beforeAll(async () => {
     stack = await startStack({ dataDir: DIR });
     await stack.scene('noRT');
@@ -67,30 +65,30 @@ describe.skipIf(!enabled)('données réelles (instantané 1.1 servi en HTTP) : c
     await stack?.stop();
   });
 
-  it('CA-121.1 (§ 1.5) : Maison → Mama, 11/11 19:42, marche 5 : bus W puis S1 ; « Plus tôt » : 19 min à pied, IC 20:08, IC 20:33', async () => {
-    const r = await route('Maison → Mama 11/11 19:42, marche 5', HOME, MAMA, at('2026-11-11', '19:42'), 5);
-    expect(summary(r).slice(0, 2)).toEqual(['short 19:59 → 21:11', 'earlier 19:47 → 20:58']);
-    expect(lines(r.journeys[0])).toEqual(["W Braine-l’Alleud Merbraine → Braine-l'Alleud, Gare", "S1 Braine-l'Alleud → Schaerbeek"]);
-    expect(r.journeys[1].legs[0]).toMatchObject({ kind: 'walk', walkMin: 19 });
+  it('CA-121.1 (§ 1.5) : Braine-l’Alleud → Schaerbeek Gare, 11/11 19:42, marche 5 : bus W puis S1 ; « Plus tôt » : 22 min à pied, IC 20:08, IC 20:33', async () => {
+    const r = await route('Braine-l’Alleud → Schaerbeek 11/11 19:42, marche 5', BRAINE, SCHAERBEEK, at('2026-11-11', '19:42'), 5);
+    expect(summary(r).slice(0, 2)).toEqual(['short 19:57 → 21:05', 'earlier 19:44 → 20:52']);
+    expect(lines(r.journeys[0])).toEqual(["W Braine-l’Alleud Bonne Fosse → Braine-l'Alleud, Gare", "S1 Braine-l'Alleud → Schaerbeek"]);
+    expect(r.journeys[1].legs[0]).toMatchObject({ kind: 'walk', walkMin: 22 });
     expect(r.journeys[1].legs.filter((l) => l.kind === 'ride').map((l) => `${l.cat} ${hhmm(l.dep)}`)).toEqual(['IC 20:08', 'IC 20:33']);
-    // § 2 : « Plus tôt » marche plus (19 min) : la proposition 1 s'affiche « Moins de marche »
-    expect(r.journeys.slice(0, 2).map((j) => plain(j.reason))).toEqual(['Moins de marche : 1 changement, à pied 6 + 1 + 9 min', 'Plus tôt de 13 min, mais 19 min à pied']);
+    // § 2 : « Plus tôt » marche plus (22 min) : la proposition 1 s'affiche « Moins de marche »
+    expect(r.journeys.slice(0, 2).map((j) => plain(j.reason))).toEqual(['Moins de marche : 1 changement, à pied 8 + 1 + 3 min', 'Plus tôt de 13 min, mais 22 min à pied']);
     for (const j of r.journeys) expect((j.reason ?? '').length).toBeLessThanOrEqual(60);
   });
 
-  it('CA-121.1 (§ 1.5) : Maison → Bureau, 12/11 07:31, marche 5 : bus 36, IC 08:01, métro 2 (07:43 → 08:33)', async () => {
-    const r = await route('Maison → Bureau 12/11 07:31, marche 5', HOME, BUREAU, at('2026-11-12', '07:31'), 5);
-    expect(summary(r)[0]).toBe('short 07:43 → 08:33');
+  it('CA-121.1 (§ 1.5) : Braine-l’Alleud → Madou, 12/11 07:31, marche 5 : bus 36, IC 08:01, métro 2 (07:49 → 08:33)', async () => {
+    const r = await route('Braine-l’Alleud → Madou 12/11 07:31, marche 5', BRAINE, MADOU, at('2026-11-12', '07:31'), 5);
+    expect(summary(r)[0]).toBe('short 07:49 → 08:33');
     expect(lines(r.journeys[0])).toEqual(['36 Braine-l’Alleud Côté du Collège → Braine-l’Alleud Vallée Bailly', "IC Braine-l'Alleud → Bruxelles-Midi", '2 Gare du Midi → Madou']);
     expect(hhmm(r.journeys[0].legs.find((l) => l.cat === 'IC')!.dep)).toBe('08:01');
-    expect(plain(r.journeys[0].reason)).toBe('Le plus court : 2 changements, 13 min à pied');
-    // « Plus tard » suit la même règle : bus 36 de 07:54, S1 08:06 et métro 2 (4 min à pied au plus), pas le S1 après
-    // 19 min à pied pour la même arrivée
-    expect(summary(r).slice(1)).toEqual(['fewer 07:40 → 08:33', 'later 07:48 → 08:50']);
+    expect(plain(r.journeys[0].reason)).toBe('Le plus court : 2 changements, à pied 4 + 3 + 2 min');
+    // « Plus tard » suit la même règle : bus 36 de 07:54, S1 08:06 et métro 2 (3 min à pied au plus), pas le S1 après
+    // 22 min à pied pour la même arrivée
+    expect(summary(r).slice(1)).toEqual(['fewer 07:37 → 08:33', 'later 07:54 → 08:50']);
     expect(lines(r.journeys[2])).toEqual(["36 Braine-l’Alleud Côté du Collège → Braine-l'Alleud, Gare", "S1 Braine-l'Alleud → Bruxelles-Midi", '2 Gare du Midi → Madou']);
     expect(r.journeys[2].legs.filter((l) => l.kind === 'ride').map((l) => hhmm(l.dep)).slice(0, 2)).toEqual(['07:54', '08:06']);
-    expect(Math.max(...r.journeys[2].legs.map((l) => (l.kind === 'walk' ? (l.walkMin ?? 0) : 0)))).toBe(4);
-    expect(plain(r.journeys[2].reason)).toBe('Plus tard : 2 changements, départ 07:48');
+    expect(Math.max(...r.journeys[2].legs.map((l) => (l.kind === 'walk' ? (l.walkMin ?? 0) : 0)))).toBe(3);
+    expect(plain(r.journeys[2].reason)).toBe('Plus tard : 2 changements, départ 07:54');
     expect(r.journeys.filter(bus36Rixensart)).toEqual([]);
   });
 
