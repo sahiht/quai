@@ -18,7 +18,7 @@
  */
 import type { LineFile, Mode, Names, Op } from '../../../shared/types';
 import type { LatLon, LineMatch } from './api';
-import { findLinesIn, lineKey, loadLineFiles, mainEnds, opposite, type EndPattern, type LineData } from './linepicks';
+import { findLinesIn, lineKey, loadLineFiles, mainEnds, opposite, vec, type EndPattern, type LineData } from './linepicks';
 import type { RealtimeClient, RtTrip, RtUpdate, StibEntry } from './realtime';
 import { stibPoint } from './realtime';
 import { headKey, headScore, rtAtStop, sameStop } from './rtmerge';
@@ -246,6 +246,82 @@ function slotsOf(spine: Pat, pats: readonly Pat[]): Slot[] {
   return slots;
 }
 
+/** Longueur (m) du trajet d'un motif, du premier au dernier arrêt ; une boucle : presque 0. */
+const reach = (x: Pat): number => Math.hypot(...vec(x.end));
+
+/**
+ * 1.2.7 : sens d'un motif par rapport à un autre d'après l'ordre de leurs arrêts communs, pour une boucle (le métro 2
+ * part d'Elisabeth et y revient, dans les deux sens : le vecteur du premier au dernier arrêt ne dit rien). Chaque pas
+ * entre deux arrêts communs consécutifs avance ou recule dans l'ordre de `ref`, en tournant autour d'une boucle ;
+ * opposé si les reculs l'emportent ; null avec moins de deux pas.
+ */
+function orderOpposite(x: Pat, ref: Pat): boolean | null {
+  const n = ref.p.a.length;
+  const loop = n > 2 && areaOf(ref, 0) === areaOf(ref, n - 1);
+  const cycle = loop ? n - 1 : n;
+  const pos = new Map<string, number>();
+  for (let q = 0; q < cycle; q++) {
+    const a = areaOf(ref, q);
+    if (a && !pos.has(a)) pos.set(a, q);
+  }
+  let fwd = 0;
+  let back = 0;
+  let prev = -1;
+  for (let q = 0; q < x.p.a.length; q++) {
+    const p = pos.get(areaOf(x, q));
+    if (p === undefined) continue;
+    if (prev >= 0 && p !== prev) {
+      let d = p - prev;
+      if (loop) {
+        d = ((d % cycle) + cycle) % cycle;
+        if (d > cycle / 2) d -= cycle;
+      }
+      if (d > 0) fwd++;
+      else back++;
+    }
+    prev = p;
+  }
+  return fwd + back < 2 ? null : back > fwd;
+}
+
+/**
+ * Deux motifs vont en sens contraires : d'après leur premier et leur dernier arrêt (opposite, plus de 105° entre eux) ;
+ * 1.2.7 : quand l'un des deux est une boucle (moins de 300 m entre ses bouts), d'après l'ordre de leurs arrêts communs.
+ */
+function oppositeOf(x: Pat, ref: Pat): boolean {
+  if (reach(x) >= 300 && reach(ref) >= 300) return opposite(x.end, ref.end);
+  return orderOpposite(x, ref) ?? false;
+}
+
+/** Correspondances d'un arrêt affiché (autres lignes à moins de 400 m) : de quoi choisir un arrêt connu. */
+const connOf = (x: Slot): number => x.pat.file.conn?.[x.pat.p.a[x.q]]?.length ?? 0;
+
+/**
+ * 1.2.7 : deux sens au même terminus (une boucle parcourue dans les deux sens, deux morceaux qui finissent au même
+ * arrêt) : chacun nommé par où il passe, « Elisabeth par Rogier » et « Elisabeth par Gare de l'Ouest ». L'arrêt
+ * choisi : parmi les trois premiers où les sens se séparent, celui qui a le plus de correspondances, jamais le
+ * terminus lui-même.
+ */
+function distinctHeads(dirs: Dir[]): void {
+  const byHead = new Map<string, Dir[]>();
+  for (const d of dirs) byHead.set(headKey(d.head.fr), [...(byHead.get(headKey(d.head.fr)) ?? []), d]);
+  for (const [key, same] of byHead) {
+    if (same.length < 2) continue;
+    const used = new Set<string>();
+    for (const d of same) {
+      let i = 0;
+      while (i < d.slots.length && same.every((e) => e === d || e.slots[i]?.area === d.slots[i].area)) i++;
+      const pool = d.slots.slice(i).filter((x) => headKey(x.pat.file.areas[x.pat.p.a[x.q]]?.[3]?.fr ?? '') !== key && !used.has(x.area));
+      const near = pool.slice(0, 3);
+      const pick = near.reduce<Slot | undefined>((best, x) => (!best || connOf(x) > connOf(best) ? x : best), undefined);
+      const name = pick ? pick.pat.file.areas[pick.pat.p.a[pick.q]]?.[3] : undefined;
+      if (!pick || !name) continue;
+      used.add(pick.area);
+      d.head = { fr: `${d.head.fr} par ${name.fr}`, nl: `${d.head.nl} via ${name.nl}` };
+    }
+  }
+}
+
 /** Terminus d'un ensemble de motifs : la destination la plus servie. */
 function headOf(pats: readonly Pat[]): Names {
   const count = new Map<string, { head: Names; n: number }>();
@@ -269,9 +345,9 @@ function directionsOf(pats: readonly Pat[]): Dir[] {
   if (!pats.length) return [];
   const byTrips = [...pats].sort(heavier);
   const m0 = byTrips[0];
-  const m1 = byTrips.find((x) => opposite(x.end, m0.end));
+  const m1 = byTrips.find((x) => oppositeOf(x, m0));
   const groups: Pat[][] = m1 ? [[], []] : [[]];
-  for (const x of pats) groups[m1 && opposite(x.end, m0.end) ? 1 : 0].push(x);
+  for (const x of pats) groups[m1 && oppositeOf(x, m0) ? 1 : 0].push(x);
   const dirs: Dir[] = [];
   groups.forEach((g, group) => {
     for (const piece of piecesOf(g)) {
@@ -279,6 +355,7 @@ function directionsOf(pats: readonly Pat[]): Dir[] {
       dirs.push({ head: headOf(piece), group, pats: piece, spine, slots: slotsOf(spine, piece) });
     }
   });
+  distinctHeads(dirs);
   dirs.sort((x, y) => x.head.fr.localeCompare(y.head.fr, 'fr') || x.group - y.group);
   const areasOf = dirs.map((d) => new Set(d.slots.map((x) => x.area)));
   const tripsOf = dirs.map((d) => d.pats.reduce((n, x) => n + x.trips, 0));
@@ -414,10 +491,19 @@ export async function lineRunIn(src: LineData, rt: RealtimeClient | null, f: Fol
     const a = x.pat.file.areas[x.pat.p.a[x.q]];
     return { areaId: a[0], name: a[3], lat: a[1], lon: a[2], next: [], ...(x.branch ? { branch: true } : {}), ...(x.pat === main && x.q === lastQ ? { last: true } : {}) };
   });
-  const index = new Map<string, number>();
-  stops.forEach((s, i) => {
-    if (!index.has(s.areaId)) index.set(s.areaId, i);
-  });
+  // 1.2.7 : un arrêt affiché deux fois (une boucle repasse à Simonis, finit à son départ) : chaque passage d'un motif à
+  // la bonne occurrence, la première qui suit celle de l'arrêt d'avant du motif
+  const occ = new Map<string, number[]>();
+  stops.forEach((s, i) => occ.set(s.areaId, [...(occ.get(s.areaId) ?? []), i]));
+  const positions = (x: Pat): number[] => {
+    let at = -1;
+    return x.p.a.map((_, q) => {
+      const list = occ.get(areaOf(x, q));
+      if (!list) return -1;
+      at = list.find((i) => i > at) ?? list[0];
+      return at;
+    });
+  };
   const dates = src.meta.serviceDates;
   const cands: { t: number; rt: boolean }[][] = stops.map(() => []);
   let rtError = false;
@@ -445,7 +531,7 @@ export async function lineRunIn(src: LineData, rt: RealtimeClient | null, f: Fol
   }
 
   for (const x of group.pats) {
-    const pos = x.p.a.map((ai) => index.get(x.file.areas[ai]?.[0] ?? '') ?? -1);
+    const pos = positions(x);
     const s = x.p.s ?? [];
     for (const t of x.p.t ?? []) {
       const date = dates[t[0]];
@@ -487,16 +573,18 @@ export async function lineRunIn(src: LineData, rt: RealtimeClient | null, f: Fol
   stops.forEach((st, i) => {
     st.next = cands[i].sort((x, y) => x.t - y.t).slice(0, PER_STOP);
   });
-  // un véhicule entre deux arrêts : il arrive au suivant avant que le prochain de l'arrêt d'avant ait pu y venir
-  // (son passage là-bas + le temps de parcours entre les deux, profil le plus servi du motif le plus servi qui les
-  // relie ; 1.2.6 : deux arrêts affichés côte à côte sans motif qui les relie, rien)
+  // un véhicule entre deux arrêts : il a déjà passé l'arrêt d'avant. 1.2.7 (faux ● de la 1.2.6, un tram un peu en
+  // avance sur l'horaire compté deux fois) : le prochain passage de cet arrêt vient du temps réel, et il arrive avant
+  // que le prochain de l'arrêt d'avant ait pu y venir même en roulant deux fois plus vite que l'horaire (son passage
+  // là-bas + la moitié du temps de parcours prévu entre les deux, moins 30 s ; profil le plus servi du motif le plus
+  // servi qui les relie). Deux arrêts affichés côte à côte sans motif qui les relie : rien.
   const linked = [...group.pats].sort(heavier);
   for (let i = 1; i < stops.length; i++) {
-    const a = stops[i - 1].next[0]?.t;
-    const b = stops[i].next[0]?.t;
-    if (a === undefined || b === undefined || b - now >= 30 * 60_000) continue;
+    const a = stops[i - 1].next[0];
+    const b = stops[i].next[0];
+    if (!a || !b?.rt || b.t - now >= 30 * 60_000) continue;
     const travel = travelMs(linked, group.slots[i - 1].area, group.slots[i].area);
-    if (travel !== null && b < a + travel - 30_000) stops[i].vehicle = true;
+    if (travel !== null && b.t < a.t + travel / 2 - 30_000) stops[i].vehicle = true;
   }
   const out: LineRun = { op: f.op, mode: main.file.mode, line: main.file.line, heads: dirs.map((x) => x.head), dir: d, ...(group.other !== undefined ? { other: group.other } : {}), stops, rtError, state: 'ok' };
   if (near) {

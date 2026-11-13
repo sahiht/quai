@@ -711,6 +711,21 @@ export function passagesText(deps: readonly LineDeparture[], now: number, markPl
   return day && textWidth(both) > maxPx ? pre + one(a, true) : both;
 }
 
+/**
+ * 1.2.7 : toute la ligne : le prochain passage seul, en clair (« 5 · 20 min » se lisait mal) : « dans 5 min »,
+ * « imminent », au-delà d'une heure « à 23:40 », un autre jour « demain 06:04 » ; « ~ » devant le nombre sans temps
+ * réel (« dans ~5 min ») ; aucun : « aucun passage ». Les passages suivants : toucher l'arrêt.
+ */
+export function nextPassageText(d: Pick<LineDeparture, 'est' | 'rt'> | undefined, now: number, markPlanned: boolean): string {
+  if (!d) return SECTION.noPassage;
+  const m = minutesUntil(d.est, now);
+  if (m < 1) return 'imminent';
+  const mark = plannedMark(d.rt, markPlanned);
+  if (m < 60) return `dans ${mark}${minText(m)}`;
+  const day = dayWord(d.est, now);
+  return `${day || 'à'} ${mark}${hhmm(d.est)}`;
+}
+
 /** Détail d'une ligne : l'heure prévue d'un passage (« 07:48 », « ~08:08 », « 07:48 +3 »). */
 export function passageTime(d: Departure, markPlanned: boolean): string {
   const p = passageParts(d, markPlanned);

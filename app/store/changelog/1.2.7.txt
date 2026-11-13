@@ -1,0 +1,3 @@
+Toute la ligne : le prochain passage à chaque arrêt, en clair (« dans 5 min »).
+Le point ● suit le temps réel : plus de tram signalé à tort.
+Les lignes en boucle, comme le métro 2, ont leurs deux sens.

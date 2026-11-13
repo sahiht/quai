@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Core, LineBoard } from '../../src/core/api';
 import type { LineFollow, LineRun } from '../../src/core/linerun';
-import { passagesText } from '../../src/glasses/format';
+import { nextPassageText, passagesText } from '../../src/glasses/format';
 import { layoutPage } from '../../src/glasses/layout';
 import { textWidth } from '../../src/glasses/font';
 import type { GlassesView } from '../../src/glasses/types';
@@ -195,7 +195,7 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
     w.c.stop();
   });
 
-  it('vue : ○ et ●, « à 80 m », les passages comme les tableaux, « ~ » expliqué, la ligne du haut ; tout tient au pixel', () => {
+  it('vue : ○ et ●, « à 80 m », 1.2.7 : le prochain passage seul, en clair (« dans 6 min »), « ~ » expliqué s’il est montré ; tout tient au pixel', () => {
     const t = (m: number, rt = true) => ({ t: NOW + m * MIN, rt });
     const run: LineRun = {
       op: 'stib',
@@ -221,9 +221,9 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
     expect(v.initialSel).toBe(1);
     const l = lines(v);
     expect(l[0]).toBe('● : un tram arrive');
-    expect(l.slice(1, 4)).toEqual(['○ Esplanade   6 · 14 min', '● Gare du Nord à 80 m   2 · 10 min', '○ Rogier   ~4 · ~12 min']);
-    // un nom trop long est coupé, jamais les passages ; au-delà de 60 min, l'heure
-    expect(l[4]).toMatch(/^○ Louvain-la-Neuve Place des Sciences.*…   08:46 · 09:06$/);
+    expect(l.slice(1, 4)).toEqual(['○ Esplanade   dans 6 min', '● Gare du Nord à 80 m   dans 2 min', '○ Rogier   dans ~4 min']);
+    // un nom trop long est coupé, jamais le passage ; au-delà de 60 min, l'heure
+    expect(l[4]).toMatch(/^○ Louvain-la-Neuve Place des Sciences.*…   à 08:46$/);
     expect(l[5]).toBe('○ Churchill   aucun passage');
     expect(l[6]).toBe('↔ Autre sens vers Esplanade');
     expect(l.at(-2)).toBe('~ horaire prévu, sans temps réel');
@@ -232,7 +232,10 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
     // une boucle (un seul sens) : pas d'autre sens ; aucun véhicule : pas de ligne du haut
     const loop = lineRunView(route, F3, { ...run, heads: [N('Churchill')], other: undefined, stops: run.stops.map((s) => ({ ...s, vehicle: false })) }, ctx());
     expect(lines(loop).some((x) => x.startsWith('↔'))).toBe(false);
-    expect(lines(loop)[0]).toBe('○ Esplanade   6 · 14 min');
+    expect(lines(loop)[0]).toBe('○ Esplanade   dans 6 min');
+    // « ~ » expliqué seulement s'il est montré : un horaire prévu en second passage seulement ne l'appelle pas
+    const firstRt = { ...run, stops: run.stops.map((x) => ({ ...x, next: x.next.map((y, i) => ({ ...y, rt: i === 0 })) })) };
+    expect(lines(lineRunView(route, F3, firstRt, ctx())).some((x) => x.startsWith('~ horaire prévu'))).toBe(false);
     // ligne introuvable : un message
     expect(lines(lineRunView(route, F3, { ...run, state: 'missing', stops: [] }, ctx()))).toEqual(['Introuvable : modifie-la sur le téléphone.', 'double toucher : retour']);
   });
@@ -261,7 +264,7 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
     const l = lines(v);
     // véhicule (◆ compris) et variantes : les deux légendes sur la ligne du haut
     expect(l[0]).toBe('● : un tram arrive · ◇ : pas tous les trams');
-    expect(l.slice(1, 6)).toEqual(['○ Gare du Nord   3 · 11 min', '○ Gare du Midi   12 · 20 min', '◇ Wiels   18 · 48 min', '◆ Forest Centre   2 · 52 min', '○ Stalle   30 min']);
+    expect(l.slice(1, 6)).toEqual(['○ Gare du Nord   dans 3 min', '○ Gare du Midi   dans 12 min', '◇ Wiels   dans 18 min', '◆ Forest Centre   dans 2 min', '○ Stalle   dans 30 min']);
     expect(l[6]).toBe('↔ Autre sens vers Gare du Nord');
     fitsRows(v);
     // le repère au plus clair, comme ○ et ● : même conteneur que le nom, les noms restent alignés
@@ -276,7 +279,7 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
     expect(lines(lineRunView(route, F3, { ...quiet, mode: 'metro' }, ctx()))[0]).toBe('◇ : pas tous les métros');
     expect(lines(lineRunView(route, F3, { ...run, mode: 'metro' }, ctx()))[0]).toBe('● : un métro arrive · ◇ : pas tous les métros');
     // ni véhicule ni variante : pas de ligne du haut
-    expect(lines(lineRunView(route, F3, { ...quiet, stops: quiet.stops.map((x) => ({ ...x, branch: false })) }, ctx()))[0]).toBe('○ Gare du Nord   3 · 11 min');
+    expect(lines(lineRunView(route, F3, { ...quiet, stops: quiet.stops.map((x) => ({ ...x, branch: false })) }, ctx()))[0]).toBe('○ Gare du Nord   dans 3 min');
     // un véhicule sur un arrêt de variante seulement : ◆, et la légende dit les deux
     const one = { ...run, stops: run.stops.map((x, i) => ({ ...x, vehicle: i === 3 })) };
     expect(lines(lineRunView(route, F3, one, ctx()))[0]).toBe('● : un tram arrive · ◇ : pas tous les trams');
@@ -301,7 +304,7 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
     const v = lineRunView(route, F3, run, ctx());
     expect(v.title).toBe('Tram 4 vers Stalle');
     const l = lines(v);
-    expect(l.slice(0, 3)).toEqual(['○ Porte de Hal   4 · 14 min', '○ Stalle   20 min', '↔ Autre sens vers Porte de Hal']);
+    expect(l.slice(0, 3)).toEqual(['○ Porte de Hal   dans 4 min', '○ Stalle   dans 20 min', '↔ Autre sens vers Porte de Hal']);
     expect(v.items[2].action).toEqual({ kind: 'open', route: { screen: 'lineRun', follow: F3.id, dir: 1 } });
     fitsRows(v);
     // sans sens inverse (morceau à sens unique, boucle) : pas de « ↔ Autre sens », jamais un autre morceau
@@ -311,6 +314,18 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
     // un sens inverse qui serait le sens lui-même, ou hors de la liste : rien non plus
     expect(lines(lineRunView(route, F3, { ...run, other: 2 }, ctx())).some((x) => x.startsWith('↔'))).toBe(false);
     expect(lines(lineRunView(route, F3, { ...run, other: 9 }, ctx())).some((x) => x.startsWith('↔'))).toBe(false);
+  });
+
+  it('1.2.7 : le prochain passage en clair : « imminent », « dans 5 min », « dans ~5 min », « à 08:46 », « demain 06:04 », « aucun passage »', () => {
+    const at = (m: number, rt = true) => ({ est: NOW + m * MIN, rt });
+    expect(nb(nextPassageText(at(0.5), NOW, true))).toBe('imminent');
+    expect(nb(nextPassageText(at(5), NOW, true))).toBe('dans 5 min');
+    expect(nb(nextPassageText(at(5, false), NOW, true))).toBe('dans ~5 min');
+    expect(nb(nextPassageText(at(5, false), NOW, false))).toBe('dans 5 min');
+    expect(nb(nextPassageText(at(59), NOW, true))).toBe('dans 59 min');
+    expect(nb(nextPassageText(at(75), NOW, true))).toBe('à 08:46');
+    expect(nb(nextPassageText({ est: at(0).est + 22 * 60 * MIN + 33 * MIN, rt: false }, NOW, true))).toBe('demain ~06:04');
+    expect(nb(nextPassageText(undefined, NOW, true))).toBe('aucun passage');
   });
 
   it('liste : un sens par rangée, la ligne et sa destination au plus clair ; en calcul « … » ; destination longue coupée', () => {

@@ -131,7 +131,7 @@ const NEXT_S1 = /^Le suivant {3}08:33 → (09:5\d|10:0\d)$/;
  * Message « Quai 1.2.6 » des lunettes (PRD-1.2.6 § 7) : depuis la 1.2.5, les quatre lignes de la 1.2.6 ; depuis une
  * version antérieure, aussi les trois lignes de la 1.2.5 encore vraies (7 lignes). Les plus anciennes ne sont plus dites.
  */
-const NEWS_TITLE = 'Quai 1.2.6';
+const NEWS_TITLE = 'Quai 1.2.7';
 const NEWS_126 = [
   'Arrêts et lignes de bus, tram, métro, séparés.',
   'Une ligne : tout son parcours, l’attente à chaque arrêt.',
@@ -3328,7 +3328,7 @@ async function s126(): Promise<void> {
   await sim.stop();
   await sim.launch(pageUrl(P126NEWS(S2)));
   await step('nouveautes', async () => {
-    const s = await sim.waitScreen(is('message', (x) => x.title === 'Quai 1.2.6'), 20_000, '« Quai 1.2.6 »');
+    const s = await sim.waitScreen(is('message', (x) => x.title === 'Quai 1.2.7'), 20_000, '« Quai 1.2.7 »');
     check126(s);
     return { screen: s };
   });

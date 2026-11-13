@@ -35,14 +35,14 @@ describe('CA-126.7 : message « Quai 1.2.6 »', () => {
     expect(NEWS_SINCE).toBe('1.2.6');
     const kv = createKV(memoryBackend());
     const a = await open('1.2.5', kv);
-    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.6' });
+    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.7' });
     expect(a.last().lines).toEqual([...NEWS_126, TAP]);
     await a.gesture('tap');
     expect((await a.until((s) => s.screen === 'home')).screen).toBe('home');
     expect(a.settings.get().seenVersion).toBe('1.2.6');
     a.c.stop();
     const b = await setup({ now: NOW + 3_600_000, kv, settings: a.settings.get(), core: (now) => stubCore(now) });
-    expect(b.screens().some((s) => s.title === 'Quai 1.2.6')).toBe(false);
+    expect(b.screens().some((s) => s.title === 'Quai 1.2.7')).toBe(false);
     expect((await b.until((s) => s.screen === 'home')).screen).toBe('home');
     b.c.stop();
   });
@@ -50,7 +50,7 @@ describe('CA-126.7 : message « Quai 1.2.6 »', () => {
   it('depuis la 1.2.4, la 1.2.3, la 1.2.2, la 1.2.1, la 1.2.0, la 1.1 et la 1.0 : aussi la 1.2.5, sur le même écran', async () => {
     for (const seen of ['1.2.4', '1.2.3', '1.2.2', '1.2.1', '1.2.0', '1.1.0', '1.0.3']) {
       const h = await open(seen);
-      expect(h.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.6', lines: [...NEWS_126, ...NEWS_125, TAP] });
+      expect(h.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.7', lines: [...NEWS_126, ...NEWS_125, TAP] });
       await h.gesture('tap');
       expect((await h.until((s) => s.screen === 'home')).screen).toBe('home');
       expect(h.settings.get().seenVersion).toBe('1.2.6');
@@ -60,24 +60,24 @@ describe('CA-126.7 : message « Quai 1.2.6 »', () => {
 
   it('installation neuve ou version déjà vue : jamais ; Quai Web : mêmes lignes', async () => {
     const fresh = await open('');
-    expect(fresh.screens().some((s) => s.title === 'Quai 1.2.6')).toBe(false);
+    expect(fresh.screens().some((s) => s.title === 'Quai 1.2.7')).toBe(false);
     expect(fresh.settings.get().seenVersion).toBe('1.2.6');
     fresh.c.stop();
     const seen = await open('1.2.6');
-    expect(seen.screens().some((s) => s.title === 'Quai 1.2.6')).toBe(false);
+    expect(seen.screens().some((s) => s.title === 'Quai 1.2.7')).toBe(false);
     seen.c.stop();
     for (const [v, want] of [
       ['1.2.5', NEWS_126],
       ['1.2.3', [...NEWS_126, ...NEWS_125]],
     ] as const) {
       const web = await open(v, undefined, true);
-      expect(web.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.6', lines: [...want, TAP] });
+      expect(web.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.7', lines: [...want, TAP] });
       web.c.stop();
     }
   });
 
   it('textes : constantes, tutoiement, espace insécable devant « : », sans tiret long ; chaque ligne et le tout tiennent sur l’écran', () => {
-    expect(NEWS_TITLE).toBe('Quai 1.2.6');
+    expect(NEWS_TITLE).toBe('Quai 1.2.7');
     expect(newsLines('1.2.5')).toEqual([...NEWS_LINES]);
     expect(newsLines('1.2.4')).toEqual([...NEWS_LINES, ...NEWS_LINES_125]);
     expect(newsLines('1.0.3')).toEqual([...NEWS_LINES, ...NEWS_LINES_125]);
