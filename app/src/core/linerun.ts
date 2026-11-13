@@ -3,10 +3,13 @@
  * l'attente à chaque arrêt (lineRun).
  *
  *  - Sens : le motif le plus servi de la ligne, puis le plus servi de ceux qui vont dans l'autre sens (opposite) ; une
- *    boucle n'a qu'un sens. Chaque motif rejoint le sens dont il ne va pas à l'opposé. Les sens sont rangés par nom de
- *    terminus (le terminus d'un sens : sa destination la plus servie), pour un ordre stable.
- *  - Arrêts d'un sens : ceux de son motif le plus servi, dans l'ordre. Les autres motifs du sens (services partiels,
- *    variantes) comptent à leurs arrêts communs.
+ *    boucle n'a qu'un sens. Chaque motif rejoint le sens dont il ne va pas à l'opposé. Correction 1.2.6 : un sens se
+ *    coupe en morceaux quand ses motifs n'ont aucun arrêt commun (ligne en deux tronçons pendant des travaux), un
+ *    sens par morceau. Les sens sont rangés par nom de terminus (le terminus d'un sens : sa destination la plus
+ *    servie), pour un ordre stable ; « ↔ Autre sens » mène au sens de l'autre groupe qui partage le plus d'arrêts.
+ *  - Arrêts d'un sens : ceux de son motif le plus servi (l'épine), dans l'ordre, puis ceux des autres motifs (services
+ *    partiels, détours, prolongements, embranchements) à leur place, marqués `branch` : seuls certains voyages y
+ *    passent. Chaque passage compte à son arrêt.
  *  - Passages : horaires de LineFile (profils), puis temps réel : STIB par point d'arrêt (WaitingTimes, une demande pour
  *    30 arrêts), De Lijn et TEC par voyage (GTFS-RT, voyages en cours ou partant dans l'heure), positions retrouvées par
  *    l'identifiant d'arrêt.
@@ -53,15 +56,25 @@ export interface LineRunStop {
   vehicle?: boolean;
   /** Terminus du sens (descente seule). */
   last?: boolean;
+  /**
+   * 1.2.6 : arrêt d'une variante, hors du motif le plus servi du sens : seuls certains voyages le desservent (◇, ◆ quand
+   * un véhicule arrive).
+   */
+  branch?: boolean;
 }
 
 export interface LineRun {
   op: Op;
   mode: Mode;
   line: string;
-  /** Terminus de chaque sens, dans l'ordre des sens (1 pour une boucle, 2 sinon). */
+  /**
+   * Terminus de chaque sens, dans l'ordre des sens : 1 pour une boucle, 2 en général ; 1.2.6 : plus pour une ligne en
+   * morceaux (deux tronçons sans arrêt commun, travaux), un sens par morceau.
+   */
   heads: Names[];
   dir: number;
+  /** 1.2.6 : le sens inverse de `dir` (celui qui partage le plus d'arrêts avec lui), s'il y en a un (« ↔ Autre sens »). */
+  other?: number;
   stops: LineRunStop[];
   /** Arrêt du sens le plus proche de la position (à NEAR_RUN_M au plus). */
   nearest?: { index: number; distanceM: number };
@@ -126,28 +139,173 @@ function patsOf(files: readonly LineFile[]): Pat[] {
   return out;
 }
 
-/** Sens de la ligne : motifs regroupés, terminus le plus servi de chacun ; rangés par nom de terminus. */
-export function directionsOf(pats: readonly Pat[]): { head: Names; pats: Pat[] }[] {
+const areaOf = (x: Pat, q: number): string => x.file.areas[x.p.a[q]]?.[0] ?? '';
+const heavier = (x: Pat, y: Pat): number => y.trips - x.trips || y.p.a.length - x.p.a.length;
+
+/** Arrêt affiché d'un sens : sa zone, le motif et la position qui le donnent (nom, coordonnées, arrêt physique). */
+interface Slot {
+  area: string;
+  pat: Pat;
+  q: number;
+  /** Hors de l'épine : seuls certains voyages du sens le desservent. */
+  branch: boolean;
+}
+
+/**
+ * Un sens : son terminus (la destination la plus servie), son groupe géographique (0 ou 1), ses motifs, son épine (le
+ * motif le plus servi), ses arrêts affichés et son sens inverse.
+ */
+interface Dir {
+  head: Names;
+  group: number;
+  pats: Pat[];
+  spine: Pat;
+  slots: Slot[];
+  other?: number;
+}
+
+/** 1.2.6 : morceaux d'un groupe : motifs reliés de proche en proche par au moins un arrêt commun. */
+function piecesOf(g: readonly Pat[]): Pat[][] {
+  const parent = g.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const first = new Map<string, number>();
+  g.forEach((x, i) => {
+    for (let q = 0; q < x.p.a.length; q++) {
+      const a = areaOf(x, q);
+      if (!a) continue;
+      const j = first.get(a);
+      if (j === undefined) first.set(a, i);
+      else {
+        const [ri, rj] = [find(i), find(j)];
+        if (ri !== rj) parent[ri] = rj;
+      }
+    }
+  });
+  const out = new Map<number, Pat[]>();
+  g.forEach((x, i) => out.set(find(i), [...(out.get(find(i)) ?? []), x]));
+  return [...out.values()];
+}
+
+/**
+ * 1.2.6 : arrêts affichés d'un sens : ceux de l'épine, dans l'ordre ; puis ceux des autres motifs (du plus servi au
+ * moins servi), chaque suite d'arrêts absents à sa place : avant l'arrêt commun qui la suit (détour, embranchement
+ * de départ, départ plus tôt), sinon à la fin (prolongement, embranchement d'arrivée). Un motif sans arrêt encore
+ * placé attend les autres (un morceau est relié de proche en proche).
+ */
+function slotsOf(spine: Pat, pats: readonly Pat[]): Slot[] {
+  const slots: Slot[] = spine.p.a.map((_, q) => ({ area: areaOf(spine, q), pat: spine, q, branch: false }));
+  const placed = new Set(slots.map((x) => x.area));
+  let pending = pats.filter((x) => x !== spine).sort(heavier);
+  for (let round = 0; pending.length && round <= pats.length; round++) {
+    const later: Pat[] = [];
+    for (const x of pending) {
+      const areas = x.p.a.map((_, q) => areaOf(x, q));
+      if (!areas.some((a) => a && placed.has(a))) {
+        later.push(x);
+        continue;
+      }
+      for (let q = 0; q < areas.length; ) {
+        if (!areas[q] || placed.has(areas[q])) {
+          q++;
+          continue;
+        }
+        let r = q;
+        while (r < areas.length && !(areas[r] && placed.has(areas[r]))) r++;
+        const run: Slot[] = [];
+        for (let k = q; k < r; k++) {
+          if (!areas[k] || placed.has(areas[k])) continue;
+          placed.add(areas[k]);
+          run.push({ area: areas[k], pat: x, q: k, branch: true });
+        }
+        const prev = q > 0 ? slots.findIndex((y) => y.area === areas[q - 1]) : -1;
+        let at = slots.length;
+        if (r < areas.length) {
+          // l'occurrence de l'arrêt commun qui suit l'arrêt d'avant (une boucle passe deux fois à son terminus)
+          at = slots.findIndex((y, i) => i > prev && y.area === areas[r]);
+          if (at < 0) at = slots.findIndex((y) => y.area === areas[r]);
+        }
+        slots.splice(at, 0, ...run);
+        q = r;
+      }
+    }
+    pending = later;
+  }
+  return slots;
+}
+
+/** Terminus d'un ensemble de motifs : la destination la plus servie. */
+function headOf(pats: readonly Pat[]): Names {
+  const count = new Map<string, { head: Names; n: number }>();
+  for (const x of pats) {
+    const k = headKey(x.head.fr);
+    const c = count.get(k) ?? { head: x.head, n: 0 };
+    c.n += x.trips;
+    count.set(k, c);
+  }
+  return [...count.values()].sort((x, y) => y.n - x.n)[0].head;
+}
+
+/**
+ * Sens de la ligne. Deux groupes géographiques : le motif le plus servi et ceux qui ne vont pas à son opposé, puis
+ * les autres ; une boucle n'en a qu'un. 1.2.6 : chaque groupe se coupe en morceaux (motifs sans arrêt commun : une ligne
+ * en deux tronçons pendant des travaux), un sens par morceau, avec son terminus et tous ses arrêts (slotsOf). Les sens
+ * sont rangés par nom de terminus, pour un ordre stable ; le sens inverse d'un sens est celui de l'autre groupe qui
+ * partage le plus d'arrêts avec lui.
+ */
+function directionsOf(pats: readonly Pat[]): Dir[] {
   if (!pats.length) return [];
-  const byTrips = [...pats].sort((x, y) => y.trips - x.trips || y.p.a.length - x.p.a.length);
+  const byTrips = [...pats].sort(heavier);
   const m0 = byTrips[0];
   const m1 = byTrips.find((x) => opposite(x.end, m0.end));
   const groups: Pat[][] = m1 ? [[], []] : [[]];
   for (const x of pats) groups[m1 && opposite(x.end, m0.end) ? 1 : 0].push(x);
-  const dirs = groups
-    .filter((g) => g.length)
-    .map((g) => {
-      const count = new Map<string, { head: Names; n: number }>();
-      for (const x of g) {
-        const k = headKey(x.head.fr);
-        const c = count.get(k) ?? { head: x.head, n: 0 };
-        c.n += x.trips;
-        count.set(k, c);
-      }
-      const head = [...count.values()].sort((x, y) => y.n - x.n)[0].head;
-      return { head, pats: g };
+  const dirs: Dir[] = [];
+  groups.forEach((g, group) => {
+    for (const piece of piecesOf(g)) {
+      const spine = [...piece].sort(heavier)[0];
+      dirs.push({ head: headOf(piece), group, pats: piece, spine, slots: slotsOf(spine, piece) });
+    }
+  });
+  dirs.sort((x, y) => x.head.fr.localeCompare(y.head.fr, 'fr') || x.group - y.group);
+  const areasOf = dirs.map((d) => new Set(d.slots.map((x) => x.area)));
+  const tripsOf = dirs.map((d) => d.pats.reduce((n, x) => n + x.trips, 0));
+  dirs.forEach((d, i) => {
+    let best = -1;
+    let shared = 0;
+    dirs.forEach((e, j) => {
+      if (e.group === d.group) return;
+      let n = 0;
+      for (const a of areasOf[i]) if (areasOf[j].has(a)) n++;
+      if (n > shared || (n === shared && n > 0 && tripsOf[j] > tripsOf[best])) [best, shared] = [j, n];
     });
-  return dirs.sort((x, y) => x.head.fr.localeCompare(y.head.fr, 'fr'));
+    if (best >= 0 && shared > 0) d.other = best;
+  });
+  return dirs;
+}
+
+/**
+ * 1.2.6 : un sens d'une ligne, tel que les lunettes le montrent (balayage des lignes, tests) : son terminus, son sens
+ * géographique (0 ou 1), son sens inverse, ses arrêts dans l'ordre affiché (`branch` : arrêt d'une variante) et ses
+ * motifs (arrêts dans l'ordre du motif, voyages).
+ */
+export interface LineDirection {
+  head: Names;
+  group: number;
+  other?: number;
+  stops: { areaId: string; branch: boolean }[];
+  patterns: { areas: string[]; trips: number }[];
+}
+
+/** 1.2.6 : les sens d'une ligne suivie et leurs arrêts, sans horaire ni temps réel. */
+export async function lineDirectionsIn(src: LineData, f: Pick<LineFollow, 'routes'>): Promise<LineDirection[]> {
+  const files = await loadLineFiles(src, [...new Set(f.routes)]);
+  return directionsOf(patsOf(files)).map((d) => ({
+    head: d.head,
+    group: d.group,
+    ...(d.other !== undefined ? { other: d.other } : {}),
+    stops: d.slots.map((x) => ({ areaId: x.area, branch: x.branch })),
+    patterns: d.pats.map((x) => ({ areas: x.p.a.map((_, q) => areaOf(x, q)), trips: x.trips })),
+  }));
 }
 
 /** Terminus des sens d'une ligne suivie (liste « Lignes ») : sans horaire ni temps réel. */
@@ -156,6 +314,25 @@ export async function lineHeadsIn(src: LineData, f: Pick<LineFollow, 'routes'>):
   const dirs = directionsOf(patsOf(files));
   if (dirs.length) return dirs.map((d) => d.head);
   return mainEnds(patsOf(files).map((x) => x.end));
+}
+
+/** Profil le plus servi d'un motif (minutes depuis le départ, par position). */
+function topProfile(x: Pat): number[] {
+  const use = new Map<number, number>();
+  for (const t of x.p.t ?? []) use.set(t[2], (use.get(t[2]) ?? 0) + 1);
+  const top = [...use.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0;
+  return x.p.prof[top] ?? [];
+}
+
+/** Temps de parcours entre deux arrêts consécutifs d'un motif du sens (le plus servi qui les relie) ; null sinon. */
+function travelMs(pats: readonly Pat[], a: string, b: string): number | null {
+  for (const x of pats)
+    for (let q = 1; q < x.p.a.length; q++)
+      if (areaOf(x, q - 1) === a && areaOf(x, q) === b) {
+        const prof = topProfile(x);
+        return Math.max(0, (prof[q] ?? 0) - (prof[q - 1] ?? 0)) * 60_000;
+      }
+  return null;
 }
 
 /** Mises à jour d'un voyage rangées par position du motif (l'identifiant d'arrêt fait foi, pas le numéro du flux). */
@@ -189,9 +366,12 @@ export async function lineRunIn(src: LineData, rt: RealtimeClient | null, f: Pic
   if (!dirs.length) return empty;
   const d = Math.min(Math.max(0, dir), dirs.length - 1);
   const group = dirs[d];
-  const main = [...group.pats].sort((x, y) => y.trips - x.trips || y.p.a.length - x.p.a.length)[0];
-  const areas = main.p.a.map((i) => main.file.areas[i]);
-  const stops: LineRunStop[] = areas.map((a, i) => ({ areaId: a[0], name: a[3], lat: a[1], lon: a[2], next: [], ...(i === areas.length - 1 ? { last: true } : {}) }));
+  const main = group.spine;
+  const lastQ = main.p.a.length - 1;
+  const stops: LineRunStop[] = group.slots.map((x) => {
+    const a = x.pat.file.areas[x.pat.p.a[x.q]];
+    return { areaId: a[0], name: a[3], lat: a[1], lon: a[2], next: [], ...(x.branch ? { branch: true } : {}), ...(x.pat === main && x.q === lastQ ? { last: true } : {}) };
+  });
   const index = new Map<string, number>();
   stops.forEach((s, i) => {
     if (!index.has(s.areaId)) index.set(s.areaId, i);
@@ -246,7 +426,7 @@ export async function lineRunIn(src: LineData, rt: RealtimeClient | null, f: Pic
 
   // STIB : passages annoncés à chaque point d'arrêt du sens (une demande pour 30 arrêts)
   if (rt && f.op === 'stib') {
-    const points = main.p.a.map((_, q) => stibPoint(main.p.s?.[q] ?? ''));
+    const points = group.slots.map((x) => stibPoint(x.pat.p.s?.[x.q] ?? ''));
     const res = await rt.stib(points.filter(Boolean)).catch(() => null);
     if (!res || res.error) rtError = true;
     else {
@@ -266,18 +446,17 @@ export async function lineRunIn(src: LineData, rt: RealtimeClient | null, f: Pic
     st.next = cands[i].sort((x, y) => x.t - y.t).slice(0, PER_STOP);
   });
   // un véhicule entre deux arrêts : il arrive au suivant avant que le prochain de l'arrêt d'avant ait pu y venir
-  // (son passage là-bas + le temps de parcours entre les deux, profil le plus servi du motif principal)
-  const use = new Map<number, number>();
-  for (const t of main.p.t ?? []) use.set(t[2], (use.get(t[2]) ?? 0) + 1);
-  const top = [...use.entries()].sort((x, y) => y[1] - x[1])[0]?.[0] ?? 0;
-  const prof = main.p.prof[top] ?? [];
+  // (son passage là-bas + le temps de parcours entre les deux, profil le plus servi du motif le plus servi qui les
+  // relie ; 1.2.6 : deux arrêts affichés côte à côte sans motif qui les relie, rien)
+  const linked = [...group.pats].sort(heavier);
   for (let i = 1; i < stops.length; i++) {
     const a = stops[i - 1].next[0]?.t;
     const b = stops[i].next[0]?.t;
-    const travel = Math.max(0, (prof[i] ?? 0) - (prof[i - 1] ?? 0)) * 60_000;
-    if (a !== undefined && b !== undefined && b < a + travel - 30_000 && b - now < 30 * 60_000) stops[i].vehicle = true;
+    if (a === undefined || b === undefined || b - now >= 30 * 60_000) continue;
+    const travel = travelMs(linked, group.slots[i - 1].area, group.slots[i].area);
+    if (travel !== null && b < a + travel - 30_000) stops[i].vehicle = true;
   }
-  const out: LineRun = { op: f.op, mode: main.file.mode, line: main.file.line, heads: dirs.map((x) => x.head), dir: d, stops, rtError, state: 'ok' };
+  const out: LineRun = { op: f.op, mode: main.file.mode, line: main.file.line, heads: dirs.map((x) => x.head), dir: d, ...(group.other !== undefined ? { other: group.other } : {}), stops, rtError, state: 'ok' };
   if (near) {
     let best = -1;
     let bestM = Infinity;

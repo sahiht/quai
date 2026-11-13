@@ -29,21 +29,31 @@ ligne ; toucher l'arrêt ouvre tous ses départs. Seul l'intitulé « ARRÊTS »
 ## 3. « Lignes de bus, tram, métro » et toute la ligne (CA-126.3)
 
 - Liste : une rangée par sens (« Tram 3 vers Churchill », « Tram 3 vers Esplanade »), la ligne et sa destination au
-  plus clair, « vers » en pâle ; une ligne qui ne roule que dans un sens (boucle) n'a qu'une rangée. Pas d'attente :
-  sans arrêt, il n'y en a pas une seule à donner. La liste ne demande rien au relais. Ligne introuvable dans les
-  données du jour : « introuvable : modifie-la sur le téléphone ».
-- Toucher un sens : toute la ligne dans ce sens (lineRun). Les arrêts du motif le plus servi, dans l'ordre du trajet ;
+  plus clair, « vers » en pâle ; une ligne qui ne roule que dans un sens (boucle) n'a qu'une rangée, une ligne en
+  morceaux une rangée par morceau et par sens. Pas d'attente : sans arrêt, il n'y en a pas une seule à donner. La
+  liste ne demande rien au relais. Ligne introuvable dans les données du jour : « introuvable : modifie-la sur le
+  téléphone ».
+- Toucher un sens : toute la ligne dans ce sens (lineRun). Ses arrêts dans l'ordre du trajet, variantes comprises ;
   à droite les deux prochains passages (« 1 · 9 min », « ~ » sans temps réel, une heure au-delà de 60 min) ; ○ devant
   chaque arrêt, ● quand un véhicule arrive (il a passé l'arrêt d'avant : le prochain passage arrive plus tôt que celui
   de l'arrêt d'avant plus le temps de parcours, moins 30 s, et dans les 30 min) ; la ligne du haut le rappelle
   (« ● : un tram arrive »). L'arrêt le plus proche, à 2 km au plus, dit sa distance (« à 80 m ») et porte le curseur à
-  l'ouverture ; plus loin, le curseur part du premier arrêt. En bas, « ↔ Autre sens vers Esplanade ». La liste défile
-  par page. Toucher un arrêt : les passages de la ligne à cet arrêt, dans les deux sens (écran de la 1.2.2).
+  l'ouverture ; plus loin, le curseur part du premier arrêt. En bas, « ↔ Autre sens vers Esplanade », s'il y a un sens
+  inverse. La liste défile par page. Toucher un arrêt : les passages de la ligne à cet arrêt, dans les deux sens
+  (écran de la 1.2.2).
 - Temps réel : STIB, l'attente annoncée à chaque arrêt (relais, 30 arrêts par appel, trié par destination) ; De Lijn et
   TEC, les voyages en route ou qui partent dans l'heure (GTFS-RT). Mise à jour toutes les 30 s, comme les autres écrans
   en direct. Le ● se déduit des heures : aucune position de véhicule n'est demandée.
-- Limite : une ligne à branches montre la branche la plus servie de chaque sens ; les autres services comptent aux
-  arrêts communs ; un arrêt d'une seule branche secondaire n'apparaît pas.
+- Variantes : les arrêts d'un sens sont ceux de son motif le plus servi, puis ceux des autres motifs du sens, insérés
+  à leur place : avant l'arrêt commun qui les suit, à la suite du terminus pour un prolongement, au début pour un
+  départ plus tôt. Un arrêt que seuls certains voyages desservent porte ◇ (◆ quand un véhicule arrive) ; la ligne du
+  haut le dit (« ◇ : pas tous les trams »). Ses passages ne comptent que les voyages qui s'y arrêtent.
+- Morceaux : des motifs d'un même sens sans arrêt commun (une ligne coupée par des travaux, par exemple) forment des
+  morceaux. Chaque morceau est un sens à part, avec sa rangée dans « Lignes » et son terminus, la destination la plus
+  servie du morceau. Le tram 4 des données du 13/11 roule en deux morceaux (Gare du Nord ↔ Wiels, Porte de Hal ↔
+  Stalle) : 4 rangées.
+- « ↔ Autre sens » mène au sens de l'autre direction qui partage le plus d'arrêts avec celui-ci ; sans sens inverse,
+  pas de rangée « ↔ ».
 
 ## 4. Lignes suivies, reprise des réglages (CA-126.4)
 
@@ -82,9 +92,8 @@ ligne ; toucher l'arrêt ouvre tous ses départs. Seul l'intitulé « ARRÊTS »
 - Le pipeline lit `route_color` et `route_text_color` des horaires officiels et les garde dans `lines/index.json`
   (5e et 6e éléments de chaque ligne, lus par position : la 1.2.5 les ignore) et dans chaque fichier de ligne. Le
   journal de nuit dit la couverture par réseau (« Couleurs des lignes : STIB 86/86, … »).
-- La STIB et De Lijn publient une couleur par ligne (Mobility Database, fonction « Route Colors »). Le TEC n'en
-  publie pas : ses pastilles prennent le jaune et le rouge de ses bus. Une ligne STIB ou De Lijn sans couleur reste
-  neutre.
+- Les trois réseaux publient une couleur par ligne : nuit du 13/11, STIB 86/86, De Lijn 1856/1856, TEC 838/838
+  (journal de nuit). Une ligne sans couleur reste neutre ; au TEC, elle prend le jaune et le rouge de ses bus.
 - Données d'essai : couleurs proches de celles du réseau (métros 1, 2, 5, 6 : violet, orange, jaune, bleu).
 
 ## 7. Nouveautés (CA-126.7)
@@ -109,11 +118,16 @@ verrouillé, sur 3 vrais trajets.
   par mot : la ligne et sa destination au plus clair, « vers » pâle) et toute la ligne ; téléphone et Quai Web dans
   Chrome.
 - Vraies lignes : chaque nuit, l'étape « Balayer les lignes de bus, tram et métro » du workflow « Données de nuit »
-  passe chaque ligne par le calcul des lunettes (sens, terminus, toute la ligne à 08:00, rangées page par page) et
-  écrit son bilan dans le journal ; erreurs : une ligne sans sens ou sans terminus, un sens de moins de 2 arrêts, une
-  rangée qui dépasse. Lancée aussi avant la publication (essai de branche, sans rien publier) : BILAN_REEL
+  passe chaque ligne par le calcul des lunettes (sens et terminus, arrêts de chaque sens, toute la ligne à 08:00,
+  rangées page par page) et écrit son bilan dans le journal ; erreurs : une ligne sans sens ou sans terminus, des
+  rangées « Lignes » qui ne correspondent pas aux sens, un arrêt d'un motif absent de la liste de son sens, un « autre
+  sens » invalide, un sens de moins de 2 arrêts, une rangée qui dépasse ; mesures : lignes en morceaux, motifs hors de
+  l'ordre de la liste, arrêts de variante, sens sans « autre sens ». Lancée aussi avant la publication (essai de
+  branche, sans rien publier) : BILAN_REEL
 - Contrôle qualité avant publication, défauts corrigés avec leurs tests : numéro d'une ligne suivie coupé à 12
   caractères (20 pour les arrêts : réglages instables), deux définitions de « même ligne », caractères de sens
   d'écriture dans les mots des rangées, limites de « Près de toi » sans message, « Terminé » d'un ajout d'arrêt qui
   menait aux lignes, aperçu de l'accueil incomplet pour les lecteurs d'écran, toute la ligne absente du mode de
-  développement ; le contrôle au pixel du simulateur étendu aux deux nouveaux écrans.
+  développement, une ligne à variantes ou en morceaux montrait une partie de ses arrêts sous un terminus qui ne
+  collait pas (le tram 4 des données du 13/11 : 54 % des voyages sur des arrêts absents) ; le contrôle au pixel du
+  simulateur étendu aux deux nouveaux écrans.

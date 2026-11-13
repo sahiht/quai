@@ -5,10 +5,11 @@
  * toi » (linesNear) et couleurs officielles (lineColorsIn). Le vrai cœur sur les fixtures (createCore), au 10/11 à 12:10.
  */
 import { describe, expect, it } from 'vitest';
+import type { LineFile, Meta } from '../../../shared/types';
 import type { LineMatch } from '../../src/core/api';
-import { lineColorsIn } from '../../src/core/linepicks';
-import { NEAR_RUN_M, completeFollow, matchFollow, sameFollow, type LineFollow } from '../../src/core/linerun';
-import { hhmm } from '../../src/core/util';
+import { lineColorsIn, linePath, type LineData } from '../../src/core/linepicks';
+import { NEAR_RUN_M, completeFollow, lineDirectionsIn, lineHeadsIn, lineRunIn, matchFollow, sameFollow, type LineDirection, type LineFollow } from '../../src/core/linerun';
+import { gtfsTime, hhmm } from '../../src/core/util';
 import { makeEnv } from './support/env';
 
 const NOW = '2026-11-10T12:10';
@@ -148,5 +149,108 @@ describe('lignes suivies : règles (sans données)', () => {
       ['delijn:1', { color: '0066B3' }],
     ]);
     expect((await lineColorsIn(src('autre nuit'))).size).toBe(0);
+  });
+});
+
+/**
+ * Correction 1.2.6 (contrôle qualité du 13/11, vraies données : le tram 4 en deux tronçons, des arrêts de variantes
+ * absents) : chaque morceau d'une ligne est un sens, tous les arrêts des variantes sont à leur place, marqués.
+ */
+describe('lignes à variantes et en morceaux (correction 1.2.6)', () => {
+  /** Arrêts sur un axe nord-sud (environ 1,1 km entre deux lettres), deux axes parallèles à 3,5 km. */
+  const XY: Record<string, [number, number]> = {
+    Z: [50.91, 4.35], A: [50.9, 4.35], B: [50.89, 4.35], C: [50.88, 4.35], X: [50.875, 4.36], D: [50.87, 4.35], E: [50.86, 4.35], F: [50.87, 4.33], G: [50.86, 4.32], H: [50.85, 4.35],
+    N1: [50.9, 4.4], N2: [50.89, 4.4], N3: [50.88, 4.4], S1: [50.86, 4.4], S2: [50.85, 4.4], S3: [50.84, 4.4],
+    T: [50.9, 4.45], a: [50.89, 4.45], b: [50.88, 4.46], c: [50.89, 4.47], x: [50.895, 4.46],
+  };
+  type P = { head: string; stops: string[]; trips: number };
+  const file = (id: string, pats: P[]): LineFile => {
+    const names = [...new Set(pats.flatMap((p) => p.stops))];
+    return {
+      v: 1,
+      id,
+      op: 'stib',
+      route: id.slice(5),
+      line: '9',
+      mode: 'tram',
+      areas: names.map((n) => [`stib:${n}`, XY[n][0], XY[n][1], N(n)]),
+      pats: pats.map((p) => ({ head: N(p.head), a: p.stops.map((n) => names.indexOf(n)), s: p.stops.map(() => ''), prof: [p.stops.map((_, q) => 2 * q)], t: Array.from({ length: p.trips }, (_, k) => [0, 360 + 5 * k, 0]) })),
+      conn: [],
+    };
+  };
+  const source = (...files: LineFile[]): LineData => ({
+    meta: { serviceDates: ['2026-11-10', '2026-11-11'] } as Meta,
+    json: async <T,>(path: string, valid: (x: unknown) => x is T): Promise<T | null> => {
+      const f = files.find((x) => linePath(x.id) === path);
+      return f && valid(f) ? f : null;
+    },
+  });
+  const stops = (d: LineDirection) => d.stops.map((s) => `${s.branch ? '◇' : ''}${s.areaId.slice(5)}`).join(' ');
+
+  it('variantes d’un sens : l’épine, puis chaque arrêt à sa place (détour, départ plus tôt, embranchement, prolongement), marqué', async () => {
+    const f = file('stib:9', [
+      { head: 'E', stops: ['A', 'B', 'C', 'D', 'E'], trips: 50 },
+      { head: 'E', stops: ['A', 'B', 'X', 'D', 'E'], trips: 20 },
+      { head: 'G', stops: ['A', 'B', 'C', 'F', 'G'], trips: 10 },
+      { head: 'H', stops: ['A', 'B', 'C', 'D', 'E', 'H'], trips: 5 },
+      { head: 'E', stops: ['Z', 'A', 'B', 'C', 'D', 'E'], trips: 4 },
+      { head: 'A', stops: ['E', 'D', 'C', 'B', 'A'], trips: 50 },
+    ]);
+    const dirs = await lineDirectionsIn(source(f), { routes: [f.id] });
+    expect(dirs.map((d) => [d.head.fr, d.group, d.other])).toEqual([
+      ['A', 1, 1],
+      ['E', 0, 0],
+    ]);
+    expect(stops(dirs[1])).toBe('◇Z A B C ◇X D E ◇F ◇G ◇H');
+    expect(stops(dirs[0])).toBe('E D C B A');
+    // aucun arrêt d'un motif n'est caché
+    for (const d of dirs) for (const p of d.patterns) for (const a of p.areas) expect(d.stops.some((s) => s.areaId === a)).toBe(true);
+    // toute la ligne : les passages des variantes à leurs arrêts, le terminus de l'épine, le sens inverse
+    const run = await lineRunIn(source(f), null, { op: 'stib', line: '9', mode: 'tram', routes: [f.id] }, 1, gtfsTime('2026-11-10', 360), null);
+    expect(run).toMatchObject({ dir: 1, other: 0, state: 'ok' });
+    expect(run.stops.map((s) => `${s.branch ? '◇' : ''}${s.name.fr}${s.last ? '|' : ''} ${s.next.map((x) => hhmm(x.t)).join(' ')}`)).toEqual([
+      '◇Z 06:00 06:05',
+      'A 06:00 06:00',
+      'B 06:02 06:02',
+      'C 06:04 06:04',
+      '◇X 06:04 06:09',
+      'D 06:06 06:06',
+      'E| 06:08 06:08',
+      '◇F 06:06 06:11',
+      '◇G 06:08 06:13',
+      '◇H 06:10 06:15',
+    ]);
+  });
+
+  it('ligne en deux morceaux (travaux) : un sens par morceau et par sens, chacun son terminus ; « Autre sens » : le même morceau', async () => {
+    const f = file('stib:4', [
+      { head: 'Wiels', stops: ['N1', 'N2', 'N3'], trips: 50 },
+      { head: 'Stalle', stops: ['S1', 'S2', 'S3'], trips: 40 },
+      { head: 'Gare du Nord', stops: ['N3', 'N2', 'N1'], trips: 50 },
+      { head: 'Porte de Hal', stops: ['S3', 'S2', 'S1'], trips: 40 },
+    ]);
+    const dirs = await lineDirectionsIn(source(f), { routes: [f.id] });
+    const named = dirs.map((d) => [d.head.fr, stops(d), d.other === undefined ? null : dirs[d.other].head.fr]);
+    expect(named).toEqual([
+      ['Gare du Nord', 'N3 N2 N1', 'Wiels'],
+      ['Porte de Hal', 'S3 S2 S1', 'Stalle'],
+      ['Stalle', 'S1 S2 S3', 'Porte de Hal'],
+      ['Wiels', 'N1 N2 N3', 'Gare du Nord'],
+    ]);
+    expect(await lineHeadsIn(source(f), { routes: [f.id] })).toEqual([N('Gare du Nord'), N('Porte de Hal'), N('Stalle'), N('Wiels')]);
+  });
+
+  it('boucle : un seul sens, sans sens inverse ; le terminus deux fois, l’arrêt d’une variante avant le retour', async () => {
+    const f = file('stib:7', [
+      { head: 'T', stops: ['T', 'a', 'b', 'c', 'T'], trips: 50 },
+      { head: 'T', stops: ['T', 'a', 'x', 'T'], trips: 10 },
+    ]);
+    const [d, ...rest] = await lineDirectionsIn(source(f), { routes: [f.id] });
+    expect(rest).toEqual([]);
+    expect(d.other).toBeUndefined();
+    expect(stops(d)).toBe('T a b c ◇x T');
+    const run = await lineRunIn(source(f), null, { op: 'stib', line: '7', mode: 'tram', routes: [f.id] }, 0, gtfsTime('2026-11-10', 360), null);
+    expect(run.other).toBeUndefined();
+    expect(run.stops.map((s) => `${s.branch ? '◇' : ''}${s.name.fr}${s.last ? '|' : ''}`)).toEqual(['T', 'a', 'b', 'c', '◇x', 'T|']);
   });
 });

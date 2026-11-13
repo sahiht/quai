@@ -53,9 +53,9 @@ export function paintBadge(el: HTMLElement, color?: string, text?: string): void
 }
 
 /**
- * Couleurs du réseau pour une ligne sans couleur dans les horaires de son opérateur : le TEC n'en publie aucune (ses
- * horaires n'ont pas de colonne de couleur) ; ses pastilles prennent le jaune et le rouge de ses bus. La STIB et De
- * Lijn publient la couleur de chaque ligne ; une ligne sans couleur y reste neutre.
+ * Couleurs du réseau pour une ligne sans couleur dans les horaires de son opérateur : au TEC, le jaune et le rouge de
+ * ses bus. Les trois réseaux publient la couleur de chaque ligne (nuit du 13/11/2026 : STIB 86/86, De Lijn 1856/1856,
+ * TEC 838/838) ; ailleurs, une ligne sans couleur reste neutre.
  */
 export const NETWORK_COLORS: Partial<Record<Op, { color: string; text: string }>> = { tec: { color: 'FFD200', text: 'D2001F' } };
 

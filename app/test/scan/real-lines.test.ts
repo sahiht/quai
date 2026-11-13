@@ -1,35 +1,38 @@
 /**
  * 1.2.6 (PRD-1.2.6 § 9) : balayage de toutes les lignes de bus, tram et métro d'une publication de nuit, par le calcul
  * des lunettes. Chaque ligne est retrouvée par son numéro, comme l'ajout du téléphone (findLines, autour de son premier
- * arrêt) ; puis ses sens (deux, ou un pour une boucle) et leurs terminus (liste « Lignes »), toute la ligne dans chaque
- * sens à 08:00 le premier jour publié, sans temps réel (lineRun), et leurs rangées dans les lunettes, page par page.
+ * arrêt) ; puis ses sens et leurs terminus (liste « Lignes » : un sens par rangée, un par morceau pour une ligne en
+ * morceaux), leurs arrêts (lineDirections : ceux du motif le plus servi, puis ceux des variantes à leur place), toute
+ * la ligne dans chaque sens à 08:00 le premier jour publié, sans temps réel (lineRun), et leurs rangées dans les
+ * lunettes, page par page.
  *
- * Erreurs (le test échoue) : une ligne sans sens ou sans terminus, un sens introuvable ou de moins de 2 arrêts, une
- * rangée qui dépasse, une exception. Le reste est mesuré et écrit dans le journal : boucles, longueur des lignes,
- * arrêts des branches secondaires non montrés (limite connue, PRD-1.2.6 § 3), rangées coupées (« … »), sens sans
- * passage à 08:00, couleurs publiées.
+ * Erreurs (le test échoue) : une ligne sans sens ou sans terminus, des rangées « Lignes » qui ne correspondent pas aux
+ * sens calculés, un arrêt d'un motif absent de la liste de son sens, un « autre sens » hors de la ligne ou du même
+ * sens géographique, un sens introuvable ou de moins de 2 arrêts, une rangée qui dépasse, une exception. Le reste est
+ * mesuré et écrit dans le journal : rangées par ligne (lignes en morceaux), motifs dont l'ordre n'est pas respecté par
+ * la liste, arrêts de variante (◇), sens sans « autre sens », longueur des lignes, rangées coupées (« … »), sens sans
+ * passage à 08:00, couleurs publiées et contraste des pastilles.
  *
  * Lancé seulement avec QUAI_SCAN_DATA (dossier des données de la nuit, ex. ../site/data), par le workflow « Données
- * de nuit » ; sans lui, ignoré.
+ * de nuit » ; sans lui, ignoré. QUAI_SCAN_DETAIL (« stib:3, tec:W ») : ces lignes détaillées dans le bilan.
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { LineFile, LineIndex, Meta, Names } from '../../../shared/types';
 import type { LineMatch } from '../../src/core/api';
-import { completeFollow, lineHeadsIn, lineRunIn, type LineFollow } from '../../src/core/linerun';
-import { findLinesIn, linePath, loadLineFiles, opposite, type EndPattern, type LineData } from '../../src/core/linepicks';
+import { completeFollow, lineDirectionsIn, lineHeadsIn, lineRunIn, type LineDirection, type LineFollow } from '../../src/core/linerun';
+import { findLinesIn, lineKey, linePath, loadLineFiles, type LineData } from '../../src/core/linepicks';
 import { gtfsTime } from '../../src/core/util';
 import { textWidth } from '../../src/glasses/font';
 import { layoutPage } from '../../src/glasses/layout';
 import type { GlassesView, PageSpec } from '../../src/glasses/types';
 import { followsView, lineRunView, type ViewCtx } from '../../src/glasses/views';
 import { badgeColors } from '../../src/phone/badges';
-import { lineKey } from '../../src/core/linepicks';
 import { overflowing, rowsOf, settingsWith } from '../glasses/helpers';
 
 const DIR = process.env.QUAI_SCAN_DATA;
-/** Lignes détaillées dans le bilan (« stib:3, tec:W ») : sens, arrêts, arrêts des branches non montrés. */
+/** Lignes détaillées dans le bilan (« stib:3, tec:W ») : sens, terminus, arrêts, arrêts de variante, autre sens. */
 const DETAIL = new Set(
   (process.env.QUAI_SCAN_DETAIL ?? '')
     .split(',')
@@ -106,50 +109,42 @@ function pagesOf(v: GlassesView): PageSpec[] {
   return out;
 }
 
-interface Pat {
-  areas: string[];
-  trips: number;
-  end: EndPattern;
-}
+/** Arrêts d'un motif, chacun à sa première occurrence (le retour au premier arrêt d'une boucle ne compte pas). */
+const firstOccurrences = (areas: readonly string[]): string[] => [...new Set(areas)];
 
-/** Motifs d'une ligne, regroupés par sens comme core/linerun.ts (directionsOf) : le plus servi, puis l'opposé. */
-function branchesOf(files: readonly LineFile[]): { head: string; missing: number; trips: number; total: number; hidden: string[]; stops: number }[] {
-  const pats: Pat[] = [];
-  for (const file of files)
-    for (const p of file.pats ?? []) {
-      const n = p.a?.length ?? 0;
-      const a = file.areas[p.a?.[0] ?? -1];
-      const b = file.areas[p.a?.[n - 1] ?? -1];
-      if (n < 2 || !a || !b) continue;
-      const trips = p.t?.length ?? 0;
-      pats.push({ areas: p.a.map((i) => file.areas[i]?.[0] ?? ''), trips, end: { head: p.head, from: { lat: a[1], lon: a[2] }, to: { lat: b[1], lon: b[2] }, trips } });
-    }
-  if (!pats.length) return [];
-  const byTrips = [...pats].sort((x, y) => y.trips - x.trips || y.areas.length - x.areas.length);
-  const m1 = byTrips.find((x) => opposite(x.end, byTrips[0].end));
-  const groups: Pat[][] = m1 ? [[], []] : [[]];
-  for (const x of pats) groups[m1 && opposite(x.end, byTrips[0].end) ? 1 : 0].push(x);
-  return groups
-    .filter((g) => g.length)
-    .map((g) => {
-      const main = [...g].sort((x, y) => y.trips - x.trips || y.areas.length - x.areas.length)[0];
-      const shown = new Set(main.areas);
-      const hidden = new Set<string>();
-      let trips = 0;
-      for (const x of g) {
-        const out = x.areas.filter((a) => !shown.has(a));
-        out.forEach((a) => hidden.add(a));
-        if (out.length) trips += x.trips;
+/**
+ * Un sens tel que les lunettes le montrent : arrêts de ses motifs absents de sa liste (cachés), et motifs dont les
+ * arrêts n'apparaissent pas dans l'ordre de la liste.
+ */
+function checkDirection(d: LineDirection): { hidden: string[]; disordered: { areas: string[]; trips: number }[] } {
+  const at = new Map<string, number>();
+  d.stops.forEach((s, i) => {
+    if (!at.has(s.areaId)) at.set(s.areaId, i);
+  });
+  const hidden = new Set<string>();
+  const disordered: { areas: string[]; trips: number }[] = [];
+  for (const p of d.patterns) {
+    let prev = -1;
+    let ordered = true;
+    for (const a of firstOccurrences(p.areas)) {
+      const i = at.get(a);
+      if (i === undefined) {
+        hidden.add(a);
+        continue;
       }
-      return { head: main.end.head.fr, missing: hidden.size, trips, total: g.reduce((s, x) => s + x.trips, 0), hidden: [...hidden], stops: main.areas.length };
-    });
+      if (i <= prev) ordered = false;
+      prev = i;
+    }
+    if (!ordered) disordered.push(p);
+  }
+  return { hidden: [...hidden], disordered };
 }
 
 const pct = (n: number, d: number): string => `${String(d ? Math.round((1000 * n) / d) / 10 : 0).replace('.', ',')} %`;
 const fr = (n: Names): string => n.fr;
 
 describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_SCAN_DATA)', () => {
-  it('chaque ligne : ses sens, leurs terminus, toute la ligne, ses rangées dans les lunettes', async () => {
+  it('chaque ligne : ses sens, leurs terminus, leurs arrêts, toute la ligne, ses rangées dans les lunettes', async () => {
     const dir = DIR!;
     const t0 = Date.now();
     const meta = JSON.parse(await readFile(join(dir, 'meta.json'), 'utf8')) as Meta;
@@ -182,22 +177,33 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
 
     const byOp = new Map<string, number>();
     const stopsCount: number[] = [];
-    let loops = 0;
+    /** Rangées « Lignes » par ligne : 1, 2, 3 et plus. */
+    const rows = [0, 0, 0];
+    const pieces: string[] = [];
     let runs = 0;
     let quiet = 0;
     let rowsF = 0;
     let cutF = 0;
     let rowsR = 0;
     let cutR = 0;
+    let dirsAll = 0;
+    let hiddenDirs = 0;
+    let patsAll = 0;
+    let tripsAll = 0;
+    let disorderedPats = 0;
+    let disorderedTrips = 0;
+    const disorderedSamples: string[] = [];
     let branchDirs = 0;
-    let branchTrips = 0;
-    let allTrips = 0;
+    let branchStops = 0;
+    let shownStops = 0;
+    const branchSamples: string[] = [];
+    let noOther = 0;
+    const noOtherSamples: string[] = [];
     let colored = 0;
     const palette = new Map<string, Map<string, number>>();
     const weak: string[] = [];
     const detail: string[] = [];
     const cutSamples: string[] = [];
-    const branchSamples: string[] = [];
     for (const m of matches) {
       const name = `${m.op} ${m.line} (${m.ends.map(fr).join(' ↔ ')})`;
       byOp.set(m.op, (byOp.get(m.op) ?? 0) + 1);
@@ -219,7 +225,7 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
           continue;
         }
         if (heads.some((h) => !h.fr.trim())) errors.push(`${name} : terminus sans nom`);
-        if (heads.length === 1) loops++;
+        rows[Math.min(heads.length, 3) - 1]++;
         // liste « Lignes » : un sens par rangée
         const fv = followsView([{ follow: f, mode: m.mode, heads }], ctx);
         for (const p of pagesOf(fv)) {
@@ -233,17 +239,56 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
             }
           }
         }
+
+        // les sens et leurs arrêts, tels que les lunettes les montrent
+        const dirs = await lineDirectionsIn(src, f);
         const files = await loadLineFiles(src, f.routes);
         const names = new Map(files.flatMap((x) => x.areas.map((a) => [a[0], a[3].fr] as const)));
-        if (wanted) detail.push(`${name} : ${f.routes.length} variante(s), ${heads.length} sens (${heads.map(fr).join(', ')})`);
-        for (const b of branchesOf(files)) {
-          if (wanted) detail.push(`  motif principal vers ${b.head} : ${b.stops} arrêts ; ${b.missing ? `${b.missing} arrêt(s) d'autres variantes non montrés (${pct(b.trips, b.total)} des voyages) : ${b.hidden.slice(0, 8).map((a) => names.get(a) ?? a).join(', ')}` : 'aucun arrêt caché'}`);
-          allTrips += b.total;
-          if (!b.missing) continue;
-          branchDirs++;
-          branchTrips += b.trips;
-          if (branchSamples.length < 6) branchSamples.push(`${name}, vers ${b.head} : ${b.missing} arrêt(s), ${pct(b.trips, b.total)} des voyages`);
+        const nameOf = (a: string): string => names.get(a) ?? a;
+        if (dirs.length !== heads.length || dirs.some((d, i) => headsDiffer(d.head, heads[i]))) {
+          errors.push(`${name} : rangées « Lignes » (${heads.map(fr).join(', ')}) ≠ sens calculés (${dirs.map((d) => fr(d.head)).join(', ')})`);
         }
+        if (dirs.length >= 3 && pieces.length < 8) pieces.push(`${name} : ${dirs.map((d) => fr(d.head)).join(', ')}`);
+        if (wanted) detail.push(`${name} : ${f.routes.length} variante(s), ${dirs.length} sens (${dirs.map((d) => fr(d.head)).join(', ')})`);
+        dirs.forEach((d, i) => {
+          dirsAll++;
+          const head = fr(d.head);
+          const { hidden, disordered } = checkDirection(d);
+          const trips = d.patterns.reduce((s, p) => s + p.trips, 0);
+          patsAll += d.patterns.length;
+          tripsAll += trips;
+          if (hidden.length) {
+            hiddenDirs++;
+            errors.push(`${name}, vers ${head} : ${hidden.length} arrêt(s) d'un motif absent(s) de la liste (${hidden.slice(0, 4).map(nameOf).join(', ')})`);
+          }
+          if (disordered.length) {
+            disorderedPats += disordered.length;
+            disorderedTrips += disordered.reduce((s, p) => s + p.trips, 0);
+            if (disorderedSamples.length < 6) disorderedSamples.push(`${name}, vers ${head} : ${disordered.length} motif(s), ${pct(disordered.reduce((s, p) => s + p.trips, 0), trips)} des voyages`);
+          }
+          const branch = d.stops.filter((s) => s.branch);
+          shownStops += d.stops.length;
+          if (branch.length) {
+            branchDirs++;
+            branchStops += branch.length;
+            if (branchSamples.length < 6) branchSamples.push(`${name}, vers ${head} : ${branch.length}/${d.stops.length}`);
+          }
+          if (d.other !== undefined && (d.other < 0 || d.other >= dirs.length || d.other === i || dirs[d.other].group === d.group)) {
+            errors.push(`${name}, vers ${head} : autre sens ${d.other} invalide (${dirs.length} sens, groupe ${d.group})`);
+          }
+          if (dirs.length >= 2 && d.other === undefined) {
+            noOther++;
+            if (noOtherSamples.length < 6) noOtherSamples.push(`${name}, vers ${head}`);
+          }
+          if (wanted) {
+            const first = d.stops[0]?.areaId ?? '';
+            const last = d.stops.at(-1)?.areaId ?? '';
+            detail.push(
+              `  sens ${i + 1} vers ${head} (groupe ${d.group}, ${d.other !== undefined ? `autre sens : vers ${fr(dirs[d.other].head)}` : 'sans autre sens'}) : ${d.stops.length} arrêts, de ${nameOf(first)} à ${nameOf(last)} ; ${d.patterns.length} motif(s) ; ${branch.length ? `${branch.length} arrêt(s) de variante : ${branch.slice(0, 10).map((s) => nameOf(s.areaId)).join(', ')}` : 'aucun arrêt de variante'}${hidden.length ? ` ; ${hidden.length} caché(s)` : ''}${disordered.length ? ` ; ${disordered.length} motif(s) hors de l'ordre` : ''}`,
+            );
+          }
+        });
+
         for (let dir = 0; dir < heads.length; dir++) {
           const run = await lineRunIn(src, null, f, dir, now, null);
           runs++;
@@ -253,13 +298,13 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
           }
           stopsCount.push(run.stops.length);
           if (run.stops.every((s) => !s.next.length)) quiet++;
-          if (wanted) detail.push(`  vers ${fr(heads[dir])} : ${run.stops.length} arrêts, de ${fr(run.stops[0].name)} à ${fr(run.stops[run.stops.length - 1].name)} ; à 08:00, ${run.stops.filter((x) => x.next.length).length} avec un passage à venir`);
+          if (wanted) detail.push(`  vers ${fr(heads[dir])} à 08:00 : ${run.stops.filter((x) => x.next.length).length}/${run.stops.length} arrêts avec un passage à venir`);
           const v = lineRunView({ screen: 'lineRun', follow: f.id, dir }, f, run, ctx);
           for (const p of pagesOf(v)) {
             const bad = [...overflowing(p), ...wordsOverlap(p)];
             if (bad.length) errors.push(`${name}, vers ${fr(heads[dir])} : ${bad.join(' ; ')}`);
             for (const l of p.lines) {
-              if (!/^[●○↔] /.test(l)) continue;
+              if (!/^[●○◆◇↔] /.test(l)) continue;
               rowsR++;
               if (l.includes('…')) {
                 cutR++;
@@ -277,8 +322,10 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
     const med = stopsCount[Math.floor(stopsCount.length / 2)] ?? 0;
     const report = [
       `Balayage des lignes (${meta.serviceDates[0]}, 08:00, sans temps réel) : ${matches.length} lignes (${[...byOp].map(([op, n]) => `${op} ${n}`).join(', ')}), ${covered.size} fichiers, ${lost.length} fichier(s) non retrouvé(s) par leur numéro${lost.length ? ` (${lost.slice(0, 6).join(', ')})` : ''}, ${Math.round((Date.now() - t0) / 1000)} s.`,
-      `Sens : ${matches.length - loops} lignes à deux sens, ${loops} à un seul (boucle ou sens unique) ; ${runs} sens ouverts, de ${stopsCount[0] ?? 0} à ${stopsCount.at(-1) ?? 0} arrêts (médiane ${med}), ${stopsCount.filter((n) => n > 30).length} de plus de 30 arrêts ; ${quiet} sans passage à venir à 08:00.`,
-      `Branches : ${branchDirs} sens dont des arrêts de motifs secondaires ne sont pas montrés, ${pct(branchTrips, allTrips)} des voyages.${branchSamples.length ? ` Ex. : ${branchSamples.join(' | ')}` : ''}`,
+      `Rangées « Lignes » par ligne : 1 (boucle ou sens unique) ${rows[0]}, 2 ${rows[1]}, 3 et plus (ligne en morceaux) ${rows[2]}.${pieces.length ? ` Ex. : ${pieces.join(' | ')}` : ''}`,
+      `Sens : ${runs} ouverts, de ${stopsCount[0] ?? 0} à ${stopsCount.at(-1) ?? 0} arrêts (médiane ${med}), ${stopsCount.filter((n) => n > 30).length} de plus de 30 arrêts ; ${quiet} sans passage à venir à 08:00 ; ${noOther} sans « autre sens » sur une ligne d'au moins 2 sens${noOtherSamples.length ? ` (${noOtherSamples.join(' | ')})` : ''}.`,
+      `Arrêts des motifs : ${hiddenDirs} sens sur ${dirsAll} avec un arrêt absent de la liste ; ${disorderedPats} motif(s) sur ${patsAll} hors de l'ordre de la liste, ${pct(disorderedTrips, tripsAll)} des voyages${disorderedSamples.length ? ` (${disorderedSamples.join(' | ')})` : ''}.`,
+      `Arrêts de variante (◇) : ${branchDirs} sens sur ${dirsAll}, ${branchStops} arrêts sur ${shownStops} montrés (${pct(branchStops, shownStops)}).${branchSamples.length ? ` Ex. : ${branchSamples.join(' | ')}` : ''}`,
       `Rangées coupées (« … ») : Lignes ${cutF}/${rowsF} (${pct(cutF, rowsF)}), toute la ligne ${cutR}/${rowsR} (${pct(cutR, rowsR)}).${cutSamples.length ? ` Ex. : ${cutSamples.join(' | ')}` : ''}`,
       `Couleurs publiées : ${colored}/${matches.length} lignes (${pct(colored, matches.length)}) ; ${[...palette]
         .map(([op, per]) => `${op} ${per.size} pastille(s) différente(s), surtout ${[...per].sort((x, y) => y[1] - x[1]).slice(0, 4).map(([c, n]) => `${c} ×${n}`).join(', ')}`)
@@ -292,3 +339,8 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
     expect(errors).toEqual([]);
   }, 1_800_000);
 });
+
+/** Deux terminus différents (nom français ou néerlandais). */
+function headsDiffer(a: Names, b: Names | undefined): boolean {
+  return !b || a.fr !== b.fr || a.nl !== b.nl;
+}
