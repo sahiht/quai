@@ -342,12 +342,13 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     const f = await until(followsReady);
     expect(f.title).toBe('Lignes de bus, tram, métro');
     expect(f.lines).toEqual(['Tram 3 vers Churchill', 'Tram 3 vers Esplanade', 'Tram 4 vers Stalle', '△▽ choisir   toucher : la ligne   double : retour']);
-    // toucher : toute la ligne dans ce sens, le curseur sur l'arrêt le plus proche (à 80 m), ● où un tram arrive
+    // toucher : toute la ligne dans ce sens, le curseur sur l'arrêt le plus proche (à 80 m), le prochain passage en clair ;
+    // 1.2.7 : ● seulement d'après le temps réel (ici, l'horaire prévu : aucun ●, pas de ligne du haut)
     await gesture('tap');
     const run = await until((x) => x.screen === 'lineRun' && x.lines.length > 3);
     expect(run.title).toBe('Tram 3 vers Churchill');
     expect(run.sel).toBe(1);
-    expect(run.lines.slice(0, 3)).toEqual(['● : un tram arrive', '○ Esplanade   ~6 · ~14 min', '● Gare du Nord à 80 m   ~2 · ~10 min']);
+    expect(run.lines.slice(0, 2)).toEqual(['○ Esplanade   dans ~6 min', '○ Gare du Nord à 80 m   dans ~2 min']);
     expect(run.lines.at(-1)).toBe('△▽ arrêts   toucher : passages   double : retour');
     // toucher l'arrêt : les passages du tram 3 à Gare du Nord, dans les deux sens (4 chacun), puis tous les départs
     await gesture('tap');
@@ -1064,7 +1065,7 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
 describe('S2 : message « Quai 1.2.6 », GlassesApi', () => {
   it('CA-126.7 (et CA-3.2, CA-S2.2, CA-M7.1) : « Quai 1.2.6 » une seule fois après la mise à jour depuis la 1.0, avec les nouveautés de la 1.2.5 (7 lignes) ; T mène à l’accueil', async () => {
     const a = await setupController({ settings: preset(), keepSeen: true });
-    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.6' });
+    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.7' });
     expect(a.last().lines).toEqual([
       'Arrêts et lignes de bus, tram, métro, séparés.',
       'Une ligne : tout son parcours, l’attente à chaque arrêt.',
@@ -1083,7 +1084,7 @@ describe('S2 : message « Quai 1.2.6 », GlassesApi', () => {
     a.c.stop();
     const b = await setupController({ settings: a.settings.get(), keepSeen: true });
     expect((await b.until(homeReady)).screen).toBe('home');
-    expect(b.screens().some((s) => s.title === 'Quai 1.2.6')).toBe(false);
+    expect(b.screens().some((s) => s.title === 'Quai 1.2.7')).toBe(false);
     b.c.stop();
   });
 
@@ -1091,7 +1092,7 @@ describe('S2 : message « Quai 1.2.6 », GlassesApi', () => {
     expect(preset11().seenVersion).toBe('1.1.0');
     for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3', '1.2.4', '1.2.5']) {
       const a = await setupController({ settings: { ...preset11(), seenVersion: seen }, keepSeen: true });
-      expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.6' });
+      expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.7' });
       const want = seen === '1.2.5' ? NEWS_LINES : [...NEWS_LINES, ...NEWS_LINES_125];
       expect(a.last().lines).toEqual([...want.map(nb), 'toucher : continuer']);
       await a.gesture('tap');
@@ -1100,12 +1101,12 @@ describe('S2 : message « Quai 1.2.6 », GlassesApi', () => {
       a.c.stop();
       const b = await setupController({ settings: a.settings.get(), keepSeen: true });
       await b.until(homeReady);
-      expect(b.screens().some((s) => s.title === 'Quai 1.2.6')).toBe(false);
+      expect(b.screens().some((s) => s.title === 'Quai 1.2.7')).toBe(false);
       b.c.stop();
     }
     const d = await setupController({ settings: { ...preset11(), seenVersion: '1.2.6' }, keepSeen: true });
     await d.until(homeReady);
-    expect(d.screens().some((s) => s.title === 'Quai 1.2.6')).toBe(false);
+    expect(d.screens().some((s) => s.title === 'Quai 1.2.7')).toBe(false);
     d.c.stop();
   });
 
@@ -1118,7 +1119,7 @@ describe('S2 : message « Quai 1.2.6 », GlassesApi', () => {
     expect(settings.get().seenVersion).toBe(APP_VERSION);
     await gesture('tap');
     expect((await until((s) => s.screen === 'home')).screen).toBe('home');
-    expect(screens().some((s) => s.title === 'Quai 1.2.6')).toBe(false);
+    expect(screens().some((s) => s.title === 'Quai 1.2.7')).toBe(false);
     c.stop();
   });
 

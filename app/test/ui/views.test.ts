@@ -472,13 +472,14 @@ describe('scénario 2 : en ville, gare du Nord (S2, 12:10)', () => {
       { kind: 'open', route: { screen: 'lineRun', follow: 'f-fav-gdn-3', dir: 1 } },
       { kind: 'open', route: { screen: 'lineRun', follow: 'f-fav-gdn-4', dir: 0 } },
     ]);
-    // toute la ligne vers Churchill, à Gare du Nord : le curseur sur cet arrêt (à 80 m), ● où un tram arrive
+    // toute la ligne vers Churchill, à Gare du Nord : le curseur sur cet arrêt (à 80 m) ; 1.2.7 : le prochain passage en
+    // clair, ● seulement d'après le temps réel (ici, l'horaire prévu)
     const t3 = follows[0].follow;
     const run = await core.lineRun!(t3, 0, { near: here });
     const rv = lineRunView({ screen: 'lineRun', follow: t3.id, dir: 0 }, t3, run, ctxOf(now, s));
     expect(rv.title).toBe('Tram 3 vers Churchill');
     expect(rv.initialSel).toBe(1);
-    expect(check(rv).slice(0, 3)).toEqual(['● : un tram arrive', '○ Esplanade   ~6 · ~14 min', '● Gare du Nord à 80 m   ~2 · ~10 min']);
+    expect(check(rv).slice(0, 2)).toEqual(['○ Esplanade   dans ~6 min', '○ Gare du Nord à 80 m   dans ~2 min']);
     expect(rv.items[1].action).toEqual({ kind: 'open', route: { screen: 'line', areaId: 'stib:6357F', op: 'stib', line: '3', name: run.stops[1].name, mode: 'tram' } });
     expect(rv.items.at(-1)).toMatchObject({ action: { kind: 'open', route: { screen: 'lineRun', follow: t3.id, dir: 1 } } });
     expect(overflowing(layoutPage(rv, { sel: rv.items.length - 1, top: rv.items.length - 1 }))).toEqual([]);
@@ -759,7 +760,7 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     // PRD-1.2.6 § 7 : un seul message ; depuis la 1.2.5, les lignes de la 1.2.6 ; d'avant, aussi celles de la 1.2.5 ;
     // espace insécable devant « : »
     const news = newsView(ctx, newsLines('1.2.5'));
-    expect(news.title).toBe('Quai 1.2.6');
+    expect(news.title).toBe('Quai 1.2.7');
     expect(check(news)).toEqual([
       'Arrêts et lignes de bus, tram, métro, séparés.',
       'Une ligne : tout son parcours, l’attente à chaque arrêt.',

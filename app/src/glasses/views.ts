@@ -65,7 +65,7 @@ import {
   minutesText,
   nextText,
   passageParts,
-  passagesText,
+  nextPassageText,
   plannedMark,
   platformText,
   rideWords,
@@ -158,7 +158,7 @@ export function firstRunView(ctx: ViewCtx): GlassesView {
 }
 
 /** Titre du message de nouveautés (une fois, après la mise à jour depuis une version antérieure). */
-export const NEWS_TITLE = 'Quai 1.2.6';
+export const NEWS_TITLE = 'Quai 1.2.7';
 
 /** 1.2.6 : lignes du message « Quai 1.2.6 » ; chacune tient sur une ligne des lunettes. */
 export const NEWS_LINES: readonly string[] = [
@@ -745,8 +745,9 @@ export function lineRunView(r: LineRunRoute, follow: LineFollow, run: LineRun, c
   const v = base('lineRun', 'lines', title, ctx);
   const f: PassageFlags = { planned: false, partial: false, rtDown: run.rtError };
   run.stops.forEach((st, i) => {
-    const deps = st.next.map((x) => ({ est: x.t, sched: x.t, rt: x.rt, cancelled: false, delayMin: 0, partial: false }) as unknown as LineDeparture);
-    if (deps.some((d) => !d.rt)) f.planned = true;
+    // 1.2.7 : le prochain passage seul, en clair (« dans 5 min ») ; « ~ » expliqué seulement s'il est montré
+    const next = st.next[0];
+    if (next && !next.rt) f.planned = true;
     // le repère et le nom dans le même conteneur (au plus clair) : les noms restent alignés (○ ● ◇ ◆ : 20 px chacun)
     const mark = st.vehicle ? (st.branch ? '◆' : '●') : st.branch ? '◇' : '○';
     const segs: Seg[] = [{ t: mark, hi: true }, { t: displayName(st.name, l), hi: true }];
@@ -754,7 +755,7 @@ export function lineRunView(r: LineRunRoute, follow: LineFollow, run: LineRun, c
     v.items.push({
       a: '',
       segs,
-      bRight: passagesText(deps, ctx.now, mp(ctx)),
+      bRight: nextPassageText(next && { est: next.t, rt: next.rt }, ctx.now, mp(ctx)),
       action: { kind: 'open', route: { screen: 'line', areaId: st.areaId, op: run.op, line: run.line, name: st.name, mode: run.mode } },
       key: `${st.areaId}#${i}`,
     });

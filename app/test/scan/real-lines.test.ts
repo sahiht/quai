@@ -184,6 +184,11 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
     let shownStops = 0;
     const branchSamples: string[] = [];
     let noOther = 0;
+    let viaLines = 0;
+    const namedVia: string[] = [];
+    let holeRuns = 0;
+    let spineHoleRuns = 0;
+    const holeSamples: string[] = [];
     const noOtherSamples: string[] = [];
     let colored = 0;
     const palette = new Map<string, Map<string, number>>();
@@ -237,6 +242,15 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
           errors.push(`${name} : rangées « Lignes » (${heads.map(fr).join(', ')}) ≠ sens calculés (${dirs.map((d) => fr(d.head)).join(', ')})`);
         }
         if (dirs.length >= 3 && pieces.length < 8) pieces.push(`${name} : ${dirs.map((d) => fr(d.head)).join(', ')}`);
+        // 1.2.7 : deux rangées « Lignes » au même nom (une boucle dans les deux sens) : jamais
+        const seenHeads = new Set<string>();
+        for (const d of dirs) {
+          const k = fr(d.head).toLowerCase();
+          if (seenHeads.has(k)) errors.push(`${name} : deux sens nommés « ${fr(d.head)} »`);
+          seenHeads.add(k);
+        }
+        if (dirs.some((d) => / par /.test(fr(d.head))) && namedVia.length < 8) namedVia.push(`${name} : ${dirs.map((d) => fr(d.head)).join(', ')}`);
+        if (dirs.some((d) => / par /.test(fr(d.head)))) viaLines++;
         if (wanted) detail.push(`${name} : ${f.routes.length} variante(s), ${dirs.length} sens (${dirs.map((d) => fr(d.head)).join(', ')})`);
         dirs.forEach((d, i) => {
           dirsAll++;
@@ -272,7 +286,7 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
             const first = d.stops[0]?.areaId ?? '';
             const last = d.stops.at(-1)?.areaId ?? '';
             detail.push(
-              `  sens ${i + 1} vers ${head} (groupe ${d.group}, ${d.other !== undefined ? `autre sens : vers ${fr(dirs[d.other].head)}` : 'sans autre sens'}) : ${d.stops.length} arrêts, de ${nameOf(first)} à ${nameOf(last)} ; ${d.patterns.length} motif(s) ; ${branch.length ? `${branch.length} arrêt(s) de variante : ${branch.slice(0, 10).map((s) => nameOf(s.areaId)).join(', ')}` : 'aucun arrêt de variante'}${hidden.length ? ` ; ${hidden.length} caché(s)` : ''}${disordered.length ? ` ; ${disordered.length} motif(s) hors de l'ordre` : ''}`,
+              `  sens ${i + 1} vers ${head} (groupe ${d.group}, ${d.other !== undefined ? `autre sens : vers ${fr(dirs[d.other].head)}` : 'sans autre sens'}) : ${d.stops.length} arrêts, de ${nameOf(first)} à ${nameOf(last)} (${d.stops.slice(0, 6).map((x) => nameOf(x.areaId)).join(', ')}…) ; ${d.patterns.length} motif(s) ; ${branch.length ? `${branch.length} arrêt(s) de variante : ${branch.slice(0, 10).map((s) => nameOf(s.areaId)).join(', ')}` : 'aucun arrêt de variante'}${hidden.length ? ` ; ${hidden.length} caché(s)` : ''}${disordered.length ? ` ; ${disordered.length} motif(s) hors de l'ordre` : ''}`,
             );
           }
         });
@@ -286,6 +300,18 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
           }
           stopsCount.push(run.stops.length);
           if (run.stops.every((s) => !s.next.length)) quiet++;
+          // 1.2.7 : un arrêt sans passage au milieu d'une ligne qui roule (un arrêt affiché deux fois, mal rattaché)
+          else {
+            const firstOn = run.stops.findIndex((x) => x.next.length);
+            const lastOn = run.stops.length - 1 - [...run.stops].reverse().findIndex((x) => x.next.length);
+            const holes = run.stops.filter((x, k) => k > firstOn && k < lastOn && !x.next.length);
+            const spine = holes.filter((x) => !x.branch);
+            if (holes.length) holeRuns++;
+            if (spine.length) {
+              spineHoleRuns++;
+              if (holeSamples.length < 8) holeSamples.push(`${name}, vers ${fr(heads[dir])} : ${spine.length} (${spine.slice(0, 3).map((x) => x.name.fr).join(', ')})`);
+            }
+          }
           if (wanted) detail.push(`  vers ${fr(heads[dir])} à 08:00 : ${run.stops.filter((x) => x.next.length).length}/${run.stops.length} arrêts avec un passage à venir`);
           const v = lineRunView({ screen: 'lineRun', follow: f.id, dir }, f, run, ctx);
           for (const p of pagesOf(v)) {
@@ -311,6 +337,8 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
     const report = [
       `Balayage des lignes (${meta.serviceDates[0]}, 08:00, sans temps réel) : ${matches.length} lignes (${[...byOp].map(([op, n]) => `${op} ${n}`).join(', ')}), ${covered.size} fichiers, ${lost.length} fichier(s) non retrouvé(s) par leur numéro${lost.length ? ` (${lost.slice(0, 6).join(', ')})` : ''}, ${Math.round((Date.now() - t0) / 1000)} s.`,
       `Rangées « Lignes » par ligne : 1 (boucle ou sens unique) ${rows[0]}, 2 ${rows[1]}, 3 et plus (ligne en morceaux) ${rows[2]}.${pieces.length ? ` Ex. : ${pieces.join(' | ')}` : ''}`,
+      `Sens au même terminus, nommés par où ils passent : ${viaLines} ligne(s).${namedVia.length ? ` Ex. : ${namedVia.join(' | ')}` : ''}`,
+      `Arrêts sans passage au milieu d'une ligne qui roule à 08:00 (d'ici la fin du lendemain) : ${holeRuns} sens, dont ${spineHoleRuns} avec un arrêt du motif principal (hors variantes).${holeSamples.length ? ` Ex. : ${holeSamples.join(' | ')}` : ''}`,
       `Sens : ${runs} ouverts, de ${stopsCount[0] ?? 0} à ${stopsCount.at(-1) ?? 0} arrêts (médiane ${med}), ${stopsCount.filter((n) => n > 30).length} de plus de 30 arrêts ; ${quiet} sans passage à venir à 08:00 ; ${noOther} sans « autre sens » sur une ligne d'au moins 2 sens${noOtherSamples.length ? ` (${noOtherSamples.join(' | ')})` : ''}.`,
       `Arrêts des motifs : ${hiddenDirs} sens sur ${dirsAll} avec un arrêt absent de la liste ; ${disorderedPats} motif(s) sur ${patsAll} hors de l'ordre de la liste, ${pct(disorderedTrips, tripsAll)} des voyages${disorderedSamples.length ? ` (${disorderedSamples.join(' | ')})` : ''}.`,
       `Arrêts de variante (◇) : ${branchDirs} sens sur ${dirsAll}, ${branchStops} arrêts sur ${shownStops} montrés (${pct(branchStops, shownStops)}).${branchSamples.length ? ` Ex. : ${branchSamples.join(' | ')}` : ''}`,

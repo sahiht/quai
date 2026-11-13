@@ -29,15 +29,16 @@ describe('vrai cœur sur les fixtures : une ligne suivie, toute la ligne', () =>
     expect(run).toMatchObject({ op: 'stib', mode: 'tram', line: '3', dir: 0, state: 'ok', rtError: false, nearest: { index: 1, distanceM: 0 } });
     expect(run.heads.map((h) => h.fr)).toEqual(['Churchill', 'Esplanade']);
     // Gare du Nord : l'attente annoncée par la STIB (relais) ; ailleurs l'horaire prévu (« ~ »). Un tram entre
-    // Esplanade et Gare du Nord : il y arrive avant le prochain d'Esplanade plus les 12 min de parcours
+    // Esplanade et Gare du Nord : il y arrive (temps réel) avant le prochain d'Esplanade plus la moitié des 12 min de
+    // parcours. 1.2.7 : jamais de ● d'après l'horaire seul (Gare du Midi, Churchill)
     expect(run.stops.map(row)).toEqual([
       'Esplanade 12:16~ 12:24~',
       '● Gare du Nord 12:12 12:20',
       'Rogier 12:14~ 12:22~',
       'De Brouckere 12:16~ 12:24~',
       'Bourse 12:17~ 12:25~',
-      '● Gare du Midi 12:14~ 12:22~',
-      '● Churchill 12:13~ 12:21~',
+      'Gare du Midi 12:14~ 12:22~',
+      'Churchill 12:13~ 12:21~',
     ]);
     expect(run.stops.map((s) => !!s.last)).toEqual([false, false, false, false, false, false, true]);
     // l'autre sens : son propre motif, Gare du Nord sous le curseur
@@ -57,9 +58,13 @@ describe('vrai cœur sur les fixtures : une ligne suivie, toute la ligne', () =>
     env.server.relay.stib.points['6359'] = [{ line: '3', dest: { fr: 'CHURCHILL', nl: 'CHURCHILL' }, times: ['2026-11-10T12:13:00+01:00'] }];
     const [t3] = await env.core.findLines('3', GDN);
     const run = await env.core.lineRun!(t3, 0, { near: GDN });
-    // Rogier : 12:13 annoncé, puis le prévu de 12:22 ; le tram de Gare du Nord (12:12) y arrive : il a déjà passé
-    // Gare du Nord ? non : 12:13 vient avant 12:12 + 2 min de parcours, le tram est entre les deux
-    expect(row(run.stops[2])).toBe('● Rogier 12:13 12:22~');
+    // Rogier : 12:13 annoncé, puis le prévu de 12:22. 1.2.7 : c'est le tram de Gare du Nord (12:12), un peu en avance
+    // sur les 2 min prévues : le même tram, pas de ● (le faux ● de la 1.2.6)
+    expect(row(run.stops[2])).toBe('Rogier 12:13 12:22~');
+    // annoncé à 12:11, avant le tram de Gare du Nord : un autre tram, qui a déjà passé Gare du Nord : ●
+    env.server.relay.stib.points['6359'] = [{ line: '3', dest: { fr: 'CHURCHILL', nl: 'CHURCHILL' }, times: ['2026-11-10T12:11:00+01:00'] }];
+    env.clock.set(env.clock.t + 30_000);
+    expect(row((await env.core.lineRun!(t3, 0, { near: GDN })).stops[2])).toBe('● Rogier 12:11 12:14~');
     // une autre ligne ou l'autre sens annoncés au même point ne comptent pas
     env.server.relay.stib.points['6361'] = [{ line: '4', dest: { fr: 'STALLE', nl: 'STALLE' }, times: ['2026-11-10T12:11:00+01:00'] }, { line: '3', dest: { fr: 'ESPLANADE', nl: 'ESPLANADE' }, times: ['2026-11-10T12:11:00+01:00'] }];
     env.clock.set(env.clock.t + 30_000);
@@ -177,6 +182,8 @@ describe('lignes à variantes et en morceaux (correction 1.2.6)', () => {
     Z: [50.91, 4.35], A: [50.9, 4.35], B: [50.89, 4.35], C: [50.88, 4.35], X: [50.875, 4.36], D: [50.87, 4.35], E: [50.86, 4.35], F: [50.87, 4.33], G: [50.86, 4.32], H: [50.85, 4.35],
     N1: [50.9, 4.4], N2: [50.89, 4.4], N3: [50.88, 4.4], S1: [50.86, 4.4], S2: [50.85, 4.4], S3: [50.84, 4.4],
     T: [50.9, 4.45], a: [50.89, 4.45], b: [50.88, 4.46], c: [50.89, 4.47], x: [50.895, 4.46],
+    // un anneau (le métro 2 : Elisabeth, Simonis, puis le tour dans un sens ou dans l'autre)
+    El: [50.87, 4.33], Si: [50.865, 4.335], Ri: [50.86, 4.345], Ys: [50.855, 4.35], Ro: [50.85, 4.355], Os: [50.86, 4.325], Be: [50.855, 4.33], Go: [50.85, 4.335], Mi: [50.84, 4.34],
   };
   type P = { head: string; stops: string[]; trips: number };
   const file = (id: string, pats: P[]): LineFile => {
@@ -253,6 +260,32 @@ describe('lignes à variantes et en morceaux (correction 1.2.6)', () => {
       ['Wiels', 'N1 N2 N3', 'Gare du Nord'],
     ]);
     expect(await lineHeadsIn(source(f), { routes: [f.id] })).toEqual([N('Gare du Nord'), N('Porte de Hal'), N('Stalle'), N('Wiels')]);
+  });
+
+  it('1.2.7 : un anneau parcouru dans les deux sens (le métro 2) : deux sens, chacun nommé par où il passe ; une course partielle à rebours rejoint le bon', async () => {
+    const f = file('stib:2', [
+      { head: 'El', stops: ['El', 'Si', 'Ri', 'Ys', 'Ro', 'Mi', 'Go', 'Be', 'Os', 'Si', 'El'], trips: 60 },
+      { head: 'El', stops: ['El', 'Si', 'Os', 'Be', 'Go', 'Mi', 'Ro', 'Ys', 'Ri', 'Si', 'El'], trips: 58 },
+      // une course qui part de Gare de l'Ouest dans le sens du second motif
+      { head: 'El', stops: ['Go', 'Mi', 'Ro', 'Ys', 'Ri', 'Si', 'El'], trips: 5 },
+    ]);
+    // Rogier et Gare de l'Ouest ont le plus de correspondances : ils nomment les deux sens
+    f.conn = f.areas.map(([id]) => (id === 'stib:Ro' || id === 'stib:Go' ? [1, 2, 3] : []));
+    const dirs = await lineDirectionsIn(source(f), { routes: [f.id] });
+    expect(dirs.map((d) => [d.head.fr, d.group, d.other])).toEqual([
+      ['El par Go', 1, 1],
+      ['El par Ro', 0, 0],
+    ]);
+    expect(stops(dirs[1])).toBe('El Si Ri Ys Ro Mi Go Be Os Si El');
+    expect(stops(dirs[0])).toBe('El Si Os Be Go Mi Ro Ys Ri Si El');
+    expect(dirs[0].patterns).toHaveLength(2);
+    expect(await lineHeadsIn(source(f), { routes: [f.id] })).toEqual([N('El par Go'), N('El par Ro')].map((x) => ({ fr: x.fr, nl: x.fr.replace(' par ', ' via ') })));
+    // toute la ligne : Simonis deux fois, chaque fois son passage (jamais « aucun passage » au second), le terminus aussi
+    const run = await lineRunIn(source(f), null, { op: 'stib', line: '2', mode: 'metro', routes: [f.id] }, 1, gtfsTime('2026-11-10', 360), null);
+    expect(run.stops.map((x) => `${x.name.fr} ${x.next[0] ? hhmm(x.next[0].t) : '-'}`)).toEqual(['El 06:00', 'Si 06:02', 'Ri 06:04', 'Ys 06:06', 'Ro 06:08', 'Mi 06:10', 'Go 06:12', 'Be 06:14', 'Os 06:16', 'Si 06:18', 'El 06:20']);
+    // l'autre sens, avec la course partielle partie de Gare de l'Ouest : à ses arrêts, dans le bon ordre
+    const back = await lineRunIn(source(f), null, { op: 'stib', line: '2', mode: 'metro', routes: [f.id] }, 0, gtfsTime('2026-11-10', 360), null);
+    expect(back.stops.map((x) => `${x.name.fr} ${x.next.map((y) => hhmm(y.t)).join(' ')}`).slice(4, 11)).toEqual(['Go 06:00 06:05', 'Mi 06:02 06:07', 'Ro 06:04 06:09', 'Ys 06:06 06:11', 'Ri 06:08 06:13', 'Si 06:10 06:15', 'El 06:12 06:17']);
   });
 
   it('boucle : un seul sens, sans sens inverse ; le terminus deux fois, l’arrêt d’une variante avant le retour', async () => {

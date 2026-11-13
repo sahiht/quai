@@ -34,9 +34,11 @@ ligne ; toucher l'arrêt ouvre tous ses départs. Seul l'intitulé « ARRÊTS »
   liste ne demande rien au relais. Ligne introuvable dans les données du jour : « introuvable : modifie-la sur le
   téléphone ».
 - Toucher un sens : toute la ligne dans ce sens (lineRun). Ses arrêts dans l'ordre du trajet, variantes comprises ;
-  à droite les deux prochains passages (« 1 · 9 min », « ~ » sans temps réel, une heure au-delà de 60 min) ; ○ devant
+  à droite les deux prochains passages (« 1 · 9 min », « ~ » sans temps réel, une heure au-delà de 60 min ; 1.2.7 : le
+  prochain seul, en clair, PRD-1.2.7 § 1) ; ○ devant
   chaque arrêt, ● quand un véhicule arrive (il a passé l'arrêt d'avant : le prochain passage arrive plus tôt que celui
-  de l'arrêt d'avant plus le temps de parcours, moins 30 s, et dans les 30 min) ; la ligne du haut le rappelle
+  de l'arrêt d'avant plus le temps de parcours, moins 30 s, et dans les 30 min ; 1.2.7 : d'après le temps réel
+  seul, PRD-1.2.7 § 2) ; la ligne du haut le rappelle
   (« ● : un tram arrive »). L'arrêt le plus proche, à 2 km au plus, dit sa distance (« à 80 m ») et porte le curseur à
   l'ouverture ; plus loin, le curseur part du premier arrêt. En bas, « ↔ Autre sens vers Esplanade », s'il y a un sens
   inverse. La liste défile par page. Toucher un arrêt : les passages de la ligne à cet arrêt, dans les deux sens
