@@ -24,9 +24,36 @@ import { textWidth } from '../../src/glasses/font';
 import { layoutPage } from '../../src/glasses/layout';
 import type { GlassesView, PageSpec } from '../../src/glasses/types';
 import { followsView, lineRunView, type ViewCtx } from '../../src/glasses/views';
-import { container, overflowing, rowsOf, settingsWith } from '../glasses/helpers';
+import { badgeColors } from '../../src/phone/badges';
+import { lineKey } from '../../src/core/linepicks';
+import { overflowing, rowsOf, settingsWith } from '../glasses/helpers';
 
 const DIR = process.env.QUAI_SCAN_DATA;
+/** Lignes détaillées dans le bilan (« stib:3, tec:W ») : sens, arrêts, arrêts des branches non montrés. */
+const DETAIL = new Set(
+  (process.env.QUAI_SCAN_DETAIL ?? '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map((x) => {
+      const [op, ...line] = x.split(':');
+      return `${op.toLowerCase()}:${lineKey(line.join(':'))}`;
+    }),
+);
+
+/** Contraste WCAG entre deux couleurs « RRGGBB ». */
+function contrast(a: string, b: string): number {
+  const lum = (hex: string): number => {
+    const n = parseInt(hex, 16);
+    const [r, g, bl] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => {
+      const x = c / 255;
+      return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+  };
+  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+}
 
 /** Données de la nuit lues sur le disque, chaque fichier une fois. */
 function diskSource(dir: string, meta: Meta): LineData {
@@ -86,7 +113,7 @@ interface Pat {
 }
 
 /** Motifs d'une ligne, regroupés par sens comme core/linerun.ts (directionsOf) : le plus servi, puis l'opposé. */
-function branchesOf(files: readonly LineFile[]): { missing: number; trips: number; total: number }[] {
+function branchesOf(files: readonly LineFile[]): { head: string; missing: number; trips: number; total: number; hidden: string[]; stops: number }[] {
   const pats: Pat[] = [];
   for (const file of files)
     for (const p of file.pats ?? []) {
@@ -114,7 +141,7 @@ function branchesOf(files: readonly LineFile[]): { missing: number; trips: numbe
         out.forEach((a) => hidden.add(a));
         if (out.length) trips += x.trips;
       }
-      return { missing: hidden.size, trips, total: g.reduce((s, x) => s + x.trips, 0) };
+      return { head: main.end.head.fr, missing: hidden.size, trips, total: g.reduce((s, x) => s + x.trips, 0), hidden: [...hidden], stops: main.areas.length };
     });
 }
 
@@ -135,7 +162,7 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
     const errors: string[] = [];
     const covered = new Set<string>();
     const matches: LineMatch[] = [];
-    let lost = 0;
+    const lost: string[] = [];
     for (const [key, line, mode] of index.lines) {
       if (mode === 'train' || covered.has(key)) continue;
       const path = linePath(key);
@@ -148,7 +175,7 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
         matches.push(m);
       }
       if (!covered.has(key)) {
-        lost++;
+        lost.push(`${key} (« ${line} »)`);
         covered.add(key);
       }
     }
@@ -166,12 +193,24 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
     let branchTrips = 0;
     let allTrips = 0;
     let colored = 0;
+    const palette = new Map<string, Map<string, number>>();
+    const weak: string[] = [];
+    const detail: string[] = [];
     const cutSamples: string[] = [];
     const branchSamples: string[] = [];
     for (const m of matches) {
       const name = `${m.op} ${m.line} (${m.ends.map(fr).join(' ↔ ')})`;
       byOp.set(m.op, (byOp.get(m.op) ?? 0) + 1);
-      if (m.color) colored++;
+      if (m.color) {
+        colored++;
+        const c = badgeColors(m.color, m.text);
+        const per = palette.get(m.op) ?? new Map<string, number>();
+        per.set(`${c.b}/${c.t}`, (per.get(`${c.b}/${c.t}`) ?? 0) + 1);
+        palette.set(m.op, per);
+        const r = contrast(c.b, c.t);
+        if (r < 3) weak.push(`${m.op} ${m.line} ${c.b}/${c.t} ${r.toFixed(1).replace('.', ',')}`);
+      }
+      const wanted = DETAIL.has(`${m.op}:${lineKey(m.line)}`);
       try {
         const f: LineFollow = completeFollow({ id: 'scan', op: m.op as LineFollow['op'], line: m.line, routes: [] }, m);
         const heads = await lineHeadsIn(src, f);
@@ -194,12 +233,16 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
             }
           }
         }
-        for (const [dir, b] of branchesOf(await loadLineFiles(src, f.routes)).entries()) {
+        const files = await loadLineFiles(src, f.routes);
+        const names = new Map(files.flatMap((x) => x.areas.map((a) => [a[0], a[3].fr] as const)));
+        if (wanted) detail.push(`${name} : ${f.routes.length} variante(s), ${heads.length} sens (${heads.map(fr).join(', ')})`);
+        for (const b of branchesOf(files)) {
+          if (wanted) detail.push(`  motif principal vers ${b.head} : ${b.stops} arrêts ; ${b.missing ? `${b.missing} arrêt(s) d'autres variantes non montrés (${pct(b.trips, b.total)} des voyages) : ${b.hidden.slice(0, 8).map((a) => names.get(a) ?? a).join(', ')}` : 'aucun arrêt caché'}`);
           allTrips += b.total;
           if (!b.missing) continue;
           branchDirs++;
           branchTrips += b.trips;
-          if (branchSamples.length < 6) branchSamples.push(`${name}, sens ${dir + 1} : ${b.missing} arrêt(s), ${pct(b.trips, b.total)} des voyages`);
+          if (branchSamples.length < 6) branchSamples.push(`${name}, vers ${b.head} : ${b.missing} arrêt(s), ${pct(b.trips, b.total)} des voyages`);
         }
         for (let dir = 0; dir < heads.length; dir++) {
           const run = await lineRunIn(src, null, f, dir, now, null);
@@ -210,6 +253,7 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
           }
           stopsCount.push(run.stops.length);
           if (run.stops.every((s) => !s.next.length)) quiet++;
+          if (wanted) detail.push(`  vers ${fr(heads[dir])} : ${run.stops.length} arrêts, de ${fr(run.stops[0].name)} à ${fr(run.stops[run.stops.length - 1].name)} ; à 08:00, ${run.stops.filter((x) => x.next.length).length} avec un passage à venir`);
           const v = lineRunView({ screen: 'lineRun', follow: f.id, dir }, f, run, ctx);
           for (const p of pagesOf(v)) {
             const bad = [...overflowing(p), ...wordsOverlap(p)];
@@ -232,11 +276,14 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
     stopsCount.sort((a, b) => a - b);
     const med = stopsCount[Math.floor(stopsCount.length / 2)] ?? 0;
     const report = [
-      `Balayage des lignes (${meta.serviceDates[0]}, 08:00, sans temps réel) : ${matches.length} lignes (${[...byOp].map(([op, n]) => `${op} ${n}`).join(', ')}), ${covered.size} fichiers, ${lost} fichier(s) non retrouvé(s) par leur numéro, ${Math.round((Date.now() - t0) / 1000)} s.`,
+      `Balayage des lignes (${meta.serviceDates[0]}, 08:00, sans temps réel) : ${matches.length} lignes (${[...byOp].map(([op, n]) => `${op} ${n}`).join(', ')}), ${covered.size} fichiers, ${lost.length} fichier(s) non retrouvé(s) par leur numéro${lost.length ? ` (${lost.slice(0, 6).join(', ')})` : ''}, ${Math.round((Date.now() - t0) / 1000)} s.`,
       `Sens : ${matches.length - loops} lignes à deux sens, ${loops} à un seul (boucle ou sens unique) ; ${runs} sens ouverts, de ${stopsCount[0] ?? 0} à ${stopsCount.at(-1) ?? 0} arrêts (médiane ${med}), ${stopsCount.filter((n) => n > 30).length} de plus de 30 arrêts ; ${quiet} sans passage à venir à 08:00.`,
       `Branches : ${branchDirs} sens dont des arrêts de motifs secondaires ne sont pas montrés, ${pct(branchTrips, allTrips)} des voyages.${branchSamples.length ? ` Ex. : ${branchSamples.join(' | ')}` : ''}`,
       `Rangées coupées (« … ») : Lignes ${cutF}/${rowsF} (${pct(cutF, rowsF)}), toute la ligne ${cutR}/${rowsR} (${pct(cutR, rowsR)}).${cutSamples.length ? ` Ex. : ${cutSamples.join(' | ')}` : ''}`,
-      `Couleurs publiées : ${colored}/${matches.length} lignes (${pct(colored, matches.length)}).`,
+      `Couleurs publiées : ${colored}/${matches.length} lignes (${pct(colored, matches.length)}) ; ${[...palette]
+        .map(([op, per]) => `${op} ${per.size} pastille(s) différente(s), surtout ${[...per].sort((x, y) => y[1] - x[1]).slice(0, 4).map(([c, n]) => `${c} ×${n}`).join(', ')}`)
+        .join(' ; ')}. Contraste du numéro sous 3:1 : ${weak.length}${weak.length ? ` (${weak.slice(0, 8).join(', ')})` : ''}.`,
+      ...(detail.length ? ['Lignes détaillées :', ...detail] : []),
       errors.length ? `Erreurs : ${errors.length}. ${errors.slice(0, 20).join(' | ')}` : 'Aucune erreur.',
     ];
     process.stdout.write(`\n${report.join('\n')}\n`);

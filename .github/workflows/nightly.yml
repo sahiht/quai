@@ -16,6 +16,11 @@ on:
         type: boolean
         required: false
         default: false
+      lignes:
+        description: "Lignes à détailler dans le bilan du balayage, ex. stib:3, tec:W (vide : aucune)"
+        type: string
+        required: false
+        default: ''
   # Après un changement de l'appli : Quai Web est republié (les données sont refaites aussi, GTFS gardés en repli).
   push:
     branches: [main]
@@ -173,6 +178,7 @@ jobs:
         working-directory: app
         env:
           QUAI_SCAN_DATA: ../site/data
+          QUAI_SCAN_DETAIL: ${{ inputs.lignes }}
         run: npx vitest run test/scan
 
       - name: Configurer GitHub Pages
@@ -222,7 +228,7 @@ jobs:
   keepalive:
     name: Garder la tâche planifiée active
     needs: [build, deploy]
-    if: ${{ !cancelled() && !inputs.verification }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

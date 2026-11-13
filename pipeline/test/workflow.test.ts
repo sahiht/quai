@@ -118,6 +118,19 @@ describe('nightly.yml', () => {
     expect(wf.jobs.build.permissions).toEqual({ contents: 'read', pages: 'read' });
   });
 
+  it('1.2.6 : balayage des lignes après Quai Web, sans bloquer ; essai d’une branche (verification) sans rien publier', () => {
+    const steps = wf.jobs.build.steps;
+    const i = (pred: (s: Step) => boolean) => steps.findIndex(pred);
+    const scan = steps[i((s) => s.name === 'Balayer les lignes de bus, tram et métro')];
+    expect(scan).toMatchObject({ if: "${{ steps.webapp.outcome == 'success' }}", 'continue-on-error': true, 'working-directory': 'app', env: { QUAI_SCAN_DATA: '../site/data' }, run: 'npx vitest run test/scan' });
+    expect(i((s) => s.name === 'Balayer les lignes de bus, tram et métro')).toBeGreaterThan(i((s) => s.id === 'webapp'));
+    expect(i((s) => s.name === 'Balayer les lignes de bus, tram et métro')).toBeLessThan(i((s) => s.uses === 'actions/upload-pages-artifact@v5'));
+    const dispatch = (wf.on as { workflow_dispatch?: { inputs?: Record<string, { type?: string; default?: unknown }> } }).workflow_dispatch;
+    expect(dispatch?.inputs?.verification).toMatchObject({ type: 'boolean', default: false });
+    for (const u of ['actions/configure-pages@v6', 'actions/upload-pages-artifact@v5']) expect(steps[i((s) => s.uses === u)].if).toBe('${{ !inputs.verification }}');
+    expect(wf.jobs.deploy.if).toBe('${{ !inputs.verification }}');
+  });
+
   it('job deploy : environnement github-pages, deploy-pages avec délai de 30 min et un nouvel essai', () => {
     const d = wf.jobs.deploy;
     expect(d.needs).toBe('build');

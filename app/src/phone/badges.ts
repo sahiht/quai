@@ -39,11 +39,17 @@ function dark(hex: string): boolean {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b < 150;
 }
 
+/** Fond et texte d'une pastille à la couleur d'une ligne : le texte de l'opérateur, sinon blanc ou presque noir. */
+export function badgeColors(color: string, text?: string): { b: string; t: string } {
+  return { b: color, t: text || (dark(color) ? 'FFFFFF' : '161A17') };
+}
+
 export function paintBadge(el: HTMLElement, color?: string, text?: string): void {
   if (!color) return;
+  const c = badgeColors(color, text);
   el.classList.add('official');
-  el.style.setProperty('--b', `#${color}`);
-  el.style.setProperty('--t', `#${text || (dark(color) ? 'FFFFFF' : '161A17')}`);
+  el.style.setProperty('--b', `#${c.b}`);
+  el.style.setProperty('--t', `#${c.t}`);
 }
 
 /**
