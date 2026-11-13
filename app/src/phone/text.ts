@@ -215,16 +215,23 @@ export const NEWS_126: readonly string[] = [
   'Tes lignes gardées à un arrêt sont déjà dans Lignes.',
 ];
 
+/** 1.2.8 : nouveautés de la bannière (comme le message « Quai 1.2.8 » des lunettes). */
+export const NEWS_128: readonly string[] = [
+  'Dans les lunettes, touche un train au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.',
+  'À chaque gare, sa voie et le prochain passage en clair (« dans 6 min ») ; ● montre où arrive le train, d’après le temps réel.',
+];
+
 /** 1.2.6 : une nouveauté d'avant qui parle de « Bus, tram, métro », devenu deux rubriques, n'est plus dite. */
 const stillTrue = (l: string): boolean => !/^Bus, tram, métro\b/.test(l);
 
 /**
- * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.6 ; depuis une version
+ * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.8 ; depuis une version
  * antérieure (`seen` : la version vue avant la mise à jour), celles des versions sautées ensuite, de la plus récente à
  * la plus ancienne, sans celles qui ne sont plus vraies.
  */
 export function newsLines(seen = ''): string[] {
-  const out = [...NEWS_126];
+  const out = [...NEWS_128];
+  if (seen && compareVersions(seen, '1.2.6') < 0) out.push(...NEWS_126);
   if (seen && compareVersions(seen, '1.2.5') < 0) out.push(...NEWS_125.filter(stillTrue));
   if (seen && compareVersions(seen, '1.2.4') < 0) out.push(...NEWS_124.filter(stillTrue));
   if (seen && compareVersions(seen, '1.2.3') < 0) out.push(...NEWS_123.filter(stillTrue));

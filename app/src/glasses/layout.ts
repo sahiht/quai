@@ -211,10 +211,11 @@ export interface Geometry {
  * Géométrie verticale d'une vue : titre, ligne du haut éventuelle, lignes, pied (note + aides). `toast` : un message
  * temporaire est affiché (il prend la ligne d'aide, même sur un pied compact).
  */
-export function geometry(v: Pick<GlassesView, 'top' | 'note' | 'reserveNote'> & Partial<Pick<GlassesView, 'hints' | 'compactFoot'>>, toast = false): Geometry {
+export function geometry(v: Pick<GlassesView, 'top' | 'note' | 'reserveNote'> & Partial<Pick<GlassesView, 'hints' | 'compactFoot' | 'notePlanned'>>, toast = false): Geometry {
   const hasTop = !!v.top?.text;
   const rowsY = GEO.TITLE_Y + LINE_H + (hasTop ? LINE_H : 0) + 3;
-  const noteLine = !!(v.reserveNote || v.note);
+  // 1.2.8 : une note qui dépend de la page (notePlanned) garde sa ligne : changer de page ne reconstruit rien
+  const noteLine = !!(v.reserveNote || v.note || v.notePlanned);
   // Accueil : la ligne d'aide n'existe que si l'aide s'affiche (1.2.1 : sous la note du jour férié ; 1.2.2, REVUE-USAGE
   // n° 1 : toujours, les 7 premiers jours passés) ou pendant un message temporaire. Sans note, le pied est vide.
   const hintLine = !v.compactFoot || !!v.hints || toast;
@@ -406,9 +407,23 @@ export interface LayoutOptions {
  * au plus clair, colonne b pâle), placé au pixel par des espaces de 5 px, une espace entre deux mots (deux entre deux
  * conteneurs) ; `right` au plus clair, aligné à droite dans la colonne c. Trop long : le mot qui dépasse est coupé à
  * l'endroit où il commence vraiment, les suivants tombent, jamais `right` : les mots finissent toujours `gap` px avant
- * le début de `right`, ou au bord sûr de l'écran sans lui.
+ * le début de `right`, ou au bord sûr de l'écran sans lui. 1.2.8 (`rightPale`) : `right` pâle, à la même place, dans
+ * le conteneur de la colonne b (une gare que le train a quittée).
  */
-export function segRow(segs: Seg[], indentPx: number, right: string | undefined, def: LayoutDef): { a: string; b: string; c: string; log: string } {
+export function segRow(segs: Seg[], indentPx: number, right: string | undefined, def: LayoutDef, rightPale = false): { a: string; b: string; c: string; log: string } {
+  const row = segRowBright(segs, indentPx, right, def);
+  if (!rightPale || !row.c) return row;
+  // le texte de droite rejoint la colonne b, à l'endroit où la colonne c l'aurait mis (espaces de 5 px), sans jamais
+  // finir plus loin qu'elle (le bord sûr de l'écran) : un arrondi vers le haut le ferait dépasser d'un pixel
+  const r = row.c.trimStart();
+  const start = def.c.x + textWidth(row.c) - textWidth(r);
+  const limit = def.c.x + textWidth(row.c);
+  let n = Math.max(1, Math.round((start - def.b.x - textWidth(row.b)) / SPACE_W));
+  while (n > 1 && def.b.x + textWidth(row.b + ' '.repeat(n) + r) > limit) n--;
+  return { a: row.a, b: row.b + ' '.repeat(n) + r, c: '', log: row.log };
+}
+
+function segRowBright(segs: Seg[], indentPx: number, right: string | undefined, def: LayoutDef): { a: string; b: string; c: string; log: string } {
   const gap = def.gap ?? GAP;
   const cw = Math.min(def.c.w ?? 0, X_END - def.c.x) - GEO.SAFETY;
   const r = right ? truncate(right, cw) : '';
@@ -522,7 +537,7 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     const ctext = cCell ? cCell.log : c ? withOptionalTail(c, it.cTail, cRoom) : '';
     if (it.segs) {
       // 1.2.5 : mots clairs et pâles (« Bus W vers Bruxelles Midi »), l'attente au plus clair à droite
-      const row = segRow(it.segs, 0, it.bRight, def);
+      const row = segRow(it.segs, 0, it.bRight, def, it.rightPale);
       colA.push(row.a);
       colB.push(row.b);
       colC.push(row.c);
@@ -568,7 +583,9 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   }
 
   const foot: string[] = [];
-  const noteText = v.note ? truncate(v.note, X_END - X_TEXT - GEO.SAFETY) : '';
+  // 1.2.8 : « ~ horaire prévu » seulement sous une page qui montre un « ~ » (notePlanned)
+  const noteSrc = v.note ?? (v.notePlanned && items.slice(from, to).some((it) => it.planned) ? v.notePlanned : '');
+  const noteText = noteSrc ? truncate(noteSrc, X_END - X_TEXT - GEO.SAFETY) : '';
   if (g.noteLine) foot.push(noteText);
   const hintText = opts.toast ? truncate(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? truncate(v.hints, X_END - X_TEXT - GEO.SAFETY) : '';
   if (g.hintLine) foot.push(hintText);

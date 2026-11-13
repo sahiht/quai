@@ -19,13 +19,13 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-// Message « Quai 1.2.6 » (PRD-1.2.6 § 7) : la version de l'appli est fixée à 1.2.6 (celle de la publication).
-vi.mock('../../src/version', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../src/version')>()), APP_VERSION: '1.2.6' }));
+// Message « Quai 1.2.8 » (PRD-1.2.8 § 4) : la version de l'appli est fixée à 1.2.8 (celle de la publication).
+vi.mock('../../src/version', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../src/version')>()), APP_VERSION: '1.2.8' }));
 import type { Core, Journey, JourneyLabel, Leg } from '../../src/core/api';
 import { textWidth } from '../../src/glasses/font';
 import { layoutPage, geometry, WIDTHS } from '../../src/glasses/layout';
 import { effectiveFrame, initNav } from '../../src/glasses/nav';
-import { NEWS_LINES, NEWS_LINES_125, stepsPage, type StepsData } from '../../src/glasses/views';
+import { NEWS_LINES, NEWS_LINES_128, stepsPage, type StepsData } from '../../src/glasses/views';
 import { QuaiError } from '../../src/core/errors';
 import { TRIP_KEY, parseTrip, tripPhase } from '../../src/glasses/controller';
 import type { ContainerSpec } from '../../src/glasses/types';
@@ -1062,18 +1062,18 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
   });
 });
 
-describe('S2 : message « Quai 1.2.6 », GlassesApi', () => {
-  it('CA-126.7 (et CA-3.2, CA-S2.2, CA-M7.1) : « Quai 1.2.6 » une seule fois après la mise à jour depuis la 1.0, avec les nouveautés de la 1.2.5 (7 lignes) ; T mène à l’accueil', async () => {
+describe('S2 : message « Quai 1.2.8 », GlassesApi', () => {
+  it('PRD-1.2.8 § 4 (et CA-126.7, CA-3.2, CA-S2.2, CA-M7.1) : « Quai 1.2.8 » une seule fois après la mise à jour depuis la 1.0, avec les nouveautés de la 1.2.6 (7 lignes) ; T mène à l’accueil', async () => {
     const a = await setupController({ settings: preset(), keepSeen: true });
-    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.7' });
+    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.8' });
     expect(a.last().lines).toEqual([
+      'Un train : tout son trajet, gares d’avant comprises.',
+      'Chaque gare : sa voie et dans combien de temps.',
+      '● : là où le train arrive, d’après le temps réel.',
       'Arrêts et lignes de bus, tram, métro, séparés.',
       'Une ligne : tout son parcours, l’attente à chaque arrêt.',
       'Dans les deux sens, sans choisir d’arrêt.',
       'Tes lignes gardées y sont déjà.',
-      'Étapes : l’heure d’arrivée si tu rates ton départ.',
-      'Pluie prévue : dite sur la marche concernée.',
-      'Dans le véhicule : ta progression jusqu’à la descente.',
       'toucher : continuer',
     ]);
     for (const l of [a.last().title, ...a.last().lines]) expect(textWidth(l), l).toBeLessThanOrEqual(WIDTHS.full);
@@ -1084,16 +1084,16 @@ describe('S2 : message « Quai 1.2.6 », GlassesApi', () => {
     a.c.stop();
     const b = await setupController({ settings: a.settings.get(), keepSeen: true });
     expect((await b.until(homeReady)).screen).toBe('home');
-    expect(b.screens().some((s) => s.title === 'Quai 1.2.7')).toBe(false);
+    expect(b.screens().some((s) => s.title === 'Quai 1.2.8')).toBe(false);
     b.c.stop();
   });
 
-  it('« Quai 1.2.6 » depuis la 1.1, la 1.2.0 à la 1.2.4 : avec la 1.2.5 ; depuis la 1.2.5 : la 1.2.6 seule ; une seule fois ; jamais avec la version vue 1.2.6', async () => {
+  it('« Quai 1.2.8 » depuis la 1.1, la 1.2.0 à la 1.2.5 : avec la 1.2.6 ; depuis la 1.2.6 et la 1.2.7 : la 1.2.8 seule ; une seule fois ; jamais avec la version vue 1.2.8', async () => {
     expect(preset11().seenVersion).toBe('1.1.0');
-    for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3', '1.2.4', '1.2.5']) {
+    for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3', '1.2.4', '1.2.5', '1.2.6', '1.2.7']) {
       const a = await setupController({ settings: { ...preset11(), seenVersion: seen }, keepSeen: true });
-      expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.7' });
-      const want = seen === '1.2.5' ? NEWS_LINES : [...NEWS_LINES, ...NEWS_LINES_125];
+      expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.8' });
+      const want = seen === '1.2.6' || seen === '1.2.7' ? NEWS_LINES_128 : [...NEWS_LINES_128, ...NEWS_LINES];
       expect(a.last().lines).toEqual([...want.map(nb), 'toucher : continuer']);
       await a.gesture('tap');
       await a.until(homeReady);
@@ -1101,16 +1101,16 @@ describe('S2 : message « Quai 1.2.6 », GlassesApi', () => {
       a.c.stop();
       const b = await setupController({ settings: a.settings.get(), keepSeen: true });
       await b.until(homeReady);
-      expect(b.screens().some((s) => s.title === 'Quai 1.2.7')).toBe(false);
+      expect(b.screens().some((s) => s.title === 'Quai 1.2.8')).toBe(false);
       b.c.stop();
     }
-    const d = await setupController({ settings: { ...preset11(), seenVersion: '1.2.6' }, keepSeen: true });
+    const d = await setupController({ settings: { ...preset11(), seenVersion: '1.2.8' }, keepSeen: true });
     await d.until(homeReady);
-    expect(d.screens().some((s) => s.title === 'Quai 1.2.7')).toBe(false);
+    expect(d.screens().some((s) => s.title === 'Quai 1.2.8')).toBe(false);
     d.c.stop();
   });
 
-  it('nouvelle installation : bienvenue, jamais « Quai 1.2.6 » ; la version vue est écrite', async () => {
+  it('nouvelle installation : bienvenue, jamais « Quai 1.2.8 » ; la version vue est écrite', async () => {
     const { c, last, gesture, until, settings, settle, screens } = await setupController({ settings: defaults({ onboarded: false }) });
     await settle();
     expect(last()).toMatchObject({ screen: 'message', title: 'Quai' });
@@ -1119,7 +1119,7 @@ describe('S2 : message « Quai 1.2.6 », GlassesApi', () => {
     expect(settings.get().seenVersion).toBe(APP_VERSION);
     await gesture('tap');
     expect((await until((s) => s.screen === 'home')).screen).toBe('home');
-    expect(screens().some((s) => s.title === 'Quai 1.2.7')).toBe(false);
+    expect(screens().some((s) => s.title === 'Quai 1.2.8')).toBe(false);
     c.stop();
   });
 

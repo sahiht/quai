@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Departure, DepartureStops } from '../../src/core/api';
 import { QuaiError } from '../../src/core/errors';
+import { trainProgress } from '../../src/core/stopcalls';
 import { hhmm } from '../../src/core/util';
 import { makeEnv } from './support/env';
 
@@ -70,9 +71,50 @@ describe('departureStops : les arrêts d’un départ jusqu’au terminus', () =
     const n = await env.core.departureStops('sncb:8863008', next);
     expect(n.anyPlanned).toBe(true);
     expect(calls(n).slice(0, 2)).toEqual(['08:42 Namur ~ v5', '08:55 Gembloux ~ v1']);
-    // depuis une gare du parcours : à partir de cette gare
+    expect(s.at).toBe(0);
+    // 1.2.8 : depuis une gare du parcours, tout le trajet : les gares d'avant à leur heure de départ, puis cette gare
     const lux = (await env.core.board('sncb:8811304', { limit: 1 })).departures[0];
-    expect(calls(await env.core.departureStops('sncb:8811304', lux))[0]).toBe('08:31 Bruxelles-Luxembourg +2 v1');
+    const fromLux = await env.core.departureStops('sncb:8811304', lux);
+    expect(fromLux.at).toBe(3);
+    expect(calls(fromLux)).toEqual(calls(s));
+    expect(fromLux.stops[3]).toMatchObject({ areaId: 'sncb:8811304', sched: lux.sched, est: lux.est });
+    // le départ estimé de chaque gare (l'arrivée au terminus) : Bruxelles-Nord arrive 08:40, repart 08:41 (+2)
+    // (Bruxelles-Schuman, supprimé : son heure prévue, 08:35)
+    expect(fromLux.stops.map((x) => hhmm(x.leave!))).toEqual(['07:44', '07:57', '08:11', '08:33', '08:35', '08:43', '08:50', '08:57']);
+  });
+
+  it('1.2.8 : où en est le train (trainProgress) : gares quittées d’après le temps réel, ● seulement avec lui', async () => {
+    const at = (hm: string) => Date.parse(`2026-11-10T${hm}:00+01:00`);
+    const env = makeEnv({ now: '2026-11-10T08:00' });
+    env.server.relay.rt.sncb.trips[IC_0742] = { u: [[1, '8863008_6', 120, null, 0], [5, '8811916_2', null, null, 1]] };
+    const ic = (await env.core.board('sncb:8812005', { horizonMin: 120 })).departures.find((d) => d.line === 'IC' && d.rt)!;
+    const s = await env.core.departureStops('sncb:8812005', ic);
+    expect(s.at).toBe(5);
+    // 08:00 : Namur (07:44) et Gembloux (07:57) quittés ; le train arrive à Ottignies (● : il vient du temps réel)
+    expect(trainProgress(s.stops, at('08:00'))).toEqual({ passed: [true, true, false, false, false, false, false, false], vehicle: 2 });
+    // à quai à Ottignies (arrivée 08:11, départ 08:11 : rien entre les deux) puis entre Ottignies et Luxembourg
+    expect(trainProgress(s.stops, at('08:12')).vehicle).toBe(3);
+    // Bruxelles-Schuman est supprimé : de Luxembourg (08:33), le train va à Bruxelles-Nord
+    expect(trainProgress(s.stops, at('08:34'))).toEqual({ passed: [true, true, true, true, false, false, false, false], vehicle: 5 });
+    // un arrêt supprimé entre la dernière gare quittée et le ● reste à venir : on ne sait pas s'il l'a dépassé
+    expect(trainProgress(s.stops, at('08:38')).passed.slice(3, 6)).toEqual([true, false, false]);
+    // l'heure prévue d'un arrêt supprimé ne fait pas passer le train : 15 min de retard, il n'a pas quitté A à 08:10
+    const synth = [
+      { est: at('07:50'), leave: at('07:50'), rt: true },
+      { est: at('08:15'), leave: at('08:15'), rt: true },
+      { est: at('08:05'), leave: at('08:05'), rt: true, cancelled: true },
+      { est: at('08:25'), leave: at('08:25'), rt: true },
+    ];
+    expect(trainProgress(synth, at('08:10'))).toEqual({ passed: [true, false, false, false], vehicle: 1 });
+    // avant son départ et après son terminus : aucun ●
+    expect(trainProgress(s.stops, at('07:30')).vehicle).toBe(-1);
+    expect(trainProgress(s.stops, at('09:30'))).toEqual({ passed: s.stops.map(() => true), vehicle: -1 });
+    // sans temps réel : les gares passées d'après l'horaire, jamais de ●
+    const planned = s.stops.map((x) => ({ ...x, rt: false }));
+    expect(trainProgress(planned, at('08:00'))).toEqual({ passed: [true, true, false, false, false, false, false, false], vehicle: -1 });
+    // un temps réel incohérent (une gare d'avant plus tard que la suivante) ne fait jamais reculer le train
+    const odd = s.stops.map((x, i) => (i === 1 ? { ...x, leave: at('08:30') } : x));
+    expect(trainProgress(odd, at('08:12')).passed.slice(0, 4)).toEqual([true, true, true, false]);
   });
 
   it('revue : heures du relais (départ en gare, arrivée au terminus) : un train à l’heure n’a pas de retard, un retard est exact', async () => {

@@ -193,9 +193,10 @@ describe('PRD-1.2.4 § 4 : heures alignées à droite, « ~ » à gauche ; aides
   });
 
   it('arrêts d’un départ : l’heure de l’arrêt du tableau alignée comme celles dessous', () => {
-    const d = trainAt(NOW, 10, { tripId: 't-1', head: { fr: 'Liège-Guillemins', nl: 'Luik-Guillemins' } });
-    const ds = stopsOf(d, NOW, [['Namur', 10, { platform: '3' }], ['Andenne', 22, { rt: false }], ['Huy', 31, {}]]);
-    const v = stopsView({ screen: 'stops', areaId: 'sncb:8863008', dep: d }, ds, ctx());
+    // 1.2.8 : un bus (un train montre tout son trajet, sans colonne d'heures)
+    const d = dep(NOW, 10, { tripId: 't-1', line: 'W', head: { fr: 'Bruxelles Midi', nl: 'Brussel Zuid' } });
+    const ds = stopsOf(d, NOW, [['Braine-l’Alleud Merbraine', 10, {}], ['Waterloo Eglise', 22, { rt: false }], ['Bruxelles Midi', 31, {}]]);
+    const v = stopsView({ screen: 'stops', areaId: 'tec:Bbrlmer1', dep: d }, ds, ctx());
     const p = layoutPage(v, { sel: 0, top: 0 });
     const top = p.containers.find((c) => c.name === 'top')!;
     const a = p.containers.find((c) => c.name === 'colA')!;

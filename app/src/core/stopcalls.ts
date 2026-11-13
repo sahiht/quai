@@ -6,7 +6,9 @@
  *   des zones (`next`, minutes après le départ).
  * - Trains : le voyage du fichier trains/{date}.json du jour du départ (gares, heures, voies) ; temps réel gare par gare
  *   (rtAtStop : retard, voie modifiée, arrêt sauté, voyage supprimé) ; pendant une panne, les suppressions et voies
- *   déjà connues, à l'horaire prévu (comme les tableaux, M8.5).
+ *   déjà connues, à l'horaire prévu (comme les tableaux, M8.5). 1.2.8 (PRD-1.2.8 § 1) : tout le trajet, de la gare de
+ *   départ du train à son terminus ; `at` : la gare du tableau ; `leave` : le départ estimé de chaque gare
+ *   (trainProgress : les gares quittées, celle où le train arrive).
  * - Bus, tram, métro : le fichier de la ligne (un seul fichier, pas une requête par arrêt) donne les noms des zones et,
  *   quand le voyage y est retrouvé, ses heures exactes ; sinon les minutes du motif. Heures décalées comme le départ
  *   (son heure estimée) quand il a du temps réel, sinon horaire prévu (« ~ ») ; départ supprimé : arrêts supprimés.
@@ -19,7 +21,7 @@ import type { PreparedArea } from './areas';
 import { flagsOf, isLineFile, linePath, soft } from './linepicks';
 import type { RealtimeClient, RtTrip } from './realtime';
 import { delayMinutes, headKey, headScore, rtAtStop, rtAtStopShown, rtOccurrence, type TripContext } from './rtmerge';
-import { indexDay } from './trains';
+import { indexDay, type DayIndex } from './trains';
 
 const MIN = 60_000;
 /** STIB : écart maximal entre un passage annoncé et le départ prévu qui lui prête sa suite d'arrêts. */
@@ -108,9 +110,33 @@ export async function departureStopsAt(env: StopCallsEnv, dep: Departure): Promi
   const found = dep ? locateDeparture(env.prep, dep) : null;
   if (!found) return missingStops(dep, env.prep.file.op);
   const base = { op: dep.op, mode: dep.mode, line: dep.line, head: dep.head };
-  const stops = env.prep.file.op === 'sncb' ? await trainCalls(env, dep, found) : await urbanCalls(env, dep, found);
-  if (!stops) return missingStops(dep, env.prep.file.op);
+  if (env.prep.file.op === 'sncb') {
+    const run = await trainCalls(env, dep, found);
+    if (!run) return missingStops(dep, env.prep.file.op);
+    return { ...base, stops: run.stops, anyPlanned: run.stops.some((s) => !s.rt), state: 'ok', at: run.at };
+  }
+  const stops = await urbanCalls(env, dep, found);
   return { ...base, stops, anyPlanned: stops.some((s) => !s.rt), state: 'ok' };
+}
+
+/**
+ * 1.2.8 (PRD-1.2.8 § 2) : où en est un train sur tout son trajet. Gares quittées (`passed`) : jusqu'à la dernière gare
+ * desservie dont le départ estimé (`leave`, sinon l'heure montrée) est passé, les arrêts supprimés d'avant compris ; le
+ * train ne repart jamais en arrière (une gare d'avant n'est jamais « à venir »). L'heure d'un arrêt supprimé ne compte
+ * pas : elle est prévue, le train peut être en retard. Gare où il arrive (`vehicle`, ● ; -1 : aucune) : la première
+ * gare desservie après la dernière quittée, seulement s'il en a quitté une et si les deux viennent du temps réel (juste
+ * ou rien, comme le ● de la 1.2.7) : sans temps réel, avant son départ ou après son terminus, aucun ●.
+ */
+export function trainProgress(stops: readonly Pick<StopCall, 'leave' | 'est' | 'rt' | 'cancelled'>[], now: number): { passed: boolean[]; vehicle: number } {
+  let last = -1;
+  stops.forEach((c, i) => {
+    if (!c.cancelled && (c.leave ?? c.est) < now) last = i;
+  });
+  const passed = stops.map((_, i) => i <= last);
+  let next = last + 1;
+  while (next < stops.length && stops[next].cancelled) next++;
+  const vehicle = last >= 0 && next < stops.length && stops[last].rt && stops[next].rt ? next : -1;
+  return { passed, vehicle };
 }
 
 /* ------------------------------ Trains ------------------------------ */
@@ -118,10 +144,10 @@ export async function departureStopsAt(env: StopCallsEnv, dep: Departure): Promi
 const uicOf = (areaId: string): string => areaId.slice(areaId.indexOf(':') + 1);
 const timesOf = (x: [number, number, number, string, number]) => ({ arr: x[1] >= 0 ? x[1] : x[2], dep: x[2] >= 0 ? x[2] : x[1] });
 
-async function trainCalls(env: StopCallsEnv, dep: Departure, found: Found): Promise<StopCall[] | null> {
+async function trainCalls(env: StopCallsEnv, dep: Departure, found: Found): Promise<{ stops: StopCall[]; at: number } | null> {
   const date = env.meta.serviceDates[found.day];
   const file = date ? await env.trains(date) : null;
-  if (!file) return urbanCalls(env, dep, found);
+  if (!file) return { stops: await urbanCalls(env, dep, found), at: 0 };
   const day = indexDay(file);
   const ti = dep.tripId ? (day.tripById.get(dep.tripId) ?? day.tripById.get(normalizeId(dep.tripId))) : undefined;
   if (ti === undefined) return null;
@@ -140,6 +166,17 @@ async function trainCalls(env: StopCallsEnv, dep: Departure, found: Found): Prom
     trip = res.map.get(id) ?? null;
     if (!trip) memory = res.remembered?.get(id);
   }
+  return trainStopCalls(file, day, ti, i, trip, memory);
+}
+
+/**
+ * 1.2.8 : tout le trajet du voyage `ti` du fichier des trains, monté à sa gare de rang `i` : ses gares de la première à
+ * la dernière (après `i`, seulement celles où l'on peut descendre), `at` : la gare de montée. Temps réel du voyage
+ * (`trip`), ou pendant une panne ce qui en était connu (`memory`) ; sans lui, horaire prévu. Fonction pure (balayage
+ * des vrais trains : test/scan/real-trains.test.ts).
+ */
+export function trainStopCalls(file: TrainsDay, day: DayIndex, ti: number, i: number, trip: RtTrip | null = null, memory?: RtTrip): { stops: StopCall[]; at: number } {
+  const s = file.trips[ti].s;
   const ctx: TripContext = {
     seqOfStop: (stopId) => {
       const uic = normalizeId(stopId).replace(/_[^_]+$/, '');
@@ -153,13 +190,19 @@ async function trainCalls(env: StopCallsEnv, dep: Departure, found: Found): Prom
   };
 
   const out: StopCall[] = [];
-  for (let p = i; p < s.length; p++) {
+  let at = 0;
+  for (let p = 0; p < s.length; p++) {
     const x = s[p];
-    // gare sans descente possible (ou simple passage) : pas un arrêt pour qui est à bord
-    if (p !== i && x[1] < 0) continue;
+    // après la gare du tableau, une gare sans descente possible n'est pas un arrêt pour qui est à bord ; avant elle
+    // (1.2.8), toutes les gares où le train s'est arrêté, jamais un point de passage sans heure (« Sterpenich-Frontière »)
+    if (p > i && x[1] < 0) continue;
+    if (x[1] < 0 && x[2] < 0) continue;
+    if (p === i) at = out.length;
     const st = file.stations[x[0]];
     const t = timesOf(x);
-    const sched = day.base + (p === i ? t.dep : t.arr) * MIN;
+    // l'heure montrée : le départ jusqu'à la gare du tableau, l'arrivée ensuite
+    const sched = day.base + (p <= i ? t.dep : t.arr) * MIN;
+    const leaveSched = day.base + t.dep * MIN;
     const platform = x[3] || undefined;
     // revue 1.2.3 : le flux donne l'heure du départ quand il existe (l'arrivée au terminus) : c'est la référence ; l'heure
     // montrée (l'arrivée) en est décalée d'autant, l'arrêt en gare n'est pas du retard
@@ -183,9 +226,11 @@ async function trainCalls(env: StopCallsEnv, dep: Departure, found: Found): Prom
       if (r.cancelled) c.cancelled = true;
       else if (r.newPlatform) c.newPlatform = r.newPlatform;
     }
+    // 1.2.8 : le départ estimé de la gare, décalé comme l'heure montrée
+    c.leave = leaveSched + (c.est - sched);
     out.push(c);
   }
-  return out;
+  return { stops: out, at };
 }
 
 /* ------------------------------ Bus, tram, métro ------------------------------ */

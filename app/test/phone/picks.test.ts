@@ -142,15 +142,16 @@ describe('sections « Gares de train », « Arrêts… » et « Lignes de bus, t
     expect(hz.settings.get().lines.map((p) => p.id)).toEqual(['fav-dl-nord']);
   });
 
-  it('préréglage 1.1 migré, mis à jour : la bannière « Quai 1.2.6 » une fois, sans les nouveautés qui parlent de « Bus, tram, métro »', () => {
+  it('préréglage 1.1 migré, mis à jour : la bannière « Quai 1.2.8 » une fois, sans les nouveautés qui parlent de « Bus, tram, métro »', () => {
     const s = preset11();
     expect(s.seenVersion).toBe('1.1.0');
     const hz = harness({ settings: s });
-    hz.ctx.news = newsState(s.seenVersion, NEWS_SINCE, '1.2.6');
+    hz.ctx.news = newsState(s.seenVersion, NEWS_SINCE, '1.2.8');
     const el = mount(homeScreen(hz.ctx));
     const shown = [...el.querySelectorAll('.news p')].map((p) => plain(p.textContent));
-    expect(shown[0]).toBe('Gares de train, arrêts et lignes de bus, tram, métro : trois rubriques séparées.');
-    expect(shown[3]).toBe('Tes lignes gardées à un arrêt sont déjà dans Lignes.');
+    expect(shown[0]).toBe('Dans les lunettes, touche un train au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.');
+    expect(shown[2]).toBe('Gares de train, arrêts et lignes de bus, tram, métro : trois rubriques séparées.');
+    expect(shown[5]).toBe('Tes lignes gardées à un arrêt sont déjà dans Lignes.');
     expect(shown.some((l) => l.startsWith('Bus, tram, métro'))).toBe(false);
     button(el, 'OK').click();
     expect(mount(homeScreen(hz.ctx)).querySelector('.news')).toBeNull();

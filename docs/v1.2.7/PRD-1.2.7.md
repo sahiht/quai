@@ -2,9 +2,9 @@
 
 Version corrective de la 1.2.6, demandée par le propriétaire le 13/11/2026 après ses essais de « toute la ligne » sur
 Quai Web. Elle ne contient que ces corrections ; ce qui était prévu pour la 1.2.7 (rappel avant la descente, écran
-calme, radar de la veille, plan B avec le retard mesuré, arrêt dépassé, flèche, écran en marchant) passe en 1.2.8.
-Règle de confidentialité inchangée : jamais d'adresse ni de position personnelle dans le dépôt, les tests ou les
-captures.
+calme, radar de la veille, plan B avec le retard mesuré, arrêt dépassé, flèche, écran en marchant) passe en 1.2.8, puis
+en 1.2.9 (la 1.2.8 est consacrée aux trains, PRD-1.2.8). Règle de confidentialité inchangée : jamais d'adresse ni de
+position personnelle dans le dépôt, les tests ou les captures.
 
 ## 1. Le prochain passage, en clair (CA-127.1)
 

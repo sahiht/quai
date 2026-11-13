@@ -166,6 +166,12 @@ export function stopsOf(dep: Pick<Departure, 'op' | 'mode' | 'line' | 'head'>, n
   return { op: dep.op, mode: dep.mode, line: dep.line, head: dep.head, stops, anyPlanned: stops.some((c) => !c.rt), state: 'ok' };
 }
 
+/** 1.2.8 : tout le trajet d'un train construit, `at` : la gare du tableau ; départ estimé (`leave`) : l'heure estimée. */
+export function trainRunOf(dep: Pick<Departure, 'op' | 'mode' | 'line' | 'head'>, now: number, calls: [string, number, Partial<StopCall>?][], at: number): DepartureStops {
+  const s = stopsOf(dep, now, calls);
+  return { ...s, at, stops: s.stops.map((c) => ({ leave: c.est, ...c })) };
+}
+
 /** Voyage disparu des données (departureStops) : rien à montrer. */
 export const vanishedStops = (dep: Pick<Departure, 'op' | 'mode' | 'line' | 'head'>): DepartureStops => ({ op: dep.op, mode: dep.mode, line: dep.line, head: dep.head, stops: [], anyPlanned: false, state: 'missing' });
 

@@ -53,7 +53,7 @@ type Seg = { from: number; to: number; text: string };
 
 /** Écrans en liste à une colonne de droite (gabarit de chacun, layout.ts). */
 const MENU: Record<string, keyof typeof LAYOUTS> = { favorites: 'favorites', stations: 'stations', keepLine: 'menu', followed: 'menu' };
-const CHECKED = new Set(['home', 'steps', 'others', 'lines', 'follows', 'lineRun', 'line', 'board', 'stops', 'train', ...Object.keys(MENU)]);
+const CHECKED = new Set(['home', 'steps', 'others', 'lines', 'follows', 'lineRun', 'trainRun', 'line', 'board', 'stops', 'train', ...Object.keys(MENU)]);
 /** 1.2.3 : ligne du haut d'un tableau (message de l'opérateur, « Départs de demain ») ; sa note, jamais une ligne de liste. */
 const TOP_BOARD = /^(! |Départs de demain$)/;
 const NOTE_BOARD = /^(~ horaire prévu|Temps réel indisponible|Pas de réseau)/;
@@ -130,6 +130,11 @@ function rowSegments(screen: string, line: string, indented = false): Seg[] {
   if (screen === 'lineRun') {
     // 1.2.6 : toute la ligne dans un sens : un arrêt par rangée en mots clairs et pâles, ses passages calés à droite
     return segRowSegments(line, 0, runWords);
+  }
+  if (screen === 'trainRun') {
+    // 1.2.8 : tout le trajet d'un train : une gare par rangée, son passage calé à droite ; une gare quittée (son heure
+    // seule) tout en pâle, l'heure comprise, à la même place
+    return segRowSegments(line, 0, trainWords, PASSED);
   }
   if (screen === 'lines' || screen === 'follows') {
     // intitulés, noms d'arrêts et titres de lignes à la marge ; leurs lignes en retrait (espaces de 5 px, subIndent),
@@ -237,12 +242,26 @@ function runWords(left: string): Word[] {
   return [{ t: m[1], hi: true }, { t: nbsp(m[2]), hi: true }, ...(m[3] ? [{ t: nbsp(m[3]) }] : [])];
 }
 
-function segRowSegments(line: string, indentPx: number, words: (left: string) => Word[] = versWords): Seg[] {
+/** 1.2.8 : une gare quittée par le train : à droite son heure seule (« 07:44 », « ~07:42 »). */
+const PASSED = /^~?\d\d:\d\d$/;
+
+/**
+ * 1.2.8 : une gare de tout le trajet d'un train (« ● Namur voie 6 ! ») : le repère et le nom au plus clair, la voie pâle
+ * (modifiée, « ! » : au plus clair) ; une gare quittée tout en pâle.
+ */
+function trainWords(left: string, right?: string): Word[] {
+  const gone = !!right && PASSED.test(right);
+  const m = /^([●○]) (.+?)(?: (voie \S+(?: !)?))?$/.exec(left);
+  if (!m) return [{ t: nbsp(left), hi: !gone }];
+  return [{ t: m[1], hi: !gone }, { t: nbsp(m[2]), hi: !gone }, ...(m[3] ? [{ t: nbsp(m[3]), hi: !gone && m[3].endsWith('!') }] : [])];
+}
+
+function segRowSegments(line: string, indentPx: number, words: (left: string, right?: string) => Word[] = versWords, paleRight?: RegExp): Seg[] {
   const def = LAYOUTS.lines;
   const parts = line.split('   ');
   const right = parts.length > 1 ? parts[parts.length - 1] : undefined;
   const left = parts.length > 1 ? parts.slice(0, -1).join('   ') : line;
-  const r = segRow(words(left), indentPx, right === undefined ? undefined : nbsp(right), def);
+  const r = segRow(words(left, right), indentPx, right === undefined ? undefined : nbsp(right), def, !!right && !!paleRight?.test(right));
   const out: Seg[] = [];
   for (const [x0, content] of [
     [def.a.x, r.a],
@@ -276,6 +295,28 @@ export function alphaIn(png: Buffer, s: LoggedScreen, text: string, from: number
   const total = [...count.values()].reduce((p, q) => p + q, 0);
   const strong = [...count.entries()].filter(([, n]) => n >= total * 0.1).map(([a]) => a);
   return strong.length ? Math.max(...strong) : 0;
+}
+
+/**
+ * 1.2.8 : luminosité d'une rangée de tout le trajet d'un train (« ● Namur voie 6 !   dans 13 min ») : le repère et le
+ * nom, la voie (-1 : aucune), le texte de droite. `gone` : une gare quittée (son heure seule, tout en pâle attendu) ;
+ * `changed` : voie modifiée (« ! », au plus clair). null : pas une rangée de gare.
+ */
+export function trainRowAlpha(png: Buffer, s: LoggedScreen, text: string): { gone: boolean; changed: boolean; name: number; platform: number; right: number } | null {
+  const parts = text.split('   ');
+  if (parts.length < 2) return null;
+  const right = parts[parts.length - 1];
+  const m = /^([●○]) (.+?)(?: (voie \S+(?: !)?))?$/.exec(parts.slice(0, -1).join('   '));
+  if (!m) return null;
+  const nameEnd = GEO.X_TEXT + width(`${m[1]} ${m[2]}`);
+  const end = GEO.X_END - GEO.SAFETY;
+  return {
+    gone: PASSED.test(right),
+    changed: !!m[3]?.endsWith('!'),
+    name: alphaIn(png, s, text, GEO.X_TEXT, nameEnd),
+    platform: m[3] ? alphaIn(png, s, text, nameEnd + 8, nameEnd + 6 + width(m[3])) : -1,
+    right: alphaIn(png, s, text, end - width(right) - 4, end + 4),
+  };
 }
 
 /** 1.2.5 : segments attendus d'une ligne journalisée de « Bus, tram, métro » (pour alphaIn). */
@@ -345,7 +386,7 @@ function bands(s: LoggedScreen): Band[] | null {
           ? TOP_BOARD.test(lines[0] ?? '')
           : s.screen === 'train'
             ? TOP_TRAIN.test(lines[0] ?? '')
-            : s.screen === 'lineRun'
+            : s.screen === 'lineRun' || s.screen === 'trainRun'
               ? /^[●◇]\s: /.test(lines[0] ?? '')
               : s.screen === 'stops' || (s.screen === 'line' && /^! /.test(lines[0] ?? ''));
   const top = hasTop ? lines.shift()! : undefined;

@@ -149,11 +149,11 @@ export const WEB_DEBOUNCE: typeof DEBOUNCE = {
 export const TRIP_KEY = 'quai.trip';
 
 /**
- * Message de nouveautés « Quai 1.2.3 » : montré une fois à qui avait vu une version antérieure (PRD-1.2.3 § 4 ; 1.2.2
- * ou avant), jamais après une installation neuve, ni tant que l'appli n'est pas en 1.2.3. Ses lignes : NEWS_LINES
- * (views.ts).
+ * Message de nouveautés « Quai 1.2.8 » : montré une fois à qui avait vu une version antérieure (PRD-1.2.8 § 4 ; 1.2.7
+ * ou avant ; la 1.2.7, corrective, n'en avait pas), jamais après une installation neuve, ni tant que l'appli n'est pas
+ * en 1.2.8. Ses lignes : newsLines (views.ts).
  */
-export const NEWS_SINCE = '1.2.6';
+export const NEWS_SINCE = '1.2.8';
 
 /**
  * Date du premier lancement (PRD-1.2.1 § 4.6), en ms : clé du stockage de l'appli sur le téléphone, hors du schéma des

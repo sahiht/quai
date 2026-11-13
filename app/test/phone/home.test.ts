@@ -10,7 +10,7 @@ import type { FavoriteAnswer, Settings } from '../../src/core/api';
 import { NEWS_SINCE, newsState } from '../../src/phone/app';
 import { ANSWER_MAX_AGE_MS, homeScreen, resetAnswers, reusable } from '../../src/phone/screens/home';
 import { catchable } from '../../src/glasses/format';
-import { NEWS_122, NEWS_123, NEWS_124, NEWS_125, NEWS_126, shortAnswer } from '../../src/phone/text';
+import { NEWS_122, NEWS_123, NEWS_124, NEWS_125, NEWS_126, NEWS_128, shortAnswer } from '../../src/phone/text';
 import { at, button, defaults, harness, mount, preset11, SCENARIO, textOf, until } from './helpers';
 
 beforeEach(() => resetAnswers());
@@ -163,36 +163,40 @@ describe('réponses courtes (S8, mêmes règles que les lunettes)', () => {
 });
 
 describe('bannière après la mise à jour (T1) et état des données (M8)', () => {
-  it('« Quai 1.2.6 » (PRD-1.2.6 § 7) : une fois depuis une version antérieure, jusqu’à « OK » ; jamais après une nouvelle installation', () => {
-    expect(NEWS_SINCE).toBe('1.2.6');
-    // l'appli en 1.2.6 (la version est montée à l'intégration) : la bannière se montre une fois
-    for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3', '1.2.4', '1.2.5']) expect(newsState(seen, NEWS_SINCE, '1.2.6').visible(), seen).toBe(true);
-    for (const seen of ['', '1.2.6', '1.3.0']) expect(newsState(seen, NEWS_SINCE, '1.2.6').visible(), seen || 'installation neuve').toBe(false);
+  it('« Quai 1.2.8 » (PRD-1.2.8 § 4) : une fois depuis une version antérieure, jusqu’à « OK » ; jamais après une nouvelle installation', () => {
+    expect(NEWS_SINCE).toBe('1.2.8');
+    // l'appli en 1.2.8 (la version est montée à l'intégration) : la bannière se montre une fois
+    for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3', '1.2.4', '1.2.5', '1.2.6', '1.2.7']) expect(newsState(seen, NEWS_SINCE, '1.2.8').visible(), seen).toBe(true);
+    for (const seen of ['', '1.2.8', '1.3.0']) expect(newsState(seen, NEWS_SINCE, '1.2.8').visible(), seen || 'installation neuve').toBe(false);
     // une appli plus ancienne que ces nouveautés ne les annonce pas
-    expect(newsState('1.2.4', NEWS_SINCE, '1.2.5').visible()).toBe(false);
+    expect(newsState('1.2.6', NEWS_SINCE, '1.2.7').visible()).toBe(false);
     const hz = harness({ settings: defaults() });
-    hz.ctx.news = newsState('1.2.5', NEWS_SINCE, '1.2.6');
+    hz.ctx.news = newsState('1.2.7', NEWS_SINCE, '1.2.8');
     const el = mount(homeScreen(hz.ctx));
     const lines = [
-      'Gares de train, arrêts et lignes de bus, tram, métro : trois rubriques séparées.',
-      'Une ligne se suit maintenant en entier, dans les deux sens, sans choisir d’arrêt : les lunettes montrent l’attente à chacun de ses arrêts.',
-      'Pour ajouter une ligne ou un arrêt, ceux près de toi sont proposés, chaque ligne à sa couleur.',
-      'Tes lignes gardées à un arrêt sont déjà dans Lignes.',
+      'Dans les lunettes, touche un train au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.',
+      'À chaque gare, sa voie et le prochain passage en clair (« dans 6 min ») ; ● montre où arrive le train, d’après le temps réel.',
     ];
     expect([...el.querySelectorAll('.news p')].map((p) => textOf(p))).toEqual(lines);
-    expect(NEWS_126).toEqual(lines);
-    // typographie française : espace insécable devant « : »
-    expect(el.querySelectorAll('.news p')[0]!.textContent).toMatch(/métro[\u00a0\u202f]:/);
+    expect(NEWS_128).toEqual(lines);
+    // typographie française : espace insécable devant « : » et « ; », dans les guillemets
+    expect(el.querySelectorAll('.news p')[0]!.textContent).toMatch(/gare[\u00a0\u202f]:/);
     for (const l of lines) expect(l).not.toMatch(/[—–]|tes lieux|vous\b/);
     button(el, 'OK').click();
     expect(el.querySelector('.news')).toBeNull();
     expect(hz.ctx.news.visible()).toBe(false);
     expect(mount(homeScreen(hz.ctx)).querySelector('.news')).toBeNull();
-    // le téléphone n'écrit pas la version vue (les lunettes s'en servent pour « Quai 1.2.6 »)
+    // le téléphone n'écrit pas la version vue (les lunettes s'en servent pour « Quai 1.2.8 »)
     expect(hz.settings.get().seenVersion).toBe('');
   });
 
-  it('mise à jour directe vers la 1.2.6 : les nouveautés des versions sautées, sans celles qui parlent de « Bus, tram, métro » ; une seule bannière, une fois', () => {
+  it('mise à jour directe vers la 1.2.8 : les nouveautés des versions sautées, sans celles qui parlent de « Bus, tram, métro » ; une seule bannière, une fois', () => {
+    const v126 = [
+      'Gares de train, arrêts et lignes de bus, tram, métro : trois rubriques séparées.',
+      'Une ligne se suit maintenant en entier, dans les deux sens, sans choisir d’arrêt : les lunettes montrent l’attente à chacun de ses arrêts.',
+      'Pour ajouter une ligne ou un arrêt, ceux près de toi sont proposés, chaque ligne à sa couleur.',
+      'Tes lignes gardées à un arrêt sont déjà dans Lignes.',
+    ];
     const v125 = [
       'Dans les étapes, quand tu pars bientôt : l’heure d’arrivée si tu rates ton départ.',
       'Une correspondance de 5 min ou moins montre sa marge.',
@@ -207,25 +211,28 @@ describe('bannière après la mise à jour (T1) et état des données (M8)', () 
       'Dans les lunettes, Aller à… a rejoint Favoris.',
       'Un trajet n’est suivi que si tu le demandes.',
     ];
+    expect(NEWS_126).toEqual(v126);
     expect(NEWS_125.filter((l) => !l.startsWith('Bus, tram, métro'))).toEqual(v125);
     expect(NEWS_124.filter((l) => !l.startsWith('Bus, tram, métro'))).toEqual(v124);
     expect(NEWS_123.filter((l) => !l.startsWith('Bus, tram, métro'))).toEqual(v123);
     expect(NEWS_122).toEqual(v122);
-    expect(newsState('1.2.5', NEWS_SINCE, '1.2.6').lines).toEqual([...NEWS_126]);
-    expect(newsState('1.2.4', NEWS_SINCE, '1.2.6').lines).toEqual([...NEWS_126, ...v125]);
-    expect(newsState('1.2.3', NEWS_SINCE, '1.2.6').lines).toEqual([...NEWS_126, ...v125, ...v124]);
-    expect(newsState('1.2.2', NEWS_SINCE, '1.2.6').lines).toEqual([...NEWS_126, ...v125, ...v124, ...v123]);
-    for (const seen of ['1.2.1', '1.2.0', '1.1.0']) expect(newsState(seen, NEWS_SINCE, '1.2.6').lines, seen).toEqual([...NEWS_126, ...v125, ...v124, ...v123, ...v122]);
+    expect(newsState('1.2.7', NEWS_SINCE, '1.2.8').lines).toEqual([...NEWS_128]);
+    expect(newsState('1.2.6', NEWS_SINCE, '1.2.8').lines).toEqual([...NEWS_128]);
+    expect(newsState('1.2.5', NEWS_SINCE, '1.2.8').lines).toEqual([...NEWS_128, ...v126]);
+    expect(newsState('1.2.4', NEWS_SINCE, '1.2.8').lines).toEqual([...NEWS_128, ...v126, ...v125]);
+    expect(newsState('1.2.3', NEWS_SINCE, '1.2.8').lines).toEqual([...NEWS_128, ...v126, ...v125, ...v124]);
+    expect(newsState('1.2.2', NEWS_SINCE, '1.2.8').lines).toEqual([...NEWS_128, ...v126, ...v125, ...v124, ...v123]);
+    for (const seen of ['1.2.1', '1.2.0', '1.1.0']) expect(newsState(seen, NEWS_SINCE, '1.2.8').lines, seen).toEqual([...NEWS_128, ...v126, ...v125, ...v124, ...v123, ...v122]);
     const hz = harness({ settings: defaults() });
-    hz.ctx.news = newsState('1.2.4', NEWS_SINCE, '1.2.6');
+    hz.ctx.news = newsState('1.2.5', NEWS_SINCE, '1.2.8');
     const el = mount(homeScreen(hz.ctx));
     expect(el.querySelectorAll('.news')).toHaveLength(1);
-    expect([...el.querySelectorAll('.news p')].map((p) => textOf(p))).toEqual([...NEWS_126, ...v125]);
+    expect([...el.querySelectorAll('.news p')].map((p) => textOf(p))).toEqual([...NEWS_128, ...v126]);
     button(el, 'OK').click();
     expect(el.querySelector('.news')).toBeNull();
     expect(mount(homeScreen(hz.ctx)).querySelector('.news')).toBeNull();
     // installation neuve : rien
-    expect(newsState('', NEWS_SINCE, '1.2.6').visible()).toBe(false);
+    expect(newsState('', NEWS_SINCE, '1.2.8').visible()).toBe(false);
   });
 
   it('« Données » : « Temps réel indisponible, horaires prévus » pendant une panne, sinon « Tout est à jour »', async () => {

@@ -27,7 +27,7 @@ describe('relecture 1.2.6 : lunettes', () => {
 
   it('reprise après verrouillage : le contrôleur rouvre toute la ligne, pas l’accueil', async () => {
     const F3: LineFollow = { id: 'f-3', op: 'stib', mode: 'tram', line: '3', routes: [] };
-    const settings = settingsWith([], { seenVersion: '1.2.6', follows: [F3] });
+    const settings = settingsWith([], { seenVersion: '1.2.8', follows: [F3] });
     const a = await setup({ now: NOW, settings, core: (now) => stubCore(now) });
     await a.until((x) => x.screen === 'home');
     await a.c.show({ screen: 'follows' });
@@ -49,7 +49,7 @@ describe('relecture 1.2.6 : lunettes', () => {
 
   it('ligne suivie introuvable à l’ouverture de toute la ligne : le message de lineRunView, sous le nom de la ligne ; Quai Web : Réglages', async () => {
     const lost: LineFollow = { id: 'f-99', op: 'stib', mode: 'tram', line: '99', routes: [] };
-    const settings = settingsWith([], { seenVersion: '1.2.6', follows: [lost] });
+    const settings = settingsWith([], { seenVersion: '1.2.8', follows: [lost] });
     const h = await setup({ now: NOW, settings, core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'lineRun', follow: 'f-99', dir: 0 });
@@ -76,7 +76,7 @@ describe('relecture 1.2.6 : lunettes', () => {
     const bare: LineFollow = { id: 'f-4', op: 'stib', mode: 'tram', line: '4', routes: ['stib:4'] };
     const h = await setup({
       now: NOW,
-      settings: settingsWith([], { seenVersion: '1.2.6', follows: [withEnds, bare] }),
+      settings: settingsWith([], { seenVersion: '1.2.8', follows: [withEnds, bare] }),
       core: (now) => Object.assign(stubCore(now), { lineHeads: async () => [] }),
     });
     const home = await h.until((x) => x.screen === 'home' && x.lines.some((l) => l.startsWith('Lignes de bus, tram, métro   2')));

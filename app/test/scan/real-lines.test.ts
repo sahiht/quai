@@ -138,7 +138,7 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
     const src = diskSource(dir, meta);
     const anyFile = (x: unknown): x is LineFile => !!x && typeof x === 'object' && 'pats' in x;
     const now = gtfsTime(meta.serviceDates[0], 8 * 60);
-    const ctx: ViewCtx = { now, settings: settingsWith([], { seenVersion: '1.2.6' }) };
+    const ctx: ViewCtx = { now, settings: settingsWith([], { seenVersion: '1.2.8' }) };
 
     const errors: string[] = [];
     const covered = new Set<string>();

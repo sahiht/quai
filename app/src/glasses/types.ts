@@ -33,6 +33,8 @@ export type ScreenId =
   | 'followed'
   /** 1.2.3 : les arrêts d'un départ, de l'arrêt du tableau au terminus (PRD-1.2.3 § 2). */
   | 'stops'
+  /** 1.2.8 : un train, tout son trajet (route 'stops') : ses gares, la voie, le passage en clair, ● où il arrive. */
+  | 'trainRun'
   | 'train'
   | 'arrival'
   | 'message';
@@ -266,6 +268,10 @@ export interface Item {
    */
   bRight?: string;
   bRightTail?: string;
+  /** 1.2.8 : avec `segs`, le texte de droite pâle (colonne b) au lieu du plus clair : une gare que le train a quittée. */
+  rightPale?: boolean;
+  /** 1.2.8 : la rangée montre un horaire prévu (« ~ ») : GlassesView.notePlanned s'affiche quand elle est à l'écran. */
+  planned?: boolean;
   action?: Intent;
 }
 
@@ -321,6 +327,11 @@ export interface GlassesView {
   items: Item[];
   /** Ligne de bas de liste (« ~ horaire prévu, sans temps réel », ce que fera ▼ sur les étapes). */
   note?: string;
+  /**
+   * 1.2.8 : note dite seulement quand une rangée à l'écran porte `planned` (« ~ horaire prévu » sous une page sans « ~ »
+   * ne s'explique pas) ; `note`, s'il existe, passe avant elle.
+   */
+  notePlanned?: string;
   /** Réserver la ligne de note même vide (évite de reconstruire la page au rafraîchissement). */
   reserveNote?: boolean;
   /** Aides de gestes (vide si désactivées). */

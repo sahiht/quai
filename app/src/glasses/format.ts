@@ -26,6 +26,8 @@ export const HINTS = {
   board: `△▽ départs   toucher${NB}: arrêts   double${NB}: retour`,
   /** 1.2.3 (§ 2) : les arrêts d'un départ ; toucher un arrêt : son tableau. */
   stops: `△▽ arrêts   toucher${NB}: départs   double${NB}: retour`,
+  /** 1.2.8 : tout le trajet d'un train ; toucher une gare : ses départs. */
+  trainRun: `△▽ gares   toucher${NB}: départs   double${NB}: retour`,
   /** 1.2.2 : « {arrêt} : garder une ligne ». */
   keepLine: `△▽ choisir   toucher${NB}: ★ garder ou retirer   double${NB}: retour`,
   favorites: `△▽ choisir   toucher${NB}: ouvrir   double${NB}: retour`,
