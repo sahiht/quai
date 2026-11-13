@@ -325,15 +325,26 @@ describe('1.2.3 : tableau complet et arrêts d’un départ (PRD-1.2.3 § 1, § 
     expect(s.stops[7]).toMatchObject({ areaId: 'sncb:8814001', est: at(8, 56), delayMin: 4, rt: true });
     // même temps réel sur le tableau d'une gare du parcours
     expect((await fake(at(8, 20)).board('sncb:8811916', { limit: 1 })).departures.map(dep)).toEqual(['IC 08:35 supprimé']);
-    // un départ d'une autre gare du même train : ses arrêts à partir de cette gare
+    expect(s.at).toBe(0);
+    // 1.2.8 : un départ d'une autre gare du même train : tout le trajet, cette gare au rang `at`, les gares d'avant à
+    // leur heure de départ ; le départ estimé de chaque gare (`leave`), comme le vrai cœur
     const lux = (await fake(at(8, 20)).board('sncb:8811304', { limit: 1 })).departures[0];
-    expect(calls(await core.departureStops('sncb:8811304', lux)).map((x) => x.slice(6))).toEqual([
+    const fromLux = await core.departureStops('sncb:8811304', lux);
+    expect(fromLux.at).toBe(3);
+    expect(calls(fromLux).map((x) => x.slice(6))).toEqual([
+      'Namur +2 v4→6',
+      'Gembloux +2 v1',
+      'Ottignies +2 v2',
       'Bruxelles-Luxembourg +2 v1',
       'Bruxelles-Schuman supprimé v2',
       'Bruxelles-Nord +2 v11',
       'Bruxelles-Central +2 v3→5',
       'Bruxelles-Midi +4 v15',
     ]);
+    expect(fromLux.stops.map((x) => hhmm(x.leave!))).toEqual(['07:44', '07:57', '08:11', '08:33', '08:35', '08:43', '08:48', '08:56']);
+    // un bus : de son arrêt seulement, sans `at`
+    const bus = (await core.board('tec:N508aga', { limit: 1 })).departures[0];
+    if (bus) expect((await core.departureStops('tec:N508aga', bus)).at).toBeUndefined();
     // et dans un trajet qui descend à Bruxelles-Midi : arrivée 08:56
     const leg = (await core.trains('sncb:8863008', 'sncb:8814001', at(7, 31), 1))[0].legs[0];
     expect([hhmm(leg.dep), hhmm(leg.arr), leg.newPlatform]).toEqual(['07:44', '08:56', '6']);

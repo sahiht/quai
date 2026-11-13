@@ -1,14 +1,21 @@
 # Passer Quai à une nouvelle version (bêta)
 
-Ce guide sert à chaque nouvelle version de Quai. La dernière est la 1.2.7. Il faut environ 10 minutes, un ordinateur (ou le téléphone) pour le portail Even Hub, puis le téléphone.
+Ce guide sert à chaque nouvelle version de Quai. La dernière est la 1.2.8. Il faut environ 10 minutes, un ordinateur (ou le téléphone) pour le portail Even Hub, puis le téléphone.
+
+## Ce qui change avec la 1.2.8
+
+- Touche un train au tableau d'une gare : tout son trajet, des gares d'avant jusqu'au terminus. Le curseur est sur ta gare ; △ remonte vers les gares d'avant, en pâle une fois que le train les a quittées.
+- À chaque gare, sa voie et le passage en clair (« dans 6 min », « à 08:42 »). Une voie modifiée se lit au plus clair (« voie 6 ! »).
+- Le ● montre où arrive le train, d'après le temps réel seulement : sans temps réel (les « ~ »), pas de ●.
+- La note « ~ horaire prévu » ne s'affiche plus que sous une page qui montre un « ~ ».
+
+Si tu passes directement de la 1.2.6 (ou d'avant) à la 1.2.8, voici aussi ce qu'apportaient les versions précédentes.
 
 ## Ce qui change avec la 1.2.7
 
 - Toute la ligne se lit d'un coup d'œil : à chaque arrêt, le prochain passage en clair (« dans 5 min », « à 23:40 », « demain 06:04 »). Touche l'arrêt pour les suivants.
 - Le ● (« un tram arrive ») suit le temps réel : plus de tram signalé à tort.
 - Les lignes en boucle, comme le métro 2, ont leurs deux sens. Deux sens qui finissent au même arrêt sont nommés par où ils passent.
-
-Si tu passes directement de la 1.2.5 (ou d'avant) à la 1.2.7, voici aussi ce qu'apportaient les versions précédentes.
 
 ## Ce qui change avec la 1.2.6
 
@@ -37,7 +44,7 @@ Si tu passes directement de la 1.2.5 (ou d'avant) à la 1.2.7, voici aussi ce qu
 - Tableaux complets : une gare ou un arrêt montre tous ses départs des 2 prochaines heures, page par page avec ▲▼. Le réglage « Départs par arrêt » disparaît.
 - Touche un départ : ses arrêts jusqu'au terminus, avec l'heure, la voie et le retard pour un train. Touche un arrêt de la liste pour voir ses départs.
 
-Si tu passes directement de la 1.2.1 à la 1.2.7, voici aussi ce qu'apportait la 1.2.2.
+Si tu passes directement de la 1.2.1 à la 1.2.8, voici aussi ce qu'apportait la 1.2.2.
 
 ## Ce qui change avec la 1.2.2
 
@@ -66,7 +73,7 @@ Quand une nouvelle version est publiée sur GitHub (page « Releases » du dép�
 
 ### 1. Télécharger le paquet
 
-Ouvre https://github.com/sahiht/quai/releases/latest. La page s'appelle « Quai v1.2.7 ». Dans « Assets » (fichiers joints), touche `quai.ehpk` pour le télécharger. L'icône ne change pas : inutile de la reprendre.
+Ouvre https://github.com/sahiht/quai/releases/latest. La page s'appelle « Quai v1.2.8 ». Dans « Assets » (fichiers joints), touche `quai.ehpk` pour le télécharger. L'icône ne change pas : inutile de la reprendre.
 
 ![Télécharger quai.ehpk](img/maj/maj-1-release.png)
 
@@ -78,13 +85,13 @@ Va sur https://hub.evenrealities.com et connecte-toi avec le même compte que da
 
 ### 3. Déposer le nouveau paquet
 
-Onglet « Builds » (paquets). Touche le bouton « + » en haut à droite et choisis le fichier `quai.ehpk` téléchargé. Une ligne « v1.2.7 » apparaît sous « Private builds » (paquets privés), avec une étiquette grise « Private » (privé).
+Onglet « Builds » (paquets). Touche le bouton « + » en haut à droite et choisis le fichier `quai.ehpk` téléchargé. Une ligne « v1.2.8 » apparaît sous « Private builds » (paquets privés), avec une étiquette grise « Private » (privé).
 
 ![Déposer le paquet](img/maj/maj-3-evenhub-builds.png)
 
 ### 4. Passer la version en bêta
 
-Sur la ligne « v1.2.7 », touche l'étiquette grise « Private ». Choisis « Beta » (bêta), puis confirme avec « Promote to Beta » (passer en bêta).
+Sur la ligne « v1.2.8 », touche l'étiquette grise « Private ». Choisis « Beta » (bêta), puis confirme avec « Promote to Beta » (passer en bêta).
 
 ![Passer en bêta](img/maj/maj-4-promote.png)
 
@@ -98,11 +105,11 @@ Dans l'appli Even Realities : onglet « Me » (moi), puis « Beta tester » (tes
 
 ### 6. Ouvrir Quai sur les lunettes
 
-Si tu viens de la 1.2.5 ou d'avant, les lunettes affichent une fois, à la première ouverture, le message « Quai 1.2.7 » avec les nouveautés. Touche pour continuer. Depuis la 1.2.6, pas de message : l'accueil s'ouvre directement.
+À la première ouverture, les lunettes affichent une fois le message « Quai 1.2.8 » avec les nouveautés (depuis la 1.2.5 ou d'avant, aussi celles de la 1.2.6). Touche pour continuer.
 
 ### 7. Vérifier
 
-Sur le téléphone, ouvre Quai, puis « Données » : la ligne « Version de Quai » doit dire « 1.2.7 ». Dans les lunettes, l'accueil montre « Favoris », « Autour de moi », « Gares de train », « Arrêts de bus, tram, métro » et « Lignes de bus, tram, métro ». Dans « Lignes de bus, tram, métro », touche une ligne : à chaque arrêt, le prochain passage (« dans 5 min »).
+Sur le téléphone, ouvre Quai, puis « Données » : la ligne « Version de Quai » doit dire « 1.2.8 ». Dans les lunettes, ouvre « Gares de train », une gare, puis touche un train : tout son trajet, le curseur sur ta gare, sa voie et le passage en clair (« dans 6 min »).
 
 ## En cas de souci
 
@@ -110,10 +117,11 @@ Sur le téléphone, ouvre Quai, puis « Données » : la ligne « Version de Qua
 |---|---|
 | Even Hub refuse le fichier | Ce numéro de version est déjà déposé. Vérifie que tu as bien pris le paquet de la dernière release. |
 | « test version expired » sur le téléphone | La version n'est pas en « Beta », ou ton invitation n'est plus « Active » dans « Testing group ». |
-| Les lunettes montrent encore l'ancienne version | Quitte Quai (double toucher à l'accueil), puis rouvre-le. Sur le téléphone, vérifie dans « Beta tester » que la version 1.2.7 est installée. |
+| Les lunettes montrent encore l'ancienne version | Quitte Quai (double toucher à l'accueil), puis rouvre-le. Sur le téléphone, vérifie dans « Beta tester » que la version 1.2.8 est installée. |
 | Un trajet propose plus de marche que ton réglage | Aucun trajet qui marche moins n'arrive assez tôt : au-delà de ta marche maximale, chaque minute à pied compte triple. Au bout des étapes, ▼ ouvre les autres trajets. Tu peux changer « Marche maximale » dans « Trajets », sur le téléphone. |
 | « Gares de train », « Arrêts » ou « Lignes » disent « à choisir » | Ajoute tes gares, tes arrêts et tes lignes sur le téléphone, dans Quai : rubriques du même nom de l'accueil. |
 | Une ligne dit « introuvable » | Elle n'est plus dans les horaires du jour (ligne renumérotée ou supprimée) : retire-la et ajoute la nouvelle sur le téléphone, rubrique « Lignes de bus, tram, métro ». |
+| Pas de ● sur le trajet d'un train | Le temps réel de ce train manque (ses heures ont un « ~ ») : le ● ne s'affiche que d'après le temps réel, jamais deviné. |
 | Une ligne sans couleur sur le téléphone | Son réseau ne publie pas de couleur pour elle : sa pastille reste neutre, rien d'autre ne change. |
 | Jamais de « pluie » sur les marches | Il ne pleut pas assez (0,3 mm sur un quart d'heure, probabilité de 60 % ou plus), ou la marche dure moins de 5 minutes. Sur le téléphone, « Données » : la carte « Météo » doit dire « Disponible » ; « Coupée dans Affichage » : rallume « Pluie pendant la marche ». |
 | « Adresses indisponibles pour l'instant » | Le service d'adresses ne répond pas. Les gares et les arrêts restent utilisables ; réessaie plus tard. |

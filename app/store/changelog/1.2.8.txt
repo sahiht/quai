@@ -1,0 +1,3 @@
+Un train touché au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.
+À chaque gare, sa voie et le prochain passage en clair (« dans 6 min ») ; ● montre où arrive le train, d’après le temps réel.
+La note « ~ horaire prévu » ne s’affiche plus que sous une page qui montre un « ~ ».

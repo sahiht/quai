@@ -100,7 +100,9 @@ describe('tableaux STIB : mentions de service', () => {
     const v = boardView(b, { now: env.clock.t, settings: settings() }, { kept: false });
     expect(v.top).toBeUndefined();
     expect(glassesLines(v)).toContain('T3   Churchill   ~11 min');
-    expect(v.note).toBe('~ horaire prévu, sans temps réel');
+    // 1.2.8 : la note sous la page qui montre un « ~ » (notePlanned)
+    expect(v.notePlanned).toBe('~ horaire prévu, sans temps réel');
+    expect(glassesLines(v)).toContain('~ horaire prévu, sans temps réel');
   });
 
   it('« Ne pas embarquer » : le passage disparaît des tableaux et des prochains départs, les horaires prévus restent', async () => {

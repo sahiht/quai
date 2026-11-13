@@ -11,7 +11,7 @@ import { textWidth } from '../../src/glasses/font';
 import { BOARD, HINTS } from '../../src/glasses/format';
 import { WIDTHS, layoutPage } from '../../src/glasses/layout';
 import { boardView, lineView, stopsView, type ViewCtx } from '../../src/glasses/views';
-import { LINES, MIN, STATIONS, at, boardOf, dep, lineBoardOf, lines, nb, page, settingsWith, setup, stopsOf, stubCore, trainAt, vanishedStops, type Screen } from './helpers';
+import { LINES, MIN, STATIONS, at, boardOf, container, dep, lineBoardOf, lines, nb, page, settingsWith, setup, stopsOf, stubCore, trainAt, trainRunOf, vanishedStops, type Screen } from './helpers';
 
 const NOW = at('2026-11-10', 7, 31);
 const N = (fr: string) => ({ fr, nl: fr });
@@ -53,11 +53,35 @@ const icHerstal = (d: Pick<Departure, 'op' | 'mode' | 'line' | 'head'>, now: num
     ['Herstal', 72, { platform: '1', delayMin: 3 }],
   ]);
 
+/**
+ * 1.2.8 : le même IC sur tout son trajet, venu de Bruxelles-Midi (2 min de retard, temps réel) : à 07:31 il a quitté
+ * Gembloux (07:30) et arrive à Namur, la gare du tableau (rang 5).
+ */
+const icFromBrussels = (d: Pick<Departure, 'op' | 'mode' | 'line' | 'head'>, now: number): DepartureStops =>
+  trainRunOf(
+    d,
+    now,
+    [
+      ['Bruxelles-Midi', -52, { platform: '15', delayMin: 2 }],
+      ['Bruxelles-Central', -48, { platform: '3', delayMin: 2 }],
+      ['Bruxelles-Nord', -44, { platform: '11', delayMin: 2 }],
+      ['Ottignies', -20, { platform: '2', delayMin: 2 }],
+      ['Gembloux', -3, { platform: '1', delayMin: 2 }],
+      ['Namur', 11, { platform: '4', newPlatform: '6', delayMin: 2 }],
+      ['Andenne', 27, { platform: '1', delayMin: 2 }],
+      ['Huy', 38, { platform: '2', cancelled: true }],
+      ['Liège-Guillemins', 60, { platform: '5', delayMin: 3 }],
+      ['Liège-Carré', 66, { platform: '1', delayMin: 3 }],
+      ['Herstal', 72, { platform: '1', delayMin: 3 }],
+    ],
+    5,
+  );
+
 /** Huy : un tableau à elle (toucher un arrêt ouvre son tableau, et ainsi de suite). */
 const huyBoard = (now: number): Board => boardOf('sncb:Huy', 'Huy', [trainAt(now, 9, { line: 'IC', head: N('Namur'), platform: '1', tripId: 't-huy' })]);
 
 const boardReady = (s: Screen) => s.screen === 'board' && s.lines.length > 2 && !s.lines.some((l) => l.startsWith('Chargement'));
-const stopsReady = (s: Screen) => s.screen === 'stops' && s.lines.length > 2 && !s.lines.some((l) => l.startsWith('Chargement'));
+const stopsReady = (s: Screen) => (s.screen === 'stops' || s.screen === 'trainRun') && s.lines.length > 2 && !s.lines.some((l) => l.startsWith('Chargement'));
 
 function core(now: () => number, extra: { stops?: (areaId: string, d: Departure, n: number) => DepartureStops | undefined } = {}) {
   const boardOpts: { areaId: string; horizonMin?: number; limit?: number }[] = [];
@@ -114,7 +138,7 @@ describe('CA-123.1 : tableau complet d’une gare ou d’un arrêt', () => {
 
   it('le contrôleur demande les 2 prochaines heures (40 au plus) ; curseur sur le premier départ ; △▽ de départ en départ, par page', async () => {
     const { core: c, boardOpts } = core(() => NOW);
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.6', stations: [STATIONS.namur] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.8', stations: [STATIONS.namur] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: STATIONS.namur.areaId, name: STATIONS.namur.name });
     const b = await h.until(boardReady);
@@ -153,7 +177,7 @@ describe('CA-123.1 : tableau complet d’une gare ou d’un arrêt', () => {
       [empty, ['★ garder une ligne', 'aucun départ']],
     ] as const) {
       const c = stubCore(() => NOW, { board: (id, n, o) => (id === 'tec:Bbrlmer1' ? (o?.horizonMin ? empty(n) : next(n)) : undefined) });
-      const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.6' }), core: () => c });
+      const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.8' }), core: () => c });
       await h.until((x) => x.screen === 'home');
       await h.c.show({ screen: 'board', areaId: 'tec:Bbrlmer1', name: N('Braine-l’Alleud Merbraine') });
       const b = await h.until((x) => x.screen === 'board' && x.lines.length > 1);
@@ -163,7 +187,7 @@ describe('CA-123.1 : tableau complet d’une gare ou d’un arrêt', () => {
   });
 
   it('le faux cœur : un tableau complet de Gare du Nord (40 au plus) ; tous les départs sont touchables', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.6' }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.8' }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: 'stib:6357F', name: { fr: 'Gare du Nord', nl: 'Noordstation' } });
     const b = await h.until(boardReady);
@@ -175,36 +199,57 @@ describe('CA-123.1 : tableau complet d’une gare ou d’un arrêt', () => {
 });
 
 describe('CA-123.2 : les arrêts d’un départ', () => {
-  it('train : l’arrêt du tableau en tête (au plus clair), voies, retard par gare, voie modifiée, arrêt supprimé, terminus en dernier', () => {
+  it('1.2.8 train : tout le trajet, gares d’avant en pâle, ● où il arrive, voie et passage en clair, curseur sur la gare du tableau', () => {
     const d = namurBoard(NOW).departures[1];
-    const v = stopsView({ screen: 'stops', areaId: STATIONS.namur.areaId, dep: d }, icHerstal(d, NOW), ctx());
-    expect(v.title).toBe('IC vers Herstal');
-    const ls = lines(v);
-    expect(ls).toEqual([
-      '07:42 +2   Namur   voie 6 !',
-      '07:58 +2   Andenne   voie 1',
-      '08:09   Huy   SUPPRIMÉ',
-      '08:31 +3   Liège-Guillemins   voie 5',
-      '08:37 +3   Liège-Carré   voie 1',
-      '08:43 +3   Herstal   voie 1',
-      '△▽ arrêts   toucher : départs   double : retour',
+    const v = stopsView({ screen: 'stops', areaId: STATIONS.namur.areaId, dep: d }, icFromBrussels(d, NOW), ctx());
+    expect(v).toMatchObject({ screen: 'trainRun', title: 'IC vers Herstal', initialSel: 5, initialTop: 4, paged: true });
+    expect(v.log).toMatchObject({ stops: 11, gare: 5, vehicle: 5, passed: 5 });
+    // la gare d'avant (quittée, en pâle, son heure) au-dessus de Namur ; le train arrive à Namur (temps réel) : ●
+    expect(lines(v)).toEqual([
+      '● : le train arrive'.replace(' ', ' '),
+      '○ Gembloux voie 1   07:30',
+      '● Namur voie 6 !   dans 13 min',
+      '○ Andenne voie 1   dans 29 min',
+      '○ Huy   SUPPRIMÉ',
+      '○ Liège-Guillemins voie 5   à 08:34',
+      '○ Liège-Carré voie 1   à 08:40',
+      '△▽ gares   toucher : départs   double : retour',
     ]);
-    // l'arrêt du tableau sur la ligne du haut, au plus clair ; les suivants un ton plus pâles
+    // les gares quittées tout en pâle (colonne b), leur heure comprise ; la voie modifiée au plus clair
     const p = page(v);
-    const top = p.containers.find((c) => c.name === 'top')!;
-    expect(top.level).toBe(4);
-    expect(p.containers.filter((c) => ['colA', 'colB', 'colC'].includes(c.name)).every((c) => c.level < 4)).toBe(true);
-    // la ligne du haut est alignée sur les colonnes de la liste (au pixel près, ± une espace)
-    const nameX = textWidth(top.content.slice(0, top.content.indexOf('Namur')));
-    const colB = p.containers.find((c) => c.name === 'colB')!;
-    expect(Math.abs(top.x + nameX - colB.x)).toBeLessThanOrEqual(3);
-    // curseur sur le premier arrêt suivant ; toucher un arrêt : son tableau
-    expect(p.sel).toBe(0);
-    expect(v.paged).toBe(true);
-    expect(v.items[0].action).toEqual({ kind: 'open', route: { screen: 'board', areaId: 'sncb:Andenne', name: N('Andenne') } });
-    // tout tient (heure et retard, voie modifiée, « SUPPRIMÉ »)
-    for (const t of ['23:59 +45', '~08:44']) expect(textWidth(t)).toBeLessThanOrEqual(WIDTHS.stopTime);
-    for (const t of ['voie 12a !', 'SUPPRIMÉ']) expect(textWidth(t)).toBeLessThanOrEqual(WIDTHS.stopRight);
+    const a = nb(container(p, 'colA').content).split('\n');
+    const b = nb(container(p, 'colB').content).split('\n');
+    const c = nb(container(p, 'colC').content).split('\n');
+    expect([a[0].trim(), b[0].replace(/ +/g, ' ').trim(), (c[0] ?? '').trim()]).toEqual(['', '○ Gembloux voie 1 07:30', '']);
+    expect([a[1].replace(/ +/g, ' ').trim(), b[1].trim(), c[1].trim()]).toEqual(['● Namur voie 6 !', '', 'dans 13 min']);
+    expect([a[2].replace(/ +/g, ' ').trim(), b[2].trim()]).toEqual(['○ Andenne', 'voie 1']);
+    expect(p.sel).toBe(5);
+    // △ : les gares d'avant, jusqu'à la gare de départ du train
+    const first = layoutPage(v, { sel: 0, top: 0 });
+    expect(first.lines.map(nb).slice(1, 4)).toEqual(['○ Bruxelles-Midi voie 15   06:41', '○ Bruxelles-Central voie 3   06:45', '○ Bruxelles-Nord voie 11   06:49']);
+    // ▼ : jusqu'au terminus
+    const end = layoutPage(v, { sel: 10, top: 10 });
+    expect(end.lines.map(nb).find((l) => l.startsWith('○ Herstal'))).toBe('○ Herstal voie 1   à 08:46');
+    // toucher une gare : ses départs (comme 1.2.3)
+    expect(v.items[6].action).toEqual({ kind: 'open', route: { screen: 'board', areaId: 'sncb:Andenne', name: N('Andenne') } });
+    expect(v.items.every((it) => !!it.key)).toBe(true);
+  });
+
+  it('1.2.8 train sans temps réel : jamais de ●, « dans ~13 min » et la note ; un autre jour : « , demain »', () => {
+    const d = namurBoard(NOW).departures[1];
+    const planned = icFromBrussels(d, NOW);
+    planned.stops = planned.stops.map((c) => ({ ...c, rt: false, delayMin: 0, est: c.sched, leave: c.sched, newPlatform: undefined }));
+    const v = stopsView({ screen: 'stops', areaId: STATIONS.namur.areaId, dep: d }, planned, ctx());
+    expect(v.log).toMatchObject({ vehicle: -1 });
+    expect(v.top).toBeUndefined();
+    const ls = lines(v);
+    expect(ls.slice(0, 3)).toEqual(['○ Gembloux voie 1   ~07:28', '○ Namur voie 4   dans ~11 min', '○ Andenne voie 1   dans ~27 min']);
+    expect(ls).toContain('~ horaire prévu, sans temps réel');
+    // le lendemain : le titre le dit, comme les arrêts d'un départ (1.2.3)
+    const late = at('2026-11-10', 23, 40);
+    const ic = trainAt(late, 400, { line: 'IC', head: N('Herstal'), platform: '4' });
+    const t = trainRunOf(ic, late, [['Namur', 400, { platform: '4' }], ['Herstal', 461, { platform: '1' }]], 0);
+    expect(stopsView({ screen: 'stops', areaId: STATIONS.namur.areaId, dep: ic }, t, { now: late, settings: settingsWith([]) }).title).toBe('IC vers Herstal, demain');
   });
 
   it('bus : heures prévues décalées du retard connu au départ ; tram sans temps réel : « ~ » et la note ; un autre jour : « , demain »', () => {
@@ -261,13 +306,15 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
       ['Bressoux', 79, { platform: '2' }],
       ['Herstal', 84, { platform: '1' }],
     ]);
-    const v = stopsView({ screen: 'stops', areaId: STATIONS.namur.areaId, dep: ic }, icStops, ctx());
+    // 1.2.8 : un train, tout son trajet (il part de Namur : rien avant), le curseur sur Namur
+    const v = stopsView({ screen: 'stops', areaId: STATIONS.namur.areaId, dep: ic }, { ...icStops, at: 0 }, ctx());
     const first = page(v);
-    expect(nb(first.lines[0])).toBe('07:45   Namur   voie 2');
+    expect(nb(first.lines[0])).toBe('○ Namur voie 2   dans 14 min');
+    expect(first.sel).toBe(0);
     expect(first.lines.some((l) => l.includes('…'))).toBe(false);
     // la dernière page finit au terminus
     const end = layoutPage(v, { sel: v.items.length - 1, top: v.items.length - 1 });
-    expect(nb(end.lines.filter((l) => /^\d/.test(nb(l))).at(-1)!)).toBe('08:55   Herstal   voie 1');
+    expect(nb(end.lines.filter((l) => /^○ /.test(nb(l))).at(-1)!)).toBe('○ Herstal voie 1   à 08:55');
     const b36 = dep(NOW, 6, { line: '36', head: N('Wavre'), rt: false });
     const bus = stopsView(
       { screen: 'stops', areaId: 'tec:Bbrlcco1', dep: b36 },
@@ -285,29 +332,28 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
 
   it('du tableau aux arrêts, d’un arrêt à son tableau, et retour : chaque double toucher revient d’un écran, curseur gardé', async () => {
     const { core: c } = core(() => NOW);
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.6', stations: [STATIONS.namur] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.8', stations: [STATIONS.namur] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: STATIONS.namur.areaId, name: STATIONS.namur.name });
     await h.until(boardReady);
-    // le 2e départ : l'IC de 07:42 vers Herstal
+    // le 2e départ : l'IC de 07:42 vers Herstal ; 1.2.8 : tout son trajet (il part de Namur), le curseur sur Namur
     await h.gesture('down', 'tap');
     const s = await h.until(stopsReady);
-    expect(s.title).toBe('IC vers Herstal');
-    expect(s.lines.slice(0, 3)).toEqual(['07:42 +2   Namur   voie 6 !', '07:58 +2   Andenne   voie 1', '08:09   Huy   SUPPRIMÉ']);
-    expect(s.sel).toBe(0);
-    // Huy : son tableau, puis l'un de ses départs, ses arrêts
-    await h.gesture('down', 'tap');
+    expect(s).toMatchObject({ screen: 'trainRun', title: 'IC vers Herstal', sel: 0 });
+    expect(s.lines.slice(0, 3)).toEqual(['○ Namur voie 6 !   dans 13 min', '○ Andenne voie 1   dans 29 min', '○ Huy   SUPPRIMÉ']);
+    // Huy : son tableau, puis l'un de ses départs, tout son trajet
+    await h.gesture('down', 'down', 'tap');
     const huy = await h.until((x) => boardReady(x) && x.title.startsWith('Huy'));
     expect(huy.lines.slice(0, 2)).toEqual(['★ garder la gare', 'IC   Namur   07:40  voie 1']);
     await h.gesture('tap');
     const s2 = await h.until((x) => stopsReady(x) && x.title === 'IC vers Namur');
-    expect(s2.lines[0]).toBe('07:40   Huy   voie 1');
-    // retour, retour, retour : le tableau de Huy, les arrêts de l'IC (sur Huy), le tableau de Namur (sur l'IC)
+    expect(s2.lines[0]).toBe('○ Huy voie 1   dans 9 min');
+    // retour, retour, retour : le tableau de Huy, le trajet de l'IC (sur Huy), le tableau de Namur (sur l'IC)
     await h.gesture('double');
     expect(h.last()).toMatchObject({ screen: 'board', sel: 1 });
     expect(h.last().title).toMatch(/^Huy/);
     await h.gesture('double');
-    expect(h.last()).toMatchObject({ screen: 'stops', title: 'IC vers Herstal', sel: 1 });
+    expect(h.last()).toMatchObject({ screen: 'trainRun', title: 'IC vers Herstal', sel: 2 });
     await h.gesture('double');
     expect(h.last()).toMatchObject({ screen: 'board', title: 'Namur, train (SNCB) ★', sel: 2 });
     await h.gesture('double');
@@ -317,7 +363,7 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
 
   it('voyage disparu, et départ sans arrêts connus : le message, double toucher revient au tableau', async () => {
     const { core: c } = core(() => NOW, { stops: (_id, d) => vanishedStops(d) });
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.6', stations: [STATIONS.namur] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.8', stations: [STATIONS.namur] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: STATIONS.namur.areaId, name: STATIONS.namur.name });
     await h.until(boardReady);
@@ -339,7 +385,7 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
       lineBoard: (id, _l, n) => (id === LINES.w.areaId ? w(n) : undefined),
       departureStops: (_id, d, n) => (d.tripId === 'w-1' ? stopsOf(d, n, [['Braine-l’Alleud Merbraine', 17, { delayMin: 3 }], ['Waterloo Eglise', 25, { delayMin: 3 }], ['Bruxelles Midi', 70, { delayMin: 3 }]]) : undefined),
     });
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.6', lines: [LINES.w] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.8', lines: [LINES.w] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'line', pick: LINES.w.id, areaId: LINES.w.areaId, op: 'tec', line: 'W', name: LINES.w.name, mode: 'bus' });
     const d = await h.until((x) => x.screen === 'line' && x.lines.length > 3);
@@ -373,7 +419,7 @@ describe('revue 1.2.3 : un départ reste le même (clé des arrêts, curseur, ra
       board: (id) => (id === 'stib:ARTSLOI' ? artsLoi() : undefined),
       departureStops: (_id, d, n) => stopsOf(d, n, d.head.fr === 'Stockel' ? [['Arts-Loi', 6], ['Mérode', 9], ['Stockel', 22]] : [['Arts-Loi', 6], ['De Brouckère', 9], ['Gare de l’Ouest', 16]]),
     });
-    const h = await setup({ now: LATE, settings: settingsWith([], { seenVersion: '1.2.6' }), core: () => c });
+    const h = await setup({ now: LATE, settings: settingsWith([], { seenVersion: '1.2.8' }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: 'stib:ARTSLOI', name: N('Arts-Loi') });
     const b = await h.until((x) => x.screen === 'board' && x.lines.length > 2);
@@ -391,7 +437,7 @@ describe('revue 1.2.3 : un départ reste le même (clé des arrêts, curseur, ra
     let deps = NAMUR_DEPS.slice(0, 6);
     const board = (now: number) => boardOf(STATIONS.namur.areaId, 'Namur', deps.map(([m, line, head, platform, p]) => trainAt(now, m, { line, head: N(head), platform, tripId: `t-${m}`, ...p, ...(p?.delayMin ? { est: now + (m + p.delayMin) * MIN } : {}) })));
     const c = stubCore(() => NOW, { board: (id, n) => (id === STATIONS.namur.areaId ? board(n) : undefined), departureStops: (_id, d, n) => stopsOf(d, n, [['Namur', 0], ['Andenne', 16]]) });
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.6', stations: [STATIONS.namur] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.8', stations: [STATIONS.namur] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: STATIONS.namur.areaId, name: STATIONS.namur.name });
     await h.until((x) => x.screen === 'board' && x.lines.length > 3);
@@ -438,7 +484,7 @@ describe('revue 1.2.3 : un départ reste le même (clé des arrêts, curseur, ra
         { head: 'Braine-l’Alleud Gare', departures: [dep(now, 9, { tripId: 'w-r9', head: N('Braine-l’Alleud Gare') })] },
       ]);
     const c = stubCore(() => NOW, { lineBoard: (id, _l, n) => (id === LINES.w.areaId ? w(n) : undefined) });
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.6', lines: [LINES.w] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.8', lines: [LINES.w] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'line', pick: LINES.w.id, areaId: LINES.w.areaId, op: 'tec', line: 'W', name: LINES.w.name, mode: 'bus' });
     await h.until((x) => x.screen === 'line' && x.lines.length > 3);
@@ -462,7 +508,7 @@ describe('revue 1.2.3 : un départ reste le même (clé des arrêts, curseur, ra
       // le cœur décale les arrêts suivants du retard du départ qu'on lui passe
       departureStops: (_id, d, n) => stopsOf(d, n, [['Braine-l’Alleud Merbraine', 17, { delayMin: d.delayMin }], ['Waterloo Eglise', 25, { delayMin: d.delayMin }]]),
     });
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.6', stations: [STATIONS.namur] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.8', stations: [STATIONS.namur] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: 'tec:Bbrlmer1', name: N('Braine-l’Alleud Merbraine') });
     await h.until((x) => x.screen === 'board' && x.lines.length > 2);
@@ -483,11 +529,15 @@ describe('revue 1.2.3 : un départ reste le même (clé des arrêts, curseur, ra
     h.c.stop();
   });
 
-  it('un retard à 3 chiffres tient dans la colonne des heures (« 23:59 +120 »)', () => {
+  it('un retard à 3 chiffres tient dans la colonne des heures (« 23:59 +120 ») ; 1.2.8 : un train en retard, en clair', () => {
     const late = at('2026-11-10', 21, 59);
-    const ic = trainAt(late, 120, { line: 'IC', head: N('Herstal'), platform: '4', delayMin: 120 });
-    const v = stopsView({ screen: 'stops', areaId: STATIONS.namur.areaId, dep: ic }, stopsOf(ic, late, [['Namur', 120, { platform: '4', delayMin: 120 }], ['Herstal', 181, { platform: '1', delayMin: 120 }]]), { now: late, settings: settingsWith([]) });
-    expect(lines(v).slice(0, 2)).toEqual(['23:59 +120   Namur   voie 4', '01:00 +120   Herstal   voie 1']);
+    const w = dep(late, 120, { line: 'W', head: N('Bruxelles Midi'), delayMin: 120 });
+    const v = stopsView({ screen: 'stops', areaId: 'tec:Bbrlmer1', dep: w }, stopsOf(w, late, [['Braine-l’Alleud Merbraine', 120, { delayMin: 120 }], ['Bruxelles Midi', 181, { delayMin: 120 }]]), { now: late, settings: settingsWith([]) });
+    expect(lines(v).slice(0, 2)).toEqual(['23:59 +120   Braine-l’Alleud Merbraine', '01:00 +120   Bruxelles Midi']);
     for (const t of ['23:59 +120', '00:00 +444']) expect(textWidth(t)).toBeLessThanOrEqual(WIDTHS.stopTime);
+    // un train : l'heure estimée, retard compris (« à 01:59 »), la voie, sans retard à part
+    const ic = trainAt(late, 120, { line: 'IC', head: N('Herstal'), platform: '4', delayMin: 120 });
+    const t = trainRunOf(ic, late, [['Namur', 120, { platform: '4', delayMin: 120 }], ['Herstal', 181, { platform: '1', delayMin: 120 }]], 0);
+    expect(lines(stopsView({ screen: 'stops', areaId: STATIONS.namur.areaId, dep: ic }, t, { now: late, settings: settingsWith([]) })).slice(0, 2)).toEqual(['○ Namur voie 4   à 01:59', '○ Herstal voie 1   à 03:00']);
   });
 });

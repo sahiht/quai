@@ -713,20 +713,22 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
    * 1.2.3 (PRD-1.2.3 § 2) : les arrêts d'un départ, de son arrêt (k) au terminus. Train : heure, voie et retard gare par
    * gare (STATION_RT), arrêt supprimé ; bus, tram, métro : heures prévues décalées du retard connu au départ, sinon « ~ ».
    */
+  /** Arrêts d'un départ monté en k ; 1.2.8 : un train, tout son trajet (gares d'avant comprises), départ estimé `leave`. */
   function stopCalls(run: Run, k: number): StopCall[] {
     const first = runRt(run, k);
     const out: StopCall[] = [];
-    for (let i = k; i < run.stops.length; i++) {
+    for (let i = run.train ? 0 : k; i < run.stops.length; i++) {
       const s = run.stops[i];
       const z = area(s.areaId);
       const r = run.train ? runRt(run, i) : first;
-      const sched = i === k ? s.dep : s.arr;
+      const sched = i <= k ? s.dep : s.arr;
       const cancelled = !!r.cancelled;
       const c: StopCall = { areaId: z.id, name: z.n, sched, est: cancelled ? sched : sched + r.delay * MIN, rt: r.rt, delayMin: cancelled ? 0 : r.delay };
       if (s.platform) c.platform = s.platform;
       const np = r.platformAt?.[z.id];
       if (np && np !== s.platform && !cancelled) c.newPlatform = np;
       if (cancelled) c.cancelled = true;
+      if (run.train) c.leave = s.dep + (c.est - sched);
       out.push(c);
     }
     return out;
@@ -1082,7 +1084,7 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
       if (!run || k < 0 || k >= run.stops.length - 1) return { ...base, stops: [], anyPlanned: false, state: 'missing' } satisfies DepartureStops;
       const stops = stopCalls(run, k);
       const head = run.train?.head ?? run.line!.head;
-      return { ...base, head, stops, anyPlanned: stops.some((s) => !s.rt), state: 'ok' } satisfies DepartureStops;
+      return { ...base, head, stops, anyPlanned: stops.some((s) => !s.rt), state: 'ok', ...(run.train ? { at: k } : {}) } satisfies DepartureStops;
     },
     async linesAt(areaId) {
       const a = area(areaId);

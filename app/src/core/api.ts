@@ -211,14 +211,25 @@ export interface StopCall {
   platform?: string;            // voie prévue (trains)
   newPlatform?: string;         // voie modifiée par le temps réel (seulement si différente)
   cancelled?: boolean;          // arrêt supprimé
+  /**
+   * 1.2.8 (trains) : epoch ms, départ estimé de cette gare (l'arrivée au terminus) : le train l'a quittée quand il est
+   * passé (trainProgress). `sched`/`est` restent l'heure montrée (départ aux gares d'avant et à celle du tableau,
+   * arrivée aux suivantes).
+   */
+  leave?: number;
 }
 
-/** 1.2.3 : les arrêts d'un départ, du premier (l'arrêt du tableau) au terminus, dans l'ordre du trajet. */
+/**
+ * 1.2.3 : les arrêts d'un départ, du premier (l'arrêt du tableau) au terminus, dans l'ordre du trajet. 1.2.8 : un train,
+ * tout son trajet, de sa gare de départ à son terminus ; `at` : la gare du tableau dans `stops`.
+ */
 export interface DepartureStops {
   op: Op; mode: Mode; line: string; head: Names;
   stops: StopCall[];
   anyPlanned: boolean;          // au moins un arrêt sans temps réel
   state: 'ok' | 'missing';      // missing : ce voyage n'est plus dans les données (rien à montrer)
+  /** 1.2.8 (trains) : rang de la gare du tableau dans `stops` (les gares d'avant la précèdent) ; absent : 0. */
+  at?: number;
 }
 
 /** 1.2.2 : passage d'une ligne dans un sens (lineBoard). `partial` : s'arrête avant le terminus du sens (`head` dit où). */

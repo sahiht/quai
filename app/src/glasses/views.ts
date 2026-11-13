@@ -24,6 +24,7 @@ import { COL_SEP, ensureVisible, geometry, maxTop, visibleRange, WIDTHS } from '
 import type { AreaRef, GlassesView, Intent, Item, KeepLineRoute, LineRoute, LineRunRoute, OthersRoute, Route, Seg, StepsRoute, StopsRoute, SubRow, TopLine } from './types';
 import { isFollowed, type LineFollow, type LineRun } from '../core/linerun';
 import { lineKey } from '../core/linepicks';
+import { trainProgress } from '../core/stopcalls';
 import {
   departureWait,
   MARGIN_SHOWN_MAX,
@@ -158,7 +159,17 @@ export function firstRunView(ctx: ViewCtx): GlassesView {
 }
 
 /** Titre du message de nouveautés (une fois, après la mise à jour depuis une version antérieure). */
-export const NEWS_TITLE = 'Quai 1.2.7';
+export const NEWS_TITLE = 'Quai 1.2.8';
+
+/** 1.2.8 : lignes du message « Quai 1.2.8 » (PRD-1.2.8 § 4) ; chacune tient sur une ligne des lunettes. */
+export const NEWS_LINES_128: readonly string[] = [
+  `Un train${NB}: tout son trajet, gares d’avant comprises.`,
+  `Chaque gare${NB}: sa voie et dans combien de temps.`,
+  `●${NB}: là où le train arrive, d’après le temps réel.`,
+];
+
+/** Lignes du message au plus : celles qui tiennent à l'écran (les plus récentes d'abord). */
+export const NEWS_MAX = 8;
 
 /** 1.2.6 : lignes du message « Quai 1.2.6 » ; chacune tient sur une ligne des lunettes. */
 export const NEWS_LINES: readonly string[] = [
@@ -175,14 +186,21 @@ export const NEWS_LINES_125: readonly string[] = [
   `Dans le véhicule${NB}: ta progression jusqu’à la descente.`,
 ];
 
-/** Lignes du message « Quai 1.2.6 », une seule fois ; à qui vient d'avant la 1.2.5, aussi celles de la 1.2.5. */
+/**
+ * Lignes du message « Quai 1.2.8 », une seule fois : celles de la 1.2.8 ; à qui vient d'avant la 1.2.6, aussi celles de
+ * la 1.2.6, puis d'avant la 1.2.5, celles de la 1.2.5 : les plus récentes d'abord, une version entière ou rien, NEWS_MAX
+ * lignes au plus (un écran).
+ */
 export function newsLines(seen = ''): string[] {
-  const out = [...NEWS_LINES];
-  if (seen && compareVersions(seen, '1.2.5') < 0) out.push(...NEWS_LINES_125);
+  const blocks: (readonly string[])[] = [NEWS_LINES_128];
+  if (seen && compareVersions(seen, '1.2.6') < 0) blocks.push(NEWS_LINES);
+  if (seen && compareVersions(seen, '1.2.5') < 0) blocks.push(NEWS_LINES_125);
+  const out: string[] = [];
+  for (const b of blocks) if (out.length + b.length <= NEWS_MAX) out.push(...b);
   return out;
 }
 
-/** Message « Quai 1.2.6 » : toucher mène à l'accueil. `lines` : celles calculées à l'ouverture (route du message). */
+/** Message « Quai 1.2.8 » : toucher mène à l'accueil. `lines` : celles calculées à l'ouverture (route du message). */
 export function newsView(ctx: ViewCtx, lines: string[] = newsLines()): GlassesView {
   return messageView(NEWS_TITLE, lines.length ? lines : newsLines(), ctx, { hints: HINTS.news, tap: { kind: 'continue' } });
 }
@@ -752,10 +770,13 @@ export function lineRunView(r: LineRunRoute, follow: LineFollow, run: LineRun, c
     const mark = st.vehicle ? (st.branch ? '◆' : '●') : st.branch ? '◇' : '○';
     const segs: Seg[] = [{ t: mark, hi: true }, { t: displayName(st.name, l), hi: true }];
     if (run.nearest?.index === i) segs.push({ t: `à ${metersText(run.nearest.distanceM)}` });
+    const right = nextPassageText(next && { est: next.t, rt: next.rt }, ctx.now, mp(ctx));
     v.items.push({
       a: '',
       segs,
-      bRight: nextPassageText(next && { est: next.t, rt: next.rt }, ctx.now, mp(ctx)),
+      bRight: right,
+      // 1.2.8 : la note « ~ » seulement sous une page qui en montre un
+      ...(right.includes('~') ? { planned: true } : {}),
       action: { kind: 'open', route: { screen: 'line', areaId: st.areaId, op: run.op, line: run.line, name: st.name, mode: run.mode } },
       key: `${st.areaId}#${i}`,
     });
@@ -774,7 +795,10 @@ export function lineRunView(r: LineRunRoute, follow: LineFollow, run: LineRun, c
     run.stops.some((st) => st.branch) ? `◇${NB}: pas tous les ${word === 'bus' ? 'bus' : `${word}s`}` : '',
   ].filter(Boolean);
   if (legend.length) v.top = { text: legend.join(' · ') };
-  v.note = passagesNote(f, ctx);
+  // 1.2.8 : « ~ horaire prévu » seul : dit sous une page qui montre un « ~ » (notePlanned)
+  const note = passagesNote(f, ctx);
+  if (note === NOTE_PLANNED) v.notePlanned = note;
+  else v.note = note;
   v.reserveNote = true;
   v.paged = true;
   v.hints = hints(ctx, HINTS.lineRun);
@@ -965,17 +989,18 @@ export function boardView(b: Board, ctx: ViewCtx, opts: { kept: boolean }): Glas
     const action: Intent = { kind: 'open', route: stopsRoute(b.area.id, d) };
     // l'identité du départ : le curseur le suit au rafraîchissement et au retour de ses arrêts (la ligne ★ n'en a pas)
     const key = departureKey(d);
-    v.items.push(
-      train
-        ? { a: d.line, b: head, cLead: trainCellParts(d, mp(ctx)).lead, c: trainCellParts(d, mp(ctx)).rest, action, key }
-        : { a: lineLabel(d.mode, d.line), b: head, bTail: lastMark(d), c: minutesText(d, ctx.now, mp(ctx)), action, key },
-    );
+    const item: Item = train
+      ? { a: d.line, b: head, cLead: trainCellParts(d, mp(ctx)).lead, c: trainCellParts(d, mp(ctx)).rest, action, key }
+      : { a: lineLabel(d.mode, d.line), b: head, bTail: lastMark(d), c: minutesText(d, ctx.now, mp(ctx)), action, key };
+    // 1.2.8 : la note « ~ » seulement sous une page qui en montre un
+    if (`${item.cLead ?? ''}${item.c ?? ''}`.includes('~')) item.planned = true;
+    v.items.push(item);
   }
   if (!deps.length) v.items.push({ a: ctx.stale ?? BOARD.none });
   if (msg) v.top = { text: `! ${msg}`, strong: true };
   else if (allTomorrow) v.top = { text: 'Départs de demain' };
   if (b.rtErrors.length) v.note = noRtNote(ctx);
-  else if (planned && mp(ctx)) v.note = NOTE_PLANNED;
+  else if (planned && mp(ctx)) v.notePlanned = NOTE_PLANNED;
   v.reserveNote = true;
   v.initialSel = 1;
   v.paged = true;
@@ -1002,6 +1027,8 @@ export function stopsView(r: StopsRoute, ds: DepartureStops, ctx: ViewCtx): Glas
   const l = lang(ctx);
   const title = stopsTitle(ds.state === 'ok' ? ds : r.dep, l);
   if (ds.state !== 'ok' || !ds.stops.length) return messageView(title, [BOARD.vanished], ctx, { hints: HINTS.message, screen: 'stops' });
+  // 1.2.8 : un train, tout son trajet
+  if (ds.op === 'sncb') return trainRunView(ds, ctx);
   const [first, ...rest] = ds.stops;
   const day = dayWord(first.sched, ctx.now);
   const v = base('stops', 'stops', day ? `${title}, ${day}` : title, ctx);
@@ -1021,6 +1048,57 @@ export function stopsView(r: StopsRoute, ds: DepartureStops, ctx: ViewCtx): Glas
   v.paged = true;
   v.hints = hints(ctx, HINTS.stops);
   v.log = { stops: ds.stops.length };
+  return v;
+}
+
+/**
+ * 1.2.8 (PRD-1.2.8 § 1, § 2) : tout le trajet d'un train touché dans un tableau, comme toute la ligne : ses gares, de sa
+ * gare de départ à son terminus ; ○ devant chacune, ● sur celle où il arrive (d'après le temps réel seul,
+ * trainProgress), dit par la ligne du haut ; le nom au plus clair, la voie en pâle (modifiée : au plus clair,
+ * « voie 6 ! ») ; à droite le passage en clair (« dans 6 min », « imminent », « à 23:40 », « ~ » sans temps réel) ou
+ * « SUPPRIMÉ ». Les gares que le train a quittées, tout en pâle, avec leur heure. Curseur sur la gare du tableau, la
+ * gare d'avant au-dessus d'elle ; toucher une gare : ses départs. Départ d'un autre jour : « , demain » au titre.
+ */
+export function trainRunView(ds: DepartureStops, ctx: ViewCtx): GlassesView {
+  const l = lang(ctx);
+  const m = mp(ctx);
+  const at = Math.min(Math.max(0, ds.at ?? 0), ds.stops.length - 1);
+  const title = stopsTitle(ds, l);
+  const day = dayWord(ds.stops[at].sched, ctx.now);
+  const v = base('trainRun', 'lines', day ? `${title}, ${day}` : title, ctx);
+  const { passed, vehicle } = trainProgress(ds.stops, ctx.now);
+  ds.stops.forEach((c, i) => {
+    const gone = passed[i];
+    const plat = c.cancelled ? '' : platformText(c.platform, c.newPlatform);
+    const segs: Seg[] = [
+      { t: i === vehicle ? '●' : '○', hi: !gone },
+      { t: displayName(c.name, l), hi: !gone },
+    ];
+    if (plat) segs.push({ t: plat, hi: !gone && !!c.newPlatform });
+    const right = c.cancelled ? 'SUPPRIMÉ' : gone ? `${plannedMark(c.rt, m)}${hhmm(c.est)}` : nextPassageText({ est: c.est, rt: c.rt }, ctx.now, m);
+    const item: Item = { a: '', segs, bRight: right, key: `${c.areaId ?? ''}#${i}` };
+    if (gone) item.rightPale = true;
+    if (right.includes('~')) item.planned = true;
+    if (c.areaId) item.action = { kind: 'open', route: { screen: 'board', areaId: c.areaId, name: c.name } };
+    v.items.push(item);
+  });
+  if (vehicle >= 0) v.top = { text: `●${NB}: le train arrive` };
+  if (ctx.stale) v.note = ctx.stale;
+  else if (m) v.notePlanned = NOTE_PLANNED;
+  v.reserveNote = true;
+  // la gare d'avant au-dessus du curseur ; un train qui arrive (●) avant la gare du tableau : son ● et la gare qu'il
+  // vient de quitter sur la même page que le curseur, si tout tient (sinon son ● seul, sinon la gare d'avant)
+  v.initialSel = at;
+  const rows = geometry(v).capacity;
+  let top = Math.max(0, at - 1);
+  if (vehicle >= 0 && vehicle < at) {
+    if (at - Math.max(0, vehicle - 1) < rows) top = Math.max(0, vehicle - 1);
+    else if (at - vehicle < rows) top = vehicle;
+  }
+  v.initialTop = top;
+  v.paged = true;
+  v.hints = hints(ctx, HINTS.trainRun);
+  v.log = { stops: ds.stops.length, gare: at, vehicle, passed: passed.filter(Boolean).length };
   return v;
 }
 
