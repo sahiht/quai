@@ -1018,10 +1018,10 @@ async function s1(): Promise<void> {
   await step('line-run', async () => {
     await sim.input('click');
     const r = await sim.waitScreen(is('lineRun', (x) => loaded(x) && x.title === 'Tram 3 vers Churchill'), 15_000, 'tout le tram 3 vers Churchill');
-    // les arrêts du sens, ○ (● : un tram arrive), les 2 prochains passages ; à Namur, loin de toute la ligne : le
-    // curseur sur le premier arrêt
+    // les arrêts du sens, ○ (● : un tram arrive) ; 1.2.7 : le prochain passage seul, en clair (« dans 6 min ») ; à
+    // Namur, loin de toute la ligne : le curseur sur le premier arrêt
     const stops = r.lines.filter((l) => /^[○●◇◆] [^:]/.test(l));
-    check(stops.length >= 3 && stops.every((l) => /^[○●◇◆] \S.* {3}(~?\d+ · ~?\d+ min|~?\d+ min|imminent.*|aucun passage|.*\d\d:\d\d)$/.test(l)), `arrêts de la ligne : ${JSON.stringify(r.lines)}`);
+    check(stops.length >= 3 && stops.every((l) => /^[○●◇◆] \S.* {3}(dans ~?\d+ min|imminent|aucun passage|(à|demain|le \d\d\/\d\d) ~?\d\d:\d\d)$/.test(l)), `arrêts de la ligne : ${JSON.stringify(r.lines)}`);
     check(r.sel === 0 && (field<number>(r, 'nearest') ?? -1) === -1, `curseur sur le 1er arrêt, aucun arrêt proche (sel ${r.sel})`);
     common(r, H.lineRun);
     return { screen: r };
@@ -1262,14 +1262,16 @@ async function s2(): Promise<void> {
     await sim.input('click');
     const s = await sim.waitScreen(is('lineRun', (x) => loaded(x) && x.title === 'Tram 3 vers Churchill'), 15_000, 'tout le tram 3 vers Churchill');
     // l'arrêt le plus proche (Gare du Nord, à 80 m) sous le curseur ; ● : un tram arrive ; la STIB annonce ses passages
-    // à Gare du Nord (temps réel), les autres arrêts en horaire prévu (« ~ »)
+    // à Gare du Nord (temps réel), les autres arrêts en horaire prévu (« ~ ») ; 1.2.7 : le prochain seul, en clair
     const at = field<number>(s, 'nearest') ?? -1;
     check(at === 1 && s.sel === 1, `curseur sur l’arrêt le plus proche (nearest ${at}, sel ${s.sel})`);
     const gdn = s.lines.find((l) => / Gare du Nord à \d+ m {3}/.test(l)) ?? '';
-    check(/^[○●◇◆] Gare du Nord à [5-9]0 m {3}[12] · (9|10) min$/.test(gdn), `Gare du Nord, sa distance, ses 2 passages en temps réel : « ${gdn} »`);
+    check(/^● Gare du Nord à [5-9]0 m {3}dans [12] min$/.test(gdn), `Gare du Nord, sa distance, son prochain passage en temps réel, ● : « ${gdn} »`);
+    // 1.2.7 : jamais de ● d'après l'horaire seul
+    check(s.lines.filter((l) => /^[●◆] [^:]/.test(l)).length === 1, `un seul ●, celui du temps réel : ${JSON.stringify(s.lines)}`);
     check(s.lines.includes('~ horaire prévu, sans temps réel'), `« ~ » expliqué : ${JSON.stringify(s.lines)}`);
     common(s, H.lineRun);
-    return { screen: s, deliver: 'g10', tour: ['glasses-line-run.png', 'Tout le tram 3 vers Churchill (1.2.6) : chaque arrêt et ses 2 prochains passages, ● quand un tram arrive, l’arrêt le plus proche sous le curseur'] };
+    return { screen: s, deliver: 'g10', tour: ['glasses-line-run.png', 'Tout le tram 3 vers Churchill (1.2.7) : chaque arrêt et son prochain passage en clair, ● quand un tram arrive (temps réel), l’arrêt le plus proche sous le curseur'] };
   });
   await step('line-detail', async () => {
     await sim.input('click');
@@ -2042,7 +2044,7 @@ async function late(): Promise<void> {
     await sim.waitScreen(is('follows', (x) => loaded(x) && x.lines.filter((l) => SEG_ROW.test(l)).length >= 3), 15_000, '« Lignes de bus, tram, métro »');
     await sim.input('click');
     const s = await sim.waitScreen(is('lineRun', (x) => loaded(x) && x.title === 'Tram 3 vers Churchill'), 15_000, 'tout le tram 3 vers Churchill');
-    // passages du lendemain matin : « demain ~06:04 · … », jamais une heure seule qui laisserait croire à ce soir
+    // passages du lendemain matin : « demain ~06:04 », jamais une heure seule qui laisserait croire à ce soir
     const morning = s.lines.filter((l) => /^[●○◆◇] [^:]/.test(l) && / {3}(demain )?~?0\d:\d\d/.test(l));
     check(morning.length >= 1 && morning.every((l) => / {3}demain ~?0\d:\d\d/.test(l)), `passages du lendemain dits « demain » : ${JSON.stringify(s.lines)}`);
     check(!s.lines.some((l) => /^[●◆] [^:]/.test(l)), `aucun tram n’arrive la nuit : ${JSON.stringify(s.lines)}`);
