@@ -53,7 +53,8 @@ import { recalcAlert, repairFollowed, touchFollowed } from './routing/repair';
 import { rankSearch, searchFileKeys } from './search';
 import { suggestOpening } from './suggest';
 import { indexDay, TrainEngine, trainLeg, type DayIndex } from './trains';
-import { findLinesIn, lineBoardAt, lineStopsIn, missingLineBoard, noWeekdayIn } from './linepicks';
+import { findLinesIn, lineBoardAt, lineColorsIn, linesNearIn, lineStopsIn, missingLineBoard, noWeekdayIn } from './linepicks';
+import { lineHeadsIn, lineRunIn, type LineFollow, type LineRun } from './linerun';
 import { departureStopsAt, missingStops } from './stopcalls';
 import { brusselsParts, distanceM, localDate, walkMinutes } from './util';
 import { DAY_START_HOUR } from './text';
@@ -333,6 +334,33 @@ export function createCore(opts: CoreOptions): Core {
     async lineStops(line: Pick<LineMatch, 'op' | 'line' | 'routes'>, near?: LatLon | null): Promise<LineStop[]> {
       const meta = await ensure();
       return lineStopsIn({ meta, json: (p, v) => data.json(p, v) }, line, near);
+    },
+
+    /** 1.2.6 : couleurs officielles des lignes (réseau:numéro → couleur, texte). */
+    async lineColors(): Promise<Map<string, { color: string; text?: string }>> {
+      const meta = await ensure();
+      return lineColorsIn({ meta, json: (p, v) => data.json(p, v) });
+    },
+
+    /** 1.2.6 : lignes de bus, tram et métro des arrêts à `radiusM` au plus de `near`. */
+    async linesNear(near: LatLon, radiusM = 500): Promise<LineMatch[]> {
+      const meta = await ensure();
+      const list = await areasAround(near.lat, near.lon, radiusM);
+      const stops = list.filter(({ a }) => a.op !== 'sncb').map(({ a }) => ({ op: a.op, lines: a.lines }));
+      return linesNearIn({ meta, json: (p, v) => data.json(p, v) }, near, stops, radiusM);
+    },
+
+    /** 1.2.6 : terminus des sens d'une ligne suivie. */
+    async lineHeads(f: Pick<LineFollow, 'routes'>): Promise<Names[]> {
+      const meta = await ensure();
+      return lineHeadsIn({ meta, json: (p, v) => data.json(p, v) }, f);
+    },
+
+    /** 1.2.6 : toute la ligne dans un sens, l'attente à chaque arrêt. */
+    async lineRun(f: Pick<LineFollow, 'op' | 'line' | 'routes' | 'mode'>, dir: number, o?: { near?: LatLon | null }): Promise<LineRun> {
+      const meta = await ensure();
+      const t = now();
+      return lineRunIn({ meta, json: (p, v) => data.json(p, v) }, isCovered(meta, t) ? rt : null, f, dir, t, o?.near ?? null);
     },
 
     /**

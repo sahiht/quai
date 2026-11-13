@@ -219,6 +219,12 @@ function sncbFeed(net: Network): Record<string, string> {
 
 const STIB_DIRECTION: Record<string, number> = { '1103': 0, '1203': 1, '1104': 0, '1302': 0, '1402': 1, '1306': 0 };
 
+/**
+ * 1.2.6 : couleurs par ligne (route_color), proches de celles du réseau (métro 1 violet, 2 orange, 5 jaune, 6 bleu),
+ * pour voir les pastilles du téléphone ; les vraies viennent chaque nuit des horaires de la STIB.
+ */
+const STIB_TEST_COLOR: Record<string, string> = { '1': 'C4008F', '2': 'F57000', '3': 'B5BA05', '4': 'E5007D', '5': 'E6B012', '6': '0078AD' };
+
 function stibFeed(net: Network): Record<string, string> {
   const o = net.ops.stib;
   const eol = '\r\n'; // flux STIB : fins de ligne Windows partout
@@ -241,7 +247,7 @@ function stibFeed(net: Network): Record<string, string> {
     'stops.txt': csv(['stop_id', 'stop_code', 'stop_name', 'stop_desc', 'stop_lat', 'stop_lon', 'zone_id', 'stop_url', 'location_type', 'parent_station'],
       o.stops.map((s) => [s.id, '', s.name, '', s.lat.toFixed(5), s.lon.toFixed(5), '', '', 0, '']), { eol }),
     'routes.txt': csv(['route_id', 'agency_id', 'route_short_name', 'route_long_name', 'route_desc', 'route_type', 'route_url', 'route_color', 'route_text_color'],
-      o.routes.map((r) => [r.id, o.agency.id, r.short, r.long, '', r.type, '', r.type === 1 ? 'C4008F' : 'B5BA05', 'FFFFFF']), { eol }),
+      o.routes.map((r) => [r.id, o.agency.id, r.short, r.long, '', r.type, '', STIB_TEST_COLOR[r.short] ?? (r.type === 1 ? 'C4008F' : 'B5BA05'), 'FFFFFF']), { eol }),
     'trips.txt': csv(['route_id', 'service_id', 'trip_id', 'trip_headsign', 'direction_id', 'block_id', 'shape_id'],
       trips.map((t) => [t.route, t.service, t.id, t.head, STIB_DIRECTION[t.id.slice(0, 4)] ?? 0, '', '']), { eol }),
     'stop_times.txt': csv(['trip_id', 'arrival_time', 'departure_time', 'stop_id', 'stop_sequence', 'pickup_type', 'drop_off_type'], stopTimes, { eol }),

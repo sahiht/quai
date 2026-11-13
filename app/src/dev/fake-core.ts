@@ -78,12 +78,13 @@ import type {
   Suggestion,
 } from '../core/api';
 import { distanceM, gtfsTime, hhmm, localDate, localMinutes, walkMinutes } from '../core/util';
-import type { AreaSummary, GeocodeResponse, GeocodeResult, HealthResponse, Mode, Names, Op } from '../../../shared/types';
+import type { AreaSummary, GeocodeResponse, GeocodeResult, HealthResponse, LineFile, Mode, Names, Op } from '../../../shared/types';
 import { normalizeForSearch, prettyName } from '../../../shared/names';
 import { QuaiError } from '../core/errors';
 import { answerFavorite, asTrip, orderFavorites, placeOf, relocateAmong, type PlanMemo } from '../core/favorites';
 import { GeocodeClient, GeoError, type GeoTransport } from '../core/geocode';
-import { lineBoardOf, lineKey, LINES_MAX, mainEnds, missingArea, missingLineBoard, orderStops, sortMatches, type DirPattern, type EndPattern, type PatDeparture } from '../core/linepicks';
+import { lineBoardOf, lineKey, linePath, LINES_MAX, mainEnds, missingArea, missingLineBoard, orderStops, sortMatches, type DirPattern, type EndPattern, type LineData, type PatDeparture } from '../core/linepicks';
+import { lineHeadsIn, lineRunIn } from '../core/linerun';
 import { maxWalkOf, P } from '../core/routing/params';
 import { itemOf, rank as rankJourneys } from '../core/routing/rank';
 import { reasonsOf } from '../core/routing/reason';
@@ -528,6 +529,47 @@ function stopsOfTpls(ls: readonly LineTpl[]): LineStop[] {
 }
 
 const endOf = (l: LineTpl): EndPattern => ({ head: l.head, from: area(l.stops[0][0]), to: area(l.stops[l.stops.length - 1][0]), trips: tripsOf(l) });
+
+/**
+ * 1.2.6 : lignes suivies (lineHeads, lineRun) : chaque gabarit devient un fichier de ligne (un motif, un profil, les
+ * voyages du jour et du lendemain), lu par le calcul du vrai cœur (core/linerun.ts), en horaires prévus.
+ */
+function lineFileOf(l: LineTpl): LineFile {
+  const areas = l.stops.map(([id]): LineFile['areas'][number] => {
+    const a = area(id);
+    return [a.id, a.lat, a.lon, a.n];
+  });
+  const starts = LINE_STARTS.get(l.key) ?? [];
+  return {
+    v: 1,
+    id: routeOf(l),
+    op: l.op,
+    route: l.key,
+    line: l.line,
+    mode: l.mode,
+    areas,
+    pats: [{ head: l.head, a: areas.map((_, i) => i), s: areas.map(() => ''), prof: [l.stops.map(([, off]) => off)], t: [0, 1].flatMap((day) => starts.map((m) => [day, m, 0])) }],
+    conn: areas.map(() => []),
+  };
+}
+const LINE_FILES = new Map(LINES.map((l) => [linePath(routeOf(l)) ?? '', lineFileOf(l)]));
+function lineSource(now: number): LineData {
+  const today = dayOf(now);
+  return {
+    meta: { serviceDates: [today, nextDate(today)] } as Meta,
+    json: async <T>(path: string, valid: (x: unknown) => x is T): Promise<T | null> => {
+      const f: unknown = LINE_FILES.get(path);
+      return valid(f) ? f : null;
+    },
+  };
+}
+/** 1.2.6 : couleurs d'essai des lignes (comme les données d'essai du pipeline : métros 2 et 6, trams 3 et 4). */
+const FAKE_COLORS: Record<string, { color: string; text?: string }> = {
+  'stib:2': { color: 'F57000', text: 'FFFFFF' },
+  'stib:3': { color: 'B5BA05', text: '000000' },
+  'stib:4': { color: 'E5007D', text: 'FFFFFF' },
+  'stib:6': { color: '0078AD', text: 'FFFFFF' },
+};
 
 /* ------------------------------ Cœur factice ------------------------------ */
 
@@ -1064,6 +1106,33 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
         return m;
       });
       return sortMatches(out).slice(0, LINES_MAX);
+    },
+    async lineColors() {
+      return new Map(Object.entries(FAKE_COLORS));
+    },
+    // 1.2.6 : les lignes des arrêts à `radiusM` au plus, chacune avec son arrêt le plus proche (comme le vrai cœur)
+    async linesNear(near, radiusM = 500) {
+      const out = new Map<string, LineMatch>();
+      for (const a of AREAS) {
+        const d = a.op === 'sncb' ? Infinity : distanceM(near, a);
+        if (d > radiusM) continue;
+        for (const l of LINES) {
+          if (l.op !== a.op || !l.stops.some(([id], i) => id === a.id && i < l.stops.length - 1)) continue;
+          const k = `${l.op}|${lineKey(l.line)}|${l.mode}`;
+          const prev = out.get(k);
+          if (prev && (prev.nearest?.distanceM ?? 0) <= d) continue;
+          const ls = LINES.filter((x) => x.op === l.op && lineKey(x.line) === lineKey(l.line) && x.mode === l.mode);
+          out.set(k, { op: l.op, mode: l.mode, line: l.line, ends: mainEnds(ls.map(endOf)), routes: ls.map(routeOf), nearest: { areaId: a.id, name: a.n, distanceM: Math.round(d) } });
+        }
+      }
+      const rank: Record<string, number> = { metro: 0, tram: 1, bus: 2 };
+      return [...out.values()].sort((a, b) => (a.nearest?.distanceM ?? 0) - (b.nearest?.distanceM ?? 0) || (rank[a.mode] ?? 3) - (rank[b.mode] ?? 3) || a.line.localeCompare(b.line, 'fr', { numeric: true }));
+    },
+    async lineHeads(f) {
+      return lineHeadsIn(lineSource(now()), f);
+    },
+    async lineRun(f, dir, o) {
+      return lineRunIn(lineSource(now()), null, f, dir, now(), o?.near ?? null);
     },
     async lineStops(m, near) {
       const routes = new Set(m.routes ?? []);

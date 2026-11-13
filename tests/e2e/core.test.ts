@@ -201,8 +201,9 @@ for (const scene of ['base', 'noRT'] as const) {
         expect(s?.favoriteId).toBe('fav-gdn');
         expect(s?.autoOpen).toBe(true);
         checkTexts(s?.title, s?.subtitle);
-        // 1.2.2 : migré en tram 3 et tram 4 « près » de la rubrique Bus, tram, métro (ouverts par les lunettes)
-        expect(PRESET.lines.filter((l) => l.areaId === 'stib:6357F').map((l) => `${l.line} ${l.near}`)).toEqual(['3 true', '4 true']);
+        // 1.2.2 : migré en tram 3 et tram 4 « près » (ouverts par les lunettes) ; 1.2.6 (PRD-1.2.6 § 4) : des lignes
+        // suivies, Gare du Nord en repère, dont les départs s'ouvrent d'office
+        expect(PRESET.follows?.filter((l) => l.via?.areaId === 'stib:6357F').map((l) => `${l.line} ${l.near}`)).toEqual(['3 true', '4 true']);
         expect((await coreAt(now).suggest(S2_POS, PRESET))?.kind).not.toBe('favoriteStop');
         const b = await coreAt(now).board('stib:6357F', { limit: PRESET.display.depsPerStop, filter: fav.kind === 'stop' ? fav.filter : undefined });
         const tilde = rt ? '' : '~';

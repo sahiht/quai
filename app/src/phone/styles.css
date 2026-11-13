@@ -325,3 +325,25 @@ dl { margin: 0; }
 /* 1.2.4 : blocs « Arrêts » et « Lignes » de « Bus, tram, métro », chacun sous son intitulé */
 .pick-lists { display: flex; flex-direction: column; gap: 8px; }
 .pick-group { margin: 6px 0 0; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--muted); }
+
+/* 1.2.6 : pastilles des lignes de bus, tram et métro, à leur couleur officielle (route_color des
+   horaires) ; sans couleur publiée, une pastille neutre. Couleurs posées par le CSSOM (--b fond, --t texte). */
+.badge { min-width: 36px; height: 36px; padding: 0 6px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 15px; line-height: 1; font-weight: 700; background: var(--b, #eceeea); color: var(--t, #3f4842); box-shadow: inset 0 0 0 1px rgba(22, 26, 23, 0.12); font-variant-numeric: tabular-nums; }
+.badge.official { box-shadow: none; }
+.badge.sm { min-width: 26px; height: 22px; padding: 0 5px; border-radius: 6px; font-size: 12px; }
+.badge.more { background: transparent; box-shadow: none; color: var(--muted); font-weight: 600; }
+.badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.pick-main > .badge, .row.opt > .badge { min-width: 36px; }
+/* « Près de toi » : une ligne, son réseau et ses terminus, la distance ; « Ajouter » ou « Ajoutée ✓ » à droite */
+.sub-head { margin: 6px 0 0; font-size: 15px; line-height: 20px; font-weight: 600; color: var(--body); }
+.near-row { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 12px 8px 14px; border-bottom: 1px solid var(--divider); }
+.near-row:last-child { border-bottom: 0; }
+.near-row .txt { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.near-row .t1 { font-size: 16px; line-height: 22px; font-weight: 500; }
+.near-row .t2 { font-size: 13px; line-height: 18px; color: var(--muted); overflow-wrap: anywhere; }
+.near-row .btn { flex-shrink: 0; min-height: 40px; padding: 0 14px; }
+.btn-on { border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
+.near-row > .ico { width: 36px; height: 36px; border-radius: 10px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+/* 1.2.6 : une gare de train se distingue au premier coup d'œil (bleu), les lignes ont leur couleur */
+.ico.train { background: #e6eef8 !important; }
+.ico.train svg { stroke: #24588f; }

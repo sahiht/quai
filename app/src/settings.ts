@@ -5,9 +5,12 @@
  * (kind 'place') ; un trajet fixe ne part jamais de « Ma position ».
  * Version 4 (1.2.2, docs/v1.2.2/PRD-1.2.2.md § 5) : gares (`stations`) et lignes à un arrêt (`lines`) choisies ; les
  * arrêts favoris y sont rangés et ne restent plus dans `favorites`.
+ * 1.2.6 (docs/v1.2.6/PRD-1.2.6.md § 4) : lignes suivies sans arrêt (`follows`) ; une ligne gardée à un arrêt (LinePick
+ * avec `line`) y devient une ligne suivie, son arrêt gardé comme repère (`via`) ; `lines` ne garde que les arrêts.
  */
 import type { Endpoint, Favorite, FavoritePlace, FavoriteStop, FavoriteTrip, KV, LineFilter, LinePick, NameLang, Place, Propose, RecentAddress, Settings, StationPick } from './core/api';
 import { DEFAULT_SETTINGS } from './core/api';
+import { sameFollow, type LineFollow } from './core/linerun';
 import { shortAddress } from './core/text';
 import { displayName } from './core/util';
 import type { Mode, Names, Op } from '../../shared/types';
@@ -18,6 +21,8 @@ export const SETTINGS_KEY = 'quai.settings';
  * seule fois et jamais réécrits : un retour à la 1.2.1 peut les reprendre.
  */
 export const SETTINGS_BACKUP_KEY = 'quai.settings.v3';
+/** 1.2.6 : réglages tels qu'avant le passage des lignes gardées à un arrêt en lignes suivies, gardés une fois. */
+export const SETTINGS_BACKUP_125_KEY = 'quai.settings.v4-1.2.5';
 export const CURRENT_VERSION = 4;
 
 const OPS: readonly Op[] = ['sncb', 'stib', 'delijn', 'tec'];
@@ -315,6 +320,38 @@ export function moveStops(favorites: readonly Favorite[], stations: StationPick[
   return rest;
 }
 
+const HEX = /^[0-9A-F]{6}$/i;
+const FOLLOW_OPS: readonly LineFollow['op'][] = ['stib', 'delijn', 'tec'];
+
+/** 1.2.6 : une ligne suivie valide (réseau urbain, numéro, variantes connues, terminus, couleur, arrêt repère). */
+function lineFollow(r: unknown): LineFollow | null {
+  if (!isObj(r) || typeof r.id !== 'string' || !r.id.trim() || typeof r.line !== 'string' || !r.line.trim()) return null;
+  const op = oneOf(r.op, FOLLOW_OPS, undefined as unknown as LineFollow['op']);
+  if (!op) return null;
+  const routes = Array.isArray(r.routes) ? r.routes.filter((k): k is string => typeof k === 'string' && /^[a-z]+:/.test(k)).slice(0, 16) : [];
+  const f: LineFollow = { id: r.id.trim().slice(0, 80), op, line: r.line.trim().slice(0, 20), routes };
+  const mode = oneOf(r.mode, MODES, undefined as unknown as Mode);
+  if (mode && mode !== 'train') f.mode = mode;
+  if (Array.isArray(r.ends)) {
+    const ends = r.ends.map(names).filter((n): n is Names => !!n).slice(0, 2);
+    if (ends.length) f.ends = ends;
+  }
+  if (typeof r.color === 'string' && HEX.test(r.color)) {
+    f.color = r.color.toUpperCase();
+    if (typeof r.text === 'string' && HEX.test(r.text)) f.text = r.text.toUpperCase();
+  }
+  if (isObj(r.via) && typeof r.via.areaId === 'string' && r.via.areaId) {
+    const name = names(r.via.name);
+    const lat = num(r.via.lat);
+    const lon = num(r.via.lon);
+    if (name && lat !== undefined && lon !== undefined && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+      f.via = { areaId: r.via.areaId, name, lat, lon };
+      if (r.near === true) f.near = true;
+    }
+  }
+  return f;
+}
+
 /**
  * Favoris v3 dans l'ordre, identifiants uniques, 32 au plus. Un trajet « Ma position → … » n'est pas un trajet fixe :
  * vers un lieu, c'est ce lieu (déjà dans la liste) ; vers une adresse ou un arrêt, il devient un lieu. Un trajet fixe
@@ -361,6 +398,27 @@ export function validateSettings(input: unknown): Settings {
   }
   // 1.2.2 : un arrêt favori encore présent (réglages écrits par une version antérieure) rejoint gares ou lignes
   const favorites = moveStops(favoritesOf(Array.isArray(x.favorites) ? x.favorites : [], lang), stations, lines);
+  // 1.2.6 : lignes suivies sans arrêt ; une ligne gardée à un arrêt (1.2.5, ou un arrêt favori migré) en devient une
+  const follows: LineFollow[] = [];
+  for (const r of Array.isArray(x.follows) ? x.follows : []) {
+    const f = lineFollow(r);
+    if (f && !follows.some((q) => q.id === f.id || sameFollow(q, f))) follows.push(f);
+    if (follows.length >= LIMITS.lines) break;
+  }
+  const picksWithLine = lines.filter((p) => p.line && p.op !== 'sncb');
+  for (let i = lines.length - 1; i >= 0; i--) if (lines[i].line && lines[i].op !== 'sncb') lines.splice(i, 1);
+  for (const p of picksWithLine) {
+    const known = follows.find((q) => sameFollow(q, { op: p.op, line: p.line ?? '' }));
+    if (known) {
+      if (p.near && !known.near && known.via?.areaId === p.areaId) known.near = true;
+      continue;
+    }
+    if (follows.length >= LIMITS.lines) continue;
+    const f: LineFollow = { id: `f-${p.id}`.slice(0, 80), op: p.op as LineFollow['op'], line: p.line ?? '', routes: [], via: { areaId: p.areaId, name: p.name, lat: p.lat, lon: p.lon } };
+    if (p.mode) f.mode = p.mode;
+    if (p.near) f.near = true;
+    follows.push(f);
+  }
   const recent: RecentAddress[] = [];
   for (const r of Array.isArray(x.recent) ? x.recent : []) {
     const ok = recentAddress(r);
@@ -378,6 +436,7 @@ export function validateSettings(input: unknown): Settings {
     favorites,
     stations,
     lines,
+    ...(follows.length ? { follows } : {}),
     recent,
     seenVersion: seen,
     display: {
@@ -518,7 +577,29 @@ export async function loadSettings(kv: KV): Promise<Settings> {
     return validateSettings({});
   }
   await backupBeforeMigration(kv, raw);
+  await backupBeforeFollows(kv, raw);
   return parseSettings(raw);
+}
+
+/**
+ * 1.2.6 : copie des réglages qui gardent encore une ligne à un arrêt (LinePick avec `line`), avant qu'elle devienne une
+ * ligne suivie, sous SETTINGS_BACKUP_125_KEY, une seule fois : un retour à la 1.2.5 peut les reprendre. Au mieux.
+ */
+async function backupBeforeFollows(kv: KV, raw: string | null): Promise<void> {
+  if (!raw) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (!isObj(parsed) || versionOf(parsed) !== CURRENT_VERSION || !Array.isArray(parsed.lines)) return;
+  if (!parsed.lines.some((p) => isObj(p) && typeof p.line === 'string' && p.line)) return;
+  try {
+    if (!(await kv.get(SETTINGS_BACKUP_125_KEY))) await kv.set(SETTINGS_BACKUP_125_KEY, raw);
+  } catch {
+    /* au mieux */
+  }
 }
 
 /**

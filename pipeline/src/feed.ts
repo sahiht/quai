@@ -166,7 +166,10 @@ export async function processFeed(o: FeedOptions): Promise<FeedResult> {
     const routeId: string[] = [];
     const routeShort: string[] = [];
     const routeMode: Mode[] = [];
-    await readFile(zip, 'routes.txt', ['route_id', 'route_short_name', 'route_long_name', 'route_type'], (v) => {
+    const routeColor: string[] = [];
+    const routeText: string[] = [];
+    const hex = (x: string): string => (/^#?[0-9a-fA-F]{6}$/.test(x.trim()) ? x.trim().replace('#', '').toUpperCase() : '');
+    await readFile(zip, 'routes.txt', ['route_id', 'route_short_name', 'route_long_name', 'route_type', 'route_color', 'route_text_color'], (v) => {
       const id = normId(v[0]);
       if (routeIndex.has(id)) return;
       routeIndex.set(id, routeId.length);
@@ -174,6 +177,9 @@ export async function processFeed(o: FeedOptions): Promise<FeedResult> {
       const mode = modeOf(v[3] === '' ? 3 : Number(v[3]));
       routeShort.push(lineName(v[1] || v[2] || id, mode) || id);
       routeMode.push(mode);
+      // 1.2.6 : couleur officielle de la ligne, si l'opérateur la publie
+      routeColor.push(hex(v[4]));
+      routeText.push(hex(v[5]));
     }, { required: ['route_id'] });
 
     /* 4. voyages actifs sur au moins une des dates */
@@ -703,7 +709,7 @@ export async function processFeed(o: FeedOptions): Promise<FeedResult> {
           };
         });
         const ri = tripRoute[t];
-        col.addTrip(ri, { id: routeId[ri], line: routeShort[ri], mode: routeMode[ri] }, tripDir[t], headOf(t), positions, days,
+        col.addTrip(ri, { id: routeId[ri], line: routeShort[ri], mode: routeMode[ri], color: routeColor[ri], text: routeText[ri] }, tripDir[t], headOf(t), positions, days,
           op === 'stib' ? undefined : tripId[t]);
       }
       lines = col.finish((a) => [areaIdStr[a], round5(areas[a].lat), round5(areas[a].lon), areaNames[a]]);

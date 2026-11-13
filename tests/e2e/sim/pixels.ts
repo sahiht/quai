@@ -25,6 +25,9 @@
  * 1.2.5 (PRD-1.2.5) : « Si tu le rates » en ligne du haut des étapes (§ 1) ; « Bus, tram, métro » en mots clairs et
  * pâles (§ 4) : chaque mot à la place que layout.ts (segRow) lui donne, dans son conteneur, les passages calés à
  * droite ; la ligne de progression en haut de « Dans le train », train compris (§ 7), et sa note (§ 5).
+ * 1.2.6 : « Lignes de bus, tram, métro » (un sens par rangée, à la marge) et toute la ligne dans un sens (un arrêt par
+ * rangée : le repère et le nom au plus clair, la distance pâle, les passages calés à droite ; « ● : un tram arrive » en
+ * ligne du haut).
  * `levels()` mesure aussi la luminosité de chaque bande (relief : favoris un ton plus pâles que leur titre) ;
  * `alphaIn()` celle d'une plage de la bande (1.2.5 : « vers » pâle entre la ligne et sa destination au plus clair).
  */
@@ -50,7 +53,7 @@ type Seg = { from: number; to: number; text: string };
 
 /** Écrans en liste à une colonne de droite (gabarit de chacun, layout.ts). */
 const MENU: Record<string, keyof typeof LAYOUTS> = { favorites: 'favorites', stations: 'stations', keepLine: 'menu', followed: 'menu' };
-const CHECKED = new Set(['home', 'steps', 'others', 'lines', 'line', 'board', 'stops', 'train', ...Object.keys(MENU)]);
+const CHECKED = new Set(['home', 'steps', 'others', 'lines', 'follows', 'lineRun', 'line', 'board', 'stops', 'train', ...Object.keys(MENU)]);
 /** 1.2.3 : ligne du haut d'un tableau (message de l'opérateur, « Départs de demain ») ; sa note, jamais une ligne de liste. */
 const TOP_BOARD = /^(! |Départs de demain$)/;
 const NOTE_BOARD = /^(~ horaire prévu|Temps réel indisponible|Pas de réseau)/;
@@ -124,11 +127,17 @@ function rowSegments(screen: string, line: string, indented = false): Seg[] {
     const a = parts.slice(0, -1).join('   ');
     return [{ from: def.a.x, to: def.a.x + width(a), text: a }, rightSeg(def, parts[parts.length - 1])];
   }
-  if (screen === 'lines') {
+  if (screen === 'lineRun') {
+    // 1.2.6 : toute la ligne dans un sens : un arrêt par rangée en mots clairs et pâles, ses passages calés à droite
+    return segRowSegments(line, 0, runWords);
+  }
+  if (screen === 'lines' || screen === 'follows') {
     // intitulés, noms d'arrêts et titres de lignes à la marge ; leurs lignes en retrait (espaces de 5 px, subIndent),
     // les passages d'un sens calés au bord droit (comme les favoris). 1.2.5 : rangées en mots clairs et pâles.
+    // 1.2.6 : « Lignes » : un sens par rangée à la marge ; une ligne en attente, « … » calé à droite.
     const def = LAYOUTS.lines;
     if (SEG_ROW.test(line)) return segRowSegments(line, indented ? (def.subIndent ?? 0) : 0);
+    if (!indented && parts.length > 1 && screen === 'follows') return [{ from: def.a.x, to: def.a.x + width(parts.slice(0, -1).join('   ')), text: parts.slice(0, -1).join('   ') }, rightSeg(def, parts[parts.length - 1])];
     if (!indented) return [{ from: def.a.x, to: def.a.x + width(line), text: line }];
     return indentedSegments(def.b.x + width(' '.repeat(Math.round((def.subIndent ?? 0) / 5))), line);
   }
@@ -212,13 +221,28 @@ function linesIndented(lines: string[]): boolean[] {
  * (« Bus W ») et la destination dans le conteneur clair, « vers » dans le pâle, deux espaces entre deux conteneurs ;
  * les passages calés à droite de la colonne c. Le journal joint les mots par une espace : on le redécoupe.
  */
-function segRowSegments(line: string, indentPx: number): Seg[] {
+type Word = { t: string; hi?: boolean };
+/** « Tram 3 vers Churchill » : la ligne et la destination au plus clair, « vers » pâle. */
+function versWords(left: string): Word[] {
+  const m = /^(.+?) vers (.+)$/.exec(left);
+  return m ? [{ t: nbsp(m[1]), hi: true }, { t: 'vers' }, { t: nbsp(m[2]), hi: true }] : [{ t: nbsp(left) }];
+}
+/**
+ * 1.2.6 : un arrêt de toute la ligne (« ● Gare du Nord à 80 m ») : le repère et le nom au plus clair, la distance
+ * pâle ; « ↔ l’autre sens vers Esplanade » comme une rangée de « Lignes ».
+ */
+function runWords(left: string): Word[] {
+  const m = /^([●○]) (.+?)(?: (à [\d,]+\s(?:m|km)))?$/.exec(left);
+  if (!m) return versWords(left);
+  return [{ t: m[1], hi: true }, { t: nbsp(m[2]), hi: true }, ...(m[3] ? [{ t: nbsp(m[3]) }] : [])];
+}
+
+function segRowSegments(line: string, indentPx: number, words: (left: string) => Word[] = versWords): Seg[] {
   const def = LAYOUTS.lines;
   const parts = line.split('   ');
   const right = parts.length > 1 ? parts[parts.length - 1] : undefined;
   const left = parts.length > 1 ? parts.slice(0, -1).join('   ') : line;
-  const m = /^(.+?) vers (.+)$/.exec(left);
-  const r = segRow(m ? [{ t: nbsp(m[1]), hi: true }, { t: 'vers' }, { t: nbsp(m[2]), hi: true }] : [{ t: nbsp(left) }], indentPx, right === undefined ? undefined : nbsp(right), def);
+  const r = segRow(words(left), indentPx, right === undefined ? undefined : nbsp(right), def);
   const out: Seg[] = [];
   for (const [x0, content] of [
     [def.a.x, r.a],
@@ -321,7 +345,9 @@ function bands(s: LoggedScreen): Band[] | null {
           ? TOP_BOARD.test(lines[0] ?? '')
           : s.screen === 'train'
             ? TOP_TRAIN.test(lines[0] ?? '')
-            : s.screen === 'stops' || (s.screen === 'line' && /^! /.test(lines[0] ?? ''));
+            : s.screen === 'lineRun'
+              ? /^●\s: /.test(lines[0] ?? '')
+              : s.screen === 'stops' || (s.screen === 'line' && /^! /.test(lines[0] ?? ''));
   const top = hasTop ? lines.shift()! : undefined;
   let hint: string | undefined;
   let note: string | undefined;
@@ -335,7 +361,7 @@ function bands(s: LoggedScreen): Band[] | null {
     hint = lines.pop();
     note = lines.length && (board ? NOTE_BOARD : NOTE).test(lines[lines.length - 1]) ? lines.pop() : undefined;
     // ligne de note réservée (layout.ts, reserveNote) : partout sauf « Autres trajets », les menus et « Dans le train »
-    const reserve = !['others', 'keepLine', 'followed', 'train'].includes(s.screen);
+    const reserve = !['others', 'keepLine', 'followed', 'train', 'follows'].includes(s.screen);
     footLines = (reserve || note ? 1 : 0) + 1;
   }
   const footY = SCREEN_H - GEO.BOTTOM_MARGIN - footLines * LINE_H;
@@ -367,7 +393,8 @@ function bands(s: LoggedScreen): Band[] | null {
   }
   // accueil : les favoris en retrait sont les lignes entre « Favoris » et la ligne vide
   let underFavorites = false;
-  const indented = s.screen === 'lines' ? linesIndented(lines) : [];
+  // 1.2.6 : « Lignes » : à la marge, sauf « introuvable » sous la ligne
+  const indented = s.screen === 'lines' ? linesIndented(lines) : s.screen === 'follows' ? lines.map((l) => /^introuvable/.test(l)) : [];
   lines.forEach((l, i) => {
     let segs: Seg[];
     if (home) {

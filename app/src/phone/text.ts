@@ -105,6 +105,11 @@ export const T = {
   /** 1.2.2 (PRD-1.2.2 § 4) : gares et lignes choisies, sur l'accueil du téléphone et dans l'onglet Réglages de Quai Web. */
   stations: 'Gares',
   lines: 'Bus, tram, métro',
+  /** 1.2.6 (PRD-1.2.6 § 1) : les trois rubriques, chacune dit son mode. */
+  stationsTitle: 'Gares de train',
+  stopsTitle: 'Arrêts de bus, tram, métro',
+  addStop: 'Ajouter un arrêt',
+  noStop: 'Aucun arrêt pour l’instant.',
   addStation: 'Ajouter une gare',
   /** 1.2.3 (PRD-1.2.3 § 3) : « Bus, tram, métro » reçoit une ligne (à un arrêt) ou un arrêt entier. */
   addLine: 'Ajouter une ligne ou un arrêt',
@@ -129,11 +134,16 @@ export const T = {
   stationPlaceholder: 'Namur, Gand-Saint-Pierre…',
   stationNearby: 'Les plus proches de ta position.',
   stationNone: 'Aucune gare ne correspond. Vérifie l’orthographe.',
-  lineLead: 'Ses passages, dans les deux sens, s’afficheront dans les lunettes.',
+  lineLead: 'Toute la ligne s’affichera dans les lunettes, dans les deux sens, avec l’attente à chaque arrêt.',
   /** 1.2.3 : les deux choix de l'ajout (comme « Nouveau favori ») et « Un arrêt », toutes ses lignes. */
   kindsLegend: 'Une ligne ou un arrêt',
   kindLine: 'Une ligne',
-  kindLineSub: 'numéro, puis arrêt',
+  /** 1.2.6 : section « Lignes de bus, tram, métro » de l'accueil. */
+  followsTitle: 'Lignes de bus, tram, métro',
+  addFollow: 'Ajouter une ligne',
+  noFollows: 'Aucune ligne pour l’instant.',
+  bothWays: 'les deux sens',
+  kindLineSub: 'numéro, les deux sens',
   kindStop: 'Un arrêt',
   kindStopSub: 'toutes ses lignes',
   stopLead: 'Tous ses départs s’afficheront dans les lunettes.',
@@ -155,8 +165,8 @@ export const T = {
   changeLine: 'Changer de ligne',
   anotherLine: 'Ajouter une autre ligne',
   searchDown: 'Recherche impossible pour l’instant : réessaie dans un instant.',
-  /** « Un endroit » (revue d'usage n° 3) : un arrêt de bus, tram ou métro mène à « Ajouter une ligne », arrêt présélectionné. */
-  nextPassagesLink: 'Ses prochains passages : choisir une ligne dans Bus, tram, métro',
+  /** « Un endroit » (revue d'usage n° 3 ; 1.2.6) : un arrêt de bus, tram ou métro mène à « Ajouter un arrêt », lui en tête. */
+  nextPassagesLink: 'Ses prochains départs : l’ajouter à tes arrêts',
 } as const;
 
 /**
@@ -197,15 +207,27 @@ export const NEWS_122: readonly string[] = [
   'Un trajet n’est suivi que si tu le demandes.',
 ];
 
+/** 1.2.6 : nouveautés de la bannière (comme le message « Quai 1.2.6 » des lunettes). */
+export const NEWS_126: readonly string[] = [
+  'Gares de train, arrêts et lignes de bus, tram, métro : trois rubriques séparées.',
+  'Une ligne se suit maintenant en entier, dans les deux sens, sans choisir d’arrêt : les lunettes montrent l’attente à chacun de ses arrêts.',
+  'Pour ajouter une ligne ou un arrêt, ceux près de toi sont proposés, chaque ligne à sa couleur.',
+  'Tes lignes gardées à un arrêt sont déjà dans Lignes.',
+];
+
+/** 1.2.6 : une nouveauté d'avant qui parle de « Bus, tram, métro », devenu deux rubriques, n'est plus dite. */
+const stillTrue = (l: string): boolean => !/^Bus, tram, métro\b/.test(l);
+
 /**
- * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.5 ; depuis une version
- * antérieure à la 1.2.4 (`seen` : la version vue avant la mise à jour), celles de la 1.2.4 ensuite, puis celles de la
- * 1.2.3 et de la 1.2.2 pour les versions plus anciennes.
+ * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.6 ; depuis une version
+ * antérieure (`seen` : la version vue avant la mise à jour), celles des versions sautées ensuite, de la plus récente à
+ * la plus ancienne, sans celles qui ne sont plus vraies.
  */
 export function newsLines(seen = ''): string[] {
-  const out = [...NEWS_125];
-  if (seen && compareVersions(seen, '1.2.4') < 0) out.push(...NEWS_124);
-  if (seen && compareVersions(seen, '1.2.3') < 0) out.push(...NEWS_123);
+  const out = [...NEWS_126];
+  if (seen && compareVersions(seen, '1.2.5') < 0) out.push(...NEWS_125.filter(stillTrue));
+  if (seen && compareVersions(seen, '1.2.4') < 0) out.push(...NEWS_124.filter(stillTrue));
+  if (seen && compareVersions(seen, '1.2.3') < 0) out.push(...NEWS_123.filter(stillTrue));
   if (seen && compareVersions(seen, '1.2.2') < 0) out.push(...NEWS_122);
   return out;
 }
@@ -216,8 +238,9 @@ export const removeUsedPlaceText = (name: string): string => `Supprimer « ${nam
 export const limitText = (max: number): string => `${max} favoris au plus : supprimes-en un.`;
 /** 1.2.2 : limites des gares et des lignes atteintes (LIMITS.stations, LIMITS.lines de settings.ts). */
 export const stationLimitText = (max: number): string => `${max} gares au plus : retires-en une.`;
-/** 1.2.4 : la limite des lignes compte aussi les arrêts (une seule liste, deux blocs). */
-export const lineLimitText = (max: number): string => `${max} lignes et arrêts au plus : retires-en un.`;
+/** 1.2.6 : les lignes suivies et les arrêts ont chacun leur limite (LIMITS.lines). */
+export const lineLimitText = (max: number): string => `${max} lignes au plus : retires-en une.`;
+export const stopLimitText = (max: number): string => `${max} arrêts au plus : retires-en un.`;
 /** 1.2.2 : gare ajoutée (« Ajouter une gare », lien de « Un endroit », revue d'usage n° 3). */
 export const stationAddedText = (name: string): string => `${name} ajoutée à Gares.`;
 /** 1.2.3 : arrêt ajouté avec toutes ses lignes (PRD-1.2.3 § 3). */
@@ -350,10 +373,16 @@ export function lineMatchText(m: Pick<LineMatch, 'op' | 'mode' | 'line' | 'ends'
 }
 
 /** Confirmation d'une ligne ajoutée (PRD-1.2.2 § 4) : « Bus W à Merbraine ajouté : les deux sens s’afficheront dans les lunettes. » */
-export function lineAddedText(l: { op: Op; line: string; mode?: Mode }, stop: string): string {
-  const named = lineName(l);
+/** 1.2.6 : ligne ajoutée entière, sans arrêt : « Tram 3 ajouté à tes lignes, dans les deux sens : Churchill ↔ Esplanade. » */
+export function lineAddedText(named: string, ends: string): string {
   // « Bus », « Tram », « Métro » sont masculins ; « Ligne » (mode inconnu) est féminin.
-  return `${named} à ${stop} ${named.startsWith('Ligne ') ? 'ajoutée' : 'ajouté'} : les deux sens s’afficheront dans les lunettes.`;
+  const added = named.startsWith('Ligne ') ? 'ajoutée' : 'ajouté';
+  return ends ? `${named} ${added} à tes lignes, dans les deux sens : ${ends}.` : `${named} ${added} à tes lignes, dans les deux sens.`;
+}
+
+/** 1.2.6 : ligne déjà suivie. */
+export function lineFollowedText(named: string): string {
+  return `${named} est déjà dans tes lignes.`;
 }
 
 /** Distance d'une proposition, à droite : « ici », « 450 m », « 1,2 km », « 52 km ». */

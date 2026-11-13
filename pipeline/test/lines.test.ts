@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import type { AreaFile, LineFile, LineIndex, LineTile, Meta, Names, TileFile } from '../../shared/types.ts';
 import { tileKey } from '../../shared/types.ts';
 import { buildLineOutputs, defaultFlags, LineCollector, routeFileKey, usableFlags } from '../src/lines.ts';
+import { colorCoverage } from '../src/build.ts';
 import type { LineData } from '../src/lines.ts';
 import { cleanupTempDirs, miniFeed, runBuild, runFeed } from './helpers.ts';
 
@@ -234,6 +235,23 @@ describe('préparation complète : lines/, linetiles/, meta.lines', () => {
     expect(inTiles).toEqual(['stib:8402', 'tec:A']);
     expect(existsSync(join(out, 'areas/tec/B.json'))).toBe(true);
     expect(logs.some((l) => /^Fichiers de ligne : 2 lignes \(STIB 1, TEC 1\), [\d,]+ Mo bruts, [\d,]+ Mo en gzip ; index/.test(l))).toBe(true);
+  });
+
+  it('1.2.6 (PRD-1.2.6 § 6) : route_color et route_text_color dans l’index (5e et 6e éléments) et le fichier de ligne ; la couverture au journal', async () => {
+    const colored = {
+      ...stib,
+      'routes.txt': 'route_id,route_short_name,route_type,route_color,route_text_color\n2,2,1,f57000,#FFFFFF\n',
+    };
+    const plain = { ...tec, 'routes.txt': 'route_id,route_short_name,route_type,route_color\nR1,W,3,zzz\n' };
+    const { read, logs } = await runBuild({ tec: plain, stib: colored });
+    const index = read<LineIndex>('lines/index.json');
+    expect(index.lines).toEqual([['stib:2', '2', 'metro', 1, 'F57000', 'FFFFFF'], ['tec:R1', 'W', 'bus', 1]]);
+    expect(read<LineFile>('lines/stib/2.json')).toMatchObject({ color: 'F57000', text: 'FFFFFF' });
+    // une couleur illisible n'est pas gardée
+    expect(read<LineFile>('lines/tec/R1.json')).not.toHaveProperty('color');
+    expect(logs).toContain('Couleurs des lignes : STIB 1/1, TEC 0/1');
+    expect(colorCoverage([])).toBe('aucune ligne');
+    expect(colorCoverage([{ op: 'delijn', mode: 'tram', color: 'FFFFFF' }, { op: 'delijn', mode: 'bus' }, { op: 'sncb', mode: 'train', color: '000000' }])).toBe('De Lijn 1/2');
   });
 
   it('réseau en échec : pas de fichiers de ligne pour lui ; aucun réseau urbain : meta.lines sans ligne', async () => {

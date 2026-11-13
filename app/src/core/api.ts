@@ -11,6 +11,7 @@
  * les favoris), lignes par numéro (findLines, lineStops) et passages d'une ligne à un arrêt par sens (lineBoard).
  */
 import type { Op, Mode, Names, AreaSummary, Meta, HealthResponse, GeocodeResult, GeoSource } from '../../../shared/types';
+import type { LineFollow, LineRun } from './linerun';
 
 export type { Op, Mode, Names, AreaSummary, Meta, HealthResponse, GeocodeResult, GeoSource };
 
@@ -117,6 +118,7 @@ export interface Settings {
   favorites: Favorite[];        // 32 au plus, dans l'ordre choisi sur le téléphone ; 1.2.2 : lieux et trajets
   stations: StationPick[];      // 1.2.2 : 32 au plus, dans l'ordre choisi sur le téléphone
   lines: LinePick[];            // 1.2.2 : 32 au plus, dans l'ordre choisi sur le téléphone
+  follows?: LineFollow[];       // 1.2.6 : lignes suivies sans arrêt (les deux sens)
   recent: RecentAddress[];      // 5 au plus, la plus récente d'abord (S4)
   /**
    * Dernière version dont les nouveautés ont été vues (« 1.1.0 »). '' = nouvelle installation : les lunettes
@@ -250,6 +252,8 @@ export interface LineBoard {
 /** 1.2.2 : ligne trouvée par son numéro (findLines), pour « Ajouter une ligne » sur le téléphone. */
 export interface LineMatch {
   op: Op; mode: Mode; line: string;
+  /** 1.2.6 : couleur officielle de la ligne et de son texte (« RRGGBB »), si l'opérateur la publie. */
+  color?: string; text?: string;
   ends: Names[];                // terminus principaux (2 en général) : « Braine-l'Alleud ↔ Bruxelles Midi »
   routes: string[];             // LineFile.id de ses variantes
   nearest?: { areaId: string; name: Names; distanceM: number };  // son arrêt le plus proche de `near`
@@ -484,6 +488,13 @@ export interface Core {
    *  1.1 : garde label et reason ; bus, trams et métros compris (fromStop, toStop). 1.2.5 : `followed` : le trajet
    *  suivi, qui garde pendant une panne du temps réel les derniers retards connus (PRD-1.2.5 § 5). */
   refresh(j: Journey, settings: Settings, o?: { followed?: boolean }): Promise<Journey>;
+  /** 1.2.6 : terminus des sens d'une ligne suivie (« Lignes »). */
+  /** 1.2.6 : couleurs officielles des lignes, lignes près d'un endroit. */
+  lineColors?(): Promise<Map<string, { color: string; text?: string }>>;
+  linesNear?(near: LatLon, radiusM?: number): Promise<LineMatch[]>;
+  lineHeads?(f: Pick<LineFollow, 'routes'>): Promise<Names[]>;
+  /** 1.2.6 : toute la ligne dans un sens, l'attente à chaque arrêt. */
+  lineRun?(f: Pick<LineFollow, 'op' | 'line' | 'routes' | 'mode'>, dir: number, o?: { near?: LatLon | null }): Promise<LineRun>;
   /** 1.1 : ordre intelligent des favoris (PRD M1.4), immédiat (sans calcul de trajet). `last` : dernières réponses
    *  connues, pour la règle 5 (« rien dans les 3 heures »). Avec favOrder 'mine' : ordre du téléphone, sauf règle 5. */
   orderFavorites(here: LatLon | null, settings: Settings, last?: ReadonlyMap<string, FavoriteAnswer>): FavoriteRank[];

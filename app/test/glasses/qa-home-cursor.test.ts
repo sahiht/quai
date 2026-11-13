@@ -70,13 +70,14 @@ describe('accueil : le curseur ne tombe jamais sur « Favoris » quand « En cou
     const running = await h.until((s) => ready(s) && s.lines[0].startsWith('En cours'));
     expect(selected(running)).toMatch(/^En cours : vers le bureau/);
     expect(running.lines.some((l) => l.startsWith('Bureau'))).toBe(false);
-    // le curseur descend sur « Bus, tram, métro », puis le trajet prend fin (arrivée plus 5 min) : il y reste
-    for (let i = 0; i < 6 && !selected(h.last()).startsWith('Bus, tram, métro'); i++) await h.gesture('down');
-    expect(selected(h.last())).toMatch(/^Bus, tram, métro/);
+    // le curseur descend sur « Lignes… » (1.2.6 : la dernière rubrique), puis le trajet prend fin (arrivée plus
+    // 5 min) : il y reste
+    for (let i = 0; i < 7 && !selected(h.last()).startsWith('Lignes de bus'); i++) await h.gesture('down');
+    expect(selected(h.last())).toMatch(/^Lignes de bus, tram, métro/);
     h.advance(60 * MIN);
     await h.c.refreshCurrent();
-    const ended = await h.until((s) => s.screen === 'home' && !s.lines[0].startsWith('En cours') && s.lines.some((l) => l.startsWith('Bus, tram, métro')));
-    expect(selected(ended)).toMatch(/^Bus, tram, métro/);
+    const ended = await h.until((s) => s.screen === 'home' && !s.lines[0].startsWith('En cours') && s.lines.some((l) => l.startsWith('Lignes de bus')));
+    expect(selected(ended)).toMatch(/^Lignes de bus, tram, métro/);
     h.c.stop();
   });
 

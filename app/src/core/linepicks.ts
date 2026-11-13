@@ -58,13 +58,13 @@ export interface EndPattern {
 }
 
 /** Vecteur (m) du premier au dernier arrêt. */
-function vec(p: EndPattern): [number, number] {
+export function vec(p: EndPattern): [number, number] {
   const k = Math.cos((p.from.lat * Math.PI) / 180);
   return [(p.to.lat - p.from.lat) * 111_320, (p.to.lon - p.from.lon) * 111_320 * k];
 }
 
 /** Deux variantes vont en sens contraires (plus de 105° entre elles) ; une boucle (moins de 300 m) n'a pas de contraire. */
-function opposite(a: EndPattern, b: EndPattern): boolean {
+export function opposite(a: EndPattern, b: EndPattern): boolean {
   const [ay, ax] = vec(a);
   const [by, bx] = vec(b);
   const na = Math.hypot(ay, ax);
@@ -387,7 +387,7 @@ export function flagsOf(f: string | undefined, n: number): string {
 }
 
 /** Fichiers de ligne (identifiants LineFile.id), dans l'ordre demandé ; absents ou d'une autre génération ignorés. */
-async function loadLineFiles(src: LineData, keys: readonly string[]): Promise<LineFile[]> {
+export async function loadLineFiles(src: LineData, keys: readonly string[]): Promise<LineFile[]> {
   const files = await mapPool(keys, POOL, async (key) => {
     const path = linePath(key);
     if (!path) return null;
@@ -458,6 +458,12 @@ function matchOf(files: readonly LineFile[], near: LatLon | null | undefined): L
     ),
   );
   const m: LineMatch = { op: f0.op, mode: f0.mode, line: f0.line, ends, routes: files.map((f) => f.id) };
+  // 1.2.6 : couleur officielle, celle de la première variante qui en publie une
+  const colored = files.find((f) => f.color);
+  if (colored?.color) {
+    m.color = colored.color;
+    if (colored.text) m.text = colored.text;
+  }
   const st = near ? orderStops(stopsOfFiles(files), near)[0] : undefined;
   if (st) m.nearest = { areaId: st.areaId, name: st.name, distanceM: st.distanceM ?? 0 };
   return m;
@@ -519,6 +525,39 @@ export async function lineStopsIn(src: LineData, m: Pick<LineMatch, 'op' | 'line
 }
 
 /** Jour de service de `now` dans `dates` (meta.serviceDates) : avant 04:00, celui de la veille ; -1 s'il n'y est pas. */
+/**
+ * 1.2.6 : couleurs officielles des lignes de bus, tram et métro (lines/index.json), par réseau et numéro
+ * (`stib:3`) ; la première variante qui en publie une.
+ */
+export async function lineColorsIn(src: LineData): Promise<Map<string, { color: string; text?: string }>> {
+  const out = new Map<string, { color: string; text?: string }>();
+  const index = await lineIndex(src);
+  for (const [key, line, mode, , color, text] of index?.lines ?? []) {
+    if (mode === 'train' || !color) continue;
+    const k = `${opOf(key)}:${lineKey(line)}`;
+    if (!out.has(k)) out.set(k, text ? { color, text } : { color });
+  }
+  return out;
+}
+
+/**
+ * 1.2.6 : lignes de bus, tram et métro « près de toi » : celles des arrêts à `radiusM` au plus (`stops` :
+ * réseau et numéros de chaque arrêt proche, comme « Autour de moi »), avec leurs terminus et leur arrêt le plus
+ * proche, du plus proche au plus loin.
+ */
+export async function linesNearIn(src: LineData, near: LatLon, stops: readonly { op: string; lines: readonly string[] }[], radiusM: number): Promise<LineMatch[]> {
+  const want = new Map<string, { op: string; line: string }>();
+  for (const st of stops) if (st.op !== 'sncb') for (const l of st.lines) if (lineKey(l)) want.set(`${st.op}:${lineKey(l)}`, { op: st.op, line: l });
+  const out: LineMatch[] = [];
+  for (const w of want.values()) {
+    const ms = await findLinesIn(src, w.line, near);
+    const m = ms.find((x) => x.op === w.op && (x.nearest?.distanceM ?? Infinity) <= radiusM + 150);
+    if (m && !out.some((o) => o.op === m.op && lineKey(o.line) === lineKey(m.line))) out.push(m);
+  }
+  const rank: Record<string, number> = { metro: 0, tram: 1, bus: 2 };
+  return out.sort((a, b) => (a.nearest?.distanceM ?? 0) - (b.nearest?.distanceM ?? 0) || (rank[a.mode] ?? 3) - (rank[b.mode] ?? 3) || a.line.localeCompare(b.line, 'fr', { numeric: true }));
+}
+
 export function serviceDayIndex(dates: readonly string[], now: number): number {
   return dates.indexOf(localDate(now - DAY_START_MS));
 }

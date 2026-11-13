@@ -824,8 +824,10 @@ function validateLines(
   const numOf = new Map<string, number>();
   lines.forEach((e, i) => {
     const w = `lines/index.json : lines[${i}]`;
-    if (!Array.isArray(e) || e.length !== 4 || !isStr(e[0]) || !isStr(e[1]) || !isStr(e[2]) || !isInt(e[3])) {
-      err(`${w} : attendu [clé, ligne, mode, motifs] (${JSON.stringify(e)})`);
+    // 1.2.6 : couleur de la ligne et de son texte (« RRGGBB »), facultatives, en 5e et 6e éléments
+    const hex = (x: unknown): boolean => typeof x === 'string' && /^[0-9A-F]{6}$/.test(x);
+    if (!Array.isArray(e) || e.length < 4 || e.length > 6 || !isStr(e[0]) || !isStr(e[1]) || !isStr(e[2]) || !isInt(e[3]) || (e.length > 4 && !hex(e[4])) || (e.length > 5 && !hex(e[5]))) {
+      err(`${w} : attendu [clé, ligne, mode, motifs, couleur ?, texte ?] (${JSON.stringify(e)})`);
       return;
     }
     if (numOf.has(e[0])) err(`${w} : ligne ${e[0]} en double`);

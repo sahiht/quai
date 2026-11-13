@@ -5,8 +5,8 @@
  * « Mes lieux » (#/lieux) n'existe plus : son ancre mène à « Mes favoris ».
  * 1.2.2 (PRD-1.2.2 § 4) : #/gares et #/lignes (Quai Web : ouverts par les lunettes) montrent la section de l'accueil,
  * ou l'ajout si elle est vide ; #/gares/ajouter, #/lignes/ajouter (?arret=… : arrêt présélectionné) ; #/trajets
- * (revue d'usage n° 9). 1.2.3 (PRD-1.2.3 § 3) : #/lignes/ajouter ouvre le choix « Une ligne » | « Un arrêt » ;
- * #/lignes/ajouter/ligne et #/lignes/ajouter/arret, l'un ou l'autre d'emblée.
+ * (revue d'usage n° 9). 1.2.6 (PRD-1.2.6 § 5) : #/lignes (lignes suivies), #/arrets (arrêts) ; #/lignes/ajouter (et
+ * #/lignes/ajouter/ligne) ajoute une ligne, #/arrets/ajouter (et #/lignes/ajouter/arret) un arrêt.
  */
 import type { Core, GlassesApi, Meta } from '../core/api';
 import type { Freshness } from '../glasses/controller';
@@ -21,6 +21,7 @@ import { displayScreen } from './screens/display';
 import { favoriteEditScreen, fixedTripScreen, newFavoriteScreen } from './screens/favorite-edit';
 import { favoritesScreen } from './screens/favorites';
 import { homeScreen } from './screens/home';
+import type { PickKind } from './screens/picks';
 import { onboardingScreen, yourFavoritesScreen } from './screens/onboarding';
 import { addLineScreen, addStationScreen } from './screens/pick-add';
 import { searchScreen } from './screens/search';
@@ -62,19 +63,25 @@ interface Route {
   screen: Screen;
   /** Fond gris (accueil, recherche) ; une fonction quand l'ancre mène à des écrans différents (#/gares). */
   grey?: boolean | ((ctx: PhoneCtx, sub: string[]) => boolean);
-  title: string;
+  /** Titre de la page ; une fonction quand l'ancre mène à des écrans différents (#/lignes/ajouter/arret). */
+  title: string | ((ctx: PhoneCtx, sub: string[]) => string);
 }
 
 /**
- * #/gares et #/lignes (PRD-1.2.2 § 1.3 et § 4, Quai Web) : la section de l'accueil, curseur sur son titre ; vide, ou
- * #/…/ajouter : l'ajout.
+ * #/gares, #/arrets et #/lignes (PRD-1.2.2 § 1.3 et § 4, Quai Web ; 1.2.6 : trois rubriques) : la section de l'accueil,
+ * curseur sur son titre ; vide, ou #/…/ajouter : l'ajout. #/lignes/ajouter/arret (1.2.3) : l'ajout d'un arrêt.
  */
-function pickRoute(kind: 'stations' | 'lines'): Route {
-  const adding = (c: PhoneCtx, s: string[]): boolean => s[0] === 'ajouter' || !c.settings.get()[kind].length;
+function pickRoute(kind: PickKind): Route {
+  const count = (c: PhoneCtx): number => {
+    const s = c.settings.get();
+    return kind === 'stations' ? s.stations.length : kind === 'lines' ? s.lines.length : (s.follows ?? []).length;
+  };
+  const stop = (s: string[]): boolean => kind === 'lines' || (s[0] === 'ajouter' && s[1] === 'arret');
+  const adding = (c: PhoneCtx, s: string[]): boolean => s[0] === 'ajouter' || !count(c);
   return {
-    screen: (c, s) => (adding(c, s) ? (kind === 'stations' ? addStationScreen(c) : addLineScreen(c, s[1] === 'arret' ? 'stop' : 'line')) : homeScreen(c, [], { focus: kind })),
+    screen: (c, s) => (adding(c, s) ? (kind === 'stations' ? addStationScreen(c) : addLineScreen(c, stop(s) ? 'stop' : 'line')) : homeScreen(c, [], { focus: kind })),
     grey: (c, s) => !adding(c, s),
-    title: kind === 'stations' ? T.stations : T.lines,
+    title: (_c, s) => (kind === 'stations' ? T.stationsTitle : stop(s) ? T.stopsTitle : T.followsTitle),
   };
 }
 
@@ -83,7 +90,8 @@ const SCREENS: Record<string, Route> = {
   bienvenue: { screen: (c, s) => (s[0] === 'favoris' || s[0] === 'lieux' ? yourFavoritesScreen(c) : onboardingScreen(c)), title: 'Bienvenue' },
   favoris: { screen: favoritesRoute, title: 'Mes favoris' },
   gares: pickRoute('stations'),
-  lignes: pickRoute('lines'),
+  arrets: pickRoute('lines'),
+  lignes: pickRoute('follows'),
   trajets: { screen: tripsScreen, title: T.trips },
   affichage: { screen: displayScreen, title: 'Affichage' },
   alertes: { screen: alertsScreen, title: 'Alertes' },
@@ -119,7 +127,7 @@ export function parseHash(hash: string): { name: string; sub: string[]; params: 
 }
 
 /** Version qui a apporté les nouveautés de la bannière (PRD-1.2.5 § 8) : la 1.2.5. */
-export const NEWS_SINCE = '1.2.5';
+export const NEWS_SINCE = '1.2.6';
 
 /** Bannière « Nouveau » de l'accueil : visible ou non, « OK », et ses lignes (newsLines). */
 export interface NewsState {
@@ -168,7 +176,8 @@ export function mountPhone(deps: PhoneDeps): { refresh(): void } {
     };
     const grey = typeof def.grey === 'function' ? def.grey(ctx, sub) : !!def.grey;
     (deps.themeTarget ?? document.body).classList.toggle('grey', grey);
-    document.title = def.title === 'Quai' ? 'Quai' : `${def.title} · Quai`;
+    const title = typeof def.title === 'function' ? def.title(ctx, sub) : def.title;
+    document.title = title === 'Quai' ? 'Quai' : `${title} · Quai`;
     let el: HTMLElement;
     try {
       el = await def.screen(ctx, sub);

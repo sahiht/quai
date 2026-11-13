@@ -33,7 +33,9 @@ function overflowing(page: PageSpec): string[] {
  */
 const lines = (v: ReturnType<typeof homePreview>) =>
   v.items.flatMap((i) => {
-    const text = [i.a, i.b, i.bRight ? `${i.bRight}${i.bRightTail ?? ''}` : '', i.c, i.b2].filter(Boolean).join(' | ').replace(/\u00a0/g, ' ');
+    // 1.2.6 : une rubrique dit son mot clé et sa précision (segs)
+    const title = i.a || (i.segs ?? []).map((g) => g.t).join(' ');
+    const text = [title, i.b, i.bRight ? `${i.bRight}${i.bRightTail ?? ''}` : '', i.c, i.b2].filter(Boolean).join(' | ').replace(/\u00a0/g, ' ');
     return i.gap ? ['', text] : [text];
   });
 
@@ -78,24 +80,20 @@ describe('Affichage', () => {
     await until(() => hz.settings.get().display.favOrder === 'mine');
   });
 
-  it('exemple en réglages v4 : favoris (endroits et trajets), une gare et une ligne ; aucun arrêt favori', () => {
+  it('exemple en réglages v4 : favoris (endroits et trajets), une gare, un arrêt et une ligne suivie ; aucun arrêt favori', () => {
     const s = sampleSettings(defaults());
     expect(s.favorites.map((f) => `${f.kind}:${f.id}`)).toEqual(['trip:ex-gand', 'place:ex-bureau', 'trip:ex-mons']);
     expect(s.stations.map((x) => [x.id, x.areaId])).toEqual([['ex-namur', 'sncb:8863008']]);
-    expect(s.lines.map((x) => [x.id, x.areaId, x.line, x.mode])).toEqual([['ex-gdn', 'stib:6357F', '3', 'tram']]);
+    expect(s.lines.map((x) => [x.id, x.areaId, x.line, x.mode])).toEqual([['ex-gdn', 'stib:6357F', undefined, undefined]]);
+    expect(s.follows?.map((x) => [x.id, x.op, x.line, x.mode])).toEqual([['ex-t3', 'stib', '3', 'tram']]);
   });
 
-  it('aperçu : l’accueil 1.2.2 (PRD-1.2.2 § 1.1), 3 favoris, puis la gare et la ligne ; 1.2.4 (PRD-1.2.4 § 3) : leur nombre à droite', () => {
-    expect(lines(homePreview(defaults()))).toEqual([
-      'Favoris | 3',
-      'Bureau | dans 4 min → 09:00',
-      'Vers Mons | dans 14 min → 09:04',
-      'Vers Gand-Saint-Pierre | 08:58 → 09:30',
-      '',
-      'Autour de moi | 3 arrêts',
-      'Gares | 1 gare',
-      'Bus, tram, métro | 1 ligne',
-    ]);
+  it('aperçu : l’accueil 1.2.2 (PRD-1.2.2 § 1.1), 3 favoris, puis les trois rubriques (1.2.6) et leur nombre à droite', () => {
+    // l'aide des gestes prend la place de la ligne vide (PRD-1.2.6 § 1)
+    const tail = ['Autour de moi | 3 arrêts', 'Gares de train | 1 gare', 'Arrêts de bus, tram, métro | 1 arrêt', 'Lignes de bus, tram, métro | 1 ligne'];
+    const favs = ['Favoris | 3', 'Bureau | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04', 'Vers Gand-Saint-Pierre | 08:58 → 09:30'];
+    expect(lines(homePreview(defaults()))).toEqual([...favs, ...tail]);
+    expect(lines(homePreview(defaults({ display: { ...defaults().display, gestureHints: false } })))).toEqual([...favs, '', ...tail]);
   });
 
   it('aperçu : selon l’ouverture, l’ordre et le rayon (T5, PRD-1.2.1 § 4)', () => {
@@ -126,6 +124,6 @@ describe('Affichage', () => {
     }
     const el = mount(displayScreen(harness({ settings: defaults() }).ctx));
     const label = el.querySelector('.preview')!.getAttribute('aria-label')!.replace(/\u00a0/g, ' ');
-    expect(label).toBe('Aperçu dans les lunettes : Quai, Favoris 3, Bureau dans 4 min → 09:00, Vers Mons dans 14 min → 09:04, Vers Gand-Saint-Pierre 08:58 → 09:30, Autour de moi 3 arrêts, Gares 1 gare, Bus, tram, métro 1 ligne');
+    expect(label).toBe('Aperçu dans les lunettes : Quai, Favoris 3, Bureau dans 4 min → 09:00, Vers Mons dans 14 min → 09:04, Vers Gand-Saint-Pierre 08:58 → 09:30, Autour de moi 3 arrêts, Gares de train 1 gare, Arrêts de bus, tram, métro 1 arrêt, Lignes de bus, tram, métro 1 ligne');
   });
 });

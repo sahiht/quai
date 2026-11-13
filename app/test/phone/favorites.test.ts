@@ -208,10 +208,11 @@ describe('trajet fixe (1.1) et créneaux (revue d’usage n° 11)', () => {
     const s = preset();
     expect(s.favorites.map((f) => `${f.kind}:${f.id}`)).toEqual(['place:fav-bureau', 'trip:fav-gand', 'place:maison']);
     expect(s.stations.map((x) => x.areaId)).toEqual(['sncb:8863008']);
-    expect(s.lines.map((x) => [x.areaId, x.line ?? '*', !!x.near])).toEqual([
+    expect(s.lines.map((x) => [x.areaId, x.line ?? '*', !!x.near])).toEqual([['delijn:308611', '*', false]]);
+    // 1.2.6 : les lignes gardées à un arrêt sont suivies, l'arrêt en repère
+    expect(s.follows?.map((x) => [x.via?.areaId, x.line, !!x.near])).toEqual([
       ['stib:6357F', '3', true],
       ['stib:6357F', '4', true],
-      ['delijn:308611', '*', false],
     ]);
   });
 });

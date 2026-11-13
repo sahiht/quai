@@ -1,0 +1,3 @@
+Gares de train, arrêts et lignes de bus, tram, métro : trois rubriques séparées.
+Une ligne se suit en entier, dans les deux sens, avec l’attente à chacun de ses arrêts.
+Ajouts plus simples : ce qui est près de toi est proposé, chaque ligne à sa couleur.

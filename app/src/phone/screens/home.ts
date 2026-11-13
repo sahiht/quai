@@ -12,7 +12,7 @@ import { catchable } from '../../glasses/format';
 import { shortAnswer, T, tripsSummary, typo } from '../text';
 import { listRow, messageHub } from '../ui';
 import { shownFavorites, type ShownFavorite } from './favorites';
-import { linesSection, stationsSection, type PickKind } from './picks';
+import { followsSection, linesSection, stationsSection, type PickKind } from './picks';
 
 const LANG_TEXT = { fr: 'Noms en français', nl: 'Noms en néerlandais', local: 'Noms comme sur place' } as const;
 
@@ -194,6 +194,7 @@ export function homeScreen(ctx: PhoneCtx, _sub: string[] = [], opts: { focus?: P
     }),
     stationsSection(ctx, opts.focus === 'stations'),
     linesSection(ctx, opts.focus === 'lines'),
+    followsSection(ctx, opts.focus === 'follows'),
     h('h2', null, 'Réglages'),
     h(
       'ul',

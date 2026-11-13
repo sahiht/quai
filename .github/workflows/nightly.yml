@@ -10,6 +10,12 @@ on:
     # 01:15 UTC = 02:15 à Bruxelles en hiver (03:15 en été)
     - cron: '15 1 * * *'
   workflow_dispatch:
+    inputs:
+      verification:
+        description: "Essai d'une branche : préparer les données et balayer les lignes, sans rien publier"
+        type: boolean
+        required: false
+        default: false
   # Après un changement de l'appli : Quai Web est republié (les données sont refaites aussi, GTFS gardés en repli).
   push:
     branches: [main]
@@ -159,10 +165,22 @@ jobs:
           </body></html>
           HTML
 
+      # 1.2.6 (PRD-1.2.6 § 9) : toutes les lignes de bus, tram et métro passent par le calcul des lunettes (sens,
+      # terminus, toute la ligne, rangées) ; le bilan est dans le journal. Ne bloque jamais la publication.
+      - name: Balayer les lignes de bus, tram et métro
+        if: ${{ steps.webapp.outcome == 'success' }}
+        continue-on-error: true
+        working-directory: app
+        env:
+          QUAI_SCAN_DATA: ../site/data
+        run: npx vitest run test/scan
+
       - name: Configurer GitHub Pages
+        if: ${{ !inputs.verification }}
         uses: actions/configure-pages@v6
 
       - name: Envoyer le site
+        if: ${{ !inputs.verification }}
         uses: actions/upload-pages-artifact@v5
         with:
           path: site
@@ -170,6 +188,7 @@ jobs:
   deploy:
     name: Publier sur GitHub Pages
     needs: build
+    if: ${{ !inputs.verification }}
     runs-on: ubuntu-latest
     timeout-minutes: 75
     permissions:
@@ -203,7 +222,7 @@ jobs:
   keepalive:
     name: Garder la tâche planifiée active
     needs: [build, deploy]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && !inputs.verification }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
