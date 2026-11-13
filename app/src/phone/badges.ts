@@ -39,9 +39,32 @@ function dark(hex: string): boolean {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b < 150;
 }
 
-/** Fond et texte d'une pastille à la couleur d'une ligne : le texte de l'opérateur, sinon blanc ou presque noir. */
+/** Contraste WCAG entre deux couleurs « RRGGBB » (de 1 à 21). */
+export function contrastRatio(a: string, b: string): number {
+  const lum = (hex: string): number => {
+    const n = parseInt(hex, 16);
+    const [r, g, bl] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => {
+      const x = c / 255;
+      return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+  };
+  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+}
+
+/** Contraste minimal du numéro sur sa pastille (WCAG, texte en gras et éléments d'interface). */
+export const BADGE_CONTRAST = 3;
+
+/**
+ * Fond et texte d'une pastille à la couleur d'une ligne : le texte de l'opérateur, sinon blanc ou presque noir. 1.2.6 :
+ * un texte de l'opérateur illisible sur son fond (contraste sous 3:1, comme le beige sur blanc de 556 lignes De Lijn
+ * le 13/11) est remplacé par le plus lisible des deux ; le fond reste celui de l'opérateur.
+ */
 export function badgeColors(color: string, text?: string): { b: string; t: string } {
-  return { b: color, t: text || (dark(color) ? 'FFFFFF' : '161A17') };
+  const t = text || (dark(color) ? 'FFFFFF' : '161A17');
+  if (contrastRatio(color, t) >= BADGE_CONTRAST) return { b: color, t };
+  return { b: color, t: contrastRatio(color, 'FFFFFF') >= contrastRatio(color, '161A17') ? 'FFFFFF' : '161A17' };
 }
 
 export function paintBadge(el: HTMLElement, color?: string, text?: string): void {

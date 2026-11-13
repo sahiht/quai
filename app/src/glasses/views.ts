@@ -720,11 +720,13 @@ function metersText(m: number): string {
 }
 
 /**
- * 1.2.6 : toute la ligne dans un sens, « Tram 3 vers Churchill » : chaque arrêt dans l'ordre, ○ pâle devant
- * son nom, ● au plus clair quand un véhicule arrive (il est entre l'arrêt d'avant et celui-ci), à droite les 2 prochains
- * passages (« imminent · 8 min », « ~4 · ~12 min », « demain ~05:32 ») ; l'arrêt le plus proche dit sa distance
- * (« à 80 m ») et porte le curseur à l'ouverture ; enfin « ↔ Autre sens vers Esplanade ». Toucher un arrêt : les
- * passages de la ligne à cet arrêt (détail de la 1.2.2).
+ * 1.2.6 : toute la ligne dans un sens, « Tram 3 vers Churchill » : chaque arrêt dans l'ordre, ○ devant son nom, ● quand
+ * un véhicule arrive (il est entre l'arrêt d'avant et celui-ci) ; un arrêt d'une variante, que seuls certains voyages
+ * desservent : ◇ (◆ quand un véhicule y arrive). À droite les 2 prochains passages (« imminent · 8 min », « ~4 · ~12
+ * min », « demain ~05:32 ») ; l'arrêt le plus proche dit sa distance (« à 80 m ») et porte le curseur à l'ouverture ;
+ * enfin « ↔ Autre sens vers Esplanade » quand la ligne a un sens inverse (`run.other` ; une ligne en morceaux a un sens
+ * par morceau). Ligne du haut : la légende de ce qui est à l'écran, « ● : un tram arrive », « ◇ : pas tous les trams »,
+ * ou les deux. Toucher un arrêt : les passages de la ligne à cet arrêt (détail de la 1.2.2).
  */
 export function lineRunView(r: LineRunRoute, follow: LineFollow, run: LineRun, ctx: ViewCtx): GlassesView {
   const l = lang(ctx);
@@ -737,8 +739,9 @@ export function lineRunView(r: LineRunRoute, follow: LineFollow, run: LineRun, c
   run.stops.forEach((st, i) => {
     const deps = st.next.map((x) => ({ est: x.t, sched: x.t, rt: x.rt, cancelled: false, delayMin: 0, partial: false }) as unknown as LineDeparture);
     if (deps.some((d) => !d.rt)) f.planned = true;
-    // le repère et le nom dans le même conteneur (au plus clair) : les noms restent alignés
-    const segs: Seg[] = [{ t: st.vehicle ? '●' : '○', hi: true }, { t: displayName(st.name, l), hi: true }];
+    // le repère et le nom dans le même conteneur (au plus clair) : les noms restent alignés (○ ● ◇ ◆ : 20 px chacun)
+    const mark = st.vehicle ? (st.branch ? '◆' : '●') : st.branch ? '◇' : '○';
+    const segs: Seg[] = [{ t: mark, hi: true }, { t: displayName(st.name, l), hi: true }];
     if (run.nearest?.index === i) segs.push({ t: `à ${metersText(run.nearest.distanceM)}` });
     v.items.push({
       a: '',
@@ -748,17 +751,25 @@ export function lineRunView(r: LineRunRoute, follow: LineFollow, run: LineRun, c
       key: `${st.areaId}#${i}`,
     });
   });
-  const other = run.heads[1 - run.dir];
-  if (run.heads.length > 1 && other) {
-    v.items.push({ a: '', segs: [{ t: '↔', hi: true }, { t: SECTION.otherWay, hi: true }, { t: 'vers' }, { t: headText(other, l, run.op), hi: true }], action: { kind: 'open', route: { screen: 'lineRun', follow: follow.id, dir: 1 - run.dir } } });
+  // le sens inverse (le même morceau, dans l'autre sens) ; une boucle ou un morceau sans retour n'en a pas
+  const back = run.other;
+  const otherHead = back !== undefined && back !== run.dir ? run.heads[back] : undefined;
+  if (back !== undefined && otherHead) {
+    v.items.push({ a: '', segs: [{ t: '↔', hi: true }, { t: SECTION.otherWay, hi: true }, { t: 'vers' }, { t: headText(otherHead, l, run.op), hi: true }], action: { kind: 'open', route: { screen: 'lineRun', follow: follow.id, dir: back } } });
   }
   if (run.nearest) v.initialSel = run.nearest.index;
-  if (run.stops.some((st) => st.vehicle)) v.top = { text: `●${NB}: ${run.mode === 'tram' ? 'un tram arrive' : run.mode === 'metro' ? 'un métro arrive' : 'un bus arrive'}` };
+  // ligne du haut : la légende de ce qui est à l'écran ; un ◆ compte comme un véhicule qui arrive
+  const word = run.mode === 'tram' ? 'tram' : run.mode === 'metro' ? 'métro' : 'bus';
+  const legend = [
+    run.stops.some((st) => st.vehicle) ? `●${NB}: un ${word} arrive` : '',
+    run.stops.some((st) => st.branch) ? `◇${NB}: pas tous les ${word === 'bus' ? 'bus' : `${word}s`}` : '',
+  ].filter(Boolean);
+  if (legend.length) v.top = { text: legend.join(' · ') };
   v.note = passagesNote(f, ctx);
   v.reserveNote = true;
   v.paged = true;
   v.hints = hints(ctx, HINTS.lineRun);
-  v.log = { line: run.line, dir: run.dir, stops: run.stops.length, vehicles: run.stops.filter((st) => st.vehicle).length, nearest: run.nearest?.index ?? -1 };
+  v.log = { line: run.line, dir: run.dir, stops: run.stops.length, vehicles: run.stops.filter((st) => st.vehicle).length, nearest: run.nearest?.index ?? -1, branches: run.stops.filter((st) => st.branch).length };
   return v;
 }
 

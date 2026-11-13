@@ -137,8 +137,8 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
     const r = await h.until(runReady);
     expect(r.title).toBe('Bus W vers Bruxelles Midi');
     expect(r.sel).toBe(1);
-    expect(r.lines.find((l) => / à \d+ m {3}/.test(l))).toMatch(/^[○●] Braine-l’Alleud Merbraine à 500 m {3}\S/);
-    expect(r.lines.filter((l) => /^[○●] [^:]/.test(l)).map((l) => l.slice(2).split('   ')[0].replace(/ à \d+ m$/, ''))).toEqual(['Braine-l’Alleud Gare', 'Braine-l’Alleud Merbraine', 'Waterloo Eglise', 'Bruxelles Midi']);
+    expect(r.lines.find((l) => / à \d+ m {3}/.test(l))).toMatch(/^[○●◇◆] Braine-l’Alleud Merbraine à 500 m {3}\S/);
+    expect(r.lines.filter((l) => /^[○●◇◆] [^:]/.test(l)).map((l) => l.slice(2).split('   ')[0].replace(/ à \d+ m$/, ''))).toEqual(['Braine-l’Alleud Gare', 'Braine-l’Alleud Merbraine', 'Waterloo Eglise', 'Bruxelles Midi']);
     expect(r.lines).toContain('↔ Autre sens vers Braine-l’Alleud Gare');
     expect(r.lines.at(-1)).toBe('△▽ arrêts   toucher : passages   double : retour');
     // « ↔ Autre sens » : l'autre sens ; double toucher : la liste
@@ -211,6 +211,7 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
         { areaId: 'stib:6366', name: N('Churchill'), lat: 0, lon: 0, next: [], last: true },
       ],
       nearest: { index: 1, distanceM: 80 },
+      other: 1,
       rtError: false,
       state: 'ok',
     };
@@ -229,11 +230,87 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
     fitsRows(v);
     fitsRows(v, 4);
     // une boucle (un seul sens) : pas d'autre sens ; aucun véhicule : pas de ligne du haut
-    const loop = lineRunView(route, F3, { ...run, heads: [N('Churchill')], stops: run.stops.map((s) => ({ ...s, vehicle: false })) }, ctx());
+    const loop = lineRunView(route, F3, { ...run, heads: [N('Churchill')], other: undefined, stops: run.stops.map((s) => ({ ...s, vehicle: false })) }, ctx());
     expect(lines(loop).some((x) => x.startsWith('↔'))).toBe(false);
     expect(lines(loop)[0]).toBe('○ Esplanade   6 · 14 min');
     // ligne introuvable : un message
     expect(lines(lineRunView(route, F3, { ...run, state: 'missing', stops: [] }, ctx()))).toEqual(['Introuvable : modifie-la sur le téléphone.', 'double toucher : retour']);
+  });
+
+  it('variantes : ◇ pour un arrêt que seuls certains voyages desservent, ◆ quand un véhicule y arrive ; légende en haut', () => {
+    const t = (m: number, rt = true) => ({ t: NOW + m * MIN, rt });
+    const run: LineRun = {
+      op: 'stib',
+      mode: 'tram',
+      line: '4',
+      heads: [N('Gare du Nord'), N('Stalle')],
+      dir: 1,
+      other: 0,
+      stops: [
+        { areaId: 'stib:a', name: N('Gare du Nord'), lat: 0, lon: 0, next: [t(3), t(11)] },
+        { areaId: 'stib:b', name: N('Gare du Midi'), lat: 0, lon: 0, next: [t(12), t(20)] },
+        { areaId: 'stib:c', name: N('Wiels'), lat: 0, lon: 0, next: [t(18), t(48)], branch: true },
+        { areaId: 'stib:d', name: N('Forest Centre'), lat: 0, lon: 0, next: [t(2), t(52)], branch: true, vehicle: true },
+        { areaId: 'stib:e', name: N('Stalle'), lat: 0, lon: 0, next: [t(30)], last: true },
+      ],
+      rtError: false,
+      state: 'ok',
+    };
+    const route = { screen: 'lineRun' as const, follow: F3.id, dir: 1 };
+    const v = lineRunView(route, F3, run, ctx());
+    const l = lines(v);
+    // véhicule (◆ compris) et variantes : les deux légendes sur la ligne du haut
+    expect(l[0]).toBe('● : un tram arrive · ◇ : pas tous les trams');
+    expect(l.slice(1, 6)).toEqual(['○ Gare du Nord   3 · 11 min', '○ Gare du Midi   12 · 20 min', '◇ Wiels   18 · 48 min', '◆ Forest Centre   2 · 52 min', '○ Stalle   30 min']);
+    expect(l[6]).toBe('↔ Autre sens vers Gare du Nord');
+    fitsRows(v);
+    // le repère au plus clair, comme ○ et ● : même conteneur que le nom, les noms restent alignés
+    const p = page(v);
+    const a = rowsOf(container(p, 'colA'));
+    const at = (name: string) => a.find((x) => x.includes(name)) ?? '';
+    expect(textWidth(at('Wiels').split('Wiels')[0])).toBe(textWidth(at('Gare du Midi').split('Gare du Midi')[0]));
+    // variantes seules : « ◇ : pas tous les trams » ; bus et métro au pluriel
+    const quiet = { ...run, stops: run.stops.map((x) => ({ ...x, vehicle: false })) };
+    expect(lines(lineRunView(route, F3, quiet, ctx()))[0]).toBe('◇ : pas tous les trams');
+    expect(lines(lineRunView(route, F3, { ...quiet, mode: 'bus' }, ctx()))[0]).toBe('◇ : pas tous les bus');
+    expect(lines(lineRunView(route, F3, { ...quiet, mode: 'metro' }, ctx()))[0]).toBe('◇ : pas tous les métros');
+    expect(lines(lineRunView(route, F3, { ...run, mode: 'metro' }, ctx()))[0]).toBe('● : un métro arrive · ◇ : pas tous les métros');
+    // ni véhicule ni variante : pas de ligne du haut
+    expect(lines(lineRunView(route, F3, { ...quiet, stops: quiet.stops.map((x) => ({ ...x, branch: false })) }, ctx()))[0]).toBe('○ Gare du Nord   3 · 11 min');
+    // un véhicule sur un arrêt de variante seulement : ◆, et la légende dit les deux
+    const one = { ...run, stops: run.stops.map((x, i) => ({ ...x, vehicle: i === 3 })) };
+    expect(lines(lineRunView(route, F3, one, ctx()))[0]).toBe('● : un tram arrive · ◇ : pas tous les trams');
+    // la ligne du haut tient sur l'écran, avec le nom de ligne le plus long des réseaux
+    for (const mode of ['tram', 'bus', 'metro'] as const) {
+      const top = layoutPage(lineRunView(route, F3, { ...run, mode }, ctx()), { sel: 0, top: 0 }).lines[0];
+      expect(textWidth(top), top).toBeLessThanOrEqual(572 - 28 - 2);
+      expect(top).not.toContain('…');
+    }
+  });
+
+  it('ligne en morceaux : « ↔ Autre sens » mène au sens inverse du même morceau (other) ; sans sens inverse, rien', () => {
+    const t = (m: number) => ({ t: NOW + m * MIN, rt: true });
+    const stops = [
+      { areaId: 'stib:p', name: N('Porte de Hal'), lat: 0, lon: 0, next: [t(4), t(14)] },
+      { areaId: 'stib:s', name: N('Stalle'), lat: 0, lon: 0, next: [t(20)], last: true },
+    ];
+    // quatre sens rangés par terminus : Gare du Nord, Porte de Hal, Stalle, Wiels ; Porte de Hal → Stalle est le sens 2,
+    // son inverse le sens 1
+    const run: LineRun = { op: 'stib', mode: 'tram', line: '4', heads: [N('Gare du Nord'), N('Porte de Hal'), N('Stalle'), N('Wiels')], dir: 2, other: 1, stops, rtError: false, state: 'ok' };
+    const route = { screen: 'lineRun' as const, follow: F3.id, dir: 2 };
+    const v = lineRunView(route, F3, run, ctx());
+    expect(v.title).toBe('Tram 4 vers Stalle');
+    const l = lines(v);
+    expect(l.slice(0, 3)).toEqual(['○ Porte de Hal   4 · 14 min', '○ Stalle   20 min', '↔ Autre sens vers Porte de Hal']);
+    expect(v.items[2].action).toEqual({ kind: 'open', route: { screen: 'lineRun', follow: F3.id, dir: 1 } });
+    fitsRows(v);
+    // sans sens inverse (morceau à sens unique, boucle) : pas de « ↔ Autre sens », jamais un autre morceau
+    const alone = lineRunView(route, F3, { ...run, other: undefined }, ctx());
+    expect(lines(alone).some((x) => x.startsWith('↔'))).toBe(false);
+    expect(alone.items).toHaveLength(2);
+    // un sens inverse qui serait le sens lui-même, ou hors de la liste : rien non plus
+    expect(lines(lineRunView(route, F3, { ...run, other: 2 }, ctx())).some((x) => x.startsWith('↔'))).toBe(false);
+    expect(lines(lineRunView(route, F3, { ...run, other: 9 }, ctx())).some((x) => x.startsWith('↔'))).toBe(false);
   });
 
   it('liste : un sens par rangée, la ligne et sa destination au plus clair ; en calcul « … » ; destination longue coupée', () => {

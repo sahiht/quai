@@ -26,8 +26,8 @@
  * pâles (§ 4) : chaque mot à la place que layout.ts (segRow) lui donne, dans son conteneur, les passages calés à
  * droite ; la ligne de progression en haut de « Dans le train », train compris (§ 7), et sa note (§ 5).
  * 1.2.6 : « Lignes de bus, tram, métro » (un sens par rangée, à la marge) et toute la ligne dans un sens (un arrêt par
- * rangée : le repère et le nom au plus clair, la distance pâle, les passages calés à droite ; « ● : un tram arrive » en
- * ligne du haut).
+ * rangée : le repère ○ ● ◇ ◆ et le nom au plus clair, la distance pâle, les passages calés à droite ; la légende,
+ * « ● : un tram arrive », « ◇ : pas tous les trams » ou les deux, en ligne du haut).
  * `levels()` mesure aussi la luminosité de chaque bande (relief : favoris un ton plus pâles que leur titre) ;
  * `alphaIn()` celle d'une plage de la bande (1.2.5 : « vers » pâle entre la ligne et sa destination au plus clair).
  */
@@ -228,11 +228,11 @@ function versWords(left: string): Word[] {
   return m ? [{ t: nbsp(m[1]), hi: true }, { t: 'vers' }, { t: nbsp(m[2]), hi: true }] : [{ t: nbsp(left) }];
 }
 /**
- * 1.2.6 : un arrêt de toute la ligne (« ● Gare du Nord à 80 m ») : le repère et le nom au plus clair, la distance
- * pâle ; « ↔ l’autre sens vers Esplanade » comme une rangée de « Lignes ».
+ * 1.2.6 : un arrêt de toute la ligne (« ● Gare du Nord à 80 m » ; ◇ et ◆ pour un arrêt de variante) : le repère et le
+ * nom au plus clair, la distance pâle ; « ↔ Autre sens vers Esplanade » comme une rangée de « Lignes ».
  */
 function runWords(left: string): Word[] {
-  const m = /^([●○]) (.+?)(?: (à [\d,]+\s(?:m|km)))?$/.exec(left);
+  const m = /^([●○◆◇]) (.+?)(?: (à [\d,]+\s(?:m|km)))?$/.exec(left);
   if (!m) return versWords(left);
   return [{ t: m[1], hi: true }, { t: nbsp(m[2]), hi: true }, ...(m[3] ? [{ t: nbsp(m[3]) }] : [])];
 }
@@ -346,7 +346,7 @@ function bands(s: LoggedScreen): Band[] | null {
           : s.screen === 'train'
             ? TOP_TRAIN.test(lines[0] ?? '')
             : s.screen === 'lineRun'
-              ? /^●\s: /.test(lines[0] ?? '')
+              ? /^[●◇]\s: /.test(lines[0] ?? '')
               : s.screen === 'stops' || (s.screen === 'line' && /^! /.test(lines[0] ?? ''));
   const top = hasTop ? lines.shift()! : undefined;
   let hint: string | undefined;

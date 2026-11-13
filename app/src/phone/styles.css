@@ -329,7 +329,7 @@ dl { margin: 0; }
 /* 1.2.6 : pastilles des lignes de bus, tram et métro, à leur couleur officielle (route_color des
    horaires) ; sans couleur publiée, une pastille neutre. Couleurs posées par le CSSOM (--b fond, --t texte). */
 .badge { min-width: 36px; height: 36px; padding: 0 6px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 15px; line-height: 1; font-weight: 700; background: var(--b, #eceeea); color: var(--t, #3f4842); box-shadow: inset 0 0 0 1px rgba(22, 26, 23, 0.12); font-variant-numeric: tabular-nums; }
-.badge.official { box-shadow: none; }
+/* 1.2.6 : le liseré reste sur une pastille officielle (le blanc des lignes De Lijn sur le fond blanc) */
 .badge.sm { min-width: 26px; height: 22px; padding: 0 5px; border-radius: 6px; font-size: 12px; }
 .badge.more { background: transparent; box-shadow: none; color: var(--muted); font-weight: 600; }
 .badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }

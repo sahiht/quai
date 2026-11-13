@@ -28,7 +28,7 @@ import { textWidth } from '../../src/glasses/font';
 import { layoutPage } from '../../src/glasses/layout';
 import type { GlassesView, PageSpec } from '../../src/glasses/types';
 import { followsView, lineRunView, type ViewCtx } from '../../src/glasses/views';
-import { badgeColors } from '../../src/phone/badges';
+import { BADGE_CONTRAST, badgeColors, contrastRatio } from '../../src/phone/badges';
 import { overflowing, rowsOf, settingsWith } from '../glasses/helpers';
 
 const DIR = process.env.QUAI_SCAN_DATA;
@@ -43,20 +43,6 @@ const DETAIL = new Set(
       return `${op.toLowerCase()}:${lineKey(line.join(':'))}`;
     }),
 );
-
-/** Contraste WCAG entre deux couleurs « RRGGBB ». */
-function contrast(a: string, b: string): number {
-  const lum = (hex: string): number => {
-    const n = parseInt(hex, 16);
-    const [r, g, bl] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => {
-      const x = c / 255;
-      return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
-    });
-    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
-  };
-  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
-  return (x + 0.05) / (y + 0.05);
-}
 
 /** Données de la nuit lues sur le disque, chaque fichier une fois. */
 function diskSource(dir: string, meta: Meta): LineData {
@@ -202,6 +188,7 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
     let colored = 0;
     const palette = new Map<string, Map<string, number>>();
     const weak: string[] = [];
+    let replaced = 0;
     const detail: string[] = [];
     const cutSamples: string[] = [];
     for (const m of matches) {
@@ -213,8 +200,9 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
         const per = palette.get(m.op) ?? new Map<string, number>();
         per.set(`${c.b}/${c.t}`, (per.get(`${c.b}/${c.t}`) ?? 0) + 1);
         palette.set(m.op, per);
-        const r = contrast(c.b, c.t);
-        if (r < 3) weak.push(`${m.op} ${m.line} ${c.b}/${c.t} ${r.toFixed(1).replace('.', ',')}`);
+        const r = contrastRatio(c.b, c.t);
+        if (r < BADGE_CONTRAST) weak.push(`${m.op} ${m.line} ${c.b}/${c.t} ${r.toFixed(1).replace('.', ',')}`);
+        if (m.text && c.t !== m.text) replaced++;
       }
       const wanted = DETAIL.has(`${m.op}:${lineKey(m.line)}`);
       try {
@@ -329,7 +317,7 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
       `Rangées coupées (« … ») : Lignes ${cutF}/${rowsF} (${pct(cutF, rowsF)}), toute la ligne ${cutR}/${rowsR} (${pct(cutR, rowsR)}).${cutSamples.length ? ` Ex. : ${cutSamples.join(' | ')}` : ''}`,
       `Couleurs publiées : ${colored}/${matches.length} lignes (${pct(colored, matches.length)}) ; ${[...palette]
         .map(([op, per]) => `${op} ${per.size} pastille(s) différente(s), surtout ${[...per].sort((x, y) => y[1] - x[1]).slice(0, 4).map(([c, n]) => `${c} ×${n}`).join(', ')}`)
-        .join(' ; ')}. Contraste du numéro sous 3:1 : ${weak.length}${weak.length ? ` (${weak.slice(0, 8).join(', ')})` : ''}.`,
+        .join(' ; ')}. Texte de l'opérateur remplacé (contraste sous 3:1) : ${replaced} ; contraste du numéro encore sous 3:1 : ${weak.length}${weak.length ? ` (${weak.slice(0, 8).join(', ')})` : ''}.`,
       ...(detail.length ? ['Lignes détaillées :', ...detail] : []),
       errors.length ? `Erreurs : ${errors.length}. ${errors.slice(0, 20).join(' | ')}` : 'Aucune erreur.',
     ];
