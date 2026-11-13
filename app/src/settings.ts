@@ -385,6 +385,7 @@ export function validateSettings(input: unknown): Settings {
       radiusM: nearestRadius(disp.radiusM),
       gestureHints: bool(disp.gestureHints, d.display.gestureHints),
       markPlanned: bool(disp.markPlanned, d.display.markPlanned),
+      rain: bool(disp.rain, d.display.rain),
       opening: oneOf(disp.opening, OPENING, d.display.opening),
       favOrder: oneOf(disp.favOrder, FAV_ORDER, d.display.favOrder),
     },

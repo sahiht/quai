@@ -7,7 +7,7 @@
  * (autre écran, ligne d'alerte qui apparaît) impose rebuildPageContainer.
  */
 import { LINE_H, SCREEN_H, SPACE_W, frenchSpaces, padLeftTo, padRightTo, textWidth, truncate, utf8Bytes } from './font';
-import type { Brightness, ContainerSpec, GlassesView, Item, Layout, PageSpec } from './types';
+import type { Brightness, ContainerSpec, GlassesView, Item, Layout, PageSpec, Seg } from './types';
 
 export const GEO = {
   X_CURSOR: 4,
@@ -401,6 +401,44 @@ export interface LayoutOptions {
   toast?: string;
 }
 
+/**
+ * 1.2.5 : une ligne en mots clairs et pâles. Chaque mot va dans le conteneur de sa luminosité (colonne a
+ * au plus clair, colonne b pâle), placé au pixel par des espaces de 5 px, une espace entre deux mots (deux entre deux
+ * conteneurs) ; `right` au plus clair, aligné à droite dans la colonne c. Trop long : le mot qui dépasse est coupé à
+ * l'endroit où il commence vraiment, les suivants tombent, jamais `right` : les mots finissent toujours `gap` px avant
+ * le début de `right`, ou au bord sûr de l'écran sans lui.
+ */
+export function segRow(segs: Seg[], indentPx: number, right: string | undefined, def: LayoutDef): { a: string; b: string; c: string; log: string } {
+  const gap = def.gap ?? GAP;
+  const cw = Math.min(def.c.w ?? 0, X_END - def.c.x) - GEO.SAFETY;
+  const r = right ? truncate(right, cw) : '';
+  const c = r ? padLeftTo(r, cw) : '';
+  const limit = r ? def.c.x + textWidth(c) - textWidth(r) - gap : X_END - GEO.SAFETY;
+  const out = { a: '', b: '' };
+  const shown: string[] = [];
+  let x = X_TEXT + indentPx;
+  let prev: 'a' | 'b' | null = null;
+  for (const p of segs) {
+    if (!p.t) continue;
+    const key = p.hi ? 'a' : 'b';
+    const cx = p.hi ? def.a.x : def.b.x;
+    // entre deux conteneurs, deux espaces : un glyphe large (« W ») peut déborder de sa chasse
+    const space = prev ? (prev !== key ? 2 * SPACE_W : SPACE_W) : 0;
+    const pad = ' '.repeat(Math.max(0, Math.round((x + space - cx - textWidth(out[key])) / SPACE_W)));
+    // mesure du conteneur entier : le crénage à la jonction compte (± 1 px)
+    const fits = (t: string): boolean => cx + textWidth(out[key] + pad + t) <= limit;
+    let t = p.t;
+    for (let w = limit - cx - textWidth(out[key] + pad); t && !fits(t); w--) t = w > 0 ? truncate(p.t, w) : '';
+    if (!t) break;
+    out[key] += pad + t;
+    shown.push(t);
+    prev = key;
+    x = cx + textWidth(out[key]);
+    if (t !== p.t) break;
+  }
+  return { ...out, c, log: shown.join(' ') + (r ? COL_SEP + r : '') };
+}
+
 /** Construit la page complète. `frame` = sélection et défilement courants. */
 export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {}): PageSpec {
   const def = LAYOUTS[v.layout];
@@ -480,11 +518,21 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     const cRoom = room(def, 'c', {});
     const cCell = it.cLead && def.c.lead ? leadCell(it.cLead, c, undefined, def.c.lead, cRoom) : null;
     const ctext = cCell ? cCell.log : c ? withOptionalTail(c, it.cTail, cRoom) : '';
+    if (it.segs) {
+      // 1.2.5 : mots clairs et pâles (« Bus W vers Bruxelles Midi »), l'attente au plus clair à droite
+      const row = segRow(it.segs, 0, it.bRight, def);
+      colA.push(row.a);
+      colB.push(row.b);
+      colC.push(row.c);
+      cursor.push(!message && i === sel ? CURSOR : '');
+      lines.push(row.log);
+    } else {
     colA.push(a);
     colB.push(bt);
     colC.push(cCell ? cCell.text : ctext && def.c.align === 'right' ? padLeftTo(ctext, Math.min(def.c.w ?? 0, X_END - def.c.x) - GEO.SAFETY) : ctext);
     cursor.push(!message && i === sel ? CURSOR : '');
     lines.push([aLog, bLog, ctext].filter(Boolean).join(COL_SEP));
+    }
     if (it.two || it.a2 || it.b2) {
       const a2 = it.a2 ? truncate(it.a2, X_END - def.a.x - GEO.SAFETY) : '';
       const b2 = it.b2 ? truncate(it.b2, X_END - def.b.x - GEO.SAFETY) : '';
@@ -496,6 +544,16 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
       if (a2 || b2) lines.push([a2, b2].filter(Boolean).join(COL_SEP));
     }
     for (const s of it.sub ?? []) {
+      if (s.segs) {
+        // 1.2.5 : ligne en retrait en mots clairs et pâles (« Bus 36 vers Wavre, Gare »)
+        const row = segRow(s.segs, s.flush ? 0 : (def.subIndent ?? 0), s.bRight, def);
+        colA.push(row.a);
+        colB.push(row.b);
+        colC.push(row.c);
+        cursor.push('');
+        lines.push(row.log);
+        continue;
+      }
       // 1.2.2 : lignes en retrait sous l'élément (sens d'une ligne), le texte de droite aligné au bord. 1.2.4 : retrait
       // fait d'espaces quand la colonne b commence au bord (subIndent) ; le journal reste sans retrait.
       const ind = def.subIndent ?? 0;

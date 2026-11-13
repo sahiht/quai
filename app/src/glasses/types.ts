@@ -177,11 +177,25 @@ export type Intent =
   | { kind: 'continue' };
 
 /**
+ * 1.2.5 : un mot ou un groupe de mots d'une ligne, au plus clair (`hi`, conteneur de la colonne a) ou pâle
+ * (conteneur de la colonne b) : « Bus W » et « Bruxelles Midi » au plus clair, « vers » pâle. Les G2 n'ont pas de
+ * surligneur : la luminosité, par conteneur, en tient lieu.
+ */
+export interface Seg {
+  t: string;
+  hi?: boolean;
+}
+
+/**
  * 1.2.2 : ligne en retrait sous un élément (un sens d'une ligne de « Bus, tram, métro ») : texte de la colonne b, puis
  * `bRight` aligné à droite dans la même colonne (comme les favoris de l'accueil).
  */
 export interface SubRow {
   b: string;
+  /** 1.2.5 : la ligne en mots clairs et pâles (`b` ignoré), `bRight` au plus clair à droite. */
+  segs?: Seg[];
+  /** 1.2.5 : sans retrait, alignée sur l'élément (un autre sens de la même ligne). */
+  flush?: boolean;
   bRight?: string;
   /** Fin de `bRight` ajoutée seulement si elle tient. */
   bRightTail?: string;
@@ -190,6 +204,8 @@ export interface SubRow {
 /** Un élément de liste : une ligne (colonnes a, b, c), ou deux lignes (a2/b2 sur la seconde). */
 export interface Item {
   a: string;
+  /** 1.2.5 : la ligne en mots clairs et pâles (`a` et `b` ignorés), `bRight` au plus clair à droite. */
+  segs?: Seg[];
   b?: string;
   c?: string;
   a2?: string;

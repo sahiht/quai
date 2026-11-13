@@ -78,6 +78,7 @@ const cloneLeg = (l: Leg): Leg => ({
 });
 
 function resetPlanned(l: Leg): void {
+  delete l.rtKept;
   l.dep = l.schedDep;
   l.arr = l.schedArr;
   l.rt = false;
@@ -279,8 +280,8 @@ function applyUrbanTrip(l: Leg, trip: RtTrip | null | undefined): void {
 }
 
 /**
- * Panne du temps réel (PRD M8.5) : suppression, arrêt sauté ou voie modifiée connus depuis 15 min au plus
- * (RealtimeClient `remembered`) ; horaire prévu.
+ * Panne du temps réel (PRD M8.5), trajets autres que le suivi : suppression, arrêt sauté ou voie modifiée connus depuis
+ * 15 min au plus (RealtimeClient `remembered`) ; horaire prévu.
  */
 function applyMemoryLeg(l: Leg, mem: RtTrip): void {
   resetPlanned(l);
@@ -302,8 +303,24 @@ function applyMemoryLeg(l: Leg, mem: RtTrip): void {
   if (p && l.platform && p !== l.platform) l.newPlatform = p;
 }
 
-/** Applique le temps réel aux étapes en véhicule (en place), un appel par opérateur. Source en erreur → horaire prévu. */
-export async function applyRealtime(legs: Leg[], env: RefreshEnv): Promise<void> {
+/**
+ * 1.2.5 (PRD-1.2.5 § 5) : trajet suivi pendant une panne : le dernier état connu du voyage, depuis 15 min au plus, le
+ * retard compris ; l'étape reste « ~ » (pas en direct) et porte `rtKept` (« Temps réel coupé : derniers retards
+ * connus »). Un retard gardé ne recule jamais l'heure de départ à pied (recompute) ni ne casse une correspondance
+ * (brokenConnection) : il informe, il ne décide pas.
+ */
+function applyKept(l: Leg, mem: RtTrip, days: DayIndex[], urban: boolean): void {
+  if (urban) applyUrbanTrip(l, mem);
+  else applyTrip(l, mem, days);
+  l.rt = false;
+  if (l.cancelled || l.delayMin || l.newPlatform) l.rtKept = true;
+}
+
+/**
+ * Applique le temps réel aux étapes en véhicule (en place), un appel par opérateur. Source en erreur → horaire prévu,
+ * avec l'état gardé (M8.5) ; `followed` (1.2.5) : trajet suivi, ses retards gardés compris.
+ */
+export async function applyRealtime(legs: Leg[], env: RefreshEnv, followed = false): Promise<void> {
   const rides = legs.filter(isRide);
   const now = env.now();
   // flux indexé par trip_id sans date : seules les étapes proches de maintenant reçoivent le temps réel
@@ -347,6 +364,7 @@ export async function applyRealtime(legs: Leg[], env: RefreshEnv): Promise<void>
   ]);
   const byOp = new Map(tripRes);
   for (const l of rides) {
+    delete l.rtKept;
     if (!live(l)) {
       resetPlanned(l);
       continue;
@@ -362,8 +380,10 @@ export async function applyRealtime(legs: Leg[], env: RefreshEnv): Promise<void>
     const id = l.tripId ? normalizeId(l.tripId) : '';
     const trip = res && id ? res.map.get(id) : undefined;
     const mem = !trip && res?.error && id ? res.remembered?.get(id) : undefined;
-    if (mem) applyMemoryLeg(l, mem);
-    else if (l.op !== 'sncb' && l.fromSeq === undefined && (l.fromStop || l.toStop)) applyUrbanTrip(l, trip);
+    const urban = l.op !== 'sncb' && l.fromSeq === undefined && !!(l.fromStop || l.toStop);
+    if (mem && followed) applyKept(l, mem, days, urban);
+    else if (mem) applyMemoryLeg(l, mem);
+    else if (urban) applyUrbanTrip(l, trip);
     else applyTrip(l, trip, days);
   }
 }
@@ -372,12 +392,14 @@ export async function applyRealtime(legs: Leg[], env: RefreshEnv): Promise<void>
 export function recompute(j: Journey, legs: Leg[], settings: Settings, now: number, fresh: boolean): Journey {
   const margin = Math.max(0, settings.alerts.leaveBeforeMin) * 60_000;
   const firstRide = legs.find(isRide);
+  // 1.2.5 : un retard gardé (temps réel coupé) ne recule jamais le départ à pied : le véhicule a pu le rattraper
+  const goBy = firstRide ? (firstRide.rtKept ? Math.min(firstRide.dep, firstRide.schedDep) : firstRide.dep) : 0;
   legs.forEach((l, i) => {
     if (l.kind !== 'walk') return;
     const w = (l.walkMin ?? 0) * 60_000;
     if (i === 0) {
       if (!firstRide) return;
-      const leave = firstRide.dep - w - margin;
+      const leave = goBy - w - margin;
       const schedLeave = firstRide.schedDep - w - margin;
       const started = !fresh && Number.isFinite(l.dep) && now >= l.dep && l.dep <= firstRide.dep;
       l.dep = started ? l.dep : leave;
@@ -393,7 +415,7 @@ export function recompute(j: Journey, legs: Leg[], settings: Settings, now: numb
     }
   });
   const firstWalk = legs[0]?.kind === 'walk' ? legs[0] : undefined;
-  const leaveAt = firstRide ? firstRide.dep - (firstWalk ? (firstWalk.walkMin ?? 0) * 60_000 : 0) - margin : (legs[0]?.dep ?? j.leaveAt);
+  const leaveAt = firstRide ? goBy - (firstWalk ? (firstWalk.walkMin ?? 0) * 60_000 : 0) - margin : (legs[0]?.dep ?? j.leaveAt);
   const rides = legs.filter(isRide);
   return {
     ...j,
@@ -472,9 +494,9 @@ async function worksFor(j: Journey, env: RefreshEnv): Promise<string[]> {
  * Applique le temps réel à plusieurs trajets (un appel au relais par opérateur pour tous) et recalcule heure de
  * départ conseillée et alertes. Étiquette et raison sont gardées.
  */
-export async function refreshJourneys(js: readonly Journey[], settings: Settings, env: RefreshEnv, fresh = false): Promise<Journey[]> {
+export async function refreshJourneys(js: readonly Journey[], settings: Settings, env: RefreshEnv, fresh = false, followed = false): Promise<Journey[]> {
   const legs = js.map((j) => j.legs.map(cloneLeg));
-  await applyRealtime(legs.flat(), env);
+  await applyRealtime(legs.flat(), env, followed);
   const now = env.now();
   return Promise.all(
     js.map(async (j, i) => {
@@ -486,12 +508,15 @@ export async function refreshJourneys(js: readonly Journey[], settings: Settings
   );
 }
 
-/** Applique le temps réel à un trajet et recalcule heure de départ conseillée et alertes. */
-export async function refreshJourney(j: Journey, settings: Settings, env: RefreshEnv, fresh = false): Promise<Journey> {
-  return (await refreshJourneys([j], settings, env, fresh))[0];
+/** Applique le temps réel à un trajet et recalcule heure de départ conseillée et alertes (`followed` : trajet suivi). */
+export async function refreshJourney(j: Journey, settings: Settings, env: RefreshEnv, fresh = false, followed = false): Promise<Journey> {
+  return (await refreshJourneys([j], settings, env, fresh, followed))[0];
 }
 
-/** Rang de la première étape en véhicule partie avant l'arrivée du véhicule précédent (marche comprise), -1 sinon. */
+/**
+ * Rang de la première étape en véhicule partie avant l'arrivée du véhicule précédent (marche comprise), -1 sinon.
+ * 1.2.5 : un retard gardé (temps réel coupé, `rtKept`) n'y compte pas : seul le temps réel en direct fait recalculer.
+ */
 export function brokenConnection(j: Journey): number {
   let prev: Leg | undefined;
   let walk = 0;
@@ -501,7 +526,7 @@ export function brokenConnection(j: Journey): number {
       walk += (l.walkMin ?? 0) * 60_000;
       continue;
     }
-    if (prev && l.dep < prev.arr + walk) return i;
+    if (prev && (l.rtKept ? l.schedDep : l.dep) < (prev.rtKept ? prev.schedArr : prev.arr) + walk) return i;
     prev = l;
     walk = 0;
   }

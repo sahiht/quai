@@ -103,7 +103,7 @@ Limites :
 
 ## Mettre à jour Quai
 
-Guide pas à pas avec images, pour passer à une nouvelle version publiée (par exemple la 1.2.4) : [MISE-A-JOUR.md](MISE-A-JOUR.md). Ci-dessous, la marche à suivre pour fabriquer toi-même une nouvelle version.
+Guide pas à pas avec images, pour passer à une nouvelle version publiée (par exemple la 1.2.5) : [MISE-A-JOUR.md](MISE-A-JOUR.md). Ci-dessous, la marche à suivre pour fabriquer toi-même une nouvelle version.
 
 Chaque mise à jour a besoin d'un nouveau numéro de version : Even Hub refuse un numéro déjà déposé. Tout se fait sur le site GitHub, depuis le téléphone.
 

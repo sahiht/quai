@@ -67,7 +67,7 @@ export function readConfig(env: Env): RelayConfig {
 /** Une source amont. `auth` : envoyer la clé BMC (jamais vers une autre adresse que BMC_BASE). */
 export interface Source {
   id: string;
-  kind: 'bmc' | 'sncb-direct' | 'data';
+  kind: 'bmc' | 'sncb-direct' | 'data' | 'weather';
   /** Libellé pour les journaux (sans adresse ni clé). */
   label: string;
   url: string;

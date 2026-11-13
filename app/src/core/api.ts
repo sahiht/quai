@@ -128,6 +128,7 @@ export interface Settings {
     radiusM: 300 | 500 | 800;
     gestureHints: boolean;
     markPlanned: boolean;       // signe ~ pour les horaires sans temps réel
+    rain: boolean;              // 1.2.5 : pluie prévue sur les marches de 5 min ou plus (Open-Meteo)
     opening: 'suggest' | 'home' | 'firstFavorite';
     favOrder: 'smart' | 'mine'; // « Ordre des favoris » : « Selon l'heure et le lieu » ou « Dans mon ordre » (S3)
   };
@@ -150,7 +151,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lines: [],
   recent: [],
   seenVersion: '',
-  display: { depsPerStop: 4, radiusM: 500, gestureHints: true, markPlanned: true, opening: 'suggest', favOrder: 'smart' },
+  display: { depsPerStop: 4, radiusM: 500, gestureHints: true, markPlanned: true, rain: true, opening: 'suggest', favOrder: 'smart' },
   alerts: { platform: true, delay: true, delayMin: 5, cancel: true, leave: true, leaveBeforeMin: 2, works: false },
 };
 
@@ -275,6 +276,8 @@ export interface Leg {
   rt?: boolean; delayMin?: number; cancelled?: boolean;
   last?: boolean;                         // dernier passage annoncé de la ligne (STIB « Dernier passage »)
   stops?: Stopover[];                     // de la montée à la descente comprises (« Dans le train » ; 1.1 : aussi bus, tram, métro)
+  rain?: boolean;                         // 1.2.5 : pluie prévue pendant cette marche (Open-Meteo, grille fixe du relais)
+  rtKept?: boolean;                       // 1.2.5 : retard gardé de la mémoire du temps réel (relais muet, 15 min au plus)
 }
 
 export interface Alert {
@@ -414,7 +417,15 @@ export interface Core {
    * Des horaires périmés ne font pas échouer init() : vérifier avec dataFreshness(meta, now) exporté par core/index.ts.
    */
   init(): Promise<Meta>;
+  /** La publication en vigueur : elle peut changer après init() (copie remplacée par le réseau, relecture de 10 min). */
   readonly meta: Meta | null;
+  /** 1.2.5 : prévient quand une autre publication est adoptée (fraîcheur et écrans à recalculer). */
+  onGeneration?(cb: (generatedAt: string) => void): void;
+  /**
+   * 1.2.5 : état de la météo (écran Données) : grille de pluie lue au relais (« ok »), relais ou Open-Meteo muets
+   * (« down »), pas encore demandée. Une demande au relais si la grille connue a plus de 15 min.
+   */
+  weather?(): Promise<'ok' | 'down' | 'unknown'>;
   /**
    * Zones dans le rayon, tous réseaux, triées par distance, avec leur prochain départ (temps réel si possible).
    * 1.1 : `light` = sans départ (`next` absent) ni fichier de zone : pour compter « Autour de moi   3 arrêts » (M8.7).
@@ -470,8 +481,9 @@ export interface Core {
   /** 1.0, gardé : (await route(...)).journeys. */
   plan(from: Endpoint, to: Endpoint, after: number, settings: Settings, here?: { lat: number; lon: number }): Promise<Journey[]>;
   /** Applique le temps réel à un trajet (retards propagés, voies, suppressions) et recalcule leaveAt et les alertes.
-   *  1.1 : garde label et reason ; bus, trams et métros compris (fromStop, toStop). */
-  refresh(j: Journey, settings: Settings): Promise<Journey>;
+   *  1.1 : garde label et reason ; bus, trams et métros compris (fromStop, toStop). 1.2.5 : `followed` : le trajet
+   *  suivi, qui garde pendant une panne du temps réel les derniers retards connus (PRD-1.2.5 § 5). */
+  refresh(j: Journey, settings: Settings, o?: { followed?: boolean }): Promise<Journey>;
   /** 1.1 : ordre intelligent des favoris (PRD M1.4), immédiat (sans calcul de trajet). `last` : dernières réponses
    *  connues, pour la règle 5 (« rien dans les 3 heures »). Avec favOrder 'mine' : ordre du téléphone, sauf règle 5. */
   orderFavorites(here: LatLon | null, settings: Settings, last?: ReadonlyMap<string, FavoriteAnswer>): FavoriteRank[];

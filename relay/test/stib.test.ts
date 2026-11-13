@@ -62,6 +62,17 @@ describe('lecture des réponses WaitingTimes', () => {
     ]);
   });
 
+  it('1.2.5 : message sans les caractères invisibles de sens d’écriture ; vide une fois retirés : sans message', () => {
+    const { rows } = extractRows({ results: [
+      { pointid: '1', lineid: '2', passingtimes: [pt('2', T('12:05'), 'SIMONIS', { message: { fr: '\u202BDéviation\u202C', nl: 'Omleiding' } })] },
+      { pointid: '1', lineid: '3', passingtimes: [pt('3', T('12:06'), 'CHURCHILL', { message: '\u2066\u2069' })] },
+    ] });
+    expect(groupWaitingTimes(rows, ['1']).get('1')).toEqual([
+      { line: '2', dest: { fr: 'SIMONIS', nl: 'SIMONIS' }, times: [T('12:05')], msg: 'Déviation' },
+      { line: '3', dest: { fr: 'CHURCHILL', nl: 'CHURCHILL' }, times: [T('12:06')] },
+    ]);
+  });
+
   it('un groupe par message : « Temps théorique », « Ne pas embarquer », « Dernier passage » jamais mélangés aux autres passages', () => {
     // Forme des vraies réponses : message sur un seul passage, destination parfois vide.
     const { rows } = extractRows({ results: [

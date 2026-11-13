@@ -95,6 +95,16 @@ describe('/api/alerts : cas limites (flux construits)', () => {
     expect(tec.body.alerts.find((a) => a.id === 'sans-periode')?.header).toEqual({ fr: 'Omleiding' });
   });
 
+  it('1.2.5 : caractères invisibles de sens d’écriture retirés ; une traduction qui n’en contient que : ignorée', async () => {
+    const bidi = feedRoute({
+      header: header(),
+      entity: [{ id: 'sens', alert: { informedEntity: [{ routeId: '9' }], headerText: tr(['\u202BDéviation\u202C \u200Erue Neuve\u200F', 'fr'], ['\u2066\u2069', 'nl']), descriptionText: tr(['\u2067Arrêt\u2069 déplacé', 'fr']) } }],
+    });
+    const r = await alerts('/api/alerts?op=delijn', makeCtx({ route: bidi }));
+    expect(r.body.alerts[0].header).toEqual({ fr: 'Déviation rue Neuve' });
+    expect(JSON.stringify(r.body)).not.toMatch(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/);
+  });
+
   it('filtres : ligne, arrêt, ligne d’un voyage ; une alerte de tout le réseau concerne tous les filtres', async () => {
     expect(await ids('&routes=232')).toEqual(['sans-periode', 'reseau']);
     expect(await ids('&stops=308611')).toEqual(['ouverte', 'reseau']);

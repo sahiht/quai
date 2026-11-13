@@ -1,11 +1,11 @@
 # Quai : confidentialité
 
-Quai est une appli personnelle pour les lunettes Even Realities G2. Elle ne crée aucun compte, ne suit personne et n’utilise aucun outil de statistiques ou de publicité. Les deux serveurs qu’elle contacte sont ouverts à ton nom : ton compte GitHub (horaires) et ton compte Vercel (relais du temps réel et des adresses).
+Quai est une appli personnelle pour les lunettes Even Realities G2. Elle ne crée aucun compte, ne suit personne et n’utilise aucun outil de statistiques ou de publicité. Les deux serveurs qu’elle contacte sont ouverts à ton nom : ton compte GitHub (horaires) et ton compte Vercel (relais du temps réel, de la pluie prévue et des adresses).
 
 ## Permissions demandées
 
 - Position (`location`) : trouver les arrêts proches et proposer le bon trajet.
-- Réseau (`network`) : télécharger les horaires et le temps réel, et chercher les adresses, uniquement depuis les deux adresses listées plus bas.
+- Réseau (`network`) : télécharger les horaires, le temps réel et la pluie prévue, et chercher les adresses, uniquement depuis les deux adresses listées plus bas.
 
 ## Position
 
@@ -18,6 +18,10 @@ Les horaires sont des fichiers statiques préparés chaque nuit et publiés sur 
 ## Temps réel
 
 Les retards, voies et suppressions viennent de ton propre relais, hébergé sur Vercel. L’appli lui envoie seulement des identifiants d’arrêts, de lignes et de voyages (ceux des écrans affichés), jamais la position.
+
+## Pluie prévue
+
+Quand le réglage « Pluie pendant la marche » est ouvert (Affichage), l’appli demande à ton relais la pluie prévue sur une carte fixe de toute la Belgique, une case tous les 20 à 30 km, la même pour tout le monde. Le relais la demande à Open-Meteo et la garde une heure. C’est le téléphone qui choisit la case de chaque marche : ta position ne le quitte jamais. Open-Meteo reçoit la requête du relais, pas de ton téléphone. Réglage fermé : l’appli ne demande plus rien.
 
 ## Adresses
 
@@ -37,9 +41,9 @@ Tes réglages, tes favoris, tes gares et tes lignes, tes adresses récentes et u
 
 <!-- quai:domaines:debut -->
 - Horaires (fichiers statiques) : adresse GitHub Pages, remplie par `npm run configure`
-- Temps réel et adresses (relais personnel) : adresse Vercel, remplie par `npm run configure`
+- Temps réel, pluie prévue et adresses (relais personnel) : adresse Vercel, remplie par `npm run configure`
 <!-- quai:domaines:fin -->
 
 ## Sources
 
-Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company, licence CC BY 4.0. Adresses : Digitaal Vlaanderen, Paradigm (UrbIS), SPW (ICAR). Usage personnel et non commercial.
+Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company, licence CC BY 4.0. Météo : Open-Meteo.com, licence CC BY 4.0. Adresses : Digitaal Vlaanderen, Paradigm (UrbIS), SPW (ICAR). Usage personnel et non commercial.

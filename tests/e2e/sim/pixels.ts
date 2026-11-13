@@ -22,11 +22,15 @@
  * pose (espaces de 5 px) ; le nom de l'arrêt ou de la gare sous « Partir à pied » dans la colonne du texte ;
  * « Bus, tram, métro » : intitulés, noms d'arrêts et titres de lignes à la marge, leurs lignes en retrait ; « Dans le
  * train » : l'heure de chaque arrêt sous les autres, même sans état.
- * `levels()` mesure aussi la luminosité de chaque bande (relief : favoris un ton plus pâles que leur titre).
+ * 1.2.5 (PRD-1.2.5) : « Si tu le rates » en ligne du haut des étapes (§ 1) ; « Bus, tram, métro » en mots clairs et
+ * pâles (§ 4) : chaque mot à la place que layout.ts (segRow) lui donne, dans son conteneur, les passages calés à
+ * droite ; la ligne de progression en haut de « Dans le train », train compris (§ 7), et sa note (§ 5).
+ * `levels()` mesure aussi la luminosité de chaque bande (relief : favoris un ton plus pâles que leur titre) ;
+ * `alphaIn()` celle d'une plage de la bande (1.2.5 : « vers » pâle entre la ligne et sa destination au plus clair).
  */
 import { PNG } from 'pngjs';
 import { padLeftTo, textWidth } from '../../../app/src/glasses/font';
-import { GEO, HOME_INDENT, LAYOUTS, TILDE_W, WIDTHS } from '../../../app/src/glasses/layout';
+import { GEO, HOME_INDENT, LAYOUTS, TILDE_W, WIDTHS, segRow } from '../../../app/src/glasses/layout';
 
 const LINE_H = 27;
 const SCREEN_H = 288;
@@ -52,11 +56,13 @@ const TOP_BOARD = /^(! |Départs de demain$)/;
 const NOTE_BOARD = /^(~ horaire prévu|Temps réel indisponible|Pas de réseau)/;
 /** 1.2.3 : voyage disparu : message (gabarit des messages), non contrôlé ici. */
 const VANISHED = 'Ce départ n’est plus dans les horaires.';
-const TOP_STEPS = /^(! |Le plus court|Le plus simple|Le plus rapide|Moins de marche|Plus tôt|Sans changement|Moins de changements|À pied|Le suivant|Plus tard)/;
+const TOP_STEPS = /^(! |Si tu le rates |Le plus court|Le plus simple|Le plus rapide|Moins de marche|Plus tôt|Sans changement|Moins de changements|À pied|Le suivant|Plus tard)/;
 const TOP_HOME = /^(Temps réel indisponible|Pas de réseau|Horaires |Près de |! )/;
-const NOTE = /^(~ horaire prévu|\* s’arrête avant le terminus|Temps réel indisponible|Pas de réseau|Horaires |[▼▽] |Fin du trajet\.|[▲△] trajet précédent|Pas d’autre trajet pour l’instant$)/;
-/** 1.2.4 : « Dans le tram » (bus, tram, métro) : la descente en ligne du haut. */
-const TOP_TRAIN = /^Descente (au prochain arrêt|dans \d+ arrêts)$/;
+const NOTE = /^(~ horaire prévu|\* s’arrête avant le terminus|Temps réel indisponible|Temps réel coupé|Pas de réseau|Horaires |[▼▽] |Fin du trajet\.|[▲△] trajet précédent|Pas d’autre trajet pour l’instant$)/;
+/** 1.2.5 (PRD-1.2.5 § 7) : « Dans le train », tous les véhicules : la ligne de progression en ligne du haut. */
+const TOP_TRAIN = /^[●◎○─…]+ {3}descente (au prochain arrêt|dans \d+ arrêts)$/;
+/** 1.2.5 (PRD-1.2.5 § 4) : rangée en mots clairs et pâles de « Bus, tram, métro » (« Bus W vers Bruxelles Midi   20 min »). */
+export const SEG_ROW = /^(Bus SNCB|Bus|Tram|Métro|Ligne) \S+ vers /;
 /** Accueil : les lignes qui suivent les favoris (jamais en retrait, même sans ligne vide). */
 const HOME_TOOLS = /^(Autour de moi|Gares|Bus, tram, métro)( {3}|$)/;
 /** « Bus, tram, métro » : titre d'une ligne choisie (à la marge) ; le reste, ses sens, en retrait. */
@@ -120,8 +126,9 @@ function rowSegments(screen: string, line: string, indented = false): Seg[] {
   }
   if (screen === 'lines') {
     // intitulés, noms d'arrêts et titres de lignes à la marge ; leurs lignes en retrait (espaces de 5 px, subIndent),
-    // les passages d'un sens calés au bord droit (comme les favoris)
+    // les passages d'un sens calés au bord droit (comme les favoris). 1.2.5 : rangées en mots clairs et pâles.
     const def = LAYOUTS.lines;
+    if (SEG_ROW.test(line)) return segRowSegments(line, indented ? (def.subIndent ?? 0) : 0);
     if (!indented) return [{ from: def.a.x, to: def.a.x + width(line), text: line }];
     return indentedSegments(def.b.x + width(' '.repeat(Math.round((def.subIndent ?? 0) / 5))), line);
   }
@@ -177,17 +184,16 @@ function rowSegments(screen: string, line: string, indented = false): Seg[] {
 }
 
 /**
- * 1.2.4 : « Bus, tram, métro » : lignes en retrait de la page, d'après leur ordre. « ARRÊTS » : un nom d'arrêt (à la
- * marge) puis sa ligne de départs (en retrait) ; « LIGNES » : un titre de ligne puis ses sens. Une page commence
- * toujours par un élément entier (ou son intitulé).
+ * 1.2.4 : « Bus, tram, métro » : lignes en retrait de la page, d'après leur ordre. 1.2.5 (PRD-1.2.5 § 4) : « ARRÊTS » :
+ * un nom d'arrêt (pâle, à la marge) puis ses départs (en retrait) ; « LIGNES » : une rangée par sens (à la marge), puis
+ * l'arrêt (pâle, en retrait) ; sens pas encore connus : le titre de la 1.2.4 et ses lignes en retrait. Une page
+ * commence toujours par un élément entier (ou son intitulé).
  */
 function linesIndented(lines: string[]): boolean[] {
   let block: 'stops' | 'lines' | undefined;
-  let named = false;
   return lines.map((l) => {
     if (l === 'ARRÊTS' || l === 'LIGNES') {
       block = l === 'ARRÊTS' ? 'stops' : 'lines';
-      named = false;
       return false;
     }
     if (LINE_TITLE.test(l)) {
@@ -195,10 +201,62 @@ function linesIndented(lines: string[]): boolean[] {
       return false;
     }
     block ??= 'stops';
-    if (block === 'lines') return true;
-    named = !named;
-    return !named;
+    const sub = /^(…|aucun passage|introuvable)/.test(l);
+    if (block === 'stops') return sub || SEG_ROW.test(l);
+    return !SEG_ROW.test(l);
   });
+}
+
+/**
+ * 1.2.5 : segments d'une rangée en mots clairs et pâles, placés comme segRow (layout.ts) les pose : la ligne
+ * (« Bus W ») et la destination dans le conteneur clair, « vers » dans le pâle, deux espaces entre deux conteneurs ;
+ * les passages calés à droite de la colonne c. Le journal joint les mots par une espace : on le redécoupe.
+ */
+function segRowSegments(line: string, indentPx: number): Seg[] {
+  const def = LAYOUTS.lines;
+  const parts = line.split('   ');
+  const right = parts.length > 1 ? parts[parts.length - 1] : undefined;
+  const left = parts.length > 1 ? parts.slice(0, -1).join('   ') : line;
+  const m = /^(.+?) vers (.+)$/.exec(left);
+  const r = segRow(m ? [{ t: nbsp(m[1]), hi: true }, { t: 'vers' }, { t: nbsp(m[2]), hi: true }] : [{ t: nbsp(left) }], indentPx, right === undefined ? undefined : nbsp(right), def);
+  const out: Seg[] = [];
+  for (const [x0, content] of [
+    [def.a.x, r.a],
+    [def.b.x, r.b],
+  ] as const) {
+    // des mots séparés par deux espaces ou plus : un segment chacun
+    for (const run of content.matchAll(/\S+(?: \S+)*/g)) {
+      const from = x0 + textWidth(content.slice(0, run.index));
+      out.push({ from, to: from + textWidth(run[0]), text: run[0] });
+    }
+  }
+  if (r.c.trim()) out.push({ from: def.c.x + textWidth(r.c) - textWidth(r.c.trim()), to: def.c.x + textWidth(r.c), text: r.c.trim() });
+  return out.sort((p, q) => p.from - q.from);
+}
+
+/**
+ * 1.2.5 : luminosité (alpha des captures) des pixels pleinement dessinés d'une plage de x dans la bande de la ligne
+ * journalisée `text` : la plus haute valeur qui revient souvent ; -1 si la ligne n'est pas à l'écran.
+ */
+export function alphaIn(png: Buffer, s: LoggedScreen, text: string, from: number, to: number): number {
+  const all = bands(s);
+  const b = all?.find((x) => x.text === text);
+  if (!b) return -1;
+  const { w, h, alpha } = litMap(png);
+  const count = new Map<number, number>();
+  for (let y = Math.max(0, b.y + 2); y < Math.min(h, b.y + LINE_H - 1); y++)
+    for (let x = Math.max(0, Math.floor(from)); x < Math.min(w, Math.ceil(to)); x++) {
+      const a = alpha(x, y);
+      if (a) count.set(a, (count.get(a) ?? 0) + 1);
+    }
+  const total = [...count.values()].reduce((p, q) => p + q, 0);
+  const strong = [...count.entries()].filter(([, n]) => n >= total * 0.1).map(([a]) => a);
+  return strong.length ? Math.max(...strong) : 0;
+}
+
+/** 1.2.5 : segments attendus d'une ligne journalisée de « Bus, tram, métro » (pour alphaIn). */
+export function lineSegments(s: LoggedScreen, text: string): Seg[] {
+  return bands(s)?.find((x) => x.text === text)?.segs ?? [];
 }
 
 /** Ligne en retrait (favori de l'accueil, sens d'une ligne) : texte à gauche, et le reste calé au bord droit. */

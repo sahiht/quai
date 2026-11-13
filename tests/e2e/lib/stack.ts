@@ -6,6 +6,8 @@
  * Chaque processus est lancé dans son propre groupe (arrêt propre de npm, sh et node).
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -140,12 +142,44 @@ export const startMockGeocode = () =>
  * Relais local. Sans QUAI_GEO_BASE, `npm run dev` vise http://localhost:8790 : les adresses sont alors en panne
  * (personne n'écoute), ce qui convient aux suites qui ne s'en servent pas.
  */
-export const startRelay = (env: { BMC_BASE: string; DATA_BASE?: string; BMC_KEY?: string; QUAI_NOW?: string; SNCB_RT_URL?: string; QUAI_GEO_BASE?: string }) =>
+export const startRelay = (env: { BMC_BASE: string; DATA_BASE?: string; BMC_KEY?: string; QUAI_NOW?: string; SNCB_RT_URL?: string; QUAI_GEO_BASE?: string; WEATHER_BASE?: string }) =>
   startServer('relay', 'npm', ['run', 'dev', '--', '--port', '0'], {
     cwd: RELAY,
     env: { BMC_KEY: TEST_KEY, QUAI_NOW: '2026-11-10T12:10:00+01:00', ...env },
     ready: /Relais Quai \(dev\) : (http:\/\/localhost:\d+)/,
   });
+
+/**
+ * 1.2.5 : faux Open-Meteo (GET /v1/forecast), dans ce processus. Grille du 10/11 : quarts d'heure de 07:15 à 13:00,
+ * heures de 08:00 à 14:00 (fins de période, comme Open-Meteo) ; de la pluie (0,8 mm, 80 %) sur une seule case, celle de
+ * Bruxelles et de Waterloo (rangée 5, colonne 7 ; 50,75° N, 4,30° E), entre 08:45 et 09:00 : la marche finale du
+ * scénario 1 (Bourse vers le bureau, 08:49 → 08:58) se fait sous la pluie, rien d'autre. Aucune requête réelle.
+ */
+export const WEATHER_RAIN_CELL = 5 * 16 + 7;
+export async function startMockWeather(): Promise<{ url: string; calls: string[]; close(): Promise<void> }> {
+  const t0 = Date.parse('2026-11-10T07:15:00+01:00') / 1000;
+  const h0 = Date.parse('2026-11-10T08:00:00+01:00') / 1000;
+  const calls: string[] = [];
+  const server = http.createServer((req, res) => {
+    calls.push(req.url ?? '');
+    const u = new URL(req.url ?? '/', 'http://x');
+    const n = (u.searchParams.get('latitude') ?? '').split(',').filter(Boolean).length;
+    if (u.pathname !== '/v1/forecast' || !n) {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: true, reason: 'requête inattendue' }));
+      return;
+    }
+    const body = Array.from({ length: n }, (_, i) => ({
+      minutely_15: { time: Array.from({ length: 24 }, (_x, k) => t0 + k * 900), precipitation: Array.from({ length: 24 }, (_x, k) => (i === WEATHER_RAIN_CELL && k === 7 ? 0.8 : 0)) },
+      hourly: { time: Array.from({ length: 7 }, (_x, h) => h0 + h * 3600), precipitation_probability: Array.from({ length: 7 }, (_x, h) => (i === WEATHER_RAIN_CELL && h === 1 ? 80 : 10)) },
+    }));
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(n === 1 ? body[0] : body));
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  const { port } = server.address() as AddressInfo;
+  return { url: `http://127.0.0.1:${port}`, calls, close: () => new Promise<void>((r) => server.close(() => r())) };
+}
 
 /** Scènes du faux service d'adresses : base, down (HTTP 503), slow (réponse après 3 s), garbage (HTML en 200). */
 export type GeoScene = 'base' | 'down' | 'slow' | 'garbage';
@@ -167,6 +201,8 @@ export interface Stack {
   /** Faux service d'adresses (le relais y est branché par QUAI_GEO_BASE). */
   geo: Proc;
   relay: Proc;
+  /** 1.2.5 : faux Open-Meteo (le relais y est branché par WEATHER_BASE). */
+  weather: { url: string; calls: string[] };
   /** Change la scène du faux portail et vide le cache du relais. */
   scene(s: 'base' | 'noRT'): Promise<void>;
   /** Change la scène du faux service d'adresses (`sources` : seulement ces services) et vide le cache du relais. */
@@ -181,8 +217,8 @@ export interface Stack {
 export async function startStack(opts: { dataDir?: string; relayNow?: string } = {}): Promise<Stack> {
   const owned = !opts.dataDir;
   const dataDir = opts.dataDir ?? (await buildFixtureData()).dir;
-  const [data, bmc, geo] = await Promise.all([startDataServer(dataDir), startMockBmc(), startMockGeocode()]);
-  const relay = await startRelay({ BMC_BASE: bmc.url, DATA_BASE: data.url, QUAI_GEO_BASE: geo.url, ...(opts.relayNow ? { QUAI_NOW: opts.relayNow } : {}) });
+  const [data, bmc, geo, weather] = await Promise.all([startDataServer(dataDir), startMockBmc(), startMockGeocode(), startMockWeather()]);
+  const relay = await startRelay({ BMC_BASE: bmc.url, DATA_BASE: data.url, QUAI_GEO_BASE: geo.url, WEATHER_BASE: weather.url, ...(opts.relayNow ? { QUAI_NOW: opts.relayNow } : {}) });
   const post = async (url: string) => {
     const r = await fetch(url, { method: 'POST' });
     if (!r.ok) throw new Error(`POST ${url} : HTTP ${r.status}`);
@@ -193,6 +229,7 @@ export async function startStack(opts: { dataDir?: string; relayNow?: string } =
     bmc,
     geo,
     relay,
+    weather,
     async scene(s) {
       await post(`${bmc.url}/__scene/${s}`);
       await post(`${relay.url}/__cache/clear`);
@@ -210,7 +247,7 @@ export async function startStack(opts: { dataDir?: string; relayNow?: string } =
       await post(`${geo.url}/__journal/reset`);
     },
     async stop() {
-      await Promise.all([relay.stop(), bmc.stop(), geo.stop(), data.stop()]);
+      await Promise.all([relay.stop(), bmc.stop(), geo.stop(), data.stop(), weather.close()]);
       if (owned) rmSync(dataDir, { recursive: true, force: true });
     },
     logs: () => [data, bmc, geo, relay].map((p) => `--- ${p.name}\n${p.out.join('')}`).join('\n'),

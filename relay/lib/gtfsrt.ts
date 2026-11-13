@@ -188,10 +188,17 @@ export interface AlertItem {
   global: boolean;
 }
 
+/**
+ * 1.2.5 : caractères invisibles de sens d'écriture (U+200E, U+200F, U+202A à U+202E, U+2066 à U+2069), qui peuvent
+ * retourner un texte à l'affichage : retirés des textes des opérateurs.
+ */
+export const BIDI = /[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+export const withoutBidi = (s: string): string => s.replace(BIDI, '');
+
 function translations(ts: transit_realtime.ITranslatedString | null | undefined, defaultLang: Lang): Partial<Record<Lang, string>> {
   const out: Partial<Record<Lang, string>> = {};
   for (const t of ts?.translation ?? []) {
-    const text = str(t.text);
+    const text = withoutBidi(str(t.text)).trim();
     if (!text) continue;
     const code = own(t, 'language') ? str(t.language).toLowerCase() : '';
     const lang = (code ? code.slice(0, 2) : defaultLang) as Lang;

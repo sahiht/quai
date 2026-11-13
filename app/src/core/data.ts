@@ -160,22 +160,59 @@ export class DataClient {
     // Serveur injoignable (réseau, délai, erreur serveur) ou serveur qui répond sans le fichier (PRD M8.6).
     let unreachable = false;
     this.metaCheckedAt = this.now();
-    try {
-      const r = await this.fetchRetry('meta.json', true);
-      if (r.status === 200 && isMeta(safeJson(r.text))) {
-        text = r.text;
+    const net = this.fetchRetry('meta.json', true).then(
+      (r) => (r.status === 200 && isMeta(safeJson(r.text)) ? r.text : null),
+      () => {
+        unreachable = true;
+        return null;
+      },
+    );
+    // 1.2.5 (PRD-1.2.5 § 6) : réseau lent ou absent (train, reprise après verrouillage) : au bout de 4 s, la copie
+    // enregistrée sert ; la réponse du réseau, si elle arrive ensuite avec une autre génération, la remplace comme le
+    // ferait la relecture (refreshMeta).
+    const saved = this.persist.getMeta().catch(() => null);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<undefined>((r) => {
+      timer = setTimeout(() => r(undefined), META_CHECK_TIMEOUT_MS);
+    });
+    const quick = await Promise.race([net, late]);
+    clearTimeout(timer);
+    if (quick !== undefined) {
+      text = quick;
+      fromNetwork = quick !== null;
+    } else {
+      // La copie, ou le réseau s'il répond pendant qu'on la lit (pont de stockage lent).
+      const copied = saved.then((c) => (c !== null && isMeta(safeJson(c)) ? c : null));
+      const won = await Promise.race([copied.then((t) => ({ net: false, t })), net.then((t) => ({ net: true, t }))]);
+      if (won.net && won.t !== null) {
+        text = won.t;
         fromNetwork = true;
+      } else {
+        const copy = won.net ? await copied : won.t;
+        if (copy !== null) {
+          text = copy;
+          void net.then((t) => this.adoptLate(t));
+        } else {
+          text = await net;
+          fromNetwork = text !== null;
+        }
       }
-    } catch {
-      text = null;
-      unreachable = true;
     }
-    if (text === null) text = await this.persist.getMeta();
+    if (text === null) text = await saved;
     const parsed = text === null ? undefined : safeJson(text);
     if (!isMeta(parsed)) throw new QuaiError(unreachable ? 'dataUnreachable' : 'dataUnavailable');
     if (fromNetwork && text !== null) this.persist.putMeta(text);
     this.useMeta(parsed);
     return parsed;
+  }
+
+  /** 1.2.5 : meta du réseau arrivée après la copie enregistrée : une autre génération la remplace. */
+  private adoptLate(text: string | null): void {
+    const parsed = text === null ? undefined : safeJson(text);
+    if (!isMeta(parsed) || !this.meta || parsed.generatedAt === this.meta.generatedAt) return;
+    this.persist.putMeta(text!);
+    this.metaCheckedAt = this.now();
+    this.useMeta(parsed);
   }
 
   /** Relecture périodique : un seul essai, délai court ; en cas d'échec, la meta connue reste. */

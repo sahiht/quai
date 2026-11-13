@@ -4,6 +4,7 @@ import * as apiStib from '../api/stib.js';
 import * as apiAlerts from '../api/alerts.js';
 import * as apiHealth from '../api/health.js';
 import * as apiGeocode from '../api/geocode.js';
+import * as apiWeather from '../api/weather.js';
 import { handleAlerts, handleHealth, handleRt, handleStib } from '../lib/handlers.js';
 import { CACHE_OK } from '../lib/http.js';
 import type { RtResponse } from '../lib/shared/types.js';
@@ -18,7 +19,7 @@ function expectCors(h: Headers) {
 
 describe('points d’entrée Vercel (api/*.ts)', () => {
   it('chaque fichier exporte GET et OPTIONS (signature Web Request → Response)', () => {
-    for (const mod of [apiRt, apiStib, apiAlerts, apiHealth, apiGeocode]) {
+    for (const mod of [apiRt, apiStib, apiAlerts, apiHealth, apiGeocode, apiWeather]) {
       expect(typeof mod.GET).toBe('function');
       expect(typeof mod.OPTIONS).toBe('function');
       expect(Object.keys(mod).sort()).toEqual(['GET', 'OPTIONS']);
@@ -26,7 +27,7 @@ describe('points d’entrée Vercel (api/*.ts)', () => {
   });
 
   it('OPTIONS : 204, CORS ouvert, pré-vérification mise en cache', async () => {
-    for (const mod of [apiRt, apiStib, apiAlerts, apiHealth, apiGeocode]) {
+    for (const mod of [apiRt, apiStib, apiAlerts, apiHealth, apiGeocode, apiWeather]) {
       const res = await mod.OPTIONS();
       expect(res.status).toBe(204);
       expectCors(res.headers);

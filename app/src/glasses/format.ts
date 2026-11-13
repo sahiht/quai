@@ -57,7 +57,7 @@ export const HINTS = {
   firstRun: `toucher${NB}: continuer   double${NB}: quitter`,
   /** Quai Web : rien à quitter, l'onglet se ferme dans le navigateur. */
   firstRunWeb: `toucher${NB}: continuer`,
-  /** Message « Quai 1.2.4 ». */
+  /** Message des nouveautés (« Quai 1.2.5 »). */
   news: `toucher${NB}: continuer`,
   quit: `double toucher${NB}: quitter`,
 } as const;
@@ -692,22 +692,6 @@ export function passagesText(deps: readonly LineDeparture[], now: number, markPl
   return day && textWidth(both) > maxPx ? pre + one(a, true) : both;
 }
 
-/**
- * Arrêt « toutes les lignes » : les 2 prochains départs sur une ligne, « T3 Churchill 2 min · T4 Stalle 5 min » ; trop
- * long : les destinations sont coupées, jamais la ligne ni l'attente. Le lendemain : « demain, 232 Vilvorde 06:10 · … ».
- */
-export function stopPassagesText(deps: readonly Departure[], now: number, lang: NameLang, markPlanned: boolean, maxPx: number): string {
-  const ps = deps.slice(0, 2).map((d) => ({ line: lineLabel(d.mode, d.line), head: headText(d.head, lang, d.op), wait: minutesText(d, now, markPlanned) }));
-  if (!ps.length) return SECTION.noPassageAll;
-  const day = laterDay(deps[0], now);
-  const join = (heads: string[]): string => (day ? `${day}, ` : '') + ps.map((p, i) => [p.line, heads[i], p.wait].filter(Boolean).join(' ')).join(' · ');
-  const full = join(ps.map((p) => p.head));
-  if (textWidth(full) <= maxPx) return full;
-  const share = Math.max(0, (maxPx - textWidth(join(ps.map(() => '')))) / ps.length - 6);
-  const cut = join(ps.map((p) => truncate(p.head, share)));
-  return textWidth(cut) <= maxPx ? cut : truncate(cut, maxPx);
-}
-
 /** Détail d'une ligne : l'heure prévue d'un passage (« 07:48 », « ~08:08 », « 07:48 +3 »). */
 export function passageTime(d: Departure, markPlanned: boolean): string {
   const p = passageParts(d, markPlanned);
@@ -787,4 +771,86 @@ export function shownMessage(j: Journey | undefined, now: number): string {
   if (!r) return `Affiché dans les lunettes${NB}: à pied, ${minText(journeyMinutes(j))}.`;
   const p = r.mode === 'train' ? r.newPlatform || r.platform : undefined;
   return `Affiché dans les lunettes${NB}: ${tripShort(j, now)}${p ? `, voie ${p}` : ''}.`;
+}
+
+/* ------------------------------ 1.2.5 (PRD-1.2.5) ------------------------------ */
+
+/** 1.2.5 : une marche de 5 min ou plus porte la pluie prévue ; en deçà, rien. */
+export const RAIN_MIN_WALK = 5;
+/** 1.2.5 : fin de la durée d'une marche sous la pluie : « (7 min, pluie) ». */
+export const RAIN_TAIL = ', pluie';
+/** 1.2.5 : « Autres trajets » : « mais 19 min à pied sous la pluie ». */
+export const RAIN_WORDS = 'sous la pluie';
+
+/** 1.2.5 : la pluie compte pour cette marche (prévue, et marche assez longue). */
+export const rainyWalk = (l: Pick<Leg, 'kind' | 'rain' | 'walkMin' | 'dep' | 'arr'>): boolean =>
+  l.kind === 'walk' && !!l.rain && walkMinOf(l as Leg) >= RAIN_MIN_WALK;
+
+/** 1.2.5 : une marche du trajet au moins se fait sous la pluie. */
+export const rainyJourney = (j: Pick<Journey, 'legs'>): boolean => j.legs.some(rainyWalk);
+
+/**
+ * 1.2.5 : « Si tu le rates : arrivée 09:57, 59 min plus tard » (le départ suivant, d'après les trajets déjà calculés) ;
+ * même heure : « Si tu le rates : même heure d'arrivée » ; plus tôt (un autre trajet, plus de marche) : « Si tu le
+ * rates : arrivée 08:20, pas plus tard ». Une heure ou plus : « 1 h », « 7 h 32 » ; un autre jour : « arrivée demain
+ * 06:30 ». Un fait, jamais un conseil.
+ */
+export function missText(arr: number, laterMin: number, now: number): string {
+  if (laterMin === 0) return `Si tu le rates${NB}: même heure d’arrivée`;
+  const day = dayWord(arr, now);
+  const at = `arrivée ${day ? `${day} ` : ''}${hhmm(arr)}`;
+  if (laterMin < 0) return `Si tu le rates${NB}: ${at}, pas plus tard`;
+  const gap = laterMin < 60 ? minText(laterMin) : laterMin % 60 === 0 ? `${laterMin / 60}${NB}h` : durationText(laterMin);
+  return `Si tu le rates${NB}: ${at}, ${gap} plus tard`;
+}
+
+/** 1.2.5 : marge d'une correspondance de 5 min ou moins, dans la colonne d'état : « marge 2 min », « très juste ». */
+export const MARGIN_SHOWN_MAX = 5;
+export function marginText(min: number): string {
+  return min <= 0 ? 'très juste' : `marge ${minText(min)}`;
+}
+
+/** 1.2.5 : glyphes de la ligne de progression (police des lunettes : ● ○ ◎ ─ existent, 20 px chacun). */
+export const PROGRESS = { passed: '●', next: '◎', ahead: '○', link: '─', more: '…' } as const;
+/**
+ * 1.2.5 : cercles au plus sur la ligne : 7 cercles et leurs liens (260 px), puis « descente au prochain arrêt », la plus
+ * longue phrase, tiennent sur la ligne (508 px sur 542 ; 8 cercles en feraient 548).
+ */
+export const PROGRESS_MAX = 7;
+
+/**
+ * 1.2.5 : ligne de progression du véhicule, de la montée à la descente : « ●─●─◎─○─○─○ ». Arrêts passés pleins,
+ * prochain arrêt cerclé, arrêts à venir vides, la descente en dernier. Plus de 7 arrêts : « … » tient la place des
+ * arrêts cachés, au début (arrêts passés) comme au milieu (descente lointaine), 7 signes au plus ; la phrase à côté
+ * donne toujours le compte exact.
+ */
+export function progressLine(n: number, next: number): string {
+  const glyph = (k: number): string => (k < next ? PROGRESS.passed : k === next ? PROGRESS.next : PROGRESS.ahead);
+  const L = PROGRESS.link;
+  if (n <= PROGRESS_MAX) return Array.from({ length: n }, (_, k) => glyph(k)).join(L);
+  const last = n - 1;
+  if (last - next <= PROGRESS_MAX - 2) {
+    const from = n - (PROGRESS_MAX - 1);
+    return PROGRESS.more + L + Array.from({ length: PROGRESS_MAX - 1 }, (_, k) => glyph(from + k)).join(L);
+  }
+  // descente lointaine : le précédent, le prochain et les suivants, « … », la descente ; des arrêts passés cachés
+  // avant le précédent : « … » en tête, un arrêt à venir de moins
+  const from = Math.max(0, next - 1);
+  const lead = from > 0;
+  const head = Array.from({ length: PROGRESS_MAX - (lead ? 3 : 2) }, (_, i) => from + i).filter((k) => k < last);
+  return (lead ? PROGRESS.more + L : '') + head.map(glyph).join(L) + L + PROGRESS.more + L + glyph(last);
+}
+
+/** 1.2.5 : la phrase à côté de la ligne : « descente dans 4 arrêts », « descente au prochain arrêt ». */
+export function alightWords(stopsLeft: number): string {
+  return stopsLeft <= 1 ? 'descente au prochain arrêt' : `descente dans ${stopsLeft} arrêts`;
+}
+
+/** 1.2.5 : relais muet, retards gardés 15 min au plus (comme les suppressions et les voies, M8.5). */
+export const NOTE_RT_KEPT = `Temps réel coupé${NB}: derniers retards connus ~`;
+
+/** 1.2.5 : l'attente d'un départ d'un arrêt, sur sa propre ligne : « ~4 min », « demain ~05:32 ». */
+export function departureWait(d: Departure, now: number, markPlanned: boolean): string {
+  const day = laterDay(d, now);
+  return `${day ? `${day} ` : ''}${minutesText(d, now, markPlanned)}`;
 }

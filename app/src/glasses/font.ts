@@ -50,7 +50,9 @@ const SUBST: Record<string, string> = {
   '⬤': '●',
   '◉': '●',
 };
-const DROP = new Set(['​', '‌', '‍', '⁠', '﻿', '­']);
+// 1.2.5 : aussi les caractères invisibles de sens d'écriture (U+200E, U+200F, U+202A à U+202E, U+2066 à U+2069),
+// qui deviendraient « ? » faute de glyphe
+const DROP = new Set(['​', '‌', '‍', '⁠', '﻿', '­', '\u200E', '\u200F', '\u202A', '\u202B', '\u202C', '\u202D', '\u202E', '\u2066', '\u2067', '\u2068', '\u2069']);
 
 const glyphCache = new Map<number, boolean>();
 

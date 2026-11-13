@@ -126,6 +126,8 @@ export interface SetupOptions {
   beforeStart?: (c: GlassesController) => void;
   /** Ne pas attendre la fin du démarrage (cœur lent : état pendant « Chargement… »). */
   noWait?: boolean;
+  /** 1.2.5 : position fournie par le test (ex. qui tarde à répondre), à la place de movableLocation. */
+  location?: ReturnType<typeof movableLocation>;
   /**
    * Garder la version vue des réglages (message « Quai 1.2 » après une mise à jour). Sinon, des réglages d'une version
    * antérieure (préréglages 1.0 et 1.1) sont pris comme déjà vus dans la version courante : l'accueil s'ouvre directement.
@@ -144,7 +146,7 @@ export async function setupController(o: SetupOptions = {}) {
   const rec = recorder();
   const closeWebView = vi.fn();
   const kv = o.kv ?? createKV(memoryBackend());
-  const location = movableLocation(clock.now, o.pos === undefined ? { lat: sc.lat, lon: sc.lon } : o.pos);
+  const location = o.location ?? movableLocation(clock.now, o.pos === undefined ? { lat: sc.lat, lon: sc.lon } : o.pos);
   const platform: Platform = { kind: 'even', glasses: rec.port, kv, location, closeWebView };
   const initial = o.settings ?? preset11();
   const settings = new SettingsStore(kv, o.keepSeen || !initial.seenVersion ? initial : { ...initial, seenVersion: APP_VERSION });

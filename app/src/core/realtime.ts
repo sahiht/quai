@@ -78,7 +78,7 @@ const MAX_POINTS = 30;
 export const RT_DEADLINE_MS = 1_500;
 /** Relais lent : dernier temps réel connu réutilisé s'il a moins de 2 min. */
 const RT_STALE_MS = 2 * 60_000;
-/** M8.5 : suppressions et voies modifiées déjà connues gardées 15 min pendant une panne. */
+/** M8.5 : état déjà connu d'un voyage (suppression, voie ; 1.2.5 : retards) gardé 15 min pendant une panne. */
 export const RT_MEMORY_MS = 15 * 60_000;
 /** État du temps réel : issues des requêtes des 5 dernières minutes. */
 const STATUS_WINDOW_MS = 5 * 60_000;
@@ -86,7 +86,8 @@ const STATUS_WINDOW_MS = 5 * 60_000;
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 
 /** Résultat de trips() : `late` = relais trop lent (horaire prévu pour l'instant) ; `remembered` = pendant une panne,
- *  suppressions et voies modifiées connues depuis 15 min au plus (sans retard : l'horaire reste prévu). */
+ *  le dernier état connu depuis 15 min au plus (1.2.5 : retards compris, appliqués au trajet suivi seulement ; les
+ *  autres trajets et les tableaux n'en prennent que les suppressions et les voies modifiées, l'horaire restant prévu). */
 export interface TripsResult {
   map: Map<string, RtTrip | null>;
   error: boolean;
@@ -109,8 +110,9 @@ class RtFailure extends Error {
 function memoryOf(v: RtTrip | null): RtTrip | null {
   if (!v) return null;
   if (v.cancelled) return { cancelled: true, u: [] };
-  const u = v.u.filter((x) => x[4] === 1 || /_[^_]+$/.test(x[1])).map((x): RtUpdate => [x[0], x[1], null, null, x[4]]);
-  return u.length ? { u } : null;
+  // 1.2.5 (PRD-1.2.5 § 5) : tout l'état connu du voyage, retards et heures compris, pour le trajet suivi ; les tableaux et
+  // les arrêts d'un départ n'en prennent toujours que la suppression, l'arrêt sauté et la voie (M8.5)
+  return v.u.length ? { u: v.u.map((x): RtUpdate => [x[0], x[1], x[2], x[3], x[4]]) } : null;
 }
 
 export class RealtimeClient {

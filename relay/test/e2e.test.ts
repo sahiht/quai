@@ -1,7 +1,7 @@
 /**
  * Bout en bout : faux portail BMC (npm run mock-bmc), faux service d'adresses (npm run mock-geocode) et relais local
  * (npm run dev) lancés comme processus séparés sur des ports éphémères, un petit serveur pour meta.json, puis appels
- * HTTP réels des cinq points d'entrée. Pour finir : la clé ne doit apparaître dans aucune réponse ni dans aucun journal
+ * HTTP réels des six points d'entrée (1.2.5 : /api/weather sur un faux Open-Meteo). Pour finir : la clé ne doit apparaître dans aucune réponse ni dans aucun journal
  * des trois processus, et le texte cherché jamais dans le journal du relais.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -10,7 +10,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { AlertsResponse, GeocodeResponse, HealthResponse, RtResponse, StibResponse } from '../lib/shared/types.js';
+import type { AlertsResponse, GeocodeResponse, HealthResponse, RtResponse, StibResponse, WeatherResponse } from '../lib/shared/types.js';
 
 const RELAY_DIR = fileURLToPath(new URL('..', import.meta.url));
 const KEY = `e2e-${randomUUID()}`;
@@ -33,7 +33,7 @@ function cleanEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const k of [
     'BMC_KEY', 'BMC_BASE', 'SNCB_RT_URL', 'DATA_BASE', 'QUAI_NOW', 'MOCK_BMC_KEY', 'NODE_OPTIONS',
-    'QUAI_GEO_BASE', 'QUAI_GEO_VLA_BASE', 'QUAI_GEO_BRU_BASE', 'QUAI_GEO_WAL_BASE', 'GEOCODE_SOURCES', 'GOOGLE_GEOCODING_KEY',
+    'QUAI_GEO_BASE', 'QUAI_GEO_VLA_BASE', 'QUAI_GEO_BRU_BASE', 'QUAI_GEO_WAL_BASE', 'GEOCODE_SOURCES', 'GOOGLE_GEOCODING_KEY', 'WEATHER_BASE',
   ]) delete env[k];
   return { ...env, ...extra };
 }
@@ -93,6 +93,9 @@ let geo: Proc;
 let relay: Proc;
 let dataServer: http.Server;
 let dataBase: string;
+/** 1.2.5 : faux Open-Meteo (requêtes reçues notées). */
+let weatherServer: http.Server;
+const weatherCalls: string[] = [];
 
 beforeAll(async () => {
   dataServer = http.createServer((req, res) => {
@@ -102,13 +105,26 @@ beforeAll(async () => {
   });
   await new Promise<void>((r) => dataServer.listen(0, '127.0.0.1', () => r()));
   dataBase = `http://127.0.0.1:${(dataServer.address() as AddressInfo).port}/data`;
+  weatherServer = http.createServer((req, res) => {
+    weatherCalls.push(req.url ?? '');
+    const u = new URL(req.url ?? '/', 'http://x');
+    const n = (u.searchParams.get('latitude') ?? '').split(',').length;
+    const t0 = sec(NOW) - (sec(NOW) % 900) + 900;
+    const h0 = sec(NOW) - (sec(NOW) % 3600) + 3600;
+    const cell = () => ({ minutely_15: { time: [t0, t0 + 900], precipitation: [0.4, 0] }, hourly: { time: [h0], precipitation_probability: [70] } });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(Array.from({ length: n }, cell)));
+  });
+  await new Promise<void>((r) => weatherServer.listen(0, '127.0.0.1', () => r()));
+  const weatherBase = `http://127.0.0.1:${(weatherServer.address() as AddressInfo).port}`;
   [mock, geo] = await Promise.all([startMock(), startGeo()]);
-  relay = await startRelay({ BMC_BASE: mock.url, BMC_KEY: KEY, QUAI_NOW: NOW, DATA_BASE: dataBase, QUAI_GEO_BASE: geo.url });
+  relay = await startRelay({ BMC_BASE: mock.url, BMC_KEY: KEY, QUAI_NOW: NOW, DATA_BASE: dataBase, QUAI_GEO_BASE: geo.url, WEATHER_BASE: weatherBase });
 });
 
 afterAll(async () => {
   for (const p of procs) p.child.kill('SIGTERM');
   await new Promise<void>((r) => dataServer.close(() => r()));
+  await new Promise<void>((r) => weatherServer.close(() => r()));
 });
 
 describe('faux portail BMC (processus)', () => {
@@ -191,6 +207,19 @@ describe('relais local (npm run dev) sur le faux portail', () => {
     expect(r.body.version).toBe('1.1.0');
     expect(Object.keys(r.body.geocode ?? {})).toEqual(['vla', 'bru', 'wal']);
     expect(Object.values(r.body.geocode ?? {}).every((s) => s?.ok)).toBe(true);
+  });
+
+  it('/api/weather (1.2.5) : la grille de toute la Belgique, une requête vers Open-Meteo gardée 1 h, sans clé ni position', async () => {
+    const r = await request<WeatherResponse>(`${relay.url}/api/weather`);
+    expect(r.status).toBe(200);
+    expect(r.body.error).toBeUndefined();
+    expect([r.body.rows, r.body.cols, r.body.rain.length, r.body.prob.length]).toEqual([9, 16, 144, 144]);
+    expect(r.body.rain[0]).toEqual([4, 0]);
+    expect(r.headers.get('cache-control')).toBe('public, s-maxage=3600, stale-while-revalidate=300');
+    await request(`${relay.url}/api/weather`);
+    expect(weatherCalls).toHaveLength(1);
+    expect(new URL(weatherCalls[0], 'http://x').searchParams.get('latitude')!.split(',')).toHaveLength(144);
+    expect(weatherCalls[0]).not.toContain(KEY);
   });
 
   it('OPTIONS 204, paramètres invalides 400, chemin inconnu 404, méthode non prise en charge 405', async () => {

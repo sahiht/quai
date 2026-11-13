@@ -15,6 +15,45 @@ function coreGuard(): Plugin {
 }
 
 /**
+ * 1.2.5 (PRD-1.2.5 § 9) : la page publiée ne charge que ses propres fichiers et ne parle qu'aux adresses des données et
+ * du relais (politique de sécurité du contenu) ; elle ne dit pas d'où viennent les visites (aucun référent).
+ * QUAI_WEB_CSP_LOCAL=1 (essais de bout en bout seulement) : aussi les serveurs de la machine (127.0.0.1, localhost).
+ */
+export function webSecurityMeta(dataBase: string, relayBase: string, local = false): string {
+  const origin = (u: string): string => {
+    try {
+      return new URL(u).origin;
+    } catch {
+      return '';
+    }
+  };
+  const connect = ["'self'", origin(dataBase), origin(relayBase), ...(local ? ['http://127.0.0.1:*', 'http://localhost:*'] : [])].filter(Boolean);
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self'",
+    `connect-src ${[...new Set(connect)].join(' ')}`,
+    "manifest-src 'self'",
+    "worker-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'none'",
+  ].join('; ');
+  return `<meta http-equiv="Content-Security-Policy" content="${csp}" />\n    <meta name="referrer" content="no-referrer" />`;
+}
+
+function securityHeaders(dataBase: string, relayBase: string, local: boolean): Plugin {
+  return {
+    name: 'quai-web-security',
+    transformIndexHtml(html) {
+      return html.replace('<meta charset="UTF-8" />', `<meta charset="UTF-8" />\n    ${webSecurityMeta(dataBase, relayBase, local)}`);
+    },
+  };
+}
+
+/**
  * Quai Web (npm run build:web → dist-web/) : la même appli pour un navigateur, publiée sur GitHub Pages.
  * Entrée web/index.html (icônes et manifeste dans web/public/), chemin de publication QUAI_WEB_BASE
  * (défaut /quai/app/), adresses QUAI_DATA_BASE et QUAI_RELAY_BASE inscrites dans la page au build.
@@ -40,7 +79,7 @@ export default defineConfig(({ command }) => {
       // Version de app.json, affichée sur le téléphone (src/version.ts).
       __QUAI_VERSION__: JSON.stringify(cfg.version),
     },
-    plugins: command === 'build' ? [coreGuard()] : [],
+    plugins: command === 'build' ? [coreGuard(), securityHeaders(cfg.dataBase, cfg.relayBase, process.env.QUAI_WEB_CSP_LOCAL === '1')] : [],
     server: { host: true, port: 5174, strictPort: false, fs: { allow: ['..', '../..'] } },
     preview: { host: true, port: 4174 },
     build: {

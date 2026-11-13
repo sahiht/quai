@@ -55,6 +55,14 @@ export function addressStatus(health: HealthResponse | null, checked: boolean): 
   return { ok: true, text: `Disponible, sauf ${down.join(' et ')}` };
 }
 
+/** 1.2.5 : état de la météo dans l'écran Données. */
+export function weatherText(w: 'ok' | 'down' | 'unknown' | 'off'): { ok: boolean; text: string } {
+  if (w === 'ok') return { ok: true, text: 'Disponible' };
+  if (w === 'down') return { ok: false, text: 'Indisponible' };
+  if (w === 'off') return { ok: false, text: 'Coupée dans Affichage' };
+  return { ok: false, text: '…' };
+}
+
 /**
  * « Temps réel » de l'écran Données : la panne est dite juste (M8). État du cœur d'abord ; tant qu'aucun temps réel
  * n'a été demandé, le test du relais fait foi quand toutes les sources sont en panne.
@@ -87,6 +95,22 @@ export function dataScreen(ctx: PhoneCtx): HTMLElement {
     const a = addressStatus(health, checked);
     addrState.className = `status${a.ok ? '' : ' off'}`;
     addrState.replaceChildren(h('span', { class: `dot${a.ok ? '' : ' off'}`, 'aria-hidden': 'true' }), a.text);
+  };
+  // 1.2.5 : météo (Open-Meteo par le relais) : disponible, indisponible, ou coupée dans Affichage
+  const weatherState = h('span', { class: 'status off' }, h('span', { class: 'dot off', 'aria-hidden': 'true' }), '…');
+  const paintWeather = (w: 'ok' | 'down' | 'unknown' | 'off'): void => {
+    const t = weatherText(w);
+    weatherState.className = `status${t.ok ? '' : ' off'}`;
+    weatherState.replaceChildren(h('span', { class: `dot${t.ok ? '' : ' off'}`, 'aria-hidden': 'true' }), t.text);
+  };
+  const checkWeather = async (): Promise<void> => {
+    if (ctx.settings.get().display.rain === false) return paintWeather('off');
+    try {
+      const core = await ctx.core();
+      paintWeather(core.weather ? await core.weather() : 'unknown');
+    } catch {
+      paintWeather('down');
+    }
   };
   const test = h('button', { type: 'button', class: 'btn btn-secondary btn-block', style: 'min-height:44px' }, 'Tester la connexion');
 
@@ -150,10 +174,14 @@ export function dataScreen(ctx: PhoneCtx): HTMLElement {
       test.disabled = false;
     }
   };
-  test.addEventListener('click', () => void check(true));
+  test.addEventListener('click', () => {
+    void check(true);
+    void checkWeather();
+  });
   paintNets(null, ctx.meta());
   paintUpdates(ctx.meta());
   void check(false);
+  void checkWeather();
 
   return h(
     'div',
@@ -175,8 +203,15 @@ export function dataScreen(ctx: PhoneCtx): HTMLElement {
       h('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;gap:12px' }, h('h2', null, 'Adresses'), addrState),
       h('p', { class: 'small' }, 'Services officiels de Bruxelles, de Flandre et de Wallonie'),
     ),
+    // 1.2.5 (PRD-1.2.5 § 3) : météo (Open-Meteo, par le relais) : toute la Belgique d'un coup, jamais la position
+    h(
+      'section',
+      { class: 'box', style: 'padding:14px 16px;display:flex;flex-direction:column;gap:6px' },
+      h('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;gap:12px' }, h('h2', null, 'Météo'), weatherState),
+      h('p', { class: 'small' }, typo('Open-Meteo : la pluie prévue pendant tes marches. Quai reçoit la carte de toute la Belgique : ta position n’est jamais envoyée.')),
+    ),
     h('section', { class: 'box pad-tight' }, h('h2', { style: 'margin:0 0 4px' }, 'Mises à jour'), updates),
     h('p', { class: 'small muted' }, 'Si une source ne répond plus, Quai affiche l’horaire prévu, signalé par le signe ~. Usage personnel et non commercial.'),
-    h('p', { class: 'small muted' }, typo(`Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company, licence CC BY 4.0. ${addressAttribution().replace(/\.\s*$/, '')}.`)),
+    h('p', { class: 'small muted' }, typo(`Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company, licence CC BY 4.0. Météo : Open-Meteo.com, licence CC BY 4.0. ${addressAttribution().replace(/\.\s*$/, '')}.`)),
   );
 }

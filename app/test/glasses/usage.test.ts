@@ -68,7 +68,8 @@ describe('REVUE-USAGE n° 8 : un véhicule s’écrit partout de la même façon
     const v = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0, fresh: true }, ctx());
     const l = lines(v);
     expect(l).toContain('07:36   Bus W vers Bruxelles Midi');
-    expect(l).toContain('08:26   Métro 2 vers Simonis (Elisabeth)');
+    // 1.2.5 : correspondance de 3 min (le W arrive à 08:21, 2 min à pied) : sa marge dans la colonne d'état
+    expect(l).toContain('08:26   Métro 2 vers Simonis (Elisabeth)   marge 3 min');
     expect(textWidth('Métro 2 vers Simonis (Elisabeth)')).toBeLessThanOrEqual(WIDTHS.stepsText);
   });
 
@@ -105,7 +106,7 @@ describe('REVUE-USAGE n° 10 : « Autour de moi » vide, une issue', () => {
 
   it('contrôleur : recherche légère jusqu’à 3 km seulement quand la liste est vide ; toucher ouvre les départs nommés', async () => {
     const calls: string[] = [];
-    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.4' }), core: (now) => stubCore(now, { nearby: 0, calls }) });
+    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.5' }), core: (now) => stubCore(now, { nearby: 0, calls }) });
     await h.until((x) => x.screen === 'home');
     calls.length = 0;
     await h.c.replaceRoute({ screen: 'nearby' });
@@ -115,7 +116,7 @@ describe('REVUE-USAGE n° 10 : « Autour de moi » vide, une issue', () => {
     expect(s.lines[1]).toBe('Rayon réglable sur le téléphone : Affichage.');
     h.c.stop();
     const busy: string[] = [];
-    const g = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.4' }), core: (now) => stubCore(now, { nearby: 3, calls: busy }) });
+    const g = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.5' }), core: (now) => stubCore(now, { nearby: 3, calls: busy }) });
     await g.until((x) => x.screen === 'home');
     busy.length = 0;
     await g.c.replaceRoute({ screen: 'nearby' });

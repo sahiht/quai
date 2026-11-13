@@ -2,13 +2,13 @@
   "package_id": "com.quai.transports",
   "edition": "202601",
   "name": "Quai",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "min_sdk_version": "0.0.16",
   "entrypoint": "index.html",
   "permissions": [
     {
       "name": "network",
-      "desc": "Télécharge les horaires préparés chaque nuit (GitHub Pages, par zones d’environ 2 km) et, depuis ton relais personnel, le temps réel (retards, voies, suppressions) et les adresses : seul le texte tapé est envoyé, jamais la position.",
+      "desc": "Télécharge les horaires préparés chaque nuit (GitHub Pages, par zones d’environ 2 km) et, depuis ton relais personnel, le temps réel (retards, voies, suppressions), la pluie prévue sur une carte fixe de la Belgique et les adresses : seul le texte tapé est envoyé, jamais la position.",
       "whitelist": []
     },
     {

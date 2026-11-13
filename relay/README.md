@@ -1,8 +1,8 @@
 # Quai : relais temps réel et adresses
 
-Petit service Vercel (gratuit, plan Hobby, runtime Node 22) entre le portail officiel Belgian Mobility Company (BMC) et l’appli Quai. Il récupère les flux temps réel des opérateurs avec la clé BMC (qui ne quitte jamais le serveur), les décode et ne renvoie à l’appli que ce qu’elle demande, en JSON. Depuis la 1.1, il cherche aussi les adresses auprès des services officiels des trois Régions (`/api/geocode`). Les formats de réponse suivent exactement `shared/types.ts` (copie dans `lib/shared/types.ts`).
+Petit service Vercel (gratuit, plan Hobby, runtime Node 22) entre le portail officiel Belgian Mobility Company (BMC) et l’appli Quai. Il récupère les flux temps réel des opérateurs avec la clé BMC (qui ne quitte jamais le serveur), les décode et ne renvoie à l’appli que ce qu’elle demande, en JSON. Depuis la 1.1, il cherche aussi les adresses auprès des services officiels des trois Régions (`/api/geocode`) ; depuis la 1.2.5, il donne la pluie prévue sur une carte fixe de la Belgique (`/api/weather`, Open-Meteo). Les formats de réponse suivent exactement `shared/types.ts` (copie dans `lib/shared/types.ts`).
 
-Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company (licence CC BY 4.0). Adresses : Digitaal Vlaanderen, Paradigm (UrbIS, CC0), SPW (ICAR, CC BY 4.0), voir « Attribution et licences ».
+Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company (licence CC BY 4.0). Adresses : Digitaal Vlaanderen, Paradigm (UrbIS, CC0), SPW (ICAR, CC BY 4.0), voir « Attribution et licences ». Météo : Open-Meteo.com (licence CC BY 4.0).
 
 ## Points d’entrée
 
@@ -74,6 +74,20 @@ Adresses des services officiels des trois Régions (PRD M4, `docs/v1.1/design-ro
 7. Limites (par instance, au mieux) : 30 recherches par minute et par adresse IP (429 « Trop de recherches d’adresses : réessaie dans une minute. ») ; 4 requêtes en cours au plus par service (les suivantes attendent une place jusqu’au délai, sinon « Trop de recherches en cours vers le service wallon ») ; disjoncteur : 3 échecs de suite écartent le service 60 s (« Service des adresses de Wallonie indisponible », de même Flandre et Bruxelles).
 8. Erreurs, toujours en HTTP 200 : toutes les sources en erreur : `error` « Recherche d’adresse indisponible pour l’instant : gares et arrêts seulement. » ; par source dans `sources.x.error` : « Délai dépassé (2 s) », « Réponse HTTP 503 du service wallon », « Réponse illisible du service flamand », « Service bruxellois injoignable », « Trop de requêtes, limite du service wallon atteinte (HTTP 429) », « Réponse trop volumineuse du service flamand ». `partial: true` dès qu’une source interrogée manque.
 
+### `GET /api/weather` (WeatherResponse, 1.2.5)
+
+Pluie prévue sur une grille fixe de la Belgique : 9 × 16 cases de 0,25° (du 49,5° N 2,55° E au 51,5° N 6,3° E), la même pour tout le monde. Aucun paramètre n’est lu : le téléphone n’envoie jamais sa position, il choisit lui-même la case de chaque marche.
+
+```json
+{"lat0":49.5,"lon0":2.55,"step":0.25,"rows":9,"cols":16,
+ "t0":1794308400,"rain":[[0,3,8,…],…],"h0":1794312000,"prob":[[20,70,…],…],"fetchedAt":"2026-11-10T07:31:05.000Z"}
+```
+
+- `t0` : fin du premier quart d’heure (secondes epoch) ; `rain[case][k]` : pluie du quart d’heure qui finit à `t0 + k × 900`, en dixièmes de mm (24 quarts d’heure, 6 h). `h0` : fin de la première heure ; `prob[case][h]` : probabilité de pluie (%) de l’heure qui finit à `h0 + h × 3600` (7 heures). Comme Open-Meteo : chaque valeur porte sur la période qui précède son heure. Valeur absente : 0, jamais de pluie annoncée sans donnée.
+- Source : une seule requête `https://api.open-meteo.com/v1/forecast` pour les 144 cases (`minutely_15=precipitation`, `hourly=precipitation_probability`, `forecast_minutely_15=24`, `forecast_hours=7`, `timeformat=unixtime`), sans clé. Usage gratuit non commercial d’Open-Meteo : moins de 10 000 appels par jour ; une grille compte au plus 144 appels.
+- Cache : 1 h dans l’instance et, au CDN, le reste de cette heure (`public, s-maxage=3600, stale-while-revalidate=300` pour une grille toute fraîche, `s-maxage` plus court ensuite, 60 s au moins), soit au plus 24 grilles par jour (3 456 appels au pire) et jamais une grille servie plus de 1 h 05 après sa lecture. Open-Meteo refuse ou ne répond pas : la dernière grille sert encore jusqu’à 2 h après sa lecture (`no-store`), ensuite HTTP 200 avec `error` (« Météo indisponible : … ») et des séries vides ; le téléphone n’annonce alors aucune pluie. Après un refus, l’instance ne rappelle pas Open-Meteo avant 5 min, et des requêtes simultanées partagent un seul appel : une panne ne dépense pas le quota. Le téléphone refuse aussi une grille lue il y a plus de 2 h (`fetchedAt`).
+- `vercel.json` : `"regions": ["fra1"]` (Francfort, au plus près des utilisateurs et d’Open-Meteo) et `maxDuration: 10` pour `api/weather`.
+
 ### `GET /api/health` (HealthResponse)
 
 Sonde les quatre sources en parallèle (3 s au plus, statut et en-têtes seulement, sans télécharger les flux) et lit `${DATA_BASE}/meta.json` si `DATA_BASE` est définie. `sources.x` : `{ ok, ms }` ou `{ ok: false, error }`. `data` : date de la dernière génération de nuit, `ok` si `meta.json` est lisible, que tous les flux de la nuit sont en ordre et que les données ont moins de 48 h, et l’état de chaque flux. `ok` global : toutes les sources et les données en ordre. Ni clé ni adresse de source dans la réponse.
@@ -91,6 +105,7 @@ Depuis la 1.1 : `version` (« 1.1.0 ») et `geocode: { vla, bru, wal }` pour les
 | `GEOCODE_SOURCES` | Optionnelle. Services d’adresses activés, dans l’ordre : défaut `vla,bru,wal`. Une autre entrée (`google` compris) est ignorée avec une ligne de journal. |
 | `QUAI_GEO_VLA_BASE`, `QUAI_GEO_BRU_BASE`, `QUAI_GEO_WAL_BASE` | Optionnelles. Adresses de base des services. Défauts : `https://geo.api.vlaanderen.be/geolocation/v4`, `https://geoservices.irisnet.be/geocoding/api/v1/brussels/geocoding` (chemin de la spécification Geoloc de Paradigm, février 2026, vérifié en direct le 11/11/2026), `https://geoservices.wallonie.be/geocodeWS`. Permettent de suivre un changement de version sans changer le code. |
 | `QUAI_GEO_BASE` | Tests seulement. Base unique d’un faux service : les trois adresses deviennent `${QUAI_GEO_BASE}/geolocation/v4`, `…/geocoding/api/v1/brussels/geocoding`, `…/geocodeWS` (une variable propre à un service l’emporte). Jamais sur Vercel. |
+| `WEATHER_BASE` | Tests seulement (1.2.5). Remplace `https://api.open-meteo.com` par un faux Open-Meteo. Jamais sur Vercel. |
 | `GOOGLE_GEOCODING_KEY` | À laisser vide. Google n’est pas branché en 1.1 (`design-routing.md` § 6.6) : la clé n’est jamais utilisée ni écrite au journal ; si elle est définie, une ligne de journal le rappelle. |
 
 Modèle : `.env.example`. Aucune clé dans le dépôt. Les services d’adresses n’ont besoin d’aucune clé.
@@ -117,7 +132,7 @@ Texte proposé, rendu dans `attribution` et à afficher au pied de la liste des 
 1. Sur Vercel, « Add New… > Project », importer le dépôt GitHub.
 2. « Root Directory » : `relay`. « Framework Preset » : « Other » (détecté seul). Version de Node : 22.x (imposée aussi par `engines` dans `package.json`).
 3. « Environment Variables » : `BMC_KEY` (et au besoin `DATA_BASE`, `SNCB_RT_URL`, `BMC_BASE`), pour Production et Preview. Les adresses n’ont besoin d’aucune variable (`GEOCODE_SOURCES` et `QUAI_GEO_*_BASE` seulement pour changer un service ; jamais `QUAI_GEO_BASE` ni `GOOGLE_GEOCODING_KEY`).
-4. « Deploy ». Vercel installe les dépendances, lance `npm run vercel-build` (vérification des types de `api/` et `lib/`), publie `public/` (page d’accueil) et crée une fonction Node par fichier de `api/`. `vercel.json` limite `api/geocode` à 5 s (`maxDuration` ; la recherche répond en 2,5 s au plus).
+4. « Deploy ». Vercel installe les dépendances, lance `npm run vercel-build` (vérification des types de `api/` et `lib/`), publie `public/` (page d’accueil) et crée une fonction Node par fichier de `api/`. `vercel.json` limite `api/geocode` à 5 s (`maxDuration` ; la recherche répond en 2,5 s au plus) et `api/weather` à 10 s, et place les fonctions à Francfort (`regions: ["fra1"]`, 1.2.5).
 5. Vérifier : `curl -s https://<projet>.vercel.app/api/health`, puis la liste « Vérifications après déploiement » ci-dessous.
 6. Donner l’adresse (`https://<projet>.vercel.app`, sans `/` final) à l’appli : `QUAI_RELAY_BASE` au moment de `npm run configure`. Prendre le domaine de production (« Domains » sur la page du projet), jamais l’adresse propre à un déploiement (`<projet>-<suite aléatoire>.vercel.app`) : avec la protection standard de Vercel, elle demande une connexion Vercel et l’appli n’y aurait pas accès.
 
@@ -125,7 +140,7 @@ Un changement de variable d’environnement n’est pris en compte qu’au dépl
 - dans Vercel, « Deployments », menu « … » du dernier déploiement, « Redeploy », en décochant « Use project's Ignore Build Step » (sinon le script compare le commit à lui-même et annule le déploiement) ;
 - ou pousser un commit dont le message contient `[deploy relay]`, par exemple `git commit --allow-empty -m "Nouvelle clé BMC [deploy relay]"`.
 
-Essai du build de Vercel sans compte ni réseau vers Vercel : dans `relay/`, créer `.vercel/project.json` contenant `{"projectId":"local","orgId":"local","settings":{"framework":null}}` (dossier ignoré par git), puis `npx vercel build --yes`. La sortie `.vercel/output/` doit contenir cinq fonctions `nodejs22.x` (`api/alerts`, `api/geocode`, `api/health`, `api/rt`, `api/stib`), chacune avec `lib/` (et `gtfs-realtime-bindings` pour celles du temps réel ; `api/geocode` n’en a pas besoin), `maxDuration: 5` pour `api/geocode`, et `static/index.html`. Essai fait le 11/11/2026 avec Vercel CLI 65.14.0 : build réussi, fonctions compilées appelées sur le faux service d’adresses.
+Essai du build de Vercel sans compte ni réseau vers Vercel : dans `relay/`, créer `.vercel/project.json` contenant `{"projectId":"local","orgId":"local","settings":{"framework":null}}` (dossier ignoré par git), puis `npx vercel build --yes`. La sortie `.vercel/output/` doit contenir six fonctions `nodejs22.x` (`api/alerts`, `api/geocode`, `api/health`, `api/rt`, `api/stib` ; 1.2.5 : `api/weather`), chacune avec `lib/` (et `gtfs-realtime-bindings` pour celles du temps réel ; `api/geocode` et `api/weather` n’en ont pas besoin), `maxDuration: 5` pour `api/geocode`, `maxDuration: 10` pour `api/weather`, et `static/index.html`. Essai fait le 11/11/2026 avec Vercel CLI 65.14.0 : build réussi, fonctions compilées appelées sur le faux service d’adresses.
 
 Le dossier se suffit à lui-même : ce qui vient de `shared/` est recopié dans `lib/shared/` par `npm run sync-shared` (un test vérifie que la copie est identique). Les fonctions utilisent la signature Web standard des fonctions Node de Vercel pour un projet sans framework : `export function GET(request: Request): Response` dans `api/*.ts` (comme les exemples `vercel/examples`, `solutions/slackbot` et `starter/mcp-api-wrapper`), sans dépendance à `@vercel/node`.
 
@@ -234,12 +249,14 @@ Lignes à attendre au démarrage (pour les scripts de test) : `[faux BMC] prêt 
 9. https://quai-relay.vercel.app/api/geocode?q=ab : HTTP 400 « Paramètre q manquant ou trop court : 3 caractères au moins. ».
 10. Deux fois la même adresse de recherche : la seconde réponse a le même `fetchedAt` (cache) et l’en-tête `Cache-Control: public, s-maxage=86400, stale-while-revalidate=604800` (`curl -sI`).
 11. Durées : `sources.x.ms` en dessous de 1000 en temps normal ; dans « Logs » de Vercel, les lignes `[relais] adresses : … car.` ne contiennent jamais le texte cherché.
+12. 1.2.5 : https://quai-relay.vercel.app/api/weather : `rows` 9, `cols` 16, 144 séries `rain` (24 valeurs) et `prob` (7 valeurs), sans `error` ; en-tête `Cache-Control: public, s-maxage=…, stale-while-revalidate=300` (`s-maxage` de 3600 au plus) ; l’en-tête `x-vercel-id` contient `fra1::` (fonction à Francfort).
 
 ## Limites connues
 
 - Cache mémoire de 25 s par instance de fonction (les requêtes simultanées partagent un seul appel au portail) : une instance froide ou une deuxième instance refait la requête. Le cache CDN de 20 s réduit les appels.
 - Plafonds du portail BMC non documentés : le cache limite les appels (au plus un par flux et par instance toutes les 25 s).
 - Plan Hobby de Vercel : usage personnel non commercial et quotas mensuels ; chaque appel reste sous 8 s (délai amont), `/api/health` sous 3 s.
+- Open-Meteo (1.2.5) : gratuit pour un usage non commercial, moins de 10 000 appels par jour ; une adresse partagée de Vercel peut atteindre la limite plus tôt (Open-Meteo le signale) : la dernière grille sert alors 2 h, puis l’appli n’annonce plus de pluie, sans autre gêne.
 - Flux `DIFFERENTIAL` : fusion au mieux, par instance (un voyage non revu depuis 10 min est oublié).
 - Retard global d’un voyage (`TripUpdate.delay`) sans mise à jour par arrêt : non transmis (le contrat ne le prévoit pas).
 - Pas de vérification sur les vrais serveurs depuis cet environnement : formats éprouvés sur des fixtures réalistes seulement (en particulier la clause `where` STIB et le format du flux SNCB direct).

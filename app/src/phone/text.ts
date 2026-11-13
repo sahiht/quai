@@ -160,9 +160,18 @@ export const T = {
 } as const;
 
 /**
- * Bannière « Nouveau » de l'accueil du téléphone, message « Quai 1.2.4 » (PRD-1.2.4 § 5) : une ligne par nouveauté,
+ * Bannière « Nouveau » de l'accueil du téléphone, message « Quai 1.2.5 » (PRD-1.2.5 § 8) : une ligne par nouveauté,
  * comme les lunettes et Quai Web.
  */
+export const NEWS_125: readonly string[] = [
+  'Dans les étapes, quand tu pars bientôt : l’heure d’arrivée si tu rates ton départ.',
+  'Une correspondance de 5 min ou moins montre sa marge.',
+  'La pluie prévue est dite sur les marches de 5 min ou plus (réglage dans Affichage).',
+  'Dans le train, le bus, le tram ou le métro : ta progression jusqu’à la descente.',
+  'Bus, tram, métro dans les lunettes : la ligne et sa destination en clair, un départ par ligne.',
+];
+
+/** Nouveautés de la 1.2.4 (PRD-1.2.4 § 5) : dites aussi à qui passe d'une version antérieure directement à la 1.2.5. */
 export const NEWS_124: readonly string[] = [
   'Dans les étapes, l’arrêt ou la gare où aller est écrit en entier.',
   'Bus, tram, métro : tes arrêts et tes lignes en deux blocs.',
@@ -189,12 +198,13 @@ export const NEWS_122: readonly string[] = [
 ];
 
 /**
- * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.4 ; depuis une version
- * antérieure à la 1.2.3 (`seen` : la version vue avant la mise à jour), celles de la 1.2.3 ensuite, et d'avant la
- * 1.2.2, celles de la 1.2.2.
+ * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.5 ; depuis une version
+ * antérieure à la 1.2.4 (`seen` : la version vue avant la mise à jour), celles de la 1.2.4 ensuite, puis celles de la
+ * 1.2.3 et de la 1.2.2 pour les versions plus anciennes.
  */
 export function newsLines(seen = ''): string[] {
-  const out = [...NEWS_124];
+  const out = [...NEWS_125];
+  if (seen && compareVersions(seen, '1.2.4') < 0) out.push(...NEWS_124);
   if (seen && compareVersions(seen, '1.2.3') < 0) out.push(...NEWS_123);
   if (seen && compareVersions(seen, '1.2.2') < 0) out.push(...NEWS_122);
   return out;
@@ -420,13 +430,17 @@ const walksOf = (j: Journey): number[] =>
 /**
  * Ligne « moyens » d'une carte (PRD-1.2.1 § 2.3 et § 7.2) : comment on voyage (`meansText`), puis les marches dans
  * l'ordre : « bus W + S1, à pied 4 + 5 min » ; plus de 3 marches : « bus 36 + IC + métro 2, 12 min à pied » ; sans
- * marche : « IC + IC ». Trajet à pied : rien, la carte le dit déjà (« 22 min à pied », « À pied, sans transport »).
+ * marche : « IC + IC ». Trajet à pied : rien, la carte le dit déjà (« 22 min à pied », « À pied, sans transport »),
+ * sauf la pluie prévue (1.2.5 : « pluie prévue »).
  */
 export function meansLine(j: Journey): string {
-  if (!j.legs.some((l) => l.kind === 'ride')) return '';
+  // 1.2.5 : comme dans les lunettes, la pluie prévue sur une marche de 5 min ou plus
+  const rainy = j.legs.some((l) => l.kind === 'walk' && !!l.rain && walkMinOf(l) >= 5);
+  if (!j.legs.some((l) => l.kind === 'ride')) return rainy ? 'pluie prévue' : '';
   const w = walksOf(j);
   if (!w.length) return meansText(j);
-  return `${meansText(j)}, ${w.length > 3 ? `${w.reduce((s, m) => s + m, 0)} min à pied` : `à pied ${w.join(' + ')} min`}`;
+  const rain = rainy ? ', pluie prévue' : '';
+  return `${meansText(j)}, ${w.length > 3 ? `${w.reduce((s, m) => s + m, 0)} min à pied` : `à pied ${w.join(' + ')} min`}${rain}`;
 }
 
 /** Largeur d'un palier de marche, en minutes (PRD-1.2.1 § 1.1). */

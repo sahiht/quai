@@ -1,10 +1,11 @@
 /**
- * npm run dev [-- --port 8788] : les cinq points d'entrée du relais sur un serveur Node local,
+ * npm run dev [-- --port 8788] : les six points d'entrée du relais sur un serveur Node local,
  * avec les mêmes gestionnaires que sur Vercel (api/*.ts : GET et OPTIONS).
  *
  * Développement seulement :
  *  - BMC_BASE vaut par défaut http://localhost:8789 (npm run mock-bmc) et BMC_KEY vaut 'dev-key' ;
  *  - adresses : sans QUAI_GEO_BASE ni QUAI_GEO_*_BASE, QUAI_GEO_BASE vaut http://localhost:8790 (npm run mock-geocode) ;
+ *  - météo (1.2.5) : WEATHER_BASE remplace https://api.open-meteo.com (faux Open-Meteo des essais) ;
  *  - QUAI_NOW=2026-11-10T12:10:00+01:00 fait partir l'horloge du relais de cet instant (filtre des alertes actives) ;
  *  - POST /__cache/clear vide les caches (utile après un changement de scène du faux portail ou du faux service
  *    d'adresses : cache, disjoncteurs et limites des adresses compris).
@@ -19,6 +20,7 @@ import * as stib from '../api/stib.js';
 import * as alerts from '../api/alerts.js';
 import * as health from '../api/health.js';
 import * as geocode from '../api/geocode.js';
+import * as weather from '../api/weather.js';
 import { clearSharedCaches, setDevClock } from '../lib/context.js';
 import { CORS_HEADERS } from '../lib/http.js';
 import { scrub, secretsFrom } from '../lib/log.js';
@@ -29,7 +31,7 @@ interface ApiModule {
   OPTIONS(request: Request): Promise<Response> | Response;
 }
 
-const ROUTES: Record<string, ApiModule> = { '/api/rt': rt, '/api/stib': stib, '/api/alerts': alerts, '/api/health': health, '/api/geocode': geocode };
+const ROUTES: Record<string, ApiModule> = { '/api/rt': rt, '/api/stib': stib, '/api/alerts': alerts, '/api/health': health, '/api/geocode': geocode, '/api/weather': weather };
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 function portArg(argv: string[], fallback: number): number {
@@ -54,7 +56,7 @@ async function route(req: http.IncomingMessage, url: URL): Promise<Response> {
     return new Response(readFileSync(join(HERE, '..', 'public', 'index.html')), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
   }
   const mod = ROUTES[url.pathname.replace(/\/+$/, '')];
-  if (!mod) return jsonResponse(404, { error: 'Introuvable : /api/rt, /api/stib, /api/alerts, /api/health ou /api/geocode' });
+  if (!mod) return jsonResponse(404, { error: 'Introuvable : /api/rt, /api/stib, /api/alerts, /api/health, /api/geocode ou /api/weather' });
   // en-têtes utiles seulement (adresse du client pour la limite par client des adresses)
   const forwarded = req.headers['x-forwarded-for'];
   const headers: Record<string, string> = typeof forwarded === 'string' ? { 'x-forwarded-for': forwarded } : {};

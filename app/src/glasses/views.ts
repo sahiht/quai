@@ -15,13 +15,26 @@ import { labelOf } from '../core/api';
 import { favoriteTitle, placesOf } from '../core/favorites';
 import { displayLabel, HOLIDAY_TEXT, holidayName, longestWalk, walksMore } from '../core/means';
 import { shortAddress } from '../core/text';
-import { areaLabel, displayName, hhmm, lineLabel, minutesUntil } from '../core/util';
+import { areaLabel, displayName, distanceM, hhmm, lineLabel, minutesUntil } from '../core/util';
 import type { Mode } from '../../../shared/types';
 import { normalizeForSearch } from '../../../shared/names';
 import { compareVersions } from '../version';
 import { textWidth, truncate } from './font';
 import { COL_SEP, ensureVisible, geometry, maxTop, visibleRange, WIDTHS } from './layout';
-import type { AreaRef, GlassesView, Intent, Item, KeepLineRoute, LineRoute, OthersRoute, Route, StepsRoute, StopsRoute, SubRow, TopLine } from './types';
+import type { AreaRef, GlassesView, Intent, Item, KeepLineRoute, LineRoute, OthersRoute, Route, Seg, StepsRoute, StopsRoute, SubRow, TopLine } from './types';
+import {
+  departureWait,
+  MARGIN_SHOWN_MAX,
+  NOTE_RT_KEPT,
+  RAIN_TAIL,
+  RAIN_WORDS,
+  alightWords,
+  marginText,
+  missText,
+  progressLine,
+  rainyJourney,
+  rainyWalk,
+} from './format';
 import {
   BOARD,
   HINTS,
@@ -57,7 +70,6 @@ import {
   spanText,
   stopAnswerLine,
   stopHomeText,
-  stopPassagesText,
   stopRightText,
   stopTimeParts,
   stopTimeText,
@@ -144,46 +156,34 @@ export function firstRunView(ctx: ViewCtx): GlassesView {
 }
 
 /** Titre du message de nouveautés (une fois, après la mise à jour depuis une version antérieure). */
-export const NEWS_TITLE = 'Quai 1.2.4';
+export const NEWS_TITLE = 'Quai 1.2.5';
 
 /**
- * Lignes du message « Quai 1.2.4 » (PRD-1.2.4 § 5) : l'arrêt ou la gare où aller dans les étapes, arrêts et lignes
- * séparés dans « Bus, tram, métro » ; chacune tient sur une ligne des lunettes. Les mêmes sur Quai Web.
+ * Lignes du message « Quai 1.2.5 » (PRD-1.2.5 § 8) : si tu le rates, pluie, progression dans le véhicule, « Bus, tram,
+ * métro » plus lisible ; chacune tient sur une ligne des lunettes. Les mêmes sur Quai Web.
  */
-export const NEWS_LINES: readonly string[] = [`Étapes${NB}: l’arrêt ou la gare où aller, en entier.`, `Bus, tram, métro${NB}: arrêts et lignes séparés.`];
-
-/** Les nouveautés de la 1.2.3 (PRD-1.2.3 § 4), telles que les lunettes les disaient. */
-export const NEWS_LINES_123: readonly string[] = [
-  `Tableaux complets${NB}: tous les départs des 2 heures à venir.`,
-  `Touche un départ${NB}: ses arrêts jusqu’au terminus.`,
-  `Bus, tram, métro${NB}: ajoute une ligne ou un arrêt.`,
+export const NEWS_LINES: readonly string[] = [
+  `Étapes${NB}: l’heure d’arrivée si tu rates ton départ.`,
+  `Pluie prévue${NB}: dite sur la marche concernée.`,
+  `Dans le véhicule${NB}: ta progression jusqu’à la descente.`,
+  `Bus, tram, métro${NB}: les lignes en clair, un départ par ligne.`,
 ];
 
-/**
- * Les nouveautés de la 1.2.2 (PRD-1.2.2 § 9), telles que les lunettes les disaient : gares et lignes sur l'accueil,
- * arrêts favoris rangés sans perte, « Aller à… » dans Favoris, trajet suivi seulement sur demande.
- */
-export const NEWS_LINES_122: readonly string[] = [
-  `Nouveau${NB}: tes gares et tes lignes sur l’accueil.`,
-  'Tes arrêts favoris y sont rangés, rien n’est perdu.',
-  'Aller à… a rejoint Favoris.',
-  'Un trajet n’est suivi que si tu le demandes.',
-];
+/** Les nouveautés de la 1.2.4 (PRD-1.2.4 § 5), telles que les lunettes les disaient. */
+export const NEWS_LINES_124: readonly string[] = [`Étapes${NB}: l’arrêt ou la gare où aller, en entier.`, `Bus, tram, métro${NB}: arrêts et lignes séparés.`];
 
 /**
- * Lignes du message « Quai 1.2.4 », une seule fois : celles de la 1.2.4 ; à qui vient d'une version antérieure à la
- * 1.2.3 (`seen`, la version vue avant la mise à jour), celles de la 1.2.3 ensuite ; d'avant la 1.2.2, aussi celles
- * de la 1.2.2, sans « Aller à… a rejoint Favoris. » pour tenir sur l'écran (8 lignes), dans l'ordre de la bannière du
- * téléphone.
+ * Lignes du message « Quai 1.2.5 » (PRD-1.2.5 § 8), une seule fois : celles de la 1.2.5 ; à qui vient d'une version
+ * antérieure à la 1.2.4 (`seen`, la version vue avant la mise à jour), aussi celles de la 1.2.4. Les nouveautés plus
+ * anciennes ne sont plus dites : 6 lignes au plus, l'écran en tient 8.
  */
 export function newsLines(seen = ''): string[] {
   const out = [...NEWS_LINES];
-  if (seen && compareVersions(seen, '1.2.3') < 0) out.push(...NEWS_LINES_123);
-  if (seen && compareVersions(seen, '1.2.2') < 0) out.push(...NEWS_LINES_122.filter((x) => !x.startsWith('Aller à')));
+  if (seen && compareVersions(seen, '1.2.4') < 0) out.push(...NEWS_LINES_124);
   return out;
 }
 
-/** Message « Quai 1.2.4 » : toucher mène à l'accueil. `lines` : celles calculées à l'ouverture (route du message). */
+/** Message « Quai 1.2.5 » : toucher mène à l'accueil. `lines` : celles calculées à l'ouverture (route du message). */
 export function newsView(ctx: ViewCtx, lines: string[] = newsLines()): GlassesView {
   return messageView(NEWS_TITLE, lines.length ? lines : newsLines(), ctx, { hints: HINTS.news, tap: { kind: 'continue' } });
 }
@@ -581,24 +581,36 @@ function missingLine(item: Item, ctx: ViewCtx, stop = false): Item {
   return item;
 }
 
+/** 1.2.5 (PRD-1.2.5 § 4) : « Bus W vers Bruxelles Midi » : le véhicule et la destination au plus clair, « vers » pâle. */
+function lineWords(vehicle: string, dest: string): Seg[] {
+  return [{ t: vehicle, hi: true }, { t: 'vers' }, { t: dest, hi: true }];
+}
+
 /**
- * Une ligne choisie (§ 3) : titre au plus clair, puis un sens par ligne en retrait et plus pâle ; arrêt « toutes les
- * lignes » : une ligne avec les 2 prochains départs, toucher : le tableau de l'arrêt ; arrêt introuvable (ligne ou
- * « toutes les lignes ») : « introuvable : modifie-la sur le téléphone ». Une ligne sans passage, même aucun les jours
- * publiés (week-end, jour férié : `none`), dit « aucun passage dans les prochaines heures », jamais « introuvable ».
+ * Une ligne choisie (§ 3), 1.2.5 (PRD-1.2.5 § 4) : une ligne par sens, « Bus W vers Bruxelles Midi », la ligne et sa
+ * destination au plus clair, ses 2 passages au plus clair à droite, puis l'arrêt pâle en retrait ; sens pas encore connus
+ * ou mode inconnu : le titre « Bus W · Braine-l'Alleud Merbraine » et les sens en retrait, comme la 1.2.4. Arrêt
+ * « toutes les lignes » : son nom pâle, puis ses 2 prochains départs en retrait, un par ligne, « Tram 3 vers Churchill
+ * 1 min » ; toucher : le tableau complet de l'arrêt. Arrêt introuvable (ligne ou « toutes les lignes ») : « introuvable :
+ * modifie-la sur le téléphone ». Une ligne sans passage, même aucun les jours publiés (week-end, jour férié : `none`),
+ * dit « aucun passage dans les prochaines heures », jamais « introuvable ».
  */
 function lineItem(r: LineRow, ctx: ViewCtx, f: PassageFlags): Item {
   const p = r.pick;
   const l = lang(ctx);
   if (!p.line) {
-    // 1.2.4 (PRD-1.2.4 § 2) : sous « ARRÊTS », le nom de l'arrêt seul (l'intitulé dit « toutes les lignes »).
+    // les lieux pâles, les lignes au plus clair : le nom de l'arrêt pâle, ses départs dessous
     const stop = displayName(p.name, l);
-    if (r.missing || r.stop?.missing) return missingLine({ a: stop }, ctx, true);
-    const deps = r.stop ? upcoming(r.stop.departures, ctx.now) : undefined;
+    if (r.missing || r.stop?.missing) return missingLine({ a: stop, segs: [{ t: stop }] }, ctx, true);
+    const deps = r.stop ? upcoming(r.stop.departures, ctx.now).slice(0, 2) : undefined;
     if (r.stop?.rtErrors.length) f.rtDown = true;
-    for (const d of deps?.slice(0, 2) ?? []) if (!d.rt && !d.cancelled) f.planned = true;
-    const text = deps ? stopPassagesText(deps, ctx.now, l, mp(ctx), WIDTHS.homeRow) : '…';
-    return { a: stop, sub: [{ b: text }], action: { kind: 'open', route: { screen: 'board', areaId: p.areaId, name: p.name } } };
+    for (const d of deps ?? []) if (!d.rt && !d.cancelled) f.planned = true;
+    const sub: SubRow[] = !deps
+      ? [{ b: '…' }]
+      : deps.length
+        ? deps.map((d) => ({ b: '', segs: lineWords(vehicleLong(d.mode, d.line), headText(d.head, l, d.op)), bRight: departureWait(d, ctx.now, mp(ctx)) }))
+        : [{ b: SECTION.noPassageAll }];
+    return { a: stop, segs: [{ t: stop }], sub, action: { kind: 'open', route: { screen: 'board', areaId: p.areaId, name: p.name } } };
   }
   const b = r.board;
   const open: LineRoute = { screen: 'line', pick: p.id, areaId: p.areaId, op: p.op, line: p.line, name: p.name };
@@ -607,9 +619,20 @@ function lineItem(r: LineRow, ctx: ViewCtx, f: PassageFlags): Item {
   const item: Item = { a: linePickTitle(p, l, mode), action: { kind: 'open', route: open } };
   if (r.missing || b?.state === 'missing') return missingLine(item, ctx);
   if (!b) item.sub = [{ b: '…' }];
-  else {
+  else if (!b.directions.length) {
     if (b.rtErrors.length) f.rtDown = true;
-    item.sub = b.directions.length ? b.directions.map((dir) => directionRow(dir, b, ctx, f)) : [{ b: SECTION.noPassageAll }];
+    item.sub = [{ b: SECTION.noPassageAll }];
+  } else {
+    if (b.rtErrors.length) f.rtDown = true;
+    const dirs = b.directions.map((dir) => directionRow(dir, b, ctx, f));
+    if (!mode) item.sub = dirs;
+    else {
+      const vehicle = vehicleLong(mode, p.line);
+      const rows = b.directions.map((dir, k) => ({ segs: lineWords(vehicle, headText(dir.head, l, b.op)), ...(dirs[k].bRight ? { bRight: dirs[k].bRight } : {}) }));
+      item.segs = rows[0].segs;
+      if (rows[0].bRight) item.bRight = rows[0].bRight;
+      item.sub = [...rows.slice(1).map((x) => ({ b: '', flush: true, ...x })), { b: displayName(p.name, l) }];
+    }
   }
   return item;
 }
@@ -939,6 +962,8 @@ interface StepRow {
   /** Étape qui peut porter le repère « ▶ » (marche, montée) ; pas les descentes. */
   markable: boolean;
   ride?: Leg;
+  /** 1.2.5 : correspondance : minutes entre l'arrivée à pied (ou la descente) et le départ de ce véhicule. */
+  margin?: number;
 }
 
 /** « la gare » devant un train, sinon « l’arrêt » ; `precise` : « l’arrêt du tram » (bus, métro). */
@@ -953,8 +978,9 @@ function placeWord(next: Leg | undefined, precise: boolean): string {
  * suivante (`always` : toujours sur deux lignes, le départ à pied d'un trajet). La place se mesure avec la colonne
  * d'état (« dans 4 min ») : la forme ne change pas quand l'état apparaît.
  */
-function walkItem(time: string, verb: string, generic: string, name: string, w: number, always = false): Item {
-  const bTail = ` (${minText(w)})`;
+function walkItem(time: string, verb: string, generic: string, name: string, w: number, always = false, rain = false): Item {
+  // 1.2.5 : pluie prévue pendant une marche de 5 min ou plus : « (7 min, pluie) »
+  const bTail = ` (${minText(w)}${rain ? RAIN_TAIL : ''})`;
   const one = `${verb} vers ${name}`;
   if (!always && textWidth(one + bTail) <= WIDTHS.stepsText) return { a: time, b: one, bTail };
   return { a: time, b: `${verb} vers ${generic}`, bTail, b2: name };
@@ -974,7 +1000,8 @@ function stepRows(j: Journey, at: string, leave: number, ctx: ViewCtx): StepRow[
   const rides = j.legs.filter((x) => x.kind === 'ride');
   if (!rides.length) {
     const min = Math.max(1, Math.round((j.arr - j.dep) / 60_000));
-    rows.push({ item: { a: hhmm(j.dep), b: 'Partir à pied', bTail: ` (${minText(min)})` }, start: j.dep, end: j.arr, markable: true });
+    const rain = rainyJourney(j) && min >= 5;
+    rows.push({ item: { a: hhmm(j.dep), b: 'Partir à pied', bTail: ` (${minText(min)}${rain ? RAIN_TAIL : ''})` }, start: j.dep, end: j.arr, markable: true });
     rows.push({ item: { a: hhmm(j.arr), b: `Arrivée ${at}` }, start: j.arr, end: j.arr, markable: false });
     return rows;
   }
@@ -983,18 +1010,19 @@ function stepRows(j: Journey, at: string, leave: number, ctx: ViewCtx): StepRow[
     const last = i === j.legs.length - 1;
     if (leg.kind === 'walk') {
       const w = walkMinOf(leg);
+      const rain = rainyWalk(leg);
       if (i === 0) {
         const next = j.legs.slice(1).find((x) => x.kind === 'ride');
-        const item = walkItem(hhmm(leave), 'Partir à pied', placeWord(next, false), displayName(leg.to.name, l), w, true);
+        const item = walkItem(hhmm(leave), 'Partir à pied', placeWord(next, false), displayName(leg.to.name, l), w, true, rain);
         rows.push({ item, start: leave, end: Math.max(leg.arr, leave + 60_000), markable: true });
       } else if (last) {
-        rows.push({ item: { a: hhmm(leg.arr), b: `Arrivée ${at}`, bTail: ` (${minText(w)} à pied)` }, start: leg.dep, end: leg.arr, markable: true });
+        rows.push({ item: { a: hhmm(leg.arr), b: `Arrivée ${at}`, bTail: ` (${minText(w)} à pied${rain ? RAIN_TAIL : ''})` }, start: leg.dep, end: leg.arr, markable: true });
       } else {
         const next = j.legs.slice(i + 1).find((x) => x.kind === 'ride');
         const same = prevRide && sameName(leg.to.name, prevRide.to.name);
         const item = same
-          ? { a: hhmm(leg.dep), b: `À pied vers ${placeWord(next, true)}`, bTail: ` (${minText(w)})` }
-          : walkItem(hhmm(leg.dep), 'À pied', placeWord(next, true), displayName(leg.to.name, l), w);
+          ? { a: hhmm(leg.dep), b: `À pied vers ${placeWord(next, true)}`, bTail: ` (${minText(w)}${rain ? RAIN_TAIL : ''})` }
+          : walkItem(hhmm(leg.dep), 'À pied', placeWord(next, true), displayName(leg.to.name, l), w, false, rain);
         rows.push({ item, start: leg.dep, end: leg.arr, markable: true });
       }
       return;
@@ -1016,6 +1044,8 @@ function stepRows(j: Journey, at: string, leave: number, ctx: ViewCtx): StepRow[
       end: leg.arr,
       markable: true,
       ride: leg,
+      // 1.2.5 : correspondance : de l'arrivée de l'étape précédente (marche ou descente) au départ de ce véhicule
+      ...(prevRide && i > 0 ? { margin: Math.floor((leg.dep - j.legs[i - 1].arr) / 60_000) } : {}),
     });
     rows.push({ item: { a: hhmm(leg.arr), b: `${last ? 'Arrivée à' : 'Descendre à'} ${displayName(leg.to.name, l)}` }, start: leg.arr, end: leg.arr, markable: false });
     prevRide = leg;
@@ -1027,8 +1057,13 @@ function stepRows(j: Journey, at: string, leave: number, ctx: ViewCtx): StepRow[
 function stateOf(r: StepRow, next: boolean, now: number): string {
   if (r.ride?.cancelled) return 'SUPPRIMÉ';
   if (r.markable && now >= r.start && now < r.end) return 'en cours';
+  // 1.2.5 (PRD-1.2.5 § 2) : correspondance serrée, avant son départ : « très juste » d'abord (aucune marge, même avec
+  // un retard de ce véhicule) ; puis son retard, l'heure de la ligne étant la prévue ; puis « marge 2 min » (5 min ou moins)
+  const tight = r.margin !== undefined && r.margin <= MARGIN_SHOWN_MAX && now < r.start;
+  if (tight && r.margin! <= 0) return marginText(r.margin!);
   const delay = r.ride?.delayMin ?? 0;
   if (r.ride && delay > 0 && now < r.end) return `+${minText(delay)}`;
+  if (tight) return marginText(r.margin!);
   if (next) {
     const m = minutesUntil(r.start, now);
     if (m < 60) return m < 1 ? 'maintenant' : `dans ${minText(m)}`;
@@ -1098,8 +1133,11 @@ export function stepsPage(route: Pick<StepsRoute, 'title' | 'label'>, d: StepsDa
     v.items.push(c ? { ...r.item, c } : r.item);
   });
   const alert = j.alerts[0];
+  // 1.2.5 : ligne du haut : l'alerte d'abord, puis « Si tu le rates » quand le départ approche, sinon le pourquoi
+  const miss = missLine(j, d.journeys, leave, ctx.now);
   let top: TopLine | undefined;
   if (alert) top = { text: alert.text, strong: true };
+  else if (miss) top = { text: miss };
   else if (j.reason) top = { text: j.reason };
   if (top) v.top = top;
   v.reserveNote = true;
@@ -1128,6 +1166,47 @@ export function stepsPage(route: Pick<StepsRoute, 'title' | 'label'>, d: StepsDa
   }
   v.log = { page: d.index + 1, pages: d.journeys.length, label: labelOf(j.label) ?? '', followed };
   return v;
+}
+
+/** 1.2.5 : « Si tu le rates » paraît 5 min au plus avant de partir, et jusqu'au départ du premier véhicule. */
+export const MISS_WINDOW_MIN = 5;
+
+/** 1.2.5 : même arrêt ou même gare : même zone, ou même nom à 400 m au plus (quais et voies d'une même gare). */
+export const SAME_STOP_M = 400;
+function sameStop(a: Leg['from'], b: Leg['from']): boolean {
+  if (a.areaId && b.areaId && a.areaId === b.areaId) return true;
+  return sameName(a.name, b.name) && distanceM(a, b) <= SAME_STOP_M;
+}
+
+/**
+ * 1.2.5 : fenêtre de « Si tu le rates » : 5 min au plus avant de partir (à pied, ou à bord dès le départ), jusqu'au
+ * départ du premier véhicule (pas supprimé). Le contrôleur rafraîchit alors aussi les trajets de repli.
+ */
+export function inMissWindow(j: Journey, now: number, leave = j.leaveAt): boolean {
+  const first = j.legs.find((l) => l.kind === 'ride');
+  if (!first || first.cancelled || now >= first.dep) return false;
+  const go = j.legs[0]?.kind === 'walk' ? leave : first.dep;
+  return go - now <= MISS_WINDOW_MIN * 60_000;
+}
+
+/**
+ * 1.2.5 (PRD-1.2.5 § 1) : « Si tu le rates : arrivée 09:57, 59 min plus tard ». Qui rate son départ est à l'arrêt ou à
+ * la gare : parmi les trajets déjà calculés, ceux qui en repartent plus tard (un autre trajet peut y passer, le suivant
+ * aussi), et le premier arrivé. Rien quand aucun n'en repart (le « , dernier » de la ligne du véhicule le dit déjà), ni
+ * quand le premier véhicule est supprimé (l'alerte le dit). Un fait, jamais un conseil.
+ */
+export function missLine(j: Journey, journeys: readonly Journey[], leave: number, now: number): string | null {
+  const first = j.legs.find((l) => l.kind === 'ride');
+  if (!first || !inMissWindow(j, now, leave)) return null;
+  let best: number | undefined;
+  for (const x of journeys) {
+    if (x.id === j.id) continue;
+    const k = x.legs.findIndex((r) => r.kind === 'ride' && !r.cancelled && r.dep > first.dep && sameStop(r.from, first.from));
+    // la suite de ce trajet doit rouler : une suppression plus loin, et son heure d'arrivée ne vaut plus
+    if (k < 0 || x.legs.slice(k).some((r) => r.kind === 'ride' && r.cancelled)) continue;
+    if (best === undefined || x.arr < best) best = x.arr;
+  }
+  return best === undefined ? null : missText(best, shownGap(j.arr, best), now);
 }
 
 /** Titre de l'écran du trajet suivi : « Vers le bureau : trajet suivi », le titre du trajet coupé si trop long. */
@@ -1202,11 +1281,13 @@ export function otherWhy(j: Journey, first: Journey | undefined): string | null 
   if (label === 'earlier') {
     const gain = shownGap(j.arr, first.arr);
     if (gain < 1) return null;
-    return `${gapWords(gain)} plus tôt${walksMore(j, first) ? `, mais ${minText(longestWalk(j))} à pied` : ''}`;
+    // 1.2.5 : « mais 19 min à pied sous la pluie » : la pluie pèse dans le choix, sans changer l'ordre
+    return `${gapWords(gain)} plus tôt${walksMore(j, first) ? `, mais ${minText(longestWalk(j))} à pied${rainyJourney(j) ? ` ${RAIN_WORDS}` : ''}` : ''}`;
   }
   if (label === 'lesswalk') {
     const d = shownGap(first.arr, j.arr);
-    return `${d > 0 ? `${gapWords(d)} plus tard` : d < 0 ? `${gapWords(-d)} plus tôt` : 'même heure d’arrivée'}, moins de marche`;
+    // 1.2.5 : le premier trajet marche sous la pluie : « moins de marche sous la pluie »
+    return `${d > 0 ? `${gapWords(d)} plus tard` : d < 0 ? `${gapWords(-d)} plus tôt` : 'même heure d’arrivée'}, moins de marche${rainyJourney(first) ? ` ${RAIN_WORDS}` : ''}`;
   }
   return null;
 }
@@ -1214,13 +1295,16 @@ export function otherWhy(j: Journey, first: Journey | undefined): string | null 
 /**
  * 2e ligne d'une entrée de « Autres trajets » (§ 3.3) : les moyens d'abord, puis le pourquoi (otherWhy) ou, à défaut,
  * les marches : « IC + IC, 13 min plus tôt, mais 19 min à pied », « bus W + métro 2, 25 min plus tard, moins de
- * marche », « bus 36 + IC + métro 2, à pied 5 + 4 + 2 min » ; à pied : « à pied, 25 min ». Une ligne mesurée au
+ * marche », « bus 36 + IC + métro 2, à pied 5 + 4 + 2 min » ; à pied : « à pied, 25 min » (1.2.5 : « à pied, 25 min sous
+ * la pluie »). Une ligne mesurée au
  * pixel : trop longue, les moyens se raccourcissent (« bus 36 + IC + … »), jamais le pourquoi.
  */
 export function otherDetail(j: Journey, journeys: readonly Journey[]): string {
   const rides = j.legs.filter((l) => l.kind === 'ride').map(rideWords);
-  if (!rides.length) return truncate(meansLine(j), WIDTHS.full);
-  const why = otherWhy(j, journeys[0]) ?? walksPhrase(j);
+  // 1.2.5 : à pied tout du long, sous la pluie : « à pied, 25 min sous la pluie »
+  if (!rides.length) return truncate(`${meansLine(j)}${rainyJourney(j) ? ` ${RAIN_WORDS}` : ''}`, WIDTHS.full);
+  const walks = walksPhrase(j);
+  const why = otherWhy(j, journeys[0]) ?? (walks && rainyJourney(j) ? `${walks} ${RAIN_WORDS}` : walks);
   for (let k = Math.min(rides.length, 3); k >= 1; k--) {
     const means = `${rides.slice(0, k).join(' + ')}${k < rides.length ? ' + …' : ''}`;
     const text = why ? `${means}, ${why}` : means;
@@ -1266,11 +1350,6 @@ export function trainTitle(leg: Leg, l: NameLang, now?: number): string {
   return `${vehicleWords(leg)}${head}${delay}${day ? `, ${day}` : ''}`;
 }
 
-/** C1 : « Descente dans 3 arrêts » (bus, tram, métro, quand les arrêts sont connus). */
-export function alightText(stopsLeft: number): string {
-  return stopsLeft <= 1 ? 'Descente au prochain arrêt' : `Descente dans ${stopsLeft} arrêts`;
-}
-
 export function trainView(j: Journey, legIndex: number, ctx: ViewCtx): GlassesView {
   const leg = j.legs[legIndex];
   if (!leg || leg.kind !== 'ride') return messageView('Dans le train', ['Trajet introuvable.'], ctx, { hints: HINTS.message });
@@ -1297,10 +1376,17 @@ export function trainView(j: Journey, legIndex: number, ctx: ViewCtx): GlassesVi
     if (lastStop && next < 0) next = k;
     v.items.push({ a: displayName(s.name, lang(ctx)), b: `${mark}${hhmm(s.est)}`, c });
   });
-  if (known && leg.mode !== 'train' && ctx.now < leg.arr) {
+  // 1.2.5 (PRD-1.2.5 § 7) : ligne de progression, train compris, même calcul que « prochain » (heures estimées) :
+  // « ●─●─◎─○─○─○   descente dans 4 arrêts » ; rien quand les arrêts ne sont pas connus, ni une fois arrivé, ni pour
+  // un véhicule supprimé
+  if (known && ctx.now < leg.arr && !leg.cancelled) {
     const left = stops.length - 1 - Math.max(1, next) + 1;
-    v.top = { text: alightText(left) };
+    v.top = { text: `${progressLine(stops.length, Math.max(0, next))}${COL_SEP}${alightWords(left)}` };
   }
+  // 1.2.5 : « ~ » expliqué ici aussi, pour ce véhicule : temps réel coupé (retards gardés) ou absent ; un véhicule en
+  // direct n'a pas de note, même quand le flux d'un autre opérateur est en panne
+  if (leg.rtKept) v.note = NOTE_RT_KEPT;
+  else if (!leg.rt && (ctx.rt === 'down' || ctx.rt === 'offline')) v.note = noRtNote(ctx);
   v.initialSel = Math.max(0, next);
   v.initialTop = Math.max(0, next - 1);
   v.hints = hints(ctx, HINTS.train);

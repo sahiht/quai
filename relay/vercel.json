@@ -4,6 +4,12 @@
   "functions": {
     "api/geocode.ts": {
       "maxDuration": 5
+    },
+    "api/weather.ts": {
+      "maxDuration": 10
     }
-  }
+  },
+  "regions": [
+    "fra1"
+  ]
 }

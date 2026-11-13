@@ -19,13 +19,13 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-// Message « Quai 1.2.4 » (PRD-1.2.4 § 5) : la version de l'appli est fixée à 1.2.4 (celle de la publication).
-vi.mock('../../src/version', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../src/version')>()), APP_VERSION: '1.2.4' }));
+// Message « Quai 1.2.5 » (PRD-1.2.5 § 8) : la version de l'appli est fixée à 1.2.5 (celle de la publication).
+vi.mock('../../src/version', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../src/version')>()), APP_VERSION: '1.2.5' }));
 import type { Core, Journey, JourneyLabel, Leg } from '../../src/core/api';
 import { textWidth } from '../../src/glasses/font';
 import { layoutPage, geometry, WIDTHS } from '../../src/glasses/layout';
 import { effectiveFrame, initNav } from '../../src/glasses/nav';
-import { NEWS_LINES, NEWS_LINES_122, NEWS_LINES_123, stepsPage, type StepsData } from '../../src/glasses/views';
+import { NEWS_LINES, NEWS_LINES_124, stepsPage, type StepsData } from '../../src/glasses/views';
 import { QuaiError } from '../../src/core/errors';
 import { TRIP_KEY, parseTrip, tripPhase } from '../../src/glasses/controller';
 import type { ContainerSpec } from '../../src/glasses/types';
@@ -206,13 +206,20 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     const { c, last, gesture, until } = await setupController({ scenario: 's2' });
     const lines = await until(linesReady);
     expect(lines.title).toBe('Bus, tram, métro');
-    // 1.2.4 : « ARRÊTS » (Bruxelles-Nord) puis « LIGNES » : le curseur sur le tram 3, 2e de la liste affichée
+    // 1.2.4 : « ARRÊTS » (Bruxelles-Nord) puis « LIGNES » : le curseur sur le tram 3, 2e de la liste. 1.2.5 : l'arrêt et
+    // ses deux départs (3 lignes) ne tiennent plus avec le tram 3 : la page commence à « LIGNES », le tram 3 entier
     expect(lines.sel).toBe(1);
-    expect(lines.lines.filter((l) => !/^\d|~/.test(l)).slice(0, 4)).toEqual(['ARRÊTS', 'Bruxelles-Nord', 'LIGNES', 'Tram 3 · Gare du Nord']);
-    expect(lines.lines.slice(5, 7).sort()).toEqual(['vers Churchill   2 · 10 min', 'vers Esplanade   6 · 14 min']);
+    expect(lines.lines[0]).toBe('LIGNES');
+    expect(lines.lines.slice(1, 3).sort()).toEqual(['Tram 3 vers Churchill   2 · 10 min', 'Tram 3 vers Esplanade   6 · 14 min']);
+    expect(lines.lines[3]).toBe('Gare du Nord');
     // le tram 4, le même arrêt (arrêt favori de la 1.2.1 rangé en deux lignes) : juste dessous, ▼
     await gesture('down');
-    expect(last().lines.slice(-4, -2)).toEqual(['Tram 4 · Gare du Nord', 'vers Stalle   5 · 13 min']);
+    expect(last().sel).toBe(2);
+    expect(last().lines.slice(-4, -2)).toEqual(['Tram 4 vers Stalle   5 · 13 min', 'Gare du Nord']);
+    // ▲▲ : l'arrêt, ses deux prochains départs, un par ligne
+    await gesture('up', 'up');
+    expect(last().lines.slice(0, 2)).toEqual(['ARRÊTS', 'Bruxelles-Nord']);
+    expect(last().lines.slice(2, 4).every((l) => /^(Bus|Tram) \S+ vers .+ {3}\S/.test(l))).toBe(true);
     await gesture('double');
     const home = await until(homeReady);
     expect(home.lines).toEqual(['Favoris   3', 'Bureau   maintenant → 12:26', 'Vers Gand-Saint-Pierre   14:10 → 14:39', '', 'Autour de moi   4 arrêts', 'Gares   1 gare', 'Bus, tram, métro   1 arrêt · 2 lignes']);
@@ -391,7 +398,8 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
       '07:42   IC vers Bruxelles-Midi, voie 6   +2 min',
       '08:42   Descendre à Bruxelles-Nord',
       '08:42   À pied vers Gare du Nord (2 min)',
-      '~08:44   Tram 3 vers Churchill',
+      // 1.2.5 (PRD-1.2.5 § 2) : l'IC a 2 min de retard, 2 min à pied, le tram à 08:44 : aucune marge
+      '~08:44   Tram 3 vers Churchill   très juste',
       '▽ suite du trajet : 2 étapes',
       HINT_FOLLOW,
     ]);
@@ -421,7 +429,9 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     const { c, gesture, until, last } = h;
     await until(homeReady);
     const p1 = await openAndFollow(h);
-    expect(p1.lines[0]).toBe('Le plus court : 1 changement, à pied 7 + 2 + 9 min');
+    // 1.2.5 (PRD-1.2.5 § 1) : départ à pied à 07:33 (sans temps réel), dans 2 min : « Si tu le rates » (l'IC suivant de
+    // Namur, « Le suivant ») à la place de la raison
+    expect(p1.lines[0]).toBe('Si tu le rates : arrivée 09:57, 59 min plus tard');
     expect(p1.lines.at(-2)).toBe('▽ suite du trajet : 2 étapes');
     // ▼ : la suite du même trajet, jamais un autre
     await gesture('down');
@@ -580,7 +590,9 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     a.goTo(at(7, 42, 20));
     await a.c.refreshCurrent();
     expect(a.last()).toMatchObject({ screen: 'train', title: 'IC vers Bruxelles-Midi' });
-    expect(a.last().lines[0]).toMatch(/^Namur   ~07:42/);
+    // 1.2.5 (PRD-1.2.5 § 7) : la ligne de progression en haut, train compris
+    expect(a.last().lines[0]).toMatch(/^[●◎○─…]+ {3}descente dans \d+ arrêts$/);
+    expect(a.last().lines[1]).toMatch(/^Namur   ~07:42/);
     // retour : les étapes du trajet suivi (la liste et l'autre proposition ont été quittées)
     await a.gesture('double');
     expect(a.last()).toMatchObject({ screen: 'steps', page: 1, followed: true });
@@ -971,7 +983,9 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
     // le bouton « Lunettes » du téléphone est une demande : le trajet est suivi (PRD-1.2.2 § 6)
     expect(p1).toMatchObject({ page: 1, pages: 3, label: 'short', followed: true });
     expect(nb(p1.title)).toBe(`Vers Saint-Géry : 07:33 → 08:57${FOLLOWED}`);
-    expect(p1.lines[0]).toBe('Le plus court : direct, à pied 7 + 11 min');
+    // 1.2.5 : départ à pied dans 2 min : « Si tu le rates » (l'IC de 08:42 de Namur, « Le suivant ») ; la raison est gardée
+    expect(p1.lines[0]).toBe('Si tu le rates : arrivée 09:57, 1 h plus tard');
+    expect(h.c.followed?.journey.reason).toBe(`Le plus court${NB}: direct, à pied 7 + 11${NB}min`);
     expect(p1.lines.at(-2)).toBe('Fin du trajet. ▽ 2 autres trajets');
     fits(p1);
     // ▼ au bout : « Autres trajets » ; en 2e ligne, les moyens, puis le pourquoi (comparé à la proposition 1) ou les marches
@@ -983,9 +997,11 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
     const p2 = await h.until((s) => s.screen === 'steps' && s.page === 2);
     expect(p2).toMatchObject({ page: 2, pages: 3, label: 'lesswalk', followed: false });
     expect(nb(p2.title)).toBe(`Vers Saint-Géry : 07:33 → 08:53${FOLLOW}`);
-    expect(p2.lines[0]).toBe('Moins de marche : 1 changement, à pied 7 + 2 + 4 min');
+    // 1.2.5 : départ dans 2 min : « Si tu le rates » (l'IC de 08:42 de Namur) ; la raison était dans la liste ; la
+    // correspondance du tram, 2 min après la marche, montre sa marge
+    expect(p2.lines[0]).toBe('Si tu le rates : arrivée 09:57, 1 h 04 plus tard');
     expect(p2.lines).toContain('08:40   À pied vers Gare du Nord (2 min)');
-    expect(p2.lines).toContain('~08:44   Tram 3 vers Churchill');
+    expect(p2.lines).toContain('~08:44   Tram 3 vers Churchill   marge 2 min');
     // 7 étapes, la 1re sur 2 lignes (1.2.4), pour 6 lignes : ▼ montre les dernières, du même trajet
     expect(p2.lines.at(-2)).toBe('▽ suite du trajet : 2 étapes');
     expect(p2.lines.at(-1)).toBe('△▽ étapes   toucher : suivre ce trajet   double : retour');
@@ -1026,19 +1042,17 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
   });
 });
 
-describe('S2 : message « Quai 1.2.4 », GlassesApi', () => {
-  it('CA-124.5 (et CA-3.2, CA-S2.2, CA-M7.1) : « Quai 1.2.4 » une seule fois après la mise à jour depuis la 1.0, avec les nouveautés de la 1.2.3 et de la 1.2.2 (8 lignes) ; T mène à l’accueil', async () => {
+describe('S2 : message « Quai 1.2.5 », GlassesApi', () => {
+  it('CA-125.8 (et CA-3.2, CA-S2.2, CA-M7.1) : « Quai 1.2.5 » une seule fois après la mise à jour depuis la 1.0, avec les nouveautés de la 1.2.4 (6 lignes) ; T mène à l’accueil', async () => {
     const a = await setupController({ settings: preset(), keepSeen: true });
-    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.4' });
+    expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.5' });
     expect(a.last().lines).toEqual([
+      'Étapes : l’heure d’arrivée si tu rates ton départ.',
+      'Pluie prévue : dite sur la marche concernée.',
+      'Dans le véhicule : ta progression jusqu’à la descente.',
+      'Bus, tram, métro : les lignes en clair, un départ par ligne.',
       'Étapes : l’arrêt ou la gare où aller, en entier.',
       'Bus, tram, métro : arrêts et lignes séparés.',
-      'Tableaux complets : tous les départs des 2 heures à venir.',
-      'Touche un départ : ses arrêts jusqu’au terminus.',
-      'Bus, tram, métro : ajoute une ligne ou un arrêt.',
-      'Nouveau : tes gares et tes lignes sur l’accueil.',
-      'Tes arrêts favoris y sont rangés, rien n’est perdu.',
-      'Un trajet n’est suivi que si tu le demandes.',
       'toucher : continuer',
     ]);
     for (const l of [a.last().title, ...a.last().lines]) expect(textWidth(l), l).toBeLessThanOrEqual(WIDTHS.full);
@@ -1049,16 +1063,16 @@ describe('S2 : message « Quai 1.2.4 », GlassesApi', () => {
     a.c.stop();
     const b = await setupController({ settings: a.settings.get(), keepSeen: true });
     expect((await b.until(homeReady)).screen).toBe('home');
-    expect(b.screens().some((s) => s.title === 'Quai 1.2.4')).toBe(false);
+    expect(b.screens().some((s) => s.title === 'Quai 1.2.5')).toBe(false);
     b.c.stop();
   });
 
-  it('« Quai 1.2.4 » depuis la 1.1, la 1.2.0 et la 1.2.1 : avec la 1.2.3 et la 1.2.2 ; depuis la 1.2.2 : avec la 1.2.3 ; depuis la 1.2.3 : la 1.2.4 seule ; une seule fois ; jamais avec la version vue 1.2.4', async () => {
+  it('« Quai 1.2.5 » depuis la 1.1, la 1.2.0 à la 1.2.3 : avec la 1.2.4 ; depuis la 1.2.4 : la 1.2.5 seule ; une seule fois ; jamais avec la version vue 1.2.5', async () => {
     expect(preset11().seenVersion).toBe('1.1.0');
-    for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3']) {
+    for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3', '1.2.4']) {
       const a = await setupController({ settings: { ...preset11(), seenVersion: seen }, keepSeen: true });
-      expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.4' });
-      const want = seen === '1.2.3' ? NEWS_LINES : seen === '1.2.2' ? [...NEWS_LINES, ...NEWS_LINES_123] : [...NEWS_LINES, ...NEWS_LINES_123, ...NEWS_LINES_122.filter((x) => !x.startsWith('Aller à'))];
+      expect(a.last()).toMatchObject({ screen: 'message', title: 'Quai 1.2.5' });
+      const want = seen === '1.2.4' ? NEWS_LINES : [...NEWS_LINES, ...NEWS_LINES_124];
       expect(a.last().lines).toEqual([...want.map(nb), 'toucher : continuer']);
       await a.gesture('tap');
       await a.until(homeReady);
@@ -1066,16 +1080,16 @@ describe('S2 : message « Quai 1.2.4 », GlassesApi', () => {
       a.c.stop();
       const b = await setupController({ settings: a.settings.get(), keepSeen: true });
       await b.until(homeReady);
-      expect(b.screens().some((s) => s.title === 'Quai 1.2.4')).toBe(false);
+      expect(b.screens().some((s) => s.title === 'Quai 1.2.5')).toBe(false);
       b.c.stop();
     }
-    const d = await setupController({ settings: { ...preset11(), seenVersion: '1.2.4' }, keepSeen: true });
+    const d = await setupController({ settings: { ...preset11(), seenVersion: '1.2.5' }, keepSeen: true });
     await d.until(homeReady);
-    expect(d.screens().some((s) => s.title === 'Quai 1.2.4')).toBe(false);
+    expect(d.screens().some((s) => s.title === 'Quai 1.2.5')).toBe(false);
     d.c.stop();
   });
 
-  it('nouvelle installation : bienvenue, jamais « Quai 1.2.3 » ; la version vue est écrite', async () => {
+  it('nouvelle installation : bienvenue, jamais « Quai 1.2.5 » ; la version vue est écrite', async () => {
     const { c, last, gesture, until, settings, settle, screens } = await setupController({ settings: defaults({ onboarded: false }) });
     await settle();
     expect(last()).toMatchObject({ screen: 'message', title: 'Quai' });
@@ -1084,7 +1098,7 @@ describe('S2 : message « Quai 1.2.4 », GlassesApi', () => {
     expect(settings.get().seenVersion).toBe(APP_VERSION);
     await gesture('tap');
     expect((await until((s) => s.screen === 'home')).screen).toBe('home');
-    expect(screens().some((s) => s.title === 'Quai 1.2.3')).toBe(false);
+    expect(screens().some((s) => s.title === 'Quai 1.2.5')).toBe(false);
     c.stop();
   });
 
@@ -1232,7 +1246,11 @@ describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-
     // (curseur sur le premier favori : 4 fois ▼)
     await gesture('down', 'down', 'down', 'down', 'tap');
     const lines = await until(linesReady);
-    expect(lines.lines.filter((l) => !l.startsWith('vers ') && !/^\d|~/.test(l)).slice(0, 4)).toEqual(['ARRÊTS', 'Bruxelles-Nord', 'LIGNES', 'Tram 3 · Gare du Nord']);
+    expect(lines.lines.slice(0, 2)).toEqual(['ARRÊTS', 'Bruxelles-Nord']);
+    // 1.2.5 : les lignes sous la page de l'arrêt et de ses deux départs : ▼
+    await gesture('down');
+    expect(last().lines[0]).toBe('LIGNES');
+    expect(last().lines.filter((l) => l.startsWith('Tram 3 vers '))).toHaveLength(2);
     // « Favoris » : le lieu « Maison » comme le trajet « Ma position → maison » de la 1.1, en fin de liste
     await gesture('double', 'up', 'up', 'up', 'up', 'up', 'tap');
     const list = await until(listReady);
@@ -1335,7 +1353,9 @@ describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-
     const d = await setupController({ kv: a.kv, now: at(7, 36), flags: { noRt: true }, settings });
     const st = await d.until(stepsReady);
     expect(st).toMatchObject({ page: 1, label: 'short', followed: true });
-    expect(st.lines[0]).toBe('Le plus court : 1 changement, à pied 7 + 2 + 9 min');
+    // 1.2.5 : parti à 07:35, l'IC pas encore : « Si tu le rates » en haut ; la raison relue « Le plus court »
+    expect(st.lines[0]).toBe('Si tu le rates : arrivée 09:57, 59 min plus tard');
+    expect(nb(d.c.followed?.journey.reason ?? '')).toBe('Le plus court : 1 changement, à pied 7 + 2 + 9 min');
     expect(d.c.followed?.journeys.map((j) => j.label)).toEqual(['short', 'next', 'later']);
     expect(st.lines.at(-2)).toBe('▽ suite du trajet : 2 étapes');
     expect(st.lines.join('\n')).not.toMatch(/simple|undefined/);

@@ -5,14 +5,15 @@
  * Paramètres invalides : HTTP 400 avec `error`.
  */
 import { normalizeId } from './shared/types.js';
-import type { AlertsResponse, HealthResponse, Meta, RtResponse, StibResponse } from './shared/types.js';
+import type { AlertsResponse, HealthResponse, Meta, RtResponse, StibResponse, WeatherResponse } from './shared/types.js';
 import {
   DEFAULT_LANG, LIMITS, OP_LABEL, RELAY_VERSION, RT_OPS, alertsSource, metaSource, readConfig, stibSource, tripUpdatesSource,
   type RelayConfig, type RtOp, type Source,
 } from './config.js';
 import { geocodeHealth } from './geocode/service.js';
 import type { Ctx } from './context.js';
-import { badRequest, json, requestUrl } from './http.js';
+import { badRequest, json, jsonWith, requestUrl } from './http.js';
+import { WEATHER_PAUSE_MS, WEATHER_STALE_MS, WEATHER_TTL_MS, cacheWeather, emptyWeather, toWeather, weatherBase, weatherSource } from './weather.js';
 import { decodeFeed, extractAlerts, indexTripUpdates, isActive, sncbStation, type AlertItem, type FeedMessage } from './gtfsrt.js';
 import { extractRows, groupWaitingTimes, stibQuery, type StibGroup } from './stib.js';
 import { MissingKeyError, UpstreamError, fetchBytes, fetchJson, probe, timeoutError } from './upstream.js';
@@ -296,5 +297,44 @@ export async function handleHealth(_req: Request, ctx: Ctx): Promise<Response> {
       ? { ok, time: iso(ctx.now()), data, sources, geocode, version: RELAY_VERSION }
       : { ok, time: iso(ctx.now()), sources, geocode, version: RELAY_VERSION };
     return json(body, 200, ok);
+  });
+}
+
+/* ------------------------------ /api/weather (1.2.5) ------------------------------ */
+
+/**
+ * Pluie prévue sur la grille fixe de la Belgique (lib/weather.ts) : la même réponse pour tous, gardée 1 h par l'instance
+ * et par le CDN pour le reste de son heure. Open-Meteo refuse ou ne répond pas : la dernière grille lue sert encore 2 h
+ * (sans cache CDN), sinon une erreur ; pas de nouvel appel avant 5 min ; les requêtes simultanées partagent un appel.
+ */
+export async function handleWeather(_req: Request, ctx: Ctx): Promise<Response> {
+  return guard(ctx, async () => {
+    const t = ctx.now();
+    const w = ctx.caches.weather;
+    const age = (x: { at: number }) => t - x.at;
+    if (w.value && age(w) >= 0 && age(w) < WEATHER_TTL_MS) return jsonWith(w.value, 200, cacheWeather(age(w)));
+    const stale = (e: unknown): Response => {
+      const last = ctx.caches.weather;
+      if (last.value && age(last) >= 0 && age(last) < WEATHER_STALE_MS) return json(last.value, 200, false);
+      return json(emptyWeather(iso(t), `Météo indisponible : ${lcFirst(userError(e, ctx))}`), 200, false);
+    };
+    if (w.failedAt !== undefined && t - w.failedAt >= 0 && t - w.failedAt < WEATHER_PAUSE_MS) return stale(new Error('Open-Meteo en pause après un refus'));
+    try {
+      if (!w.pending) {
+        w.pending = fetchJson(ctx, weatherSource(weatherBase(ctx.env)), ctx.timeouts.upstream)
+          .then(({ data }) => toWeather(data, iso(t)))
+          .finally(() => {
+            ctx.caches.weather.pending = null;
+          });
+      }
+      const value: WeatherResponse = await w.pending;
+      // l'heure de la lecture est celle de la requête qui l'a lancée (fetchedAt), pour toutes celles qui l'attendaient
+      if (ctx.caches.weather.value !== value) ctx.caches.weather = { value, at: Date.parse(value.fetchedAt) || t };
+      return jsonWith(value, 200, cacheWeather(age(ctx.caches.weather)));
+    } catch (e) {
+      ctx.log.warn(`Open-Meteo indisponible : ${errorText(e)}`);
+      ctx.caches.weather.failedAt = t;
+      return stale(e);
+    }
   });
 }

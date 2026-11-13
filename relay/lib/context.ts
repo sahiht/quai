@@ -9,6 +9,7 @@ import { createLogger, type Logger } from './log.js';
 import type { AlertItem, TripIndex } from './gtfsrt.js';
 import type { StibGroup } from './stib.js';
 import { createGeoState, type GeoState } from './geocode/state.js';
+import type { WeatherResponse } from './shared/types.js';
 
 export interface Caches {
   trips: TtlCache<TripIndex>;
@@ -18,6 +19,11 @@ export interface Caches {
   geo: GeoState;
   /** Dernier message « clé absente » journalisé (pour ne pas le répéter à chaque requête). */
   state: { missingKeyLoggedAt: number | null };
+  /**
+   * 1.2.5 : dernière grille météo lue (et l'heure de sa lecture), dernier refus d'Open-Meteo (pause de 5 min), demande en
+   * cours partagée par les requêtes simultanées de l'instance.
+   */
+  weather: { value: WeatherResponse | null; at: number; failedAt?: number; pending?: Promise<WeatherResponse> | null };
   clear(): void;
 }
 
@@ -28,12 +34,14 @@ export function createCaches(ttlMs: number = LIMITS.cacheTtlMs): Caches {
     stib: new BatchCache<StibGroup[]>(ttlMs),
     geo: createGeoState(),
     state: { missingKeyLoggedAt: null },
+    weather: { value: null, at: 0 },
     clear() {
       caches.trips.clear();
       caches.alerts.clear();
       caches.stib.clear();
       caches.geo.clear();
       caches.state.missingKeyLoggedAt = null;
+      caches.weather = { value: null, at: 0 };
     },
   };
   return caches;

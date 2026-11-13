@@ -43,6 +43,8 @@ export function displayScreen(ctx: PhoneCtx): HTMLElement {
       ),
       h('div', { class: 'bordered' }, switchRow({ label: 'Aides de gestes', sub: 'rappel discret en bas de l’écran', checked: s.display.gestureHints, onChange: (v) => set((d) => ({ ...d, gestureHints: v })) })),
       h('div', { class: 'bordered' }, switchRow({ label: 'Signaler les horaires prévus', sub: 'avec le signe ~ quand il n’y a pas de temps réel', checked: s.display.markPlanned, onChange: (v) => set((d) => ({ ...d, markPlanned: v })) })),
+      // 1.2.5 : pluie prévue sur les marches de 5 min ou plus (grille fixe de la Belgique : la position n'est pas envoyée)
+      h('div', { class: 'bordered' }, switchRow({ label: 'Pluie pendant la marche', sub: 'sur les marches de 5 min ou plus, d’après Open-Meteo', checked: s.display.rain, onChange: (v) => set((d) => ({ ...d, rain: v })) })),
     ),
     h(
       'div',

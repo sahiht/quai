@@ -260,6 +260,30 @@ export interface HealthResponse {
   version?: string;
 }
 
+/**
+ * 1.2.5 : GET /api/weather : pluie prévue sur une grille fixe de la Belgique (Open-Meteo, licence CC BY 4.0), la même
+ * pour tout le monde : le téléphone choisit lui-même la case de chaque marche, aucune position n'est envoyée.
+ * Cases ligne par ligne, du sud au nord puis d'ouest en est : la case (r, c) est au point lat0 + r × step,
+ * lon0 + c × step, d'indice r × cols + c. Erreur : `error`, listes vides.
+ */
+export interface WeatherResponse {
+  lat0: number;
+  lon0: number;
+  step: number;
+  rows: number;
+  cols: number;
+  /** Fin du premier quart d'heure, en secondes epoch : le quart d'heure k va de t0 + (k - 1) × 900 à t0 + k × 900. */
+  t0: number;
+  /** Pluie de chaque quart d'heure en dixièmes de mm, par case : rain[case][k]. */
+  rain: number[][];
+  /** Fin de la première heure, en secondes epoch : l'heure h va de h0 + (h - 1) × 3600 à h0 + h × 3600. */
+  h0: number;
+  /** Probabilité de pluie (plus de 0,1 mm) de chaque heure, en %, par case : prob[case][h]. */
+  prob: number[][];
+  fetchedAt: string;
+  error?: string;
+}
+
 /** Normalisation des identifiants préfixés par le portail BMC : 'gt:tec:123' -> '123', 'gs:nmbssncb:8812005' -> '8812005'. */
 export function normalizeId(id: string): string {
   return id.replace(/^g[a-z]:[a-z0-9]+:/i, '');

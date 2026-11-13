@@ -59,20 +59,26 @@ describe('refresh : scénario 1 (voie modifiée en chemin)', () => {
     expect(j1.alerts.map((a) => a.kind)).toEqual(['platform']);
   });
 
-  it('source en erreur au rafraîchissement : horaire prévu ; voie modifiée connue gardée 15 min (M8.5)', async () => {
+  it('source en erreur au rafraîchissement : voie modifiée connue gardée 15 min (M8.5) ; 1.2.5 : le dernier retard connu aussi, « ~ »', async () => {
     const env = makeEnv({ now: '2026-11-10T07:31' });
     const j0 = await morning(env);
     expect(j0.legs[1].newPlatform).toBe('6');
     env.server.scene = 'noRT';
     env.clock.advance(30_000);
-    const j1 = await env.core.refresh(j0, env.preset);
-    expect(j1.legs[1]).toMatchObject({ rt: false, delayMin: 0, newPlatform: '6' });
-    expect(hhmm(j1.legs[1].dep)).toBe('07:42');
+    const j1 = await env.core.refresh(j0, env.preset, { followed: true });
+    // PRD-1.2.5 § 5 : trajet suivi : le retard de 2 min connu il y a 30 s reste dit, pas en direct (rt false), rtKept
+    expect(j1.legs[1]).toMatchObject({ rt: false, delayMin: 2, newPlatform: '6', rtKept: true });
+    expect(hhmm(j1.legs[1].dep)).toBe('07:44');
     expect(j1.rt).toBe(false);
     expect(plainAlert(j1.alerts[0])).toMatchObject({ kind: 'platform', text: '! Voie modifiée : l’IC part de la voie 6' });
+    // un autre trajet : la voie gardée, l'horaire prévu (M8.5, comme en 1.2.4)
+    const o1 = await env.core.refresh(j0, env.preset);
+    expect(o1.legs[1]).toMatchObject({ rt: false, delayMin: 0, newPlatform: '6' });
+    expect(hhmm(o1.legs[1].dep)).toBe('07:42');
+    expect(plainAlert(o1.alerts[0])).toMatchObject({ kind: 'platform', text: '! Voie modifiée : l’IC part de la voie 6' });
     // au-delà de 15 min : plus rien de connu, horaire et voie prévus
     env.clock.advance(16 * 60_000);
-    const j2 = await env.core.refresh(j0, env.preset);
+    const j2 = await env.core.refresh(j0, env.preset, { followed: true });
     expect(j2.legs[1]).toMatchObject({ rt: false, delayMin: 0 });
     expect(j2.legs[1].newPlatform).toBeUndefined();
     expect(j2.alerts.some((a) => a.kind === 'platform')).toBe(false);

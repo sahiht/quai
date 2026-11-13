@@ -114,14 +114,16 @@ describe('sections « Gares » et « Bus, tram, métro » de l’accueil (§ 4)'
     expect(hz.settings.get().favorites.some((f) => f.kind === 'stop')).toBe(false);
   });
 
-  it('préréglage 1.1 migré, mis à jour : la bannière « Quai 1.2.4 » une fois, avec « Bus, tram, métro : tes arrêts et tes lignes en deux blocs. »', () => {
+  it('préréglage 1.1 migré, mis à jour : la bannière « Quai 1.2.5 » une fois, avec « Bus, tram, métro » de la 1.2.5, de la 1.2.4 et de la 1.2.3', () => {
     const s = preset11();
     expect(s.seenVersion).toBe('1.1.0');
     const hz = harness({ settings: s });
-    hz.ctx.news = newsState(s.seenVersion, NEWS_SINCE, '1.2.4');
+    hz.ctx.news = newsState(s.seenVersion, NEWS_SINCE, '1.2.5');
     const el = mount(homeScreen(hz.ctx));
-    expect(plain(el.querySelectorAll('.news p')[1]?.textContent)).toBe('Bus, tram, métro : tes arrêts et tes lignes en deux blocs.');
-    expect([...el.querySelectorAll('.news p')].map((p) => plain(p.textContent))).toContain('Bus, tram, métro : ajoute une ligne ou un arrêt.');
+    const shown = [...el.querySelectorAll('.news p')].map((p) => plain(p.textContent));
+    expect(shown[4]).toBe('Bus, tram, métro dans les lunettes : la ligne et sa destination en clair, un départ par ligne.');
+    expect(shown[6]).toBe('Bus, tram, métro : tes arrêts et tes lignes en deux blocs.');
+    expect(shown).toContain('Bus, tram, métro : ajoute une ligne ou un arrêt.');
     button(el, 'OK').click();
     expect(mount(homeScreen(hz.ctx)).querySelector('.news')).toBeNull();
   });

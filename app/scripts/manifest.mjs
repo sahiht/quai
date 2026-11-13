@@ -31,7 +31,7 @@ export const APP_VERSION = readManifestVersion(new URL('../app.json', import.met
 
 export const NETWORK_DESC =
   'Télécharge les horaires préparés chaque nuit (GitHub Pages, par zones d’environ 2 km) ' +
-  'et, depuis ton relais personnel, le temps réel (retards, voies, suppressions) et les adresses : ' +
+  'et, depuis ton relais personnel, le temps réel (retards, voies, suppressions), la pluie prévue sur une carte fixe de la Belgique et les adresses : ' +
   'seul le texte tapé est envoyé, jamais la position.';
 export const LOCATION_DESC =
   'Trouve les arrêts proches et propose le bon trajet. La position exacte reste sur le téléphone : ' +
@@ -138,11 +138,11 @@ export function privacyWithDomains(markdown, cfg) {
   const body = cfg
     ? [
         `- Horaires (fichiers statiques) : ${originOf(cfg.dataBase)}`,
-        `- Temps réel et adresses (relais personnel) : ${originOf(cfg.relayBase)}`,
+        `- Temps réel, pluie prévue et adresses (relais personnel) : ${originOf(cfg.relayBase)}`,
       ].join('\n')
     : [
         '- Horaires (fichiers statiques) : adresse GitHub Pages, remplie par `npm run configure`',
-        '- Temps réel et adresses (relais personnel) : adresse Vercel, remplie par `npm run configure`',
+        '- Temps réel, pluie prévue et adresses (relais personnel) : adresse Vercel, remplie par `npm run configure`',
       ].join('\n');
   return markdown.slice(0, start + DOMAINS_START.length) + '\n' + body + '\n' + markdown.slice(end);
 }

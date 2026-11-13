@@ -100,9 +100,10 @@ describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
     expect(end).toMatchObject({ screen: 'steps', page: 1, title: first.title, followed: true });
     expect(end.lines.slice(1, 7)).toEqual([
       '07:55   À pied vers la gare (4 min)',
-      '08:01   IC vers Liers, voie 3',
+      // 1.2.5 (PRD-1.2.5 § 2) : correspondances de 5 min ou moins, leur marge dans la colonne d'état
+      '08:01   IC vers Liers, voie 3   marge 2 min',
       '08:24   Descendre à Bruxelles-Central',
-      '08:27   Métro 2 vers Simonis',
+      '08:27   Métro 2 vers Simonis   marge 3 min',
       '08:31   Descendre à Madou',
       '08:33   Arrivée au bureau (2 min à pied)',
     ]);
@@ -119,12 +120,13 @@ describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
     expect(nb(list.title)).toBe('Vers le bureau : autres trajets');
     expect(list.lines).toEqual(LIST);
     expect(list.sel).toBe(0);
-    // toucher : les étapes de « Plus tôt », sa raison en haut
+    // toucher : les étapes de « Plus tôt ». 1.2.5 (PRD-1.2.5 § 1) : départ à pied dans 5 min (07:36) : « Si tu le
+    // rates » à la place de la raison, déjà dite dans la liste ; raté à Braine-l'Alleud, l'IC de 08:01 du 1er trajet
     await h.gesture('tap');
     const other = await h.until(steps);
     expect(other).toMatchObject({ page: 2, label: 'earlier', followed: false, sel: -1 });
     expect(nb(other.title)).toBe('Vers le bureau : 07:36 → 08:20   Suivre ce trajet');
-    expect(other.lines[0]).toBe('Plus tôt de 13 min, mais 19 min à pied');
+    expect(other.lines[0]).toBe('Si tu le rates : arrivée 08:33, 13 min plus tard');
     expect(other.lines.slice(-2)).toEqual(['Fin du trajet. ▽ autres trajets', HINT_OTHER]);
     // double toucher : la liste, curseur sur la même entrée
     await h.gesture('double');

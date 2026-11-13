@@ -7,6 +7,7 @@
 import type { Names } from './shared/types.js';
 import { UpstreamError } from './upstream.js';
 import { parseTime, toBrusselsIso } from './time.js';
+import { withoutBidi } from './gtfsrt.js';
 
 export interface StibGroup { line: string; dest: Names; times: string[]; msg?: string }
 
@@ -69,7 +70,9 @@ function names(d: unknown): Names {
 }
 
 function message(m: unknown): string | undefined {
-  const s = typeof m === 'string' ? m.trim() : isObj(m) ? str(m.fr) || str(m.nl) || str(m.en) : '';
+  const raw = typeof m === 'string' ? m : isObj(m) ? str(m.fr) || str(m.nl) || str(m.en) : '';
+  // 1.2.5 : sans les caractères invisibles de sens d'écriture (voir gtfsrt.ts, withoutBidi)
+  const s = withoutBidi(raw).trim();
   return s || undefined;
 }
 

@@ -49,15 +49,31 @@ export function glyphPositions(line: string): number[] {
   return out;
 }
 
-/** Texte lisible d'une page, pour les lecteurs d'écran (titre, heure, lignes, aides). */
+/** Mots d'une rangée d'un conteneur et leur abscisse à l'écran (px). */
+function wordsAt(c: ContainerSpec | undefined, line: string | undefined): { x: number; t: string }[] {
+  if (!c || !line) return [];
+  return [...line.matchAll(/\S+/g)].map((m) => ({ x: c.x + getTextWidth(line.slice(0, m.index)), t: m[0] }));
+}
+
+/**
+ * Texte lisible d'une page, pour les lecteurs d'écran (titre, heure, lignes, aides). 1.2.5 : une rangée en mots clairs
+ * et pâles (« Bus W » et « Bruxelles Midi » dans la colonne a, « vers » dans la b, entremêlés) se lit dans l'ordre des
+ * mots à l'écran : « Bus W vers Bruxelles Midi, 20 · ~37 min ».
+ */
 export function describeContainers(cs: readonly ContainerSpec[]): string {
-  const by = (name: string) => cs.find((c) => c.name === name)?.content.split('\n') ?? [];
+  const box = (name: string) => cs.find((c) => c.name === name);
+  const by = (name: string) => box(name)?.content.split('\n') ?? [];
   const clean = (t: string) => t.replace(/\s+/g, ' ').trim();
   const cursor = by('cursor');
   const [a, b, c] = [by('colA'), by('colB'), by('colC')];
   const rows: string[] = [];
   for (let i = 0; i < Math.max(a.length, b.length, c.length); i++) {
-    const row = [a[i], b[i], c[i]].map((x) => clean(x ?? '')).filter(Boolean).join(', ');
+    const wa = wordsAt(box('colA'), a[i]);
+    const wb = wordsAt(box('colB'), b[i]);
+    const xs = (w: { x: number }[]) => w.map((x) => x.x);
+    const mixed = wa.length > 0 && wb.length > 0 && Math.min(...xs(wb)) < Math.max(...xs(wa)) && Math.max(...xs(wb)) > Math.min(...xs(wa));
+    const cols = mixed ? [[...wa, ...wb].sort((p, q) => p.x - q.x).map((w) => w.t).join(' '), c[i]] : [a[i], b[i], c[i]];
+    const row = cols.map((x) => clean(x ?? '')).filter(Boolean).join(', ');
     if (row) rows.push(cursor[i]?.trim() ? `sélection : ${row}` : row);
   }
   return [clean(by('title').join(' ')), clean(by('clock').join(' ')), clean(by('top').join(' ')), ...rows, ...by('foot').map(clean)].filter(Boolean).join('. ');

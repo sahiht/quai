@@ -3,7 +3,7 @@
  * quel que soit le scénario : succès, erreurs de source, erreurs qui citent la clé ou l'adresse, paramètres invalides.
  */
 import { describe, expect, it } from 'vitest';
-import { handleAlerts, handleHealth, handleRt, handleStib } from '../lib/handlers.js';
+import { handleAlerts, handleHealth, handleRt, handleStib, handleWeather } from '../lib/handlers.js';
 import { handleGeocode } from '../lib/geocode/service.js';
 import { scrub, secretsFrom } from '../lib/log.js';
 import { bmcRoute, call, jsonBody, makeCtx, never, protobuf, stackRoute, type Result, type Route } from './helpers.js';
@@ -34,6 +34,7 @@ const PATHS = [
   '/api/geocode?q=rue%20de%20fer%2025%20namur',
   '/api/geocode?q=rue%20de%20fer%2025&lang=nl',
   '/api/geocode?q=ab',
+  '/api/weather',
 ];
 
 function handlerFor(path: string) {
@@ -41,6 +42,7 @@ function handlerFor(path: string) {
   if (path.startsWith('/api/stib')) return handleStib;
   if (path.startsWith('/api/alerts')) return handleAlerts;
   if (path.startsWith('/api/geocode')) return handleGeocode;
+  if (path.startsWith('/api/weather')) return handleWeather;
   return handleHealth;
 }
 
@@ -76,13 +78,15 @@ describe('la clé ne fuit jamais', () => {
     }
   });
 
-  it('la clé n’est envoyée qu’au portail BMC, jamais au flux direct, au site de données ni aux services d’adresses', async () => {
+  it('la clé n’est envoyée qu’au portail BMC, jamais au flux direct, au site de données, aux services d’adresses ni à Open-Meteo', async () => {
     const t = makeCtx({ env: { BMC_KEY: KEY, SNCB_RT_URL: DIRECT.replace(`user:${TOKEN}@`, ''), DATA_BASE: 'https://data.test/d' }, route: stackRoute({ key: KEY }) });
     await call(handleHealth, '/api/health', t.ctx);
     await call(handleRt, `/api/rt?op=sncb&trips=${S1}`, t.ctx);
     await call(handleGeocode, '/api/geocode?q=rue%20de%20fer%2025', t.ctx);
+    await call(handleWeather, '/api/weather', t.ctx);
+    expect(t.calls.some((c) => c.url.startsWith('https://api.open-meteo.com/v1/forecast?'))).toBe(true);
     const outside = t.calls.filter((c) => !c.url.startsWith('https://bmc.test/'));
-    expect(outside.length).toBeGreaterThanOrEqual(8);
+    expect(outside.length).toBeGreaterThanOrEqual(9);
     for (const c of outside) expect(`${c.url} ${JSON.stringify(c.headers)}`).not.toContain(KEY);
   });
 

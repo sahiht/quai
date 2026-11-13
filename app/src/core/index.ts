@@ -45,6 +45,7 @@ import { GeocodeClient, relayGeoTransport } from './geocode';
 import { brokenConnection, refreshJourney, refreshJourneys, skeleton, type RefreshEnv } from './journeys';
 import { makeFetch, mapPool } from './net';
 import { PersistentCache } from './persist';
+import { inTime, markRain, WeatherClient } from './weather';
 import { planCandidates, type NearArea } from './plan';
 import { RealtimeClient, stibPoint, type AlertItem } from './realtime';
 import { computeRoute } from './routing/engine';
@@ -98,6 +99,9 @@ export function createCore(opts: CoreOptions): Core {
   const data = new DataClient(trimSlash(opts.dataBase), fetchFn, persist, now);
   const rt = new RealtimeClient(trimSlash(opts.relayBase), fetchFn, now);
   const geo = new GeocodeClient(relayGeoTransport(trimSlash(opts.relayBase), fetchFn), now);
+  // 1.2.5 : pluie prévue pendant les marches (grille fixe de la Belgique par le relais, jamais la position)
+  const weather = new WeatherClient(trimSlash(opts.relayBase), fetchFn, now);
+  const rainOn = (s: Settings): boolean => s.display.rain !== false;
   const engine = new TrainEngine();
 
   const ensure = (): Promise<Meta> => data.requireMeta();
@@ -227,6 +231,10 @@ export function createCore(opts: CoreOptions): Core {
   const core: Core = {
     get meta() {
       return data.meta;
+    },
+
+    onGeneration(cb: (generatedAt: string) => void): void {
+      data.onGeneration(cb);
     },
 
     async init(): Promise<Meta> {
@@ -374,19 +382,28 @@ export function createCore(opts: CoreOptions): Core {
       return (await core.route(from, to, after, settings, here)).journeys;
     },
 
-    async refresh(j: Journey, settings: Settings): Promise<Journey> {
+    async refresh(j: Journey, settings: Settings, o?: { followed?: boolean }): Promise<Journey> {
+      const followed = !!o?.followed;
+      // 1.2.5 : la pluie suit les heures rafraîchies des marches
+      const rain = rainOn(settings) ? weather.get() : Promise.resolve(null);
+      const marked = async (x: Journey): Promise<Journey> => {
+        // grille en retard : les marques du trajet restent celles d'avant
+        const w = await inTime(rain);
+        if (w !== undefined) markRain([x], w);
+        return x;
+      };
       // trajet suivi : son réseau passe en tête de la mémoire des réseaux (routing/repair.ts)
       touchFollowed(j.id);
-      const out = await refreshJourney(j, settings, refreshEnv, false);
+      const out = await refreshJourney(j, settings, refreshEnv, false, followed);
       // correspondance devenue impossible : reste du trajet recalculé sur le réseau de sa recherche, gardé par
       // identifiant de trajet et refait au besoin avec les mêmes fichiers de la même génération (routing/repair.ts)
       const meta = data.meta;
-      if (brokenConnection(out) < 0 || !meta) return out;
+      if (brokenConnection(out) < 0 || !meta) return marked(out);
       const source = { meta, tile: (k: string) => data.tile(k), json: <T>(p: string, v: (x: unknown) => x is T) => data.json(p, v), trains: (d: string) => data.trains(d) };
       const legs = await repairFollowed(out, settings, source).catch(() => null);
-      if (!legs || data.meta?.generatedAt !== meta.generatedAt) return out;
-      const [fixed] = await refreshJourneys([{ ...out, legs }], settings, refreshEnv, false);
-      return { ...fixed, id: j.id, alerts: [recalcAlert(now()), ...fixed.alerts] };
+      if (!legs || data.meta?.generatedAt !== meta.generatedAt) return marked(out);
+      const [fixed] = await refreshJourneys([{ ...out, legs }], settings, refreshEnv, false, followed);
+      return marked({ ...fixed, id: j.id, alerts: [recalcAlert(now()), ...fixed.alerts] });
     },
 
     async suggest(here: { lat: number; lon: number } | null, settings: Settings): Promise<Suggestion | null> {
@@ -412,20 +429,35 @@ export function createCore(opts: CoreOptions): Core {
     /* --- 1.1 : points d'attache provisoires (remplacés par les équipes cœur et routage) --- */
     /** 1.1 (routage) : calcul de routing/engine.ts sur les fichiers de ligne ; repli 1.0 sans meta.lines. */
     async route(from: Endpoint, to: Endpoint, after: number, settings: Settings, here?: { lat: number; lon: number } | null): Promise<PlanResult> {
-      for (let attempt = 0; ; attempt++) {
-        const meta = await ensure();
-        if (!isCovered(meta, now())) return { journeys: [], empty: 'noTrip' };
-        const result = await computeRoute(from, to, after, settings, here, {
-          source: { meta, tile: (k) => data.tile(k), json: (p, v) => data.json(p, v), trains: (d) => data.trains(d) },
-          now,
-          refresh: (js, fresh) => refreshJourneys(js, settings, refreshEnv, fresh),
-          legacy: (O, D, t, maxWalk) =>
-            planCandidates(O, D, t, maxWalk, { meta, areasAround, area: preparedOrNull, trainDays, engine, refresh: (j) => refreshJourney(j, settings, refreshEnv, true) }),
-        });
-        // une génération de données à la fois : publication changée pendant le calcul, on recommence une fois
-        if (attempt === 0 && data.meta && data.meta.generatedAt !== meta.generatedAt) continue;
-        return result;
+      // 1.2.5 : la grille météo est demandée pendant le calcul ; ensuite, 0,5 s d'attente au plus (WEATHER_GRACE_MS)
+      const rain = rainOn(settings) ? weather.get() : Promise.resolve(null);
+      const result = await compute();
+      const w = await inTime(rain);
+      if (w !== undefined) markRain(result.journeys, w);
+      return result;
+
+      async function compute(): Promise<PlanResult> {
+        for (let attempt = 0; ; attempt++) {
+          const meta = await ensure();
+          if (!isCovered(meta, now())) return { journeys: [], empty: 'noTrip' };
+          const result = await computeRoute(from, to, after, settings, here, {
+            source: { meta, tile: (k) => data.tile(k), json: (p, v) => data.json(p, v), trains: (d) => data.trains(d) },
+            now,
+            refresh: (js, fresh) => refreshJourneys(js, settings, refreshEnv, fresh),
+            legacy: (O, D, t, maxWalk) =>
+              planCandidates(O, D, t, maxWalk, { meta, areasAround, area: preparedOrNull, trainDays, engine, refresh: (j) => refreshJourney(j, settings, refreshEnv, true) }),
+          });
+          // une génération de données à la fois : publication changée pendant le calcul, on recommence une fois
+          if (attempt === 0 && data.meta && data.meta.generatedAt !== meta.generatedAt) continue;
+          return result;
+        }
       }
+    },
+
+    /** 1.2.5 : état de la météo pour l'écran Données (une demande au relais si la grille est trop vieille). */
+    async weather(): Promise<'ok' | 'down' | 'unknown'> {
+      await weather.get();
+      return weather.status();
     },
 
     /** M1.4 : ordre intelligent (core/favorites.ts, commun au faux cœur). */
@@ -445,7 +477,15 @@ export function createCore(opts: CoreOptions): Core {
           if (found) aliasOf.set(f.areaId, found.id);
           return found;
         },
-        refresh: (js, s) => refreshJourneys(js, s, refreshEnv, false),
+        // 1.2.5 : plan mémorisé rafraîchi, marche jusqu'à la gare ajoutée : la pluie suit, comme refresh() ; grille en
+        // retard : les marques d'avant restent ; réglage coupé : plus aucune
+        refresh: async (js, s) => {
+          const rain = rainOn(s) ? weather.get() : Promise.resolve(null);
+          const out = await refreshJourneys(js, s, refreshEnv, false);
+          const w = await inTime(rain);
+          if (w !== undefined) markRain(out, w);
+          return out;
+        },
         generation: async () => (await ensure()).generatedAt,
         plans,
       });

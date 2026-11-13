@@ -66,6 +66,7 @@ import {
   followedView,
   HOME_FAVORITES,
   homeView,
+  inMissWindow,
   isStationBoard,
   keepLineTitle,
   keepLineView,
@@ -146,7 +147,7 @@ export const TRIP_KEY = 'quai.trip';
  * ou avant), jamais après une installation neuve, ni tant que l'appli n'est pas en 1.2.3. Ses lignes : NEWS_LINES
  * (views.ts).
  */
-export const NEWS_SINCE = '1.2.4';
+export const NEWS_SINCE = '1.2.5';
 
 /**
  * Date du premier lancement (PRD-1.2.1 § 4.6), en ms : clé du stockage de l'appli sur le téléphone, hors du schéma des
@@ -179,6 +180,8 @@ const UNDO_MS = 5_000;
 const RESUME_MS = 3_000;
 const CORE_TIMEOUT_MS = 20_000;
 const MOVE_M = 30;
+/** 1.2.5 : à la reprise d'un état gardé, sa position sert tout de suite si elle a 2 min au plus (PRD-1.2.5 § 6). */
+const KEPT_FIX_MS = 2 * 60_000;
 /** Fin d'un trajet en cours : arrivée plus 5 min (M6.3). */
 const RUN_AFTER_MS = 5 * 60_000;
 /** Fin anticipée : encore à moins de 300 m du départ après le départ du premier véhicule (M6.3). */
@@ -442,6 +445,7 @@ export class GlassesController implements GlassesApi {
   /** Démarre : page de chargement immédiate (jamais d'écran noir), puis écran d'ouverture. */
   async start(): Promise<void> {
     this.unsubscribe = this.d.platform.glasses.onSignal((s) => this.onSignal(s));
+    this.d.core.onGeneration?.(() => this.generationChanged());
     await this.render(true);
     if (!this.d.configured) {
       this.nav = initNav(this.notConfiguredRoute());
@@ -480,7 +484,30 @@ export class GlassesController implements GlassesApi {
   }
 
   get currentMeta(): Meta | null {
+    return this.metaNow();
+  }
+
+  /**
+   * 1.2.5 : publication en vigueur. Le cœur peut en adopter une autre après le lancement (copie enregistrée servie au
+   * bout de 4 s puis remplacée par la réponse du réseau, relecture de 10 min) : la fraîcheur la suit.
+   */
+  private metaNow(): Meta | null {
+    if (!this.meta) return null;
+    let m: Meta | null = null;
+    try {
+      m = this.d.core.meta;
+    } catch {
+      /* cœur sans publication lisible */
+    }
+    if (m && m.generatedAt !== this.meta.generatedAt) this.meta = m;
     return this.meta;
+  }
+
+  /** 1.2.5 : autre publication adoptée : bandeau de fraîcheur et écran courant recalculés tout de suite. */
+  private generationChanged(): void {
+    if (!this.meta || this.stopped) return;
+    this.metaNow();
+    if (this.ready && !this.paused) void this.refreshCurrent();
   }
 
   get freshness(): Freshness | null {
@@ -513,7 +540,16 @@ export class GlassesController implements GlassesApi {
       this.log('QUAI_READY');
       return;
     }
-    this.here = await this.d.platform.location.current(5000);
+    // 1.2.5 (PRD-1.2.5 § 6) : reprise d'un état gardé (téléphone verrouillé) : sa position, si elle a 2 min au plus,
+    // sert tout de suite, et la nouvelle passe ensuite par le chemin d'une position arrivée (déplacement : ordre de
+    // l'accueil pas encore touché, écrans qui en dépendent) ; sinon on attend la position, 5 s au plus, comme avant
+    const kept = this.pendingRestore && this.here && this.d.clock.now() - this.here.at <= KEPT_FIX_MS && this.here.at <= this.d.clock.now();
+    if (kept) {
+      void this.d.platform.location
+        .current(5000)
+        .then((f) => (f ? this.takeFix(f, true) : undefined))
+        .catch(() => undefined);
+    } else this.here = await this.d.platform.location.current(5000);
     await this.loadTrip();
     // Avant openingNav : la version vue (vide = nouvelle installation) n'est pas encore écrite.
     await this.loadFirstUse();
@@ -556,7 +592,7 @@ export class GlassesController implements GlassesApi {
     return { nav: this.homeNav(), resumed: false };
   }
 
-  /** Écrit la version vue (« Quai 1.2.4 » affiché une seule fois ; nouvelle installation : sans rien afficher). */
+  /** Écrit la version vue (« Quai 1.2.5 » affiché une seule fois ; nouvelle installation : sans rien afficher). */
   private async markSeen(): Promise<void> {
     if (this.settings().seenVersion === APP_VERSION) return;
     await this.d.settings.update((x) => ({ ...x, seenVersion: APP_VERSION }));
@@ -1164,7 +1200,7 @@ export class GlassesController implements GlassesApi {
     const now = this.d.clock.now();
     if (journeyStartMs(t) - now > TRIP_REFRESH_AHEAD_MS) return;
     try {
-      const j = await deadline(this.d.core.refresh(this.journeyOf(t.journey), this.settings()), CORE_TIMEOUT_MS, 'trajet suivi trop lent');
+      const j = await deadline(this.d.core.refresh(this.journeyOf(t.journey), this.settings(), { followed: true }), CORE_TIMEOUT_MS, 'trajet suivi trop lent');
       this.journeysById.set(j.id, j);
       if (this.trip && this.trip.journey.id === j.id) {
         this.trip = { ...this.trip, journey: j };
@@ -1611,7 +1647,8 @@ export class GlassesController implements GlassesApi {
 
   /** Fraîcheur des horaires maintenant (l'appli peut rester ouverte au-delà de minuit). */
   private freshNow(): Freshness | null {
-    if (this.meta) this.fresh = this.d.freshness(this.meta, this.d.clock.now());
+    const meta = this.metaNow();
+    if (meta) this.fresh = this.d.freshness(meta, this.d.clock.now());
     return this.fresh;
   }
 
@@ -1669,16 +1706,27 @@ export class GlassesController implements GlassesApi {
 
   private async updateLocation(): Promise<void> {
     if (this.paused || this.stopped) return;
-    const prev = this.here;
     const fix = await this.d.platform.location.current(8000);
-    if (!fix) return;
+    if (fix) await this.takeFix(fix);
+  }
+
+  /**
+   * Position arrivée : elle remplace l'ancienne ; un déplacement de plus de 30 m recalcule ce qui en dépend.
+   * `resumed` (1.2.5) : première position après la reprise d'un état gardé : l'accueil pas encore touché reprend son
+   * ordre (M1.4 le fige à l'entrée, ici sur la position gardée).
+   */
+  private async takeFix(fix: Fix, resumed = false): Promise<void> {
+    if (this.stopped) return;
+    const prev = this.here;
     this.here = fix;
-    const moved = !prev || distanceM(prev, fix) > MOVE_M;
-    if (!moved) return;
+    if (!this.ready || (prev && distanceM(prev, fix) <= MOVE_M)) return;
     this.positionChanged();
-    const r = current(this.nav).route;
-    if (r.screen === 'home') void this.refreshHome(false);
-    if (r.screen === 'home' || USES_POSITION.has(r.screen)) await this.render();
+    const f = current(this.nav);
+    if (f.route.screen === 'home') {
+      if (resumed && f.fresh) this.freezeHome();
+      void this.refreshHome(false);
+    }
+    if (f.route.screen === 'home' || USES_POSITION.has(f.route.screen)) await this.render();
   }
 
   /** Rafraîchissement périodique de l'écran courant (temps réel) et du trajet suivi. */
@@ -1790,7 +1838,7 @@ export class GlassesController implements GlassesApi {
         return this.fetchOthers(r);
       case 'train':
       case 'arrival': {
-        const j = await core.refresh(this.journeyOf(r.journey), s);
+        const j = await core.refresh(this.journeyOf(r.journey), s, { followed: this.trip?.journey.id === r.journey.id });
         this.journeysById.set(j.id, j);
         if (this.trip?.journey.id === j.id) {
           this.trip = { ...this.trip, journey: j };
@@ -1910,16 +1958,21 @@ export class GlassesController implements GlassesApi {
       return { ok: true };
     }
     const shown = list[Math.min(r.index ?? 0, list.length - 1)];
-    const ids = new Set([shown.id]);
-    if (this.trip && this.trip.key === r.key) ids.add(this.trip.journey.id);
-    for (const id of ids) {
-      const j = id === shown.id ? this.journeyOf(shown) : this.journeyOf(this.trip!.journey);
-      const fresh = await core.refresh(j, s);
+    const main = new Map<string, Journey>([[shown.id, shown]]);
+    if (this.trip && this.trip.key === r.key) main.set(this.trip.journey.id, this.trip.journey);
+    const refreshOne = async (id: string, x: Journey): Promise<void> => {
+      const fresh = await core.refresh(this.journeyOf(x), s, { followed: this.trip?.journey.id === id });
       this.journeysById.set(fresh.id, fresh);
       if (this.trip?.journey.id === fresh.id) {
         this.trip = { ...this.trip, journey: fresh };
         this.saveFollowed();
       }
+    };
+    for (const [id, x] of main) await refreshOne(id, x);
+    // 1.2.5 : pendant la fenêtre de « Si tu le rates », les trajets de repli aussi (une suppression doit s'y voir) :
+    // ensemble, après le trajet montré, et sans jamais faire échouer l'écran
+    if (inMissWindow(this.journeyOf(shown), now)) {
+      await Promise.all(list.filter((j) => !main.has(j.id)).map((j) => refreshOne(j.id, j).catch(() => undefined)));
     }
     return { ok: true };
   }
@@ -1929,7 +1982,7 @@ export class GlassesController implements GlassesApi {
     const s = this.settings();
     for (const [k, j] of r.journeys.entries()) {
       if (k === r.index) continue;
-      const fresh = await this.d.core.refresh(this.journeyOf(j), s);
+      const fresh = await this.d.core.refresh(this.journeyOf(j), s, { followed: this.trip?.journey.id === j.id });
       this.journeysById.set(fresh.id, fresh);
       if (this.trip?.journey.id === fresh.id) {
         this.trip = { ...this.trip, journey: fresh };

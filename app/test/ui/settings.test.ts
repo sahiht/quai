@@ -60,7 +60,8 @@ describe('réglages : migration de la 1.1 et de la 1.0 (PRD-1.2 § 2.4, puis PRD
     expect(s.favorites[1]).toEqual(raw.favorites[2]);
     expect(s.stations).toEqual(PRESET_STATIONS);
     expect(s.lines).toEqual(PRESET_LINES);
-    expect([s.seenVersion, s.recent, s.display, s.alerts, s.maxWalkMin]).toEqual([raw.seenVersion, raw.recent, raw.display, raw.alerts, raw.maxWalkMin]);
+    // 1.2.5 (PRD-1.2.5 § 3) : « Pluie pendant la marche », nouveau, allumé
+    expect([s.seenVersion, s.recent, s.display, s.alerts, s.maxWalkMin]).toEqual([raw.seenVersion, raw.recent, { ...raw.display, rain: true }, raw.alerts, raw.maxWalkMin]);
     // une seconde lecture ne change rien
     stable(s);
     // validateSettings migre d'office des réglages d'une version antérieure (préréglages des tests)

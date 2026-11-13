@@ -96,6 +96,8 @@ export interface FakeFlags {
   noRt?: boolean;
   geo?: 'down';
   offline?: boolean;
+  /** 1.2.5 : pluie prévue sur toutes les marches de 5 min ou plus (paramètre d'URL rain=1). */
+  rain?: boolean;
 }
 
 const N = (fr: string, nl = fr, l?: 'fr' | 'nl'): Names => (l ? { fr, nl, l } : { fr, nl });
@@ -556,6 +558,7 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
     const q = new URLSearchParams(g.location?.search ?? '');
     if (flags.geo === undefined && q.get('geo') === 'down') flags.geo = 'down';
     if (flags.offline === undefined && q.get('offline') === '1') flags.offline = true;
+    if (flags.rain === undefined && q.get('rain') === '1') flags.rain = true;
   } catch {
     /* rien */
   }
@@ -912,6 +915,16 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
     return out;
   }
 
+  /** 1.2.5 : drapeau `rain` : pluie prévue sur toutes les marches de 5 min ou plus (ce que la grille du relais dirait). */
+  function fakeRain(journeys: Journey[], settings: Settings): void {
+    for (const j of journeys)
+      for (const l of j.legs) {
+        if (l.kind !== 'walk') continue;
+        if (flags.rain && settings.display.rain !== false && Math.round((l.arr - l.dep) / 60_000) >= 5) l.rain = true;
+        else delete l.rain;
+      }
+  }
+
   async function route(from: Endpoint, to: Endpoint, after: number, settings: Settings, here?: LatLon | null): Promise<PlanResult> {
     touchRt();
     const a = resolve(from, settings, here);
@@ -927,6 +940,7 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
     if (!walkOnly && !hasFrom) return { journeys: [], empty: 'noStopFrom', accessMin };
     if (!walkOnly && !hasTo) return { journeys: [], empty: 'noStopTo', accessMin };
     const journeys = rank(hasFrom && hasTo ? candidates(a, b, after, settings) : [], walkOnly, settings, after);
+    fakeRain(journeys, settings);
     if (journeys.length) return { journeys };
     const st = AREAS.filter((z) => z.op === 'sncb')
       .map((z) => ({ z, d: distanceM(b, z) }))
@@ -1113,7 +1127,13 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
       const out = finish(legs, settings, j.id);
       if (j.label) out.label = j.label;
       if (j.reason) out.reason = j.reason;
+      fakeRain([out], settings);
       return out;
+    },
+
+    /** 1.2.5 : la grille météo du faux cœur est toujours là (drapeau `rain` ou non). */
+    async weather(): Promise<'ok' | 'down' | 'unknown'> {
+      return flags.offline ? 'down' : 'ok';
     },
     async suggest(here, settings) {
       const t = now();

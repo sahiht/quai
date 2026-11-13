@@ -26,8 +26,8 @@ export class MissingKeyError extends UpstreamError {
   }
 }
 
-const OF: Record<Source['kind'], string> = { bmc: 'du portail', 'sncb-direct': 'du flux SNCB', data: 'du site de données' };
-const NAME: Record<Source['kind'], string> = { bmc: 'Portail', 'sncb-direct': 'Flux SNCB', data: 'Site de données' };
+const OF: Record<Source['kind'], string> = { bmc: 'du portail', 'sncb-direct': 'du flux SNCB', data: 'du site de données', weather: 'd’Open-Meteo' };
+const NAME: Record<Source['kind'], string> = { bmc: 'Portail', 'sncb-direct': 'Flux SNCB', data: 'Site de données', weather: 'Open-Meteo' };
 
 export function httpMessage(status: number, src: Source): string {
   if (src.kind === 'bmc' && (status === 401 || status === 403)) return `Clé refusée par le portail (HTTP ${status})`;
