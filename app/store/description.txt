@@ -5,11 +5,11 @@ Dans les lunettes :
 - Un toucher ouvre le trajet étape par étape : l’arrêt ou la gare où aller, la marge des correspondances, la pluie prévue sur tes marches et l’heure d’arrivée si tu rates ton départ. Quai propose d’abord celui qui arrive le plus tôt : au-delà de ta marche maximale, chaque minute à pied compte triple. Puis jusqu’à deux autres choix, et il dit toujours pourquoi.
 - Gares de train : tous leurs départs des 2 prochaines heures, avec l’heure, la voie et le retard.
 - Arrêts de bus, tram, métro : leurs prochains départs ; touche un passage pour voir ses arrêts.
-- Lignes de bus, tram, métro : toute la ligne, dans les deux sens, l’attente à chaque arrêt.
+- Lignes de bus, tram, métro : toute la ligne dans les deux sens, variantes comprises, l’attente à chaque arrêt.
 - Autour de moi : les arrêts proches, tous réseaux confondus, avec le prochain départ.
 - Le suivi du trajet, quand tu le demandes : voie, retard ou suppression en tête de l’écran, ta progression dans le véhicule, et le trajet revient quand tu rouvres Quai.
 
-Sur le téléphone, un seul champ pour une adresse, une gare ou un arrêt : vas-y, ou garde le trajet en favori. Tu y choisis tes favoris, tes gares, tes arrêts et tes lignes (ceux près de toi sont proposés), tu règles les trajets, l’affichage et les alertes.
+Sur le téléphone, un seul champ pour une adresse, une gare ou un arrêt : vas-y, garde le trajet en favori ou affiche-le dans les lunettes. Tu y choisis tes favoris, tes gares, tes arrêts et tes lignes (ceux près de toi sont proposés), tu règles les trajets, l’affichage et les alertes.
 
 Le signe ~ signale un horaire prévu, sans temps réel.
 

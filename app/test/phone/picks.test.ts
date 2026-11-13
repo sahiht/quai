@@ -372,7 +372,59 @@ describe('« Ajouter une gare » (§ 4, PRD-1.2.6 § 5)', () => {
     expect(none.querySelector<HTMLElement>('.sub-head')!.closest<HTMLElement>('.step')!.hidden).toBe(true);
   });
 
-  it('un toucher ajoute (« Namur ajoutée à Gares. ») ; une gare déjà choisie : « Déjà dans tes gares » ; « Terminé » revient à la section', async () => {
+  it('contrôle qualité 1.2.6 : une gare ajoutée par la recherche paraît « Ajoutée ✓ » dans « Près de toi » ; le toucher suivant la retire, comme il le dit', async () => {
+    const hz = harness({ settings: defaults(), here: { lat: SCENARIO.s3.lat, lon: SCENARIO.s3.lon } });
+    const el = mount(addStationScreen(hz.ctx));
+    await until(() => nearRows(el).length > 0);
+    type(el.querySelector<HTMLInputElement>('#gare-nom')!, 'bruxelles-nord');
+    await until(() => opts(el.querySelector('.opts')).some(([n]) => n === 'Bruxelles-Nord'));
+    optButton(el.querySelector('.opts')!, 'Bruxelles-Nord').click();
+    await until(() => hz.settings.get().stations.length === 1);
+    await until(() => textOf(nearButton(el, 'Bruxelles-Nord')) === 'Ajoutée ✓');
+    expect(nearButton(el, 'Bruxelles-Nord').getAttribute('aria-pressed')).toBe('true');
+    // retirée ailleurs (une autre section, les lunettes de Quai Web) : « Ajouter » de nouveau
+    await hz.settings.update((x) => ({ ...x, stations: [] }));
+    await until(() => textOf(nearButton(el, 'Bruxelles-Nord')) === 'Ajouter');
+  });
+
+  it('contrôle qualité 1.2.6 : position pas encore connue à l’ouverture : « Près de toi » la demande et paraît ; le curseur reste sur « Ajouter »', async () => {
+    const hz = harness({ settings: defaults(), here: { lat: SCENARIO.s3.lat, lon: SCENARIO.s3.lon } });
+    const fix = hz.location.fix;
+    let asked = 0;
+    hz.ctx.location = { last: () => null, current: async () => (asked++, fix) };
+    const el = mount(addStationScreen(hz.ctx));
+    await until(() => nearRows(el).length > 0);
+    expect(asked).toBe(1);
+    // un toucher garde le curseur sur son bouton (il n'est jamais grisé pendant l'enregistrement)
+    const b = nearButton(el, 'Bruxelles-Nord');
+    b.focus();
+    b.click();
+    await until(() => textOf(nearButton(el, 'Bruxelles-Nord')) === 'Ajoutée ✓');
+    expect(document.activeElement).toBe(b);
+    expect(b.disabled).toBe(false);
+    // position refusée : une seule demande, pas de « Près de toi », la recherche reste là
+    const refused = harness({ settings: defaults(), here: null });
+    let tries = 0;
+    refused.ctx.location = { last: () => null, current: async () => (tries++, null) };
+    const none = mount(addStationScreen(refused.ctx));
+    await new Promise((r) => setTimeout(r, 50));
+    type(none.querySelector<HTMLInputElement>('#gare-nom')!, 'na');
+    type(none.querySelector<HTMLInputElement>('#gare-nom')!, '');
+    await new Promise((r) => setTimeout(r, 300));
+    expect(nearRows(none)).toEqual([]);
+    expect(tries).toBe(1);
+  });
+
+  it('contrôle qualité 1.2.6 : après un ajout par la recherche, le curseur va à « Terminé »', async () => {
+    const hz = harness({ settings: defaults(), here: null });
+    const el = mount(addStationScreen(hz.ctx));
+    type(el.querySelector<HTMLInputElement>('#gare-nom')!, 'namur');
+    await until(() => opts(el.querySelector('.opts')).length > 0);
+    optButton(el.querySelector('.opts')!, 'Namur').click();
+    await until(() => document.activeElement === button(el, 'Terminé'));
+  });
+
+  it('un toucher ajoute (« Namur ajoutée à tes gares. ») ; une gare déjà choisie : « Déjà dans tes gares » ; « Terminé » revient à la section', async () => {
     const hz = harness({ settings: defaults(), here: null });
     const el = mount(addStationScreen(hz.ctx));
     const input = el.querySelector<HTMLInputElement>('#gare-nom')!;
@@ -386,7 +438,7 @@ describe('« Ajouter une gare » (§ 4, PRD-1.2.6 § 5)', () => {
     expect(hz.settings.get().stations[0]).toMatchObject({ areaId: 'sncb:8863008', name: { fr: 'Namur', nl: 'Namen' }, lat: 50.4685, lon: 4.8625 });
     expect(hz.settings.get().stations[0]).not.toHaveProperty('near');
     await until(() => textOf(el.querySelector('.msg')) !== '');
-    expect(textOf(el.querySelector('.msg'))).toBe('Namur ajoutée à Gares.');
+    expect(textOf(el.querySelector('.msg'))).toBe('Namur ajoutée à tes gares.');
     // prêt pour une autre gare : le champ est vidé
     expect(input.value).toBe('');
     type(input, 'namur');
@@ -513,6 +565,52 @@ describe('« Ajouter une ligne » (PRD-1.2.6 § 5) : la ligne entière, dans les
     expect(nearRows(none)).toEqual([]);
   });
 
+  it('contrôle qualité 1.2.6 : une ligne ajoutée par son numéro paraît « Ajoutée ✓ » dans « Près de toi », de retour au champ', async () => {
+    const hz = harness({ settings: defaults(), here: BRAINE_GARE });
+    const el = mount(addLineScreen(hz.ctx));
+    await until(() => nearRows(el).length > 0);
+    await number(el, 'w');
+    el.querySelector<HTMLButtonElement>('.opts .opt')!.click();
+    await until(() => (hz.settings.get().follows ?? []).length === 1);
+    button(step2(el), 'Ajouter une autre ligne').click();
+    await until(() => textOf(nearButton(el, 'Bus W')) === 'Ajoutée ✓');
+    expect(nearButton(el, 'Bus W').closest<HTMLElement>('.step')!.hidden).toBe(false);
+  });
+
+  it('contrôle qualité 1.2.6 : une ligne déjà suivie le dit dans les lignes trouvées ; « Près de toi » paraît quand la position arrive', async () => {
+    const hz = harness({ settings: defaults({ follows: [{ id: 'f-w', op: 'tec', mode: 'bus', line: 'W', routes: [] }] }), here: BRAINE_GARE });
+    const fix = hz.location.fix;
+    hz.ctx.location = { last: () => null, current: async () => fix };
+    const el = mount(addLineScreen(hz.ctx));
+    await until(() => nearRows(el).length > 0);
+    expect(nearRows(el)).toEqual([['Bus W', 'TEC · Braine-l’Alleud Gare ↔ Bruxelles Midi · ici', 'Ajoutée ✓']]);
+    await number(el, 'w');
+    expect(opts(el.querySelector('.opts'))).toEqual([['Bus W TEC, Braine-l’Alleud Gare ↔ Bruxelles Midi', 'déjà dans tes lignes']]);
+    // lu « Ajouter Bus W TEC, … » par un lecteur d'écran, comme les gares et les arrêts
+    expect(textOf(el.querySelector('.opts .opt .t1'))).toMatch(/^Ajouter Bus W/);
+    // retirée dans « Près de toi » : la ligne trouvée le suit
+    nearButton(el, 'Bus W').click();
+    await until(() => (hz.settings.get().follows ?? []).length === 0);
+    await until(() => opts(el.querySelector('.opts'))[0]?.[1] === '');
+  });
+
+  it('contrôle qualité 1.2.6 : le W suivi ailleurs (autres variantes) n’est pas celui d’ici : « Ajouter », et les deux se suivent', async () => {
+    const elsewhere = { id: 'f-w', op: 'tec' as const, mode: 'bus' as const, line: 'W', routes: ['tec:ailleurs'] };
+    const hz = harness({ settings: defaults({ follows: [elsewhere] }), here: BRAINE_GARE });
+    const el = mount(addLineScreen(hz.ctx));
+    await until(() => nearRows(el).length > 0);
+    expect(nearRows(el)).toEqual([['Bus W', 'TEC · Braine-l’Alleud Gare ↔ Bruxelles Midi · ici', 'Ajouter']]);
+    await number(el, 'w');
+    expect(opts(el.querySelector('.opts'))).toEqual([['Bus W TEC, Braine-l’Alleud Gare ↔ Bruxelles Midi', 'ici']]);
+    nearButton(el, 'Bus W').click();
+    await until(() => (hz.settings.get().follows ?? []).length === 2);
+    await until(() => textOf(nearButton(el, 'Bus W')) === 'Ajoutée ✓');
+    // le retirer laisse celui d'ailleurs
+    nearButton(el, 'Bus W').click();
+    await until(() => (hz.settings.get().follows ?? []).length === 1);
+    expect(hz.settings.get().follows![0].id).toBe('f-w');
+  });
+
   it('plusieurs lignes du même numéro, les plus proches d’abord ; « Changer de ligne » revient au champ', async () => {
     const hz = harness({ settings: defaults(), here: { lat: SCENARIO.s3.lat, lon: SCENARIO.s3.lon } });
     const el = mount(addLineScreen(hz.ctx));
@@ -530,10 +628,10 @@ describe('« Ajouter une ligne » (PRD-1.2.6 § 5) : la ligne entière, dans les
     expect(document.activeElement?.id).toBe('ligne-num');
   });
 
-  it('textes clairs : numéro inconnu (un train : « ajoute sa gare dans Gares »), recherche en panne', async () => {
+  it('textes clairs : numéro inconnu (un train : « ajoute sa gare à tes gares »), recherche en panne', async () => {
     const el = mount(addLineScreen(harness({ settings: defaults(), here: null }).ctx));
     await number(el, 'IC');
-    expect(textOf(el.querySelector('#ligne-num-etat'))).toBe('Aucune ligne de bus, tram ou métro ne porte ce numéro. Pour un train, ajoute sa gare dans Gares.');
+    expect(textOf(el.querySelector('#ligne-num-etat'))).toBe('Aucune ligne de bus, tram ou métro ne porte ce numéro. Pour un train, ajoute sa gare à tes gares.');
     const down = harness({ settings: defaults(), here: null, core: (c: Core) => ({ ...c, findLines: async () => Promise.reject(new Error('réseau')) }) });
     const el2 = mount(addLineScreen(down.ctx));
     await number(el2, 'w');
@@ -623,6 +721,17 @@ describe('« Ajouter un arrêt » (PRD-1.2.3 § 3, PRD-1.2.6 § 5)', () => {
     expect(full.settings.get().lines).toHaveLength(MAX_LINES);
   });
 
+  it('contrôle qualité 1.2.6 : un arrêt ajouté par la recherche paraît « Ajouté ✓ » dans « Près de toi »', async () => {
+    const hz = harness({ settings: defaults(), here: { lat: SCENARIO.s3.lat, lon: SCENARIO.s3.lon } });
+    const el = mount(addLineScreen(hz.ctx, 'stop'));
+    await until(() => nearRows(el).length > 0);
+    type(el.querySelector<HTMLInputElement>('#arret-nom')!, 'bourse');
+    await until(() => opts(el.querySelector('.opts')).some(([n]) => n === 'Bourse'));
+    optButton(el.querySelector('.opts')!, 'Bourse').click();
+    await until(() => hz.settings.get().lines.length === 1);
+    await until(() => textOf(nearButton(el, 'Bourse')) === 'Ajouté ✓');
+  });
+
   it('un toucher ajoute l’arrêt avec toutes ses lignes (sans line ni mode) et confirme ; doublon signalé ; « Terminé » : la section', async () => {
     const hz = harness({ settings: defaults({ follows: [T3] }), here: null });
     const el = mount(addLineScreen(hz.ctx, 'stop'));
@@ -657,10 +766,10 @@ describe('« Ajouter un arrêt » (PRD-1.2.3 § 3, PRD-1.2.6 § 5)', () => {
     expect(titles(section(home, LIGNES))).toEqual(['Tram 3']);
   });
 
-  it('textes clairs : seulement une gare (« Pour une gare, ajoute-la dans Gares. »), recherche en panne ; limite des arrêts', async () => {
+  it('textes clairs : seulement une gare (« Pour une gare, ajoute-la à tes gares. »), recherche en panne ; limite des arrêts', async () => {
     const el = mount(addLineScreen(harness({ settings: defaults(), here: null }).ctx, 'stop'));
     await search(el, 'ottignies');
-    expect(textOf(el.querySelector('#arret-nom-etat'))).toBe('Aucun arrêt de bus, tram ou métro ne correspond. Pour une gare, ajoute-la dans Gares.');
+    expect(textOf(el.querySelector('#arret-nom-etat'))).toBe('Aucun arrêt de bus, tram ou métro ne correspond. Pour une gare, ajoute-la à tes gares.');
     expect(stopOpts(el)).toEqual([]);
     const down = harness({ settings: defaults(), here: null, core: (c: Core) => ({ ...c, search: async () => Promise.reject(new Error('réseau')) }) });
     const el2 = mount(addLineScreen(down.ctx, 'stop'));

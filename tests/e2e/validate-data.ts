@@ -878,6 +878,10 @@ function validateLines(
     if (f.op !== id.split(':')[0]) err(`${rel} : op « ${String(f.op)} » incohérent avec ${id}`);
     if (!isStr(f.route) || normalizeId(f.route) !== f.route || `${f.op}:${f.route}` !== id) err(`${rel} : route « ${String(f.route)} » incohérente avec ${id}`);
     if (entry && (entry[1] !== f.line || entry[2] !== f.mode)) err(`${rel} : ligne ou mode différents de lines/index.json`);
+    // 1.2.6 : couleur officielle et couleur du texte (« RRGGBB »), les mêmes que dans lines/index.json
+    const rgb = (x: unknown): boolean => x === undefined || (typeof x === 'string' && /^[0-9A-F]{6}$/.test(x));
+    if (!rgb(f.color) || !rgb(f.text) || (f.text !== undefined && f.color === undefined)) err(`${rel} : couleur « ${String(f.color)} » ou texte « ${String(f.text)} » invalides`);
+    else if (entry && ((entry[4] ?? undefined) !== f.color || (entry[5] ?? undefined) !== f.text)) err(`${rel} : couleur différente de lines/index.json`);
     if (!isStr(f.line) || !f.line.trim()) err(`${rel} : nom de ligne vide`);
     else if ((f.mode === 'tram' && /^T\s?\d/i.test(f.line)) || (f.mode === 'metro' && /^M\s?\d/i.test(f.line))) err(`${rel} : ligne « ${f.line} » déjà préfixée`);
     if (!MODES.includes(f.mode) || f.mode === 'train') err(`${rel} : mode invalide « ${String(f.mode)} »`);

@@ -7,8 +7,8 @@
 import { describe, expect, it } from 'vitest';
 import type { LineFile, Meta } from '../../../shared/types';
 import type { LineMatch } from '../../src/core/api';
-import { lineColorsIn, linePath, type LineData } from '../../src/core/linepicks';
-import { NEAR_RUN_M, completeFollow, lineDirectionsIn, lineHeadsIn, lineRunIn, matchFollow, sameFollow, type LineDirection, type LineFollow } from '../../src/core/linerun';
+import { lineColorsIn, linePath, linesNearIn, type LineData } from '../../src/core/linepicks';
+import { NEAR_RUN_M, completeFollow, isFollowed, lineDirectionsIn, lineHeadsIn, lineRunIn, matchFollow, sameFollow, type LineDirection, type LineFollow } from '../../src/core/linerun';
 import { gtfsTime, hhmm } from '../../src/core/util';
 import { makeEnv } from './support/env';
 
@@ -119,6 +119,18 @@ describe('lignes suivies : règles (sans données)', () => {
     expect(matchFollow({ ...f, op: 'stib' }, [a, b])).toBeNull();
   });
 
+  it('isFollowed (contrôle qualité) : même réseau et numéro, et une variante commune quand les deux en ont ; sinon le numéro suffit', () => {
+    const braine: LineFollow = { id: 'w', op: 'tec', line: 'W', routes: ['tec:B0536-23747', 'tec:B0536-23748'] };
+    expect(isFollowed(braine, { op: 'tec', line: 'w', routes: ['tec:B0536-23748'] })).toBe(true);
+    // le W de Tournai : même numéro, aucune variante commune
+    expect(isFollowed(braine, { op: 'tec', line: 'W', routes: ['tec:T0900-23747'] })).toBe(false);
+    // variantes inconnues d'un côté (ligne reprise de la 1.2.5, recherche par numéro) : le numéro suffit
+    expect(isFollowed(braine, { op: 'tec', line: 'W' })).toBe(true);
+    expect(isFollowed({ ...braine, routes: [] }, { op: 'tec', line: 'W', routes: ['tec:T0900-23747'] })).toBe(true);
+    expect(isFollowed(braine, { op: 'delijn', line: 'W', routes: ['tec:B0536-23747'] })).toBe(false);
+    expect(isFollowed(braine, { op: 'tec', line: 'X', routes: ['tec:B0536-23747'] })).toBe(false);
+  });
+
   it('completeFollow : mode, variantes (16 au plus), terminus (2 au plus), couleur officielle ; le repère et l’ouverture d’office restent', () => {
     const f: LineFollow = { id: 'f', op: 'tec', line: 'W', routes: [], via: { areaId: 'tec:y', name: N('Y'), lat: 0, lon: 0 }, near: true, color: '000000' };
     const done = completeFollow(f, m({ routes: Array.from({ length: 20 }, (_, i) => `tec:${i}`), color: 'FFD200', text: 'D2001F' }));
@@ -136,9 +148,12 @@ describe('lignes suivies : règles (sans données)', () => {
       stations: {},
       lines: [
         ['stib:3', '3', 'tram', 2, 'B5BA05', '000000'],
-        ['stib:3-bis', '03', 'tram', 1, '111111'],
+        ['stib:3-bis', '03', 'tram', 1, 'b5ba05', '000000'],
         ['tec:B0536-23747', 'W', 'bus', 2],
         ['delijn:1', '1', 'tram', 2, '0066B3'],
+        // contrôle qualité : le 2 de De Lijn, deux lignes de deux villes, deux couleurs : aucune plutôt qu'une fausse
+        ['delijn:20', '2', 'tram', 2, 'E30613', 'FFFFFF'],
+        ['delijn:50', '2', 'bus', 2, 'FFFFFF', 'B59E6A'],
         ['sncb:IC', 'IC', 'train', 1, 'FF0000'],
       ],
     };
@@ -252,5 +267,74 @@ describe('lignes à variantes et en morceaux (correction 1.2.6)', () => {
     const run = await lineRunIn(source(f), null, { op: 'stib', line: '7', mode: 'tram', routes: [f.id] }, 0, gtfsTime('2026-11-10', 360), null);
     expect(run.other).toBeUndefined();
     expect(run.stops.map((s) => `${s.branch ? '◇' : ''}${s.name.fr}${s.last ? '|' : ''}`)).toEqual(['T', 'a', 'b', 'c', '◇x', 'T|']);
+  });
+});
+
+/**
+ * Contrôle qualité 1.2.6 (relecture du cœur) : une ligne suivie dont l'opérateur a changé les identifiants de variantes
+ * (nouvel horaire) reste suivie, retrouvée par son numéro sans se tromper de ligne ; « Près de toi » ne cherche que
+ * les lignes les plus proches.
+ */
+describe('lignes suivies : variantes renommées, « Près de toi » rapide (contrôle qualité 1.2.6)', () => {
+  const XY: Record<string, [number, number]> = { A: [50.9, 4.35], B: [50.89, 4.35], C: [50.88, 4.35], P: [50.6, 3.4], Q: [50.59, 3.4], R: [50.58, 3.4] };
+  const file = (id: string, line: string, op: LineFile['op'], stops: string[], head: string, back: string): LineFile => ({
+    v: 1,
+    id,
+    op,
+    route: id.split(':')[1],
+    line,
+    mode: 'bus',
+    areas: stops.map((n) => [`${op}:${n}`, XY[n][0], XY[n][1], N(n)]),
+    pats: [
+      { head: N(head), a: stops.map((_, i) => i), s: stops.map(() => ''), prof: [stops.map((_, q) => 3 * q)], t: [[0, 420, 0]] },
+      { head: N(back), a: stops.map((_, i) => stops.length - 1 - i), s: stops.map(() => ''), prof: [stops.map((_, q) => 3 * q)], t: [[0, 430, 0]] },
+    ],
+    conn: [],
+  });
+  const source = (files: LineFile[], reads: string[] = []): LineData => {
+    const index = { v: 1, generatedAt: 'nuit', conn: 400, stations: {}, lines: files.map((f) => [f.id, f.line, f.mode, f.pats.length]) };
+    return {
+      meta: { serviceDates: ['2026-11-10', '2026-11-11'], generatedAt: 'nuit', lines: { ops: ['stib', 'delijn', 'tec'] } } as unknown as Meta,
+      json: async <T,>(path: string, valid: (x: unknown) => x is T): Promise<T | null> => {
+        reads.push(path);
+        const x: unknown = path === 'lines/index.json' ? index : files.find((f) => linePath(f.id) === path);
+        return x && valid(x) ? (x as T) : null;
+      },
+    };
+  };
+  // le W de Braine (A, B, C) et un autre W, à Tournai (P, Q, R), avec de nouveaux identifiants cette nuit
+  const W_BRAINE = file('tec:B0536-24001', 'W', 'tec', ['A', 'B', 'C'], 'C', 'A');
+  const W_TOURNAI = file('tec:T0900-24001', 'W', 'tec', ['P', 'Q', 'R'], 'R', 'P');
+  const old: LineFollow = { id: 'f-w', op: 'tec', mode: 'bus', line: 'W', routes: ['tec:B0536-23747'], ends: [N('A'), N('C')] };
+
+  it('variantes absentes cette nuit : la ligne retrouvée par son numéro et ses terminus, jamais l’autre W ; rien de sûr : introuvable', async () => {
+    const src = source([W_TOURNAI, W_BRAINE]);
+    expect(await lineHeadsIn(src, old)).toEqual([N('A'), N('C')]);
+    const run = await lineRunIn(src, null, old, 1, gtfsTime('2026-11-10', 400), null);
+    expect([run.state, run.stops.map((s) => s.name.fr)]).toEqual(['ok', ['A', 'B', 'C']]);
+    // par l'arrêt repère (ligne reprise de la 1.2.5, sans terminus connus)
+    const via = { ...old, ends: undefined, via: { areaId: 'tec:Q', name: N('Q'), lat: XY.Q[0], lon: XY.Q[1] } };
+    expect(await lineHeadsIn(src, via)).toEqual([N('P'), N('R')]);
+    // ni terminus, ni repère, deux W : introuvable plutôt qu'au hasard ; un seul W : celui-là
+    const bare = { ...old, ends: undefined };
+    expect(await lineHeadsIn(src, bare)).toEqual([]);
+    expect((await lineRunIn(src, null, bare, 0, gtfsTime('2026-11-10', 400), null)).state).toBe('missing');
+    expect(await lineHeadsIn(source([W_BRAINE]), bare)).toEqual([N('A'), N('C')]);
+    // variantes toujours là : lues telles quelles, sans recherche
+    const reads: string[] = [];
+    expect(await lineHeadsIn(source([W_BRAINE], reads), { ...old, routes: [W_BRAINE.id] })).toEqual([N('A'), N('C')]);
+    expect(reads).toEqual([linePath(W_BRAINE.id)]);
+  });
+
+  it('linesNearIn : les lignes des arrêts les plus proches d’abord, `max` au plus, sans chercher les autres', async () => {
+    const files = Array.from({ length: 12 }, (_, i) => file(`stib:${i + 1}`, String(i + 1), 'stib', ['A', 'B', 'C'], 'C', 'A'));
+    const reads: string[] = [];
+    const stops = files.map((f) => ({ op: 'stib', lines: [f.line] }));
+    const near = { lat: XY.A[0], lon: XY.A[1] };
+    const got = await linesNearIn(source(files, reads), near, stops, 500, 3);
+    expect(got.map((m) => m.line)).toEqual(['1', '2', '3']);
+    // une recherche par paquet de 4 : les 8 autres lignes ne sont jamais lues
+    expect(reads.filter((p) => p.startsWith('lines/stib/')).length).toBe(4);
+    expect((await linesNearIn(source(files), near, stops, 500)).length).toBe(12);
   });
 });

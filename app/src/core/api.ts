@@ -11,7 +11,7 @@
  * les favoris), lignes par numéro (findLines, lineStops) et passages d'une ligne à un arrêt par sens (lineBoard).
  */
 import type { Op, Mode, Names, AreaSummary, Meta, HealthResponse, GeocodeResult, GeoSource } from '../../../shared/types';
-import type { LineFollow, LineRun } from './linerun';
+import type { FollowRef, LineFollow, LineRun } from './linerun';
 
 export type { Op, Mode, Names, AreaSummary, Meta, HealthResponse, GeocodeResult, GeoSource };
 
@@ -488,13 +488,13 @@ export interface Core {
    *  1.1 : garde label et reason ; bus, trams et métros compris (fromStop, toStop). 1.2.5 : `followed` : le trajet
    *  suivi, qui garde pendant une panne du temps réel les derniers retards connus (PRD-1.2.5 § 5). */
   refresh(j: Journey, settings: Settings, o?: { followed?: boolean }): Promise<Journey>;
-  /** 1.2.6 : terminus des sens d'une ligne suivie (« Lignes »). */
-  /** 1.2.6 : couleurs officielles des lignes, lignes près d'un endroit. */
+  /** 1.2.6 : couleurs officielles des lignes ; lignes des arrêts à `radiusM` (500 m) de `near`, `max` (8) au plus. */
   lineColors?(): Promise<Map<string, { color: string; text?: string }>>;
-  linesNear?(near: LatLon, radiusM?: number): Promise<LineMatch[]>;
-  lineHeads?(f: Pick<LineFollow, 'routes'>): Promise<Names[]>;
+  linesNear?(near: LatLon, radiusM?: number, max?: number): Promise<LineMatch[]>;
+  /** 1.2.6 : terminus des sens d'une ligne suivie (« Lignes ») ; ligne retrouvée par son numéro si ses variantes ont changé. */
+  lineHeads?(f: FollowRef): Promise<Names[]>;
   /** 1.2.6 : toute la ligne dans un sens, l'attente à chaque arrêt. */
-  lineRun?(f: Pick<LineFollow, 'op' | 'line' | 'routes' | 'mode'>, dir: number, o?: { near?: LatLon | null }): Promise<LineRun>;
+  lineRun?(f: FollowRef & Pick<LineFollow, 'op' | 'line'>, dir: number, o?: { near?: LatLon | null }): Promise<LineRun>;
   /** 1.1 : ordre intelligent des favoris (PRD M1.4), immédiat (sans calcul de trajet). `last` : dernières réponses
    *  connues, pour la règle 5 (« rien dans les 3 heures »). Avec favOrder 'mine' : ordre du téléphone, sauf règle 5. */
   orderFavorites(here: LatLon | null, settings: Settings, last?: ReadonlyMap<string, FavoriteAnswer>): FavoriteRank[];

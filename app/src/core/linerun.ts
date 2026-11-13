@@ -18,7 +18,7 @@
  */
 import type { LineFile, Mode, Names, Op } from '../../../shared/types';
 import type { LatLon, LineMatch } from './api';
-import { lineKey, loadLineFiles, mainEnds, opposite, type EndPattern, type LineData } from './linepicks';
+import { findLinesIn, lineKey, loadLineFiles, mainEnds, opposite, type EndPattern, type LineData } from './linepicks';
 import type { RealtimeClient, RtTrip, RtUpdate, StibEntry } from './realtime';
 import { stibPoint } from './realtime';
 import { headKey, headScore, rtAtStop, sameStop } from './rtmerge';
@@ -87,6 +87,19 @@ export interface LineRun {
 /** 1.2.6 : même ligne suivie : même réseau, même numéro (« T3 » comme « 3 »). */
 export function sameFollow(a: Pick<LineFollow, 'op' | 'line'>, b: Pick<LineFollow, 'op' | 'line'>): boolean {
   return a.op === b.op && lineKey(a.line) === lineKey(b.line);
+}
+
+/**
+ * 1.2.6 (contrôle qualité) : `x` est-elle la ligne suivie `f` ? Même réseau et même numéro (sameFollow), puis, quand
+ * les variantes des deux sont connues, au moins une en commun : le W de Waterloo n'est pas celui de Tournai, ni le 1
+ * De Lijn de Gand celui d'Anvers. Sans variante d'un côté (ligne reprise de la 1.2.5 pas encore complétée), le numéro
+ * suffit.
+ */
+export function isFollowed(f: Pick<LineFollow, 'op' | 'line' | 'routes'>, x: { op: string; line: string; routes?: readonly string[] }): boolean {
+  if (f.op !== x.op || lineKey(f.line) !== lineKey(x.line)) return false;
+  const mine = f.routes ?? [];
+  if (!mine.length || !x.routes?.length) return true;
+  return x.routes.some((r) => mine.includes(r));
 }
 
 /**
@@ -296,9 +309,38 @@ export interface LineDirection {
   patterns: { areas: string[]; trips: number }[];
 }
 
+/**
+ * 1.2.6 : une ligne suivie telle que le cœur la lit : ses variantes gardées (`routes`), et de quoi la retrouver par son
+ * numéro quand elles ne sont plus dans les données de la nuit (réseau, numéro, mode, terminus, arrêt repère).
+ */
+export type FollowRef = Pick<LineFollow, 'routes'> & Partial<Pick<LineFollow, 'op' | 'line' | 'mode' | 'ends' | 'via'>>;
+
+/**
+ * Fichiers d'une ligne suivie : ses variantes gardées. Contrôle qualité 1.2.6 : une variante absente des données de la
+ * nuit (l'opérateur change ses identifiants à un nouvel horaire : la ligne deviendrait « introuvable » pour toujours)
+ * fait chercher la ligne par son numéro : même réseau et même mode ; celle qui garde une des variantes, sinon celle aux
+ * mêmes terminus, sinon celle qui passe à l'arrêt repère, sinon la seule de ce numéro. Rien de sûr : les variantes
+ * encore là (ou aucune : « introuvable »).
+ */
+async function followFiles(src: LineData, f: FollowRef): Promise<LineFile[]> {
+  const keys = [...new Set(f.routes)];
+  const files = await loadLineFiles(src, keys);
+  if ((files.length && files.length === keys.length) || !f.op || !f.line) return files;
+  const near = f.via ? { lat: f.via.lat, lon: f.via.lon } : null;
+  const ms = (await findLinesIn(src, f.line, near)).filter((m) => m.op === f.op && (!f.mode || m.mode === f.mode));
+  const want = new Set((f.ends ?? []).map((e) => headKey(e.fr)).filter(Boolean));
+  const kept = (m: LineMatch): number => m.routes.filter((r) => keys.includes(r)).length;
+  const ends = (m: LineMatch): number => m.ends.filter((e) => want.has(headKey(e.fr))).length;
+  const atVia = (m: LineMatch): number => (f.via && (m.nearest?.areaId === f.via.areaId || (m.nearest?.distanceM ?? Infinity) <= 300) ? 1 : 0);
+  const best = [...ms].sort((a, b) => kept(b) - kept(a) || ends(b) - ends(a) || atVia(b) - atVia(a))[0];
+  if (!best || !(kept(best) || ends(best) || atVia(best) || ms.length === 1)) return files;
+  const fresh = await loadLineFiles(src, best.routes);
+  return fresh.length ? fresh : files;
+}
+
 /** 1.2.6 : les sens d'une ligne suivie et leurs arrêts, sans horaire ni temps réel. */
-export async function lineDirectionsIn(src: LineData, f: Pick<LineFollow, 'routes'>): Promise<LineDirection[]> {
-  const files = await loadLineFiles(src, [...new Set(f.routes)]);
+export async function lineDirectionsIn(src: LineData, f: FollowRef): Promise<LineDirection[]> {
+  const files = await followFiles(src, f);
   return directionsOf(patsOf(files)).map((d) => ({
     head: d.head,
     group: d.group,
@@ -309,8 +351,8 @@ export async function lineDirectionsIn(src: LineData, f: Pick<LineFollow, 'route
 }
 
 /** Terminus des sens d'une ligne suivie (liste « Lignes ») : sans horaire ni temps réel. */
-export async function lineHeadsIn(src: LineData, f: Pick<LineFollow, 'routes'>): Promise<Names[]> {
-  const files = await loadLineFiles(src, [...new Set(f.routes)]);
+export async function lineHeadsIn(src: LineData, f: FollowRef): Promise<Names[]> {
+  const files = await followFiles(src, f);
   const dirs = directionsOf(patsOf(files));
   if (dirs.length) return dirs.map((d) => d.head);
   return mainEnds(patsOf(files).map((x) => x.end));
@@ -358,8 +400,8 @@ function stibOfDirection(e: StibEntry, line: string, heads: readonly string[]): 
  * Toute la ligne dans le sens `dir` : chaque arrêt, ses 2 prochains passages (temps réel ou prévus), les véhicules
  * qui arrivent, l'arrêt le plus proche de `near`.
  */
-export async function lineRunIn(src: LineData, rt: RealtimeClient | null, f: Pick<LineFollow, 'op' | 'line' | 'routes' | 'mode'>, dir: number, now: number, near: LatLon | null): Promise<LineRun> {
-  const files = await loadLineFiles(src, [...new Set(f.routes)]);
+export async function lineRunIn(src: LineData, rt: RealtimeClient | null, f: FollowRef & Pick<LineFollow, 'op' | 'line'>, dir: number, now: number, near: LatLon | null): Promise<LineRun> {
+  const files = await followFiles(src, f);
   const empty: LineRun = { op: f.op, mode: f.mode ?? 'bus', line: f.line, heads: [], dir: 0, stops: [], rtError: false, state: 'missing' };
   if (!files.length) return empty;
   const dirs = directionsOf(patsOf(files));

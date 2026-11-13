@@ -43,7 +43,7 @@ export function withFavorite(list: Favorite[], fav: Favorite): Favorite[] | null
 
 /**
  * Lien au-dessus du formulaire d'un lieu placé à une gare ou à un arrêt (revue d'usage n° 3) : une gare SNCB
- * s'ajoute à « Gares » d'un toucher (« Namur ajoutée à Gares. ») ; un arrêt de bus, tram ou métro mène à « Ajouter
+ * s'ajoute à « Gares » d'un toucher (« Namur ajoutée à tes gares. ») ; un arrêt de bus, tram ou métro mène à « Ajouter
  * un arrêt », lui en tête (1.2.6).
  */
 export function departuresLink(ctx: PhoneCtx, it: SearchItem): HTMLElement {

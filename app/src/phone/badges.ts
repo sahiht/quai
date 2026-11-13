@@ -1,7 +1,7 @@
 /**
  * 1.2.6 : pastille d'une ligne de bus, tram ou métro, à sa couleur officielle (route_color et
  * route_text_color des horaires de l'opérateur) ; sans couleur publiée, une pastille neutre. Les couleurs passent par
- * le CSSOM (style.setProperty) : la politique de sécurité de Quai Web refuse les attributs style écrits dans la page.
+ * le CSSOM (style.setProperty), jamais par du texte HTML : une couleur venue des données ne s'écrit pas dans la page.
  */
 import type { Mode, Op } from '../../../shared/types';
 import { lineKey } from '../core/linepicks';
@@ -11,16 +11,22 @@ import { h } from './dom';
 type Colors = Map<string, { color: string; text?: string }>;
 let colorsP: Promise<Colors> | null = null;
 
-/** Couleurs officielles des lignes (réseau:numéro), lues une fois. */
+/**
+ * Couleurs officielles des lignes (réseau:numéro), lues une fois. Contrôle qualité 1.2.6 : une lecture vide (index des
+ * lignes pas encore là, réseau coupé) n'est pas gardée, sinon toutes les pastilles restaient neutres jusqu'à la
+ * fermeture de la page.
+ */
 export function lineColors(ctx: Pick<PhoneCtx, 'core'>): Promise<Colors> {
   if (!colorsP) {
-    colorsP = ctx
+    const p: Promise<Colors> = ctx
       .core()
       .then(async (c) => (await c.lineColors?.()) ?? new Map<string, { color: string; text?: string }>())
-      .catch(() => {
-        colorsP = null;
-        return new Map<string, { color: string; text?: string }>();
+      .catch(() => new Map<string, { color: string; text?: string }>())
+      .then((m) => {
+        if (!m.size && colorsP === p) colorsP = null;
+        return m;
       });
+    colorsP = p;
   }
   return colorsP;
 }

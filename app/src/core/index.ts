@@ -54,7 +54,7 @@ import { rankSearch, searchFileKeys } from './search';
 import { suggestOpening } from './suggest';
 import { indexDay, TrainEngine, trainLeg, type DayIndex } from './trains';
 import { findLinesIn, lineBoardAt, lineColorsIn, linesNearIn, lineStopsIn, missingLineBoard, noWeekdayIn } from './linepicks';
-import { lineHeadsIn, lineRunIn, type LineFollow, type LineRun } from './linerun';
+import { lineHeadsIn, lineRunIn, type FollowRef, type LineFollow, type LineRun } from './linerun';
 import { departureStopsAt, missingStops } from './stopcalls';
 import { brusselsParts, distanceM, localDate, walkMinutes } from './util';
 import { DAY_START_HOUR } from './text';
@@ -342,22 +342,22 @@ export function createCore(opts: CoreOptions): Core {
       return lineColorsIn({ meta, json: (p, v) => data.json(p, v) });
     },
 
-    /** 1.2.6 : lignes de bus, tram et métro des arrêts à `radiusM` au plus de `near`. */
-    async linesNear(near: LatLon, radiusM = 500): Promise<LineMatch[]> {
+    /** 1.2.6 : lignes de bus, tram et métro des arrêts à `radiusM` au plus de `near`, les `max` plus proches. */
+    async linesNear(near: LatLon, radiusM = 500, max = 8): Promise<LineMatch[]> {
       const meta = await ensure();
       const list = await areasAround(near.lat, near.lon, radiusM);
       const stops = list.filter(({ a }) => a.op !== 'sncb').map(({ a }) => ({ op: a.op, lines: a.lines }));
-      return linesNearIn({ meta, json: (p, v) => data.json(p, v) }, near, stops, radiusM);
+      return linesNearIn({ meta, json: (p, v) => data.json(p, v) }, near, stops, radiusM, max);
     },
 
     /** 1.2.6 : terminus des sens d'une ligne suivie. */
-    async lineHeads(f: Pick<LineFollow, 'routes'>): Promise<Names[]> {
+    async lineHeads(f: FollowRef): Promise<Names[]> {
       const meta = await ensure();
       return lineHeadsIn({ meta, json: (p, v) => data.json(p, v) }, f);
     },
 
     /** 1.2.6 : toute la ligne dans un sens, l'attente à chaque arrêt. */
-    async lineRun(f: Pick<LineFollow, 'op' | 'line' | 'routes' | 'mode'>, dir: number, o?: { near?: LatLon | null }): Promise<LineRun> {
+    async lineRun(f: FollowRef & Pick<LineFollow, 'op' | 'line'>, dir: number, o?: { near?: LatLon | null }): Promise<LineRun> {
       const meta = await ensure();
       const t = now();
       return lineRunIn({ meta, json: (p, v) => data.json(p, v) }, isCovered(meta, t) ? rt : null, f, dir, t, o?.near ?? null);

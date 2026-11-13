@@ -22,7 +22,7 @@ import { compareVersions } from '../version';
 import { textWidth, truncate } from './font';
 import { COL_SEP, ensureVisible, geometry, maxTop, visibleRange, WIDTHS } from './layout';
 import type { AreaRef, GlassesView, Intent, Item, KeepLineRoute, LineRoute, LineRunRoute, OthersRoute, Route, Seg, StepsRoute, StopsRoute, SubRow, TopLine } from './types';
-import { sameFollow, type LineFollow, type LineRun } from '../core/linerun';
+import { isFollowed, type LineFollow, type LineRun } from '../core/linerun';
 import { lineKey } from '../core/linepicks';
 import {
   departureWait,
@@ -360,15 +360,13 @@ export function sectionItem(kind: 'stations' | 'lines', ctx: ViewCtx): Item {
 /**
  * 1.2.6 : lignes suivies, sans arrêt. Celles choisies sur le téléphone (`follows`), puis celles de la 1.2.5
  * suivies à un arrêt (LinePick avec `line`) : la ligne reste, l'arrêt devient son repère (`via`) quand la position
- * manque. Une ligne n'apparaît qu'une fois (réseau et numéro).
+ * manque. Une ligne n'apparaît qu'une fois (réseau et numéro ; contrôle qualité : deux lignes du même numéro sans
+ * variante commune, le W de Waterloo et celui de Tournai, sont deux lignes, isFollowed).
  */
 export function followsOf(s: Pick<Settings, 'lines'> & { follows?: LineFollow[] }): LineFollow[] {
   const out: LineFollow[] = [];
-  const seen = new Set<string>();
   const add = (f: LineFollow): void => {
-    const k = `${f.op}:${lineKey(f.line)}`;
-    if (seen.has(k)) return;
-    seen.add(k);
+    if (out.some((x) => isFollowed(x, f))) return;
     out.push(f);
   };
   for (const f of s.follows ?? []) add(f);
@@ -714,9 +712,19 @@ export function followsView(rows: FollowRow[], ctx: ViewCtx): GlassesView {
   return v;
 }
 
-/** 1.2.6 : « 120 m », « 1,2 km ». */
-function metersText(m: number): string {
-  return m < 1000 ? `${Math.round(m / 10) * 10}${NB}m` : `${(Math.round(m / 100) / 10).toString().replace('.', ',')}${NB}km`;
+/** 1.2.6 : « 120 m », « 1,2 km » (relecture : 995 m disait « 1000 m »). */
+export function metersText(m: number): string {
+  const r = Math.round(m / 10) * 10;
+  return r < 1000 ? `${r}${NB}m` : `${(Math.round(m / 100) / 10).toString().replace('.', ',')}${NB}km`;
+}
+
+/**
+ * 1.2.6 : ligne suivie introuvable (données du jour, ou retirée sur le téléphone pendant qu'on la regarde) : « Introuvable :
+ * modifie-la sur le téléphone. » ; Quai Web : dans Réglages, et toucher ouvre « Lignes de bus, tram, métro » de l'onglet.
+ */
+export function lineRunMissingView(title: string, ctx: ViewCtx): GlassesView {
+  const tap: Intent | undefined = ctx.web ? { kind: 'phone', hash: '#/lignes', text: SECTION.chooseLinesWeb } : undefined;
+  return messageView(title, [`${upperFirst(ctx.web ? SECTION.missingWeb : SECTION.missing)}.`], ctx, { hints: HINTS.message, screen: 'lineRun', ...(tap ? { tap } : {}) });
 }
 
 /**
@@ -733,7 +741,7 @@ export function lineRunView(r: LineRunRoute, follow: LineFollow, run: LineRun, c
   const vehicle = vehicleLong(run.mode, run.line);
   const head = run.heads[run.dir];
   const title = head ? `${vehicle} vers ${headText(head, l, run.op)}` : vehicle;
-  if (run.state === 'missing') return messageView(title, [`${upperFirst(ctx.web ? SECTION.missingWeb : SECTION.missing)}.`], ctx, { hints: HINTS.message, screen: 'lineRun' });
+  if (run.state === 'missing') return lineRunMissingView(title, ctx);
   const v = base('lineRun', 'lines', title, ctx);
   const f: PassageFlags = { planned: false, partial: false, rtDown: run.rtError };
   run.stops.forEach((st, i) => {
@@ -823,6 +831,11 @@ export function lineView(r: LineRoute, b: LineBoard, ctx: ViewCtx, works?: strin
 export interface StopLine {
   line: string;
   mode: Mode;
+  /**
+   * 1.2.6 (contrôle qualité) : variantes de la ligne qui passe à cet arrêt (findLines autour de lui), lues quand une
+   * ligne suivie porte le même numéro : le W de Tournai n'est pas celui de Waterloo.
+   */
+  routes?: string[];
 }
 
 /** Titre : « Gare du Nord : garder une ligne », le nom de l'arrêt coupé si trop long. */
@@ -843,7 +856,7 @@ export function keepLineView(r: KeepLineRoute, lines: StopLine[], ctx: ViewCtx):
   const v = base('keepLine', 'menu', title, ctx);
   for (const x of lines) {
     // 1.2.6 : ★ = la ligne entière est dans « Lignes » (où qu'elle ait été ajoutée)
-    const kept = r.op !== 'sncb' && (ctx.settings.follows ?? []).some((f) => sameFollow(f, { op: r.op as LineFollow['op'], line: x.line }));
+    const kept = r.op !== 'sncb' && (ctx.settings.follows ?? []).some((f) => isFollowed(f, { op: r.op, line: x.line, routes: x.routes }));
     v.items.push({ a: rideWords({ op: r.op, mode: x.mode, line: x.line }), c: kept ? '★' : '', action: { kind: 'toggleLine', line: x.line, mode: x.mode } });
   }
   v.hints = hints(ctx, HINTS.keepLine);

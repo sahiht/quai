@@ -524,19 +524,23 @@ export async function lineStopsIn(src: LineData, m: Pick<LineMatch, 'op' | 'line
   return orderStops(stopsOfFiles(files), near);
 }
 
-/** Jour de service de `now` dans `dates` (meta.serviceDates) : avant 04:00, celui de la veille ; -1 s'il n'y est pas. */
 /**
- * 1.2.6 : couleurs officielles des lignes de bus, tram et métro (lines/index.json), par réseau et numéro
- * (`stib:3`) ; la première variante qui en publie une.
+ * 1.2.6 : couleurs officielles des lignes de bus, tram et métro (lines/index.json), par réseau et numéro (`stib:3`).
+ * Contrôle qualité : un même numéro peut être deux lignes (De Lijn le réutilise d'une ville à l'autre) ; leurs couleurs
+ * diffèrent : aucune (pastille neutre), plutôt que celle d'une autre ville.
  */
 export async function lineColorsIn(src: LineData): Promise<Map<string, { color: string; text?: string }>> {
   const out = new Map<string, { color: string; text?: string }>();
+  const mixed = new Set<string>();
   const index = await lineIndex(src);
   for (const [key, line, mode, , color, text] of index?.lines ?? []) {
     if (mode === 'train' || !color) continue;
     const k = `${opOf(key)}:${lineKey(line)}`;
-    if (!out.has(k)) out.set(k, text ? { color, text } : { color });
+    const prev = out.get(k);
+    if (!prev) out.set(k, text ? { color, text } : { color });
+    else if (prev.color.toUpperCase() !== color.toUpperCase() || (prev.text ?? '').toUpperCase() !== (text ?? '').toUpperCase()) mixed.add(k);
   }
+  for (const k of mixed) out.delete(k);
   return out;
 }
 
@@ -545,19 +549,30 @@ export async function lineColorsIn(src: LineData): Promise<Map<string, { color: 
  * réseau et numéros de chaque arrêt proche, comme « Autour de moi »), avec leurs terminus et leur arrêt le plus
  * proche, du plus proche au plus loin.
  */
-export async function linesNearIn(src: LineData, near: LatLon, stops: readonly { op: string; lines: readonly string[] }[], radiusM: number): Promise<LineMatch[]> {
+export async function linesNearIn(src: LineData, near: LatLon, stops: readonly { op: string; lines: readonly string[] }[], radiusM: number, max = Infinity): Promise<LineMatch[]> {
+  // `stops` du plus proche au plus loin : les lignes du plus proche arrêt d'abord. Contrôle qualité 1.2.6 : à un grand
+  // arrêt (40 lignes), chercher chaque ligne une à une faisait attendre « Près de toi » plusieurs secondes : 4 à la
+  // fois, et plus rien une fois les `max` plus proches trouvées
   const want = new Map<string, { op: string; line: string }>();
-  for (const st of stops) if (st.op !== 'sncb') for (const l of st.lines) if (lineKey(l)) want.set(`${st.op}:${lineKey(l)}`, { op: st.op, line: l });
+  for (const st of stops) if (st.op !== 'sncb') for (const l of st.lines) if (lineKey(l) && !want.has(`${st.op}:${lineKey(l)}`)) want.set(`${st.op}:${lineKey(l)}`, { op: st.op, line: l });
   const out: LineMatch[] = [];
-  for (const w of want.values()) {
-    const ms = await findLinesIn(src, w.line, near);
-    const m = ms.find((x) => x.op === w.op && (x.nearest?.distanceM ?? Infinity) <= radiusM + 150);
-    if (m && !out.some((o) => o.op === m.op && lineKey(o.line) === lineKey(m.line))) out.push(m);
+  const todo = [...want.values()];
+  for (let i = 0; i < todo.length && out.length < max; i += 4) {
+    const found = await Promise.all(
+      todo.slice(i, i + 4).map(async (w) => {
+        const ms = await findLinesIn(src, w.line, near);
+        return ms.find((x) => x.op === w.op && (x.nearest?.distanceM ?? Infinity) <= radiusM + 150);
+      }),
+    );
+    for (const m of found) if (m && !out.some((o) => o.op === m.op && lineKey(o.line) === lineKey(m.line))) out.push(m);
   }
   const rank: Record<string, number> = { metro: 0, tram: 1, bus: 2 };
-  return out.sort((a, b) => (a.nearest?.distanceM ?? 0) - (b.nearest?.distanceM ?? 0) || (rank[a.mode] ?? 3) - (rank[b.mode] ?? 3) || a.line.localeCompare(b.line, 'fr', { numeric: true }));
+  return out
+    .sort((a, b) => (a.nearest?.distanceM ?? 0) - (b.nearest?.distanceM ?? 0) || (rank[a.mode] ?? 3) - (rank[b.mode] ?? 3) || a.line.localeCompare(b.line, 'fr', { numeric: true }))
+    .slice(0, max);
 }
 
+/** Jour de service de `now` dans `dates` (meta.serviceDates) : avant 04:00, celui de la veille ; -1 s'il n'y est pas. */
 export function serviceDayIndex(dates: readonly string[], now: number): number {
   return dates.indexOf(localDate(now - DAY_START_MS));
 }

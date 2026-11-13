@@ -4,7 +4,8 @@
  * plus lisible du blanc et du presque noir ; le fond reste celui de l'opérateur.
  */
 import { describe, expect, it } from 'vitest';
-import { BADGE_CONTRAST, badgeColors, contrastRatio } from '../../src/phone/badges';
+import type { Core } from '../../src/core/api';
+import { BADGE_CONTRAST, badgeColors, contrastRatio, forgetLineColors, lineColors } from '../../src/phone/badges';
 
 describe('pastilles des lignes : couleurs et contraste', () => {
   it('contraste WCAG : 21 du noir au blanc, 1 entre deux couleurs égales', () => {
@@ -26,5 +27,21 @@ describe('pastilles des lignes : couleurs et contraste', () => {
   it('sans couleur du texte : blanc sur un fond sombre, presque noir sur un fond clair', () => {
     expect(badgeColors('0078AD').t).toBe('FFFFFF');
     expect(badgeColors('FFD200').t).toBe('161A17');
+  });
+});
+
+describe('couleurs des lignes lues dans l’index de la nuit', () => {
+  it('contrôle qualité 1.2.6 : une lecture vide (index pas encore là) n’est pas gardée ; une lecture pleine l’est', async () => {
+    forgetLineColors();
+    let reads = 0;
+    let ready = false;
+    const core = { lineColors: async () => (reads++, ready ? new Map([['stib:3', { color: 'B5BA05', text: '000000' }]]) : new Map()) } as unknown as Core;
+    const ctx = { core: async () => core };
+    expect((await lineColors(ctx)).size).toBe(0);
+    ready = true;
+    expect((await lineColors(ctx)).get('stib:3')).toEqual({ color: 'B5BA05', text: '000000' });
+    await lineColors(ctx);
+    expect(reads).toBe(2);
+    forgetLineColors();
   });
 });

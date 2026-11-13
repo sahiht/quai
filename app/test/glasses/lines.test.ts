@@ -461,11 +461,41 @@ describe('REVUE-USAGE n° 3 et CA-126.4 : « garder une ligne » depuis les dép
     const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.6', follows: many }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'keepLine', areaId: 'stib:6357F', op: 'stib', name: N('Gare du Nord'), lat: 50.86, lon: 4.36 });
-    await h.until((x) => x.screen === 'keepLine' && x.lines.length > 1);
+    await h.until((x) => x.screen === 'keepLine' && x.lines[0]?.startsWith('tram'));
     await h.gesture('tap');
     expect(nb(h.last().lines.at(-1)!)).toBe(`Déjà ${LIMITS.lines} lignes : retires-en une sur le téléphone`);
     expect(h.settings.get().follows).toHaveLength(LIMITS.lines);
     h.c.stop();
+  });
+});
+
+describe('contrôle qualité 1.2.6 : deux lignes du même numéro dans deux régions', () => {
+  it('« garder une ligne » : ★ seulement pour la ligne suivie qui passe à cet arrêt (ses variantes) ; l’autre s’ajoute à côté', async () => {
+    const GDN = { lat: 50.86, lon: 4.36 };
+    const [t3] = await stubCore(() => NOW).findLines('3', GDN);
+    const keep = { screen: 'keepLine' as const, areaId: 'stib:6357F', op: 'stib' as const, name: N('Gare du Nord'), ...GDN };
+    // le tram 3 suivi est celui d'ailleurs (autres variantes) : pas d'★ ici ; le toucher ajoute celui de cet arrêt
+    const elsewhere: LineFollow = { id: 'f-3b', op: 'stib', mode: 'tram', line: '3', routes: ['stib:ailleurs'] };
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.6', follows: [elsewhere] }), core: (now) => stubCore(now) });
+    await h.until((x) => x.screen === 'home');
+    await h.c.show(keep);
+    const k = await h.until((x) => x.screen === 'keepLine' && x.lines[0]?.startsWith('tram 3'));
+    expect(k.lines[0]).toBe('tram 3');
+    await h.gesture('tap');
+    expect(h.last().lines.at(-1)).toBe('★ Ajoutée aux lignes');
+    expect(h.settings.get().follows?.map((f) => `${f.line} ${f.id === elsewhere.id ? 'ailleurs' : 'ici'}`)).toEqual(['3 ailleurs', '3 ici']);
+    h.c.stop();
+    // le tram 3 suivi est bien celui-ci (une variante en commun) : ★, et le toucher le retire
+    const here: LineFollow = { ...elsewhere, routes: t3.routes };
+    const g = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.6', follows: [here] }), core: (now) => stubCore(now) });
+    await g.until((x) => x.screen === 'home');
+    await g.c.show(keep);
+    const k2 = await g.until((x) => x.screen === 'keepLine' && x.lines[0]?.startsWith('tram 3'));
+    expect(k2.lines[0]).toBe('tram 3   ★');
+    await g.gesture('tap');
+    expect(g.last().lines.at(-1)).toBe('★ Retirée. Toucher encore : annuler');
+    expect(g.settings.get().follows ?? []).toEqual([]);
+    g.c.stop();
   });
 });
 

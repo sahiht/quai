@@ -224,10 +224,10 @@ describe('« Nouveau favori » (PRD-1.2 § 2.2, PRD-1.2.1 § 7.1)', () => {
     // au-dessus du formulaire, le lien vers « Gares »
     const link = el.querySelector<HTMLButtonElement>('.jump')!;
     expect(link.compareDocumentPosition(el.querySelector('.place-form')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(link.textContent).toBe('Ses prochains départs\u00a0: ajouter Namur à Gares');
+    expect(link.textContent).toBe('Ses prochains départs\u00a0: ajouter Namur à tes gares');
     link.click();
     await until(() => textOf(el.querySelector('.jump-box .msg')) !== '');
-    expect(textOf(el.querySelector('.jump-box .msg'))).toBe('Namur ajoutée à Gares.');
+    expect(textOf(el.querySelector('.jump-box .msg'))).toBe('Namur ajoutée à tes gares.');
     expect(hz.settings.get().stations).toEqual([expect.objectContaining({ areaId: 'sncb:8863008', name: { fr: 'Namur', nl: 'Namen' } })]);
     link.click();
     await until(() => textOf(el.querySelector('.jump-box .msg')) === 'Déjà dans tes gares.');

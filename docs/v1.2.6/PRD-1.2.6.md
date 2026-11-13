@@ -84,8 +84,11 @@ ligne ; toucher l'arrêt ouvre tous ses départs. Seul l'intitulé « ARRÊTS »
   ou par numéro. Une ligne s'ajoute toujours dans les deux sens ; plus de question « À quel arrêt ? ». « Près de toi »
   se calcule sur le téléphone avec les horaires de la nuit : la position ne le quitte pas.
 - Couleurs : chaque ligne est une pastille à sa couleur, avec son numéro (accueil, ajouts, lignes d'un arrêt) ; une gare
-  de train a son icône bleue. Couleurs posées par le CSSOM (la politique de sécurité de Quai Web refuse les attributs
-  style). Les lunettes restent monochromes.
+  de train a son icône bleue. Couleurs posées par le CSSOM (style.setProperty), sans attribut style écrit dans la page.
+  Les lunettes restent monochromes.
+- Lisibilité (contrôle sur les vraies données) : le numéro garde la couleur de texte de l'opérateur si elle se lit
+  (contraste d'au moins 3:1), sinon blanc ou presque noir, le plus lisible (le beige sur blanc de 556 lignes De
+  Lijn) ; chaque pastille garde un liseré fin (une pastille blanche sur la page blanche).
 
 ## 6. Couleurs des lignes (données de nuit ; CA-126.6)
 
@@ -93,7 +96,8 @@ ligne ; toucher l'arrêt ouvre tous ses départs. Seul l'intitulé « ARRÊTS »
   (5e et 6e éléments de chaque ligne, lus par position : la 1.2.5 les ignore) et dans chaque fichier de ligne. Le
   journal de nuit dit la couverture par réseau (« Couleurs des lignes : STIB 86/86, … »).
 - Les trois réseaux publient une couleur par ligne : nuit du 13/11, STIB 86/86, De Lijn 1856/1856, TEC 838/838
-  (journal de nuit). Une ligne sans couleur reste neutre ; au TEC, elle prend le jaune et le rouge de ses bus.
+  (journal de nuit) ; le TEC, la même pour toutes ses lignes (jaune, numéro noir). Une ligne sans couleur reste
+  neutre ; au TEC, elle prendrait le jaune et le rouge de ses bus.
 - Données d'essai : couleurs proches de celles du réseau (métros 1, 2, 5, 6 : violet, orange, jaune, bleu).
 
 ## 7. Nouveautés (CA-126.7)
@@ -123,7 +127,13 @@ verrouillé, sur 3 vrais trajets.
   rangées « Lignes » qui ne correspondent pas aux sens, un arrêt d'un motif absent de la liste de son sens, un « autre
   sens » invalide, un sens de moins de 2 arrêts, une rangée qui dépasse ; mesures : lignes en morceaux, motifs hors de
   l'ordre de la liste, arrêts de variante, sens sans « autre sens ». Lancée aussi avant la publication (essai de
-  branche, sans rien publier) : BILAN_REEL
+  branche, sans rien publier), sur les données du 13/11 : 1 851 lignes (STIB 86, De Lijn 927, TEC 838 ; 2 780
+  fichiers), aucune erreur. Avant la correction des variantes, 11,3 % des voyages passaient par un arrêt absent de
+  l'écran ; après : aucun arrêt caché, 5 lignes en morceaux (dont le tram 4), 11,9 % des arrêts montrés en ◇, 1,9 %
+  des voyages sur un motif dont l'ordre diffère de la liste (boucles surtout), 3 609 sens de 2 à 133 arrêts (médiane
+  32), 0,7 % des rangées coupées (« … »), couleurs pour 100 % des lignes, texte de l'opérateur remplacé sur 566
+  pastilles illisibles (aucune sous 3:1 ensuite). Deux fichiers De Lijn (lignes 2 et 4) ne sont pas retrouvés par leur
+  numéro (la recherche lit 16 fichiers au plus).
 - Contrôle qualité avant publication, défauts corrigés avec leurs tests : numéro d'une ligne suivie coupé à 12
   caractères (20 pour les arrêts : réglages instables), deux définitions de « même ligne », caractères de sens
   d'écriture dans les mots des rangées, limites de « Près de toi » sans message, « Terminé » d'un ajout d'arrêt qui

@@ -149,11 +149,11 @@ export const T = {
   stopLead: 'Tous ses départs s’afficheront dans les lunettes.',
   stopField: 'Nom de l’arrêt',
   stopSearchPlaceholder: 'Rogier, Gare du Nord…',
-  stopSearchNone: 'Aucun arrêt de bus, tram ou métro ne correspond. Pour une gare, ajoute-la dans Gares.',
+  stopSearchNone: 'Aucun arrêt de bus, tram ou métro ne correspond. Pour une gare, ajoute-la à tes gares.',
   stopsFound: 'Arrêts trouvés',
   lineField: 'Numéro de la ligne',
   linePlaceholder: 'W, 36, 71…',
-  lineNone: 'Aucune ligne de bus, tram ou métro ne porte ce numéro. Pour un train, ajoute sa gare dans Gares.',
+  lineNone: 'Aucune ligne de bus, tram ou métro ne porte ce numéro. Pour un train, ajoute sa gare à tes gares.',
   linesFound: 'Lignes trouvées',
   whichStop: 'À quel arrêt ?',
   stopFilter: 'Filtrer les arrêts',
@@ -242,11 +242,11 @@ export const stationLimitText = (max: number): string => `${max} gares au plus :
 export const lineLimitText = (max: number): string => `${max} lignes au plus : retires-en une.`;
 export const stopLimitText = (max: number): string => `${max} arrêts au plus : retires-en un.`;
 /** 1.2.2 : gare ajoutée (« Ajouter une gare », lien de « Un endroit », revue d'usage n° 3). */
-export const stationAddedText = (name: string): string => `${name} ajoutée à Gares.`;
+export const stationAddedText = (name: string): string => `${name} ajoutée à tes gares.`;
 /** 1.2.3 : arrêt ajouté avec toutes ses lignes (PRD-1.2.3 § 3). */
 export const stopAddedText = (name: string): string => `${name} ajouté : tous ses départs s’afficheront dans les lunettes.`;
-/** « Un endroit » (revue d'usage n° 3) : une gare SNCB choisie, ses départs dans Gares. */
-export const nextDeparturesLink = (name: string): string => `Ses prochains départs : ajouter ${name} à Gares`;
+/** « Un endroit » (revue d'usage n° 3) : une gare SNCB choisie, ses départs dans « Gares de train » (1.2.6 : « à tes gares »). */
+export const nextDeparturesLink = (name: string): string => `Ses prochains départs : ajouter ${name} à tes gares`;
 /** Retrait d'une gare ou d'une ligne, confirmé dans la page, puis annoncé. */
 export const removeStationText = (name: string): string => `Retirer ${name} de tes gares ?`;
 export const removeLineText = (name: string): string => `Retirer ${name} de tes lignes ?`;

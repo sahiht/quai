@@ -1111,7 +1111,7 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
       return new Map(Object.entries(FAKE_COLORS));
     },
     // 1.2.6 : les lignes des arrêts à `radiusM` au plus, chacune avec son arrêt le plus proche (comme le vrai cœur)
-    async linesNear(near, radiusM = 500) {
+    async linesNear(near, radiusM = 500, max = 8) {
       const out = new Map<string, LineMatch>();
       for (const a of AREAS) {
         const d = a.op === 'sncb' ? Infinity : distanceM(near, a);
@@ -1126,7 +1126,7 @@ export function createFakeCore(opts: CoreOptions, flags: FakeFlags = {}): Core {
         }
       }
       const rank: Record<string, number> = { metro: 0, tram: 1, bus: 2 };
-      return [...out.values()].sort((a, b) => (a.nearest?.distanceM ?? 0) - (b.nearest?.distanceM ?? 0) || (rank[a.mode] ?? 3) - (rank[b.mode] ?? 3) || a.line.localeCompare(b.line, 'fr', { numeric: true }));
+      return [...out.values()].sort((a, b) => (a.nearest?.distanceM ?? 0) - (b.nearest?.distanceM ?? 0) || (rank[a.mode] ?? 3) - (rank[b.mode] ?? 3) || a.line.localeCompare(b.line, 'fr', { numeric: true })).slice(0, max);
     },
     async lineHeads(f) {
       return lineHeadsIn(lineSource(now()), f);

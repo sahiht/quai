@@ -10,7 +10,7 @@
  */
 import type { Endpoint, Favorite, FavoritePlace, FavoriteStop, FavoriteTrip, KV, LineFilter, LinePick, NameLang, Place, Propose, RecentAddress, Settings, StationPick } from './core/api';
 import { DEFAULT_SETTINGS } from './core/api';
-import { sameFollow, type LineFollow } from './core/linerun';
+import { isFollowed, type LineFollow } from './core/linerun';
 import { shortAddress } from './core/text';
 import { displayName } from './core/util';
 import type { Mode, Names, Op } from '../../shared/types';
@@ -402,19 +402,23 @@ export function validateSettings(input: unknown): Settings {
   const follows: LineFollow[] = [];
   for (const r of Array.isArray(x.follows) ? x.follows : []) {
     const f = lineFollow(r);
-    if (f && !follows.some((q) => q.id === f.id || sameFollow(q, f))) follows.push(f);
+    // contrôle qualité 1.2.6 : deux lignes du même numéro sans variante commune (deux régions) restent deux lignes
+    if (f && !follows.some((q) => q.id === f.id || isFollowed(q, f))) follows.push(f);
     if (follows.length >= LIMITS.lines) break;
   }
   const picksWithLine = lines.filter((p) => p.line && p.op !== 'sncb');
   for (let i = lines.length - 1; i >= 0; i--) if (lines[i].line && lines[i].op !== 'sncb') lines.splice(i, 1);
   for (const p of picksWithLine) {
-    const known = follows.find((q) => sameFollow(q, { op: p.op, line: p.line ?? '' }));
+    const known = follows.find((q) => isFollowed(q, { op: p.op, line: p.line ?? '' }));
     if (known) {
       if (p.near && !known.near && known.via?.areaId === p.areaId) known.near = true;
       continue;
     }
     if (follows.length >= LIMITS.lines) continue;
-    const f: LineFollow = { id: `f-${p.id}`.slice(0, 80), op: p.op as LineFollow['op'], line: p.line ?? '', routes: [], via: { areaId: p.areaId, name: p.name, lat: p.lat, lon: p.lon } };
+    // identifiant unique, même si une ligne suivie porte déjà « f-<arrêt> » (réglages repris d'un retour à la 1.2.5)
+    let id = `f-${p.id}`.slice(0, 80);
+    for (let k = 2; follows.some((q) => q.id === id); k++) id = `f-${p.id}`.slice(0, 76) + `-${k}`;
+    const f: LineFollow = { id, op: p.op as LineFollow['op'], line: p.line ?? '', routes: [], via: { areaId: p.areaId, name: p.name, lat: p.lat, lon: p.lon } };
     if (p.mode) f.mode = p.mode;
     if (p.near) f.near = true;
     follows.push(f);

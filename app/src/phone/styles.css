@@ -339,7 +339,7 @@ dl { margin: 0; }
 .near-row { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 12px 8px 14px; border-bottom: 1px solid var(--divider); }
 .near-row:last-child { border-bottom: 0; }
 .near-row .txt { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
-.near-row .t1 { font-size: 16px; line-height: 22px; font-weight: 500; }
+.near-row .t1 { font-size: 16px; line-height: 22px; font-weight: 500; overflow-wrap: anywhere; }
 .near-row .t2 { font-size: 13px; line-height: 18px; color: var(--muted); overflow-wrap: anywhere; }
 .near-row .btn { flex-shrink: 0; min-height: 40px; padding: 0 14px; }
 .btn-on { border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent-ink); }

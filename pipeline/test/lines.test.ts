@@ -254,6 +254,39 @@ describe('préparation complète : lines/, linetiles/, meta.lines', () => {
     expect(colorCoverage([{ op: 'delijn', mode: 'tram', color: 'FFFFFF' }, { op: 'delijn', mode: 'bus' }, { op: 'sncb', mode: 'train', color: '000000' }])).toBe('De Lijn 1/2');
   });
 
+  it('1.2.6 : une couleur sans couleur du texte : 5 éléments (jamais un élément vide) ; colonne vide ou « # » sur 3 caractères ignorés', async () => {
+    const noText = {
+      ...stib,
+      'routes.txt': 'route_id,route_short_name,route_type,route_color,route_text_color\n2,2,1,#0078ad,\n',
+    };
+    const short = { ...tec, 'routes.txt': 'route_id,route_short_name,route_type,route_color,route_text_color\nR1,W,3,#FFF,000\n' };
+    const { read } = await runBuild({ tec: short, stib: noText });
+    const index = read<LineIndex>('lines/index.json');
+    expect(index.lines).toEqual([['stib:2', '2', 'metro', 1, '0078AD'], ['tec:R1', 'W', 'bus', 1]]);
+    expect(index.lines.every((e) => e.every((x) => x !== ''))).toBe(true);
+    const file = read<LineFile>('lines/stib/2.json');
+    expect(file.color).toBe('0078AD');
+    expect(file).not.toHaveProperty('text');
+    expect(read<LineFile>('lines/tec/R1.json')).not.toHaveProperty('color');
+  });
+
+  it('1.2.6 : la 1.2.5 déjà installée lit l’index et les fichiers de ligne avec leurs couleurs (validateurs et lectures par position de la 1.2.5)', async () => {
+    const colored = { ...stib, 'routes.txt': 'route_id,route_short_name,route_type,route_color,route_text_color\n2,2,1,F57000,FFFFFF\n' };
+    const { read } = await runBuild({ tec, stib: colored });
+    const index = read<LineIndex>('lines/index.json');
+    const file = read<LineFile>('lines/stib/2.json');
+    // copies exactes des validateurs publiés en 1.2.5 (app/src/core/linepicks.ts et routing/select.ts, commit 86d6c14)
+    const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
+    const isLineIndex125 = (x: unknown): boolean => isObj(x) && x.v === 1 && Array.isArray(x.lines) && isObj(x.stations) && typeof x.conn === 'number';
+    const isLineFile125 = (x: unknown): boolean => isObj(x) && typeof x.id === 'string' && typeof x.op === 'string' && Array.isArray(x.areas) && Array.isArray(x.pats) && Array.isArray(x.conn);
+    expect(isLineIndex125(index)).toBe(true);
+    expect(isLineFile125(file)).toBe(true);
+    // la 1.2.5 lit chaque entrée par position (clé, numéro, mode) : la couleur, en 5e et 6e, ne la gêne pas
+    const stibEntry = index.lines.find((e) => e[0] === 'stib:2')!;
+    const [key, line, mode] = stibEntry;
+    expect([key, line, mode, stibEntry.length]).toEqual(['stib:2', '2', 'metro', 6]);
+  });
+
   it('réseau en échec : pas de fichiers de ligne pour lui ; aucun réseau urbain : meta.lines sans ligne', async () => {
     const broken = { ...tec, 'stop_times.txt': 'trip_id,stop_id\n' };
     const r1 = await runBuild({ tec: broken, stib });

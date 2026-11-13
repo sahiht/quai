@@ -2431,13 +2431,13 @@ async function phone(): Promise<void> {
       await pick(page, 'nf-lieu', 'Namur', 'gare SNCB');
       await page.waitFor(`document.querySelector('#pl-nom')?.value === 'Namur'`, 8_000, 'lieu nommé « Namur »');
       const link = nbn(await page.waitFor<string>(`document.querySelector('.jump')?.textContent`, 5_000, 'lien vers « Gares »'));
-      check(link === 'Ses prochains départs : ajouter Namur à Gares', `lien « ${link} »`);
+      check(link === 'Ses prochains départs : ajouter Namur à tes gares', `lien « ${link} »`);
       return { shot: true };
     });
     await phoneStep(page, 'station-to-gares', async () => {
       await page.click('.jump');
       const msg = nbn(await page.waitFor<string>(`document.querySelector('.jump-box .msg')?.textContent`, 5_000, 'message du lien'));
-      check(msg === 'Namur ajoutée à Gares.', `message « ${msg} »`);
+      check(msg === 'Namur ajoutée à tes gares.', `message « ${msg} »`);
       await page.clickText('Enregistrer', '.place-form');
       await page.waitFor(`location.hash === '#/favoris'`, 5_000, 'retour à « Mes favoris »');
       const rows = await waitRows(page, 2);
@@ -3212,7 +3212,7 @@ async function tourPhone(): Promise<void> {
   }
 }
 
-/* ------------------------------ Prototype 1.2.6 (branche locale proto-126, jamais publié) ------------------------------ */
+/* ------------------------------ Scénario 1.2.6 : arrêts et lignes séparés, toute la ligne ------------------------------ */
 
 /** PCUR, version vue 1.2.6, « Lignes » : tram 3, tram 4 (gardés à Gare du Nord en 1.2.5) et bus W (TEC). */
 const P126 = preset('p/p126.json');
@@ -3222,7 +3222,7 @@ const P126NEWS = preset('p/p126news.json');
 const PWAT126 = preset('p/pwat126.json');
 
 /** Contrôles communs des écrans de la 1.2.6 : aucune ligne coupée, pas de tiret long. */
-function proto(s: Screen): void {
+function check126(s: Screen): void {
   const cut = truncatedLines(s);
   check(!cut.length, `lignes coupées : ${JSON.stringify(cut)}`);
   check(![s.title, ...s.lines].some((l) => /[–—]/.test(l)), 'tiret long dans un texte affiché');
@@ -3289,47 +3289,47 @@ async function s126(): Promise<void> {
     const stops = field<number>(sim.last!, 'stops') ?? 0;
     await sim.select(stops);
     const s = await sim.waitScreen(is('lineRun', (x) => x.sel === stops), 8_000, '▼ jusqu’à « ↔ Autre sens »');
-    proto(s);
+    check126(s);
     return { screen: s };
   });
   await step('tram3-esplanade', async () => {
     await sim.input('click');
     const s = await sim.waitScreen(is('lineRun', (x) => loaded(x) && x.title === 'Tram 3 vers Esplanade'), 15_000, '↔ autre sens');
-    proto(s);
+    check126(s);
     return { screen: s };
   });
   await step('tram3-arret', async () => {
     await sim.input('click');
     const s = await sim.waitScreen(is('line', loaded), 15_000, 'passages du tram 3 à l’arrêt');
-    proto(s);
+    check126(s);
     return { screen: s };
   });
   await sim.stop();
   await sim.launch(pageUrl(PWAT126(WAT)));
   await step('waterloo-accueil', async () => {
     const s = await sim.waitScreen(is('home', (x) => homeReady(x) && has(x, /^Lignes de bus, tram, métro {3}/)), 20_000, 'accueil à Waterloo');
-    proto(s);
+    check126(s);
     return { screen: s };
   });
   await step('waterloo-lignes', async () => {
     await sim.select(homeIndex(sim.last!, /^Lignes de bus, tram, métro {3}/));
     await sim.input('click');
     const s = await sim.waitScreen(is('follows', (x) => loaded(x) && x.lines.some((l) => l === 'Bus W vers Bruxelles Midi')), 15_000, '« Lignes » à Waterloo');
-    proto(s);
+    check126(s);
     return { screen: s, shot: false };
   });
   await step('busW-midi', async () => {
     await sim.select(sim.last!.lines.findIndex((l) => l === 'Bus W vers Bruxelles Midi'));
     await sim.input('click');
     const s = await sim.waitScreen(is('lineRun', (x) => loaded(x) && x.title === 'Bus W vers Bruxelles Midi'), 15_000, 'tout le bus W vers Bruxelles Midi');
-    proto(s);
+    check126(s);
     return { screen: s };
   });
   await sim.stop();
   await sim.launch(pageUrl(P126NEWS(S2)));
   await step('nouveautes', async () => {
     const s = await sim.waitScreen(is('message', (x) => x.title === 'Quai 1.2.6'), 20_000, '« Quai 1.2.6 »');
-    proto(s);
+    check126(s);
     return { screen: s };
   });
   await withChrome(async (page) => {

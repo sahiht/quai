@@ -338,8 +338,12 @@ export function buildLineOutputs(lines: LineData[], stations: { id: string; lat:
     v: 1,
     generatedAt,
     conn: CONN_M,
-    // 1.2.6 : la couleur officielle de la ligne, quand l'opérateur la publie
-    lines: kept.map((l): LineIndex['lines'][number] => (l.color ? [l.id, l.line, l.mode, l.pats.length, l.color, l.text ?? ''] : [l.id, l.line, l.mode, l.pats.length])),
+    // 1.2.6 : la couleur officielle de la ligne, quand l'opérateur la publie, puis celle de son texte s'il la publie
+    // aussi (jamais d'élément vide : 4, 5 ou 6 éléments)
+    lines: kept.map((l): LineIndex['lines'][number] => {
+      if (!l.color) return [l.id, l.line, l.mode, l.pats.length];
+      return l.text ? [l.id, l.line, l.mode, l.pats.length, l.color, l.text] : [l.id, l.line, l.mode, l.pats.length, l.color];
+    }),
     stations: stationLines,
   };
 

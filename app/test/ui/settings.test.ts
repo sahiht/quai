@@ -527,6 +527,22 @@ describe('persistance (KV du SDK)', () => {
       { id: 'f-w', op: 'tec', line: 'W', routes: [], via: { areaId: 'tec:Bbrlmer1', name: { fr: 'Merbraine', nl: 'Merbraine' }, lat: 50.68, lon: 4.39 }, near: true },
     ]);
     stable(s);
+    // contrôle qualité : deux lignes du même numéro de deux régions (aucune variante commune) restent deux lignes ; une
+    // variante commune : la même ligne, une seule fois
+    const two = validateSettings({
+      v: 4,
+      follows: [
+        { id: 'w-braine', op: 'tec', line: 'W', routes: ['tec:B0536-23747'] },
+        { id: 'w-tournai', op: 'tec', line: 'W', routes: ['tec:T0900-23747'] },
+        { id: 'w-encore', op: 'tec', line: 'W', routes: ['tec:T0900-23747', 'tec:T0900-23748'] },
+      ],
+    });
+    expect(two.follows?.map((x) => x.id)).toEqual(['w-braine', 'w-tournai']);
+    stable(two);
+    // une ligne gardée à un arrêt qui devient une ligne suivie : identifiant unique, même si « f-l4 » existe déjà
+    const clash = validateSettings({ v: 4, follows: [{ id: 'f-l4', op: 'stib', line: '4', routes: ['stib:4'] }], lines: [{ id: 'l4', ...gdn, line: '3' }] });
+    expect(clash.follows?.map((x) => x.id)).toEqual(['f-l4', 'f-l4-2']);
+    stable(clash);
     // `near` sans repère : ignoré ; repère sans coordonnées : sans repère
     const odd = validateSettings({ v: 4, follows: [{ id: 'a', op: 'tec', line: '1', routes: ['x'], near: true }, { id: 'b', op: 'tec', line: '2', routes: [], via: { areaId: 'tec:1', name: { fr: 'X' } } }] });
     expect(odd.follows).toEqual([

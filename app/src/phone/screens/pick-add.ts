@@ -24,7 +24,7 @@ import { debounce, h, icon } from '../dom';
 import { distanceText, lineAddedText, lineFollowedText, lineLimitText, lineMatchText, lineName, stationAddedText, stationLimitText, stopAddedText, stopLimitText, stopLinesText, T, typo } from '../text';
 import { followsOf } from '../../glasses/views';
 import { badgeRow, lineBadge } from '../badges';
-import { sameFollow, type LineFollow } from '../../core/linerun';
+import { isFollowed, type LineFollow } from '../../core/linerun';
 import { OP_NAME } from '../../core/util';
 import { messageHub } from '../ui';
 import { linesAtStop, trainIcon, withLine, withStation } from './picks';
@@ -55,9 +55,13 @@ function option(o: { icon: HTMLSpanElement; label: string; sub?: string; meta?: 
 /**
  * 1.2.6 : une rangée « Près de toi » des trois ajouts (gare, arrêt, ligne) : icône ou pastille, nom,
  * détail, et à droite « Ajouter », qui devient « Ajoutée ✓ » (« Ajouté ✓ » pour un arrêt) ; toucher encore retire.
+ * Contrôle qualité 1.2.6 : le bouton suit les réglages (un ajout par la recherche dessous, un retrait ailleurs) ; sinon
+ * il disait « Ajouter » pour un élément déjà gardé, et le toucher le retirait.
  */
-function toggleRow(o: { icon: HTMLElement; t1: string; t2?: string; extra?: HTMLElement; done: string; on: () => boolean; toggle: () => Promise<void> }): HTMLLIElement {
+function toggleRow(o: { ctx: Pick<PhoneCtx, 'settings'>; icon: HTMLElement; t1: string; t2?: string; extra?: HTMLElement; done: string; on: () => boolean; toggle: () => Promise<void> }): HTMLLIElement {
   const btn = h('button', { type: 'button', class: 'btn btn-small' });
+  // pendant l'enregistrement, les touchers sont ignorés sans griser le bouton : un bouton grisé perd le curseur
+  let busy = false;
   const paintBtn = (): void => {
     const on = o.on();
     btn.className = on ? 'btn btn-small btn-on' : 'btn btn-small btn-secondary';
@@ -66,16 +70,27 @@ function toggleRow(o: { icon: HTMLElement; t1: string; t2?: string; extra?: HTML
     btn.setAttribute('aria-label', `${o.t1} : ${on ? `${o.done.toLowerCase()}, toucher pour retirer` : 'ajouter'}`);
   };
   btn.addEventListener('click', async () => {
-    btn.disabled = true;
+    if (busy) return;
+    busy = true;
+    btn.setAttribute('aria-busy', 'true');
     try {
       await o.toggle();
     } finally {
-      btn.disabled = false;
+      busy = false;
+      btn.removeAttribute('aria-busy');
       paintBtn();
     }
   });
   paintBtn();
-  return h('li', { class: 'near-row' }, o.icon, h('span', { class: 'txt' }, h('span', { class: 't1' }, o.t1), o.t2 ? h('span', { class: 't2' }, o.t2) : null, o.extra ?? null), btn);
+  const li = h('li', { class: 'near-row' }, o.icon, h('span', { class: 'txt' }, h('span', { class: 't1' }, o.t1), o.t2 ? h('span', { class: 't2' }, o.t2) : null, o.extra ?? null), btn);
+  const stop = o.ctx.settings.subscribe(() => {
+    if (!li.isConnected) {
+      stop();
+      return;
+    }
+    if (!busy) paintBtn();
+  });
+  return li;
 }
 
 /** 1.2.6 : bloc « Près de toi » (caché tant qu'il est vide) et l'intitulé de la recherche dessous. */
@@ -126,6 +141,18 @@ const near = (ctx: PhoneCtx): LatLon | null => {
   return f ? { lat: f.lat, lon: f.lon } : null;
 };
 
+/** Délai d'une position demandée pour « Près de toi » quand aucune n'est encore connue (comme la recherche). */
+const NEAR_FIX_MS = 6000;
+
+/**
+ * Contrôle qualité 1.2.6 : position de « Près de toi » : la dernière connue, sinon une demandée (6 s au plus) ; sans
+ * elle, « Près de toi » restait vide pour toujours quand l'écran s'ouvrait avant la première position.
+ */
+async function nearPos(ctx: PhoneCtx): Promise<LatLon | null> {
+  const f = ctx.location.last() ?? (await ctx.location.current(NEAR_FIX_MS).catch(() => null));
+  return f ? { lat: f.lat, lon: f.lon } : null;
+}
+
 /* ------------------------------ Ajouter une gare ------------------------------ */
 
 interface StationChoice { areaId: string; name: Names; lat: number; lon: number; distanceM?: number }
@@ -153,6 +180,7 @@ export function addStationScreen(ctx: PhoneCtx): HTMLElement {
   const nearStation = (c: StationChoice): HTMLLIElement => {
     const taken = (): boolean => ctx.settings.get().stations.some((x) => x.areaId === c.areaId);
     return toggleRow({
+      ctx,
       icon: trainIcon(),
       t1: displayName(c.name, ctx.settings.get().lang),
       t2: c.distanceM !== undefined ? typo(distanceText(c.distanceM)) : undefined,
@@ -184,6 +212,28 @@ export function addStationScreen(ctx: PhoneCtx): HTMLElement {
     list.hidden = !shown.length;
   };
 
+  /**
+   * Sans texte : les gares les plus proches (recherche légère, sans départs). 1.2.6 : dans « Près de toi », au-dessus
+   * du champ, un toucher pour les ajouter ou les retirer. Une seule demande de position, sans faire attendre le reste.
+   */
+  let nearTried = false;
+  const fillNear = async (): Promise<void> => {
+    const known = near(ctx);
+    if (nbS.list.children.length || (nearTried && !known)) return;
+    nearTried = true;
+    try {
+      const here = known ?? (await nearPos(ctx));
+      if (!here || nbS.list.children.length) return;
+      const around = await (await ctx.core()).nearby(here.lat, here.lon, NEAR_STATIONS_M, { light: true });
+      if (nbS.list.children.length) return;
+      const cs = around.filter((n) => n.area.op === 'sncb').slice(0, NEAR_STATIONS_MAX).map((n) => ofArea(n.area, n.distanceM));
+      nbS.list.replaceChildren(...cs.map(nearStation));
+      nbS.show(cs.length);
+    } catch {
+      // « Près de toi » reste caché ; la recherche dessous reste utilisable
+    }
+  };
+
   const run = async (): Promise<void> => {
     const my = ++seq;
     const q = field.input.value.trim();
@@ -195,14 +245,7 @@ export function addStationScreen(ctx: PhoneCtx): HTMLElement {
       if (normalizeForSearch(q).replace(/ /g, '').length >= 2) {
         items = stationsOf(await core.search(q, pos ?? undefined), pos);
         if (!items.length) note = T.stationNone;
-      } else if (pos && !nbS.list.children.length) {
-        // Sans texte : les gares les plus proches (recherche légère, sans départs). 1.2.6 : dans
-        // « Près de toi », au-dessus du champ, un toucher pour les ajouter ou les retirer
-        const around = await core.nearby(pos.lat, pos.lon, NEAR_STATIONS_M, { light: true });
-        const cs = around.filter((n) => n.area.op === 'sncb').slice(0, NEAR_STATIONS_MAX).map((n) => ofArea(n.area, n.distanceM));
-        nbS.list.replaceChildren(...cs.map(nearStation));
-        nbS.show(cs.length);
-      }
+      } else void fillNear();
     } catch {
       if (my !== seq) return;
       shown = [];
@@ -230,6 +273,8 @@ export function addStationScreen(ctx: PhoneCtx): HTMLElement {
     // Prêt pour une autre gare : le champ se vide, les gares proches reviennent (celle-ci « déjà dans tes gares »).
     field.input.value = '';
     await run();
+    // le bouton touché a disparu avec la liste : le curseur va à « Terminé » (sans rouvrir le clavier)
+    done.focus();
   }
 
   field.input.addEventListener('input', debounce(() => void run(), TYPE_DELAY_MS));
@@ -305,13 +350,17 @@ function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
   /** Position pour trier : l'arrêt présélectionné, sinon la position du téléphone. */
   const ref = (): LatLon | null => (preset?.area ? { lat: preset.area.lat, lon: preset.area.lon } : near(ctx));
 
+  let lastFound: LineMatch[] = [];
   const paintFound = (ms: LineMatch[]): void => {
+    lastFound = ms;
     found.replaceChildren(
       ...ms.map((m) =>
         option({
           icon: lineBadge(ctx, m),
           label: lineMatchText(m, lang()),
-          meta: m.nearest ? typo(distanceText(m.nearest.distanceM)) : undefined,
+          // comme les gares et les arrêts : une ligne déjà suivie le dit avant le toucher
+          meta: followed(m) ? T.lineTaken : m.nearest ? typo(distanceText(m.nearest.distanceM)) : undefined,
+          verb: 'Ajouter',
           onPick: () => void choose(m),
         }),
       ),
@@ -346,6 +395,14 @@ function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
     if (e.key !== 'Enter') return;
     e.preventDefault();
     found.querySelector<HTMLButtonElement>('button')?.focus();
+  });
+  // « déjà dans tes lignes » suit les réglages (une ligne ajoutée ou retirée dans « Près de toi », au-dessus)
+  const unwatch = ctx.settings.subscribe(() => {
+    if (!found.isConnected) {
+      unwatch();
+      return;
+    }
+    if (!found.hidden && !found.contains(document.activeElement)) paintFound(lastFound);
   });
 
   async function choose(m: LineMatch): Promise<void> {
@@ -413,12 +470,13 @@ function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
   const nearList = h('ul', { class: 'list box' });
   const nearBox = h('div', { class: 'step', hidden: true }, h('h2', { class: 'sub-head' }, 'Près de toi'), nearList);
   const otherHead = h('h2', { class: 'sub-head', hidden: true }, 'Une autre ligne');
-  const followed = (m: LineMatch): boolean => followsOf(ctx.settings.get()).some((f) => sameFollow(f, m));
+  const followed = (m: LineMatch): boolean => followsOf(ctx.settings.get()).some((f) => isFollowed(f, m));
   const nearRow = (m: LineMatch): HTMLLIElement => {
     const s = ctx.settings.get();
     const ends = m.ends.map((e) => displayName(e, s.lang)).join(' ↔ ');
     const dist = m.nearest ? ` · ${distanceText(m.nearest.distanceM)}` : '';
     return toggleRow({
+      ctx,
       icon: lineBadge(ctx, m),
       t1: typo(lineName(m)),
       t2: typo(`${OP_NAME[m.op]} · ${ends}${dist}`),
@@ -426,7 +484,7 @@ function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
       on: () => followed(m),
       toggle: async () => {
         if (followed(m)) {
-          await ctx.settings.update((x) => ({ ...x, follows: (x.follows ?? []).filter((f) => !sameFollow(f, m)) }));
+          await ctx.settings.update((x) => ({ ...x, follows: (x.follows ?? []).filter((f) => !isFollowed(f, m)) }));
         } else {
           if ((ctx.settings.get().follows ?? []).length >= LIMITS.lines) return hub.say(msg1, typo(lineLimitText(LIMITS.lines)), true);
           hub.clear();
@@ -435,19 +493,16 @@ function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
       },
     });
   };
-  const pos0 = near(ctx);
-  if (pos0) {
-    void ctx
-      .core()
-      .then((c) => c.linesNear?.(pos0, NEAR_LINES_M) ?? [])
-      .then((ms) => {
-        if (!ms.length) return;
-        nearList.replaceChildren(...ms.slice(0, NEAR_LINES_MAX).map(nearRow));
-        nearBox.hidden = !step2.hidden;
-        otherHead.hidden = nearBox.hidden;
-      })
-      .catch(() => undefined);
-  }
+  void nearPos(ctx)
+    .then(async (pos0) => {
+      if (!pos0) return;
+      const ms = (await (await ctx.core()).linesNear?.(pos0, NEAR_LINES_M)) ?? [];
+      if (!ms.length) return;
+      nearList.replaceChildren(...ms.slice(0, NEAR_LINES_MAX).map(nearRow));
+      nearBox.hidden = !step2.hidden;
+      otherHead.hidden = nearBox.hidden;
+    })
+    .catch(() => undefined);
   return h('div', { class: 'line-add' }, h('p', { class: 'lead' }, T.lineLead), nearBox, msg1, otherHead, step1, step2);
 }
 
@@ -497,6 +552,7 @@ function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
     const taken = (): boolean => ctx.settings.get().lines.some((x) => x.areaId === c.areaId && !x.line);
     const stop = { areaId: c.areaId, op: c.op, name: c.name, lat: c.lat, lon: c.lon };
     return toggleRow({
+      ctx,
       icon: modeIcon(mainMode(c.modes)),
       t1: displayName(c.name, ctx.settings.get().lang),
       t2: typo(c.distanceM !== undefined ? `${c.kind} · ${distanceText(c.distanceM)}` : c.kind),
@@ -534,6 +590,27 @@ function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
     list.hidden = !shown.length;
   };
 
+  /** Les arrêts les plus proches dans « Près de toi » : comme les gares, une seule demande de position. */
+  let nearTried = false;
+  const fillNear = async (): Promise<void> => {
+    const known = near(ctx);
+    if (nbA.list.children.length || (nearTried && !known)) return;
+    nearTried = true;
+    try {
+      const here = known ?? (await nearPos(ctx));
+      if (!here || nbA.list.children.length) return;
+      const around = (await (await ctx.core()).nearby(here.lat, here.lon, NEAR_STOPS_M, { light: true }))
+        .filter((n) => n.area.op !== 'sncb')
+        .slice(0, NEAR_STOPS_MAX)
+        .map((n) => ofStopArea(n.area, n.distanceM));
+      if (nbA.list.children.length) return;
+      nbA.list.replaceChildren(...around.map(nearStop));
+      nbA.show(around.length);
+    } catch {
+      // « Près de toi » reste caché ; la recherche dessous reste utilisable
+    }
+  };
+
   const run = async (): Promise<void> => {
     const my = ++seq;
     const q = field.input.value.trim();
@@ -549,14 +626,7 @@ function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
         // Sans texte : l'arrêt présélectionné ; 1.2.6 : les plus proches dans « Près de toi », au-dessus
         // du champ, un toucher pour les ajouter ou les retirer
         const first = preset?.area && preset.area.op !== 'sncb' ? [ofStopArea(preset.area)] : [];
-        if (pos && !nbA.list.children.length) {
-          const around = (await core.nearby(pos.lat, pos.lon, NEAR_STOPS_M, { light: true }))
-            .filter((n) => n.area.op !== 'sncb')
-            .slice(0, NEAR_STOPS_MAX)
-            .map((n) => ofStopArea(n.area, n.distanceM));
-          nbA.list.replaceChildren(...around.map(nearStop));
-          nbA.show(around.length);
-        }
+        void fillNear();
         items = first;
       }
     } catch {
@@ -587,6 +657,8 @@ function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
     // Prêt pour un autre arrêt : le champ se vide, les arrêts proches reviennent (celui-ci « déjà dans tes arrêts »).
     field.input.value = '';
     await run();
+    // le bouton touché a disparu avec la liste : le curseur va à « Terminé » (sans rouvrir le clavier)
+    done.focus();
   }
 
   field.input.addEventListener('input', debounce(() => void run(), TYPE_DELAY_MS));
