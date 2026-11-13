@@ -33,6 +33,10 @@ export const HINTS = {
   stations: `△▽ choisir   toucher${NB}: départs   double${NB}: retour`,
   /** 1.2.2 : « Bus, tram, métro » (§ 3) : détail d'une ligne, ou départs d'un arrêt « toutes les lignes ». */
   lines: `△▽ choisir   toucher${NB}: ouvrir   double${NB}: retour`,
+  /** 1.2.6 : « Lignes », un sens par rangée ; toucher : toute la ligne. */
+  follows: `△▽ choisir   toucher${NB}: la ligne   double${NB}: retour`,
+  /** 1.2.6 : toute la ligne ; toucher un arrêt : ses passages. */
+  lineRun: `△▽ arrêts   toucher${NB}: passages   double${NB}: retour`,
   /** 1.2.2 : détail d'une ligne à son arrêt ; 1.2.3 : toucher un passage, ses arrêts (« Tous les départs » : le tableau). */
   line: `△▽ passages   toucher${NB}: arrêts   double${NB}: retour`,
   /** Étapes du trajet suivi (1.2.1 : ▲▼ font défiler les étapes ; 1.2.2 : toucher propose « Ne plus suivre »). */
@@ -57,7 +61,7 @@ export const HINTS = {
   firstRun: `toucher${NB}: continuer   double${NB}: quitter`,
   /** Quai Web : rien à quitter, l'onglet se ferme dans le navigateur. */
   firstRunWeb: `toucher${NB}: continuer`,
-  /** Message des nouveautés (« Quai 1.2.5 »). */
+  /** Message des nouveautés (« Quai 1.2.6 »). */
   news: `toucher${NB}: continuer`,
   quit: `double toucher${NB}: quitter`,
 } as const;
@@ -69,12 +73,27 @@ export const HINTS = {
 export const SECTION = {
   stations: 'Gares',
   lines: 'Bus, tram, métro',
+  /**
+   * 1.2.6 (PRD-1.2.6 § 1) : « Bus, tram, métro » devient deux rubriques ; chacune dit son mode : sur l'accueil, le mot
+   * clé au plus clair et la précision pâle (« Arrêts » + « de bus, tram, métro ») ; le titre entier sur son écran.
+   */
+  stops: 'Arrêts',
+  follows: 'Lignes',
+  trainQual: 'de train',
+  transitQual: 'de bus, tram, métro',
+  stationsTitle: 'Gares de train',
+  stopsTitle: 'Arrêts de bus, tram, métro',
+  followsTitle: 'Lignes de bus, tram, métro',
+  /** 1.2.6 : dernière rangée de toute une ligne, l'autre sens. */
+  otherWay: 'Autre sens',
   /** Rubrique vide, à droite sur l'accueil. */
   empty: 'à choisir',
   /** Toucher sur une rubrique vide (appli Even ; Quai Web ouvre la section de l'onglet Réglages). */
   chooseStations: 'Choisis tes gares dans Quai, sur le téléphone',
+  chooseStops: 'Choisis tes arrêts dans Quai, sur le téléphone',
   chooseLines: 'Choisis tes lignes dans Quai, sur le téléphone',
   chooseStationsWeb: 'Choisis tes gares dans l’onglet Réglages',
+  chooseStopsWeb: 'Choisis tes arrêts dans l’onglet Réglages',
   chooseLinesWeb: 'Choisis tes lignes dans l’onglet Réglages',
   /** Accueil, « Gares » : rien dans l'horizon des tableaux pour la gare la plus proche. */
   noDeparture: 'aucun départ',

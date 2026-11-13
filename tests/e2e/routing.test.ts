@@ -200,6 +200,11 @@ describe('données : le pipeline produit ce que le routage attend (gen-fixtures.
         // date de génération : celle de la nuit, égale à meta.generatedAt (data.test.ts)
         delete a.generatedAt;
         delete b.generatedAt;
+        // 1.2.6 : couleurs des lignes (5e et 6e éléments), lues dans les horaires ; gen-fixtures n'en a pas
+        if (Array.isArray(a.lines)) a.lines = (a.lines as unknown[][]).map((e) => e.slice(0, 4));
+      } else if (f.startsWith('lines/')) {
+        delete a.color;
+        delete a.text;
       }
       // seul écart connu : Gare du Midi (STIB) arrondie à 50.83567 (pipeline) contre 50.83568 (gen-fixtures)
       expect(deepDiff(a, b, 1.1e-5), f).toEqual([]);
@@ -511,10 +516,11 @@ describe('favoris (preset-1.1.json migré en v4, arrêts lus comme en 1.2.1) : r
       expect(s.v).toBe(4);
       expect('places' in s).toBe(false);
       expect(migrateSettings(s)).toEqual(s); // seconde lecture identique
-      // arrêts favoris rangés (PRD-1.2.2 § 5) : « Namur » en gare ; tram 3 et tram 4 à Gare du Nord, ouverts d'office ;
-      // « Bruxelles-Nord, bus De Lijn » toutes lignes
+      // arrêts favoris rangés (PRD-1.2.2 § 5) : « Namur » en gare ; « Bruxelles-Nord, bus De Lijn » toutes lignes ;
+      // 1.2.6 (PRD-1.2.6 § 4) : tram 3 et tram 4 à Gare du Nord, ouverts d'office, sont des lignes suivies
       expect(s.stations.map((x) => x.id)).toEqual(['fav-namur']);
-      expect(s.lines.map((x) => `${x.id} ${x.line ?? '*'}${x.near ? ' près' : ''}`)).toEqual(['fav-gdn-3 3 près', 'fav-gdn-4 4 près', 'fav-dl-nord *']);
+      expect(s.lines.map((x) => `${x.id} ${x.line ?? '*'}${x.near ? ' près' : ''}`)).toEqual(['fav-dl-nord *']);
+      expect(s.follows?.map((x) => `${x.id} ${x.line}${x.near ? ' près' : ''} ${x.via?.areaId}`)).toEqual(['f-fav-gdn-3 3 près stib:6357F', 'f-fav-gdn-4 4 près stib:6357F']);
     }
     expect(PRESET.favorites.map((f) => `${f.kind}:${f.id}`)).toEqual(['place:fav-bureau', 'trip:fav-gand', 'place:fav-maison']);
     // 1.0 : pas de « Vers la maison » ; « Maison » devient un lieu « Jamais » en fin de liste

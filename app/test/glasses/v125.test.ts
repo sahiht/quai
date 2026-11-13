@@ -10,8 +10,9 @@ import { glyphSafe, missingGlyphs, textWidth } from '../../src/glasses/font';
 import { MARGIN_SHOWN_MAX, NOTE_RT_KEPT, PROGRESS_MAX, alightWords, marginText, missText, progressLine } from '../../src/glasses/format';
 import { GEO, LAYOUTS, WIDTHS, layoutPage, segRow } from '../../src/glasses/layout';
 import { describeContainers } from '../../src/web/display';
-import { MISS_WINDOW_MIN, linesView, missLine, otherDetail, stepsPage, trainView, type ViewCtx } from '../../src/glasses/views';
-import { LINES, MIN, at, container, dep, journey, lineBoardOf, lines, nb, page, rowsOf, settingsWith } from './helpers';
+import { MISS_WINDOW_MIN, followsView, linesView, missLine, otherDetail, stepsPage, trainView, type ViewCtx } from '../../src/glasses/views';
+import type { LineFollow } from '../../src/core/linerun';
+import { LINES, MIN, at, container, dep, journey, lines, nb, page, rowsOf, settingsWith } from './helpers';
 
 const DAY = '2026-11-13';
 const T = (hh: number, mm: number) => at(DAY, hh, mm);
@@ -225,39 +226,30 @@ describe('PRD-1.2.5 § 3 : pluie prévue sur les marches de 5 min ou plus', () =
   });
 });
 
-describe('PRD-1.2.5 § 4 : « Bus, tram, métro » en mots clairs et pâles', () => {
-  const board = (now: number) =>
-    lineBoardOf(LINES.w.areaId, 'Braine-l’Alleud Merbraine', 'W', [
-      { head: 'Bruxelles Midi', departures: [dep(now, 20), dep(now, 37, { rt: false })] },
-      { head: 'Braine-l’Alleud Gare', departures: [dep(now, 11)] },
-    ]);
+describe('PRD-1.2.5 § 4, PRD-1.2.6 § 3 : lignes en mots clairs et pâles', () => {
+  const FW: LineFollow = { id: 'f-w', op: 'tec', mode: 'bus', line: 'W', routes: [] };
+  const N = (fr: string) => ({ fr, nl: fr });
 
-  it('la ligne et sa destination au plus clair (colonne a), « vers » et l’arrêt pâles (colonne b), les passages à droite', () => {
-    const v = linesView([{ pick: LINES.w, board: board(NOW) }], ctx(NOW, { lines: [LINES.w] }));
+  it('« Lignes… » : la ligne et sa destination au plus clair (colonne a), « vers » pâle (colonne b), au pixel', () => {
+    const v = followsView([{ follow: FW, mode: 'bus', heads: [N('Bruxelles Midi'), N('Braine-l’Alleud Gare')] }], ctx(NOW, { follows: [FW] }));
     const p = page(v);
-    expect(p.lines.map(nb).slice(0, 4)).toEqual(['LIGNES', 'Bus W vers Bruxelles Midi   20 · ~37 min', 'Bus W vers Braine-l’Alleud Gare   11 min', 'Braine-l’Alleud Merbraine']);
+    expect(p.lines.map(nb).slice(0, 2)).toEqual(['Bus W vers Bruxelles Midi', 'Bus W vers Braine-l’Alleud Gare']);
     // Quai Web, lecteurs d'écran : les mots dans l'ordre de l'écran, pas colonne par colonne
     const said = nb(describeContainers(p.containers));
-    expect(said).toContain('sélection : Bus W vers Bruxelles Midi, 20 · ~37 min');
-    expect(said).toContain('Bus W vers Braine-l’Alleud Gare, 11 min. Braine-l’Alleud Merbraine');
+    expect(said).toContain('sélection : Bus W vers Bruxelles Midi');
+    expect(said).toContain('Bus W vers Braine-l’Alleud Gare');
     const a = rowsOf(container(p, 'colA'));
     const b = rowsOf(container(p, 'colB'));
-    const c = rowsOf(container(p, 'colC'));
     expect(container(p, 'colA').level).toBe(4);
     expect(container(p, 'colB').level).toBe(2);
-    expect(container(p, 'colC').level).toBe(4);
-    // rangée 1 (la 0 est l'intitulé « LIGNES ») : « Bus W » et « Bruxelles Midi » clairs, « vers » pâle, au pixel
-    expect(a[1].trim().split(/ {2,}/)).toEqual(['Bus W', 'Bruxelles Midi']);
-    expect(b[1].trim()).toBe('vers');
-    expect(c[1].trim()).toBe('20 · ~37 min');
+    // « Bus W » et « Bruxelles Midi » clairs, « vers » pâle, au pixel
+    expect(a[0].trim().split(/ {2,}/)).toEqual(['Bus W', 'Bruxelles Midi']);
+    expect(b[0].trim()).toBe('vers');
     // « vers » commence après « Bus W » et deux espaces (le W déborde de sa chasse) ; la destination après « vers »
-    const xVers = textWidth(b[1].match(/^ */)![0]);
-    const xDest = textWidth(a[1].slice(0, a[1].indexOf('Bruxelles')));
+    const xVers = textWidth(b[0].match(/^ */)![0]);
+    const xDest = textWidth(a[0].slice(0, a[0].indexOf('Bruxelles')));
     expect(xVers).toBeGreaterThanOrEqual(textWidth('Bus W') + 8);
     expect(xDest).toBeGreaterThanOrEqual(xVers + textWidth('vers') + 4);
-    // l'arrêt : pâle, en retrait, rien de clair sur sa rangée
-    expect(b[3].trim()).toBe('Braine-l’Alleud Merbraine');
-    expect((a[3] ?? '').trim()).toBe('');
   });
 
   it('segRow : destination trop longue coupée, jamais les passages ; chaque conteneur tient', () => {
@@ -321,16 +313,17 @@ describe('PRD-1.2.5 § 4 : « Bus, tram, métro » en mots clairs et pâles', ()
     ];
     const v = linesView([{ pick: stop, stop: { areaId: stop.areaId, name: stop.name, departures: deps, anyPlanned: false, rtErrors: [] } as never }], ctx(NOW, { lines: [stop] }));
     const p = page(v);
-    expect(p.lines.map(nb).slice(0, 4)).toEqual(['ARRÊTS', 'Gare du Nord', 'Tram 3 vers Churchill   1 min', 'Tram 4 vers Stalle   4 min']);
+    // 1.2.6 : l'écran porte le nom de la rubrique, plus d'intitulé « ARRÊTS »
+    expect(p.lines.map(nb).slice(0, 3)).toEqual(['Gare du Nord', 'Tram 3 vers Churchill   1 min', 'Tram 4 vers Stalle   4 min']);
     // le nom de l'arrêt pâle (colonne b), rien de clair sur sa rangée
-    expect(rowsOf(container(p, 'colB'))[1].trim()).toBe('Gare du Nord');
-    expect((rowsOf(container(p, 'colA'))[1] ?? '').trim()).toBe('');
+    expect(rowsOf(container(p, 'colB'))[0].trim()).toBe('Gare du Nord');
+    expect((rowsOf(container(p, 'colA'))[0] ?? '').trim()).toBe('');
     const none = linesView([{ pick: stop, stop: { areaId: stop.areaId, name: stop.name, departures: [], anyPlanned: false, rtErrors: [] } as never }], ctx(NOW, { lines: [stop] }));
-    expect(lines(none).slice(0, 3)).toEqual(['ARRÊTS', 'Gare du Nord', 'aucun passage dans les prochaines heures']);
+    expect(lines(none).slice(0, 2)).toEqual(['Gare du Nord', 'aucun passage dans les prochaines heures']);
     const wait = linesView([{ pick: stop }], ctx(NOW, { lines: [stop] }));
-    expect(lines(wait).slice(0, 3)).toEqual(['ARRÊTS', 'Gare du Nord', '…']);
+    expect(lines(wait).slice(0, 2)).toEqual(['Gare du Nord', '…']);
     const lost = linesView([{ pick: stop, missing: true }], ctx(NOW, { lines: [stop] }));
-    expect(lines(lost).slice(0, 3)).toEqual(['ARRÊTS', 'Gare du Nord', 'introuvable : modifie-le sur le téléphone']);
+    expect(lines(lost).slice(0, 2)).toEqual(['Gare du Nord', 'introuvable : modifie-le sur le téléphone']);
   });
 });
 
@@ -413,8 +406,8 @@ describe('PRD-1.2.5 § 9 : caractères invisibles de sens d’écriture', () => 
     expect(glyphSafe(marked)).toBe('Gare du Nord');
     expect(missingGlyphs(glyphSafe(marked))).toEqual([]);
     expect(textWidth(marked)).toBe(textWidth('Gare du Nord'));
-    // un titre qui en contient se met en page comme sans
-    const v = linesView([{ pick: { ...LINES.w, name: { fr: '⁦Merbraine⁩', nl: 'Merbraine' } } }], ctx(NOW, { lines: [LINES.w] }));
-    expect(layoutPage(v, { sel: 0, top: 0 }).lines.map(nb)[1]).toBe('Bus W · Merbraine');
+    // un nom qui en contient se met en page comme sans
+    const v = linesView([{ pick: { ...LINES.gdnAll, name: { fr: '⁦Merbraine⁩', nl: 'Merbraine' } } }], ctx(NOW, { lines: [LINES.gdnAll] }));
+    expect(layoutPage(v, { sel: 0, top: 0 }).lines.map(nb)[0]).toBe('Merbraine');
   });
 });

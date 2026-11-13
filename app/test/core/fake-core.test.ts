@@ -49,7 +49,8 @@ describe('faux cœur 1.2 : favoris', () => {
     expect(b.order.slice(-2)).toContain('fav-bureau');
     // 1.2.2 : réglages v4 (arrêts rangés dans les gares et les lignes)
     expect((await order(at(7, 31), POS.s1, PRESET)).order).toEqual(['fav-bureau', 'fav-gand', 'fav-maison']);
-    expect([PRESET.stations.map((x) => x.id), PRESET.lines.map((x) => x.id)]).toEqual([['fav-namur'], ['fav-gdn-3', 'fav-gdn-4', 'fav-dl-nord']]);
+    expect([PRESET.stations.map((x) => x.id), PRESET.lines.map((x) => x.id)]).toEqual([['fav-namur'], ['fav-dl-nord']]);
+    expect(PRESET.follows?.map((x) => x.id)).toEqual(['f-fav-gdn-3', 'f-fav-gdn-4']);
   });
 
   it('réponses : bureau (IC puis tram, puis les IC suivants), gare à gare hors de portée, sans position', async () => {

@@ -42,6 +42,8 @@ interface RouteAcc {
   route: string;
   line: string;
   mode: Mode;
+  color?: string;
+  text?: string;
   byKey: Map<string, PatAcc>;
   pats: PatAcc[];
   tripRank: Map<string, number>;
@@ -55,6 +57,9 @@ export interface LineData {
   route: string;
   line: string;
   mode: Mode;
+  /** 1.2.6 : couleur officielle (« RRGGBB ») et couleur de son texte, si l'opérateur les publie. */
+  color?: string;
+  text?: string;
   areas: LineFile['areas'];
   pats: LineFile['pats'];
   trips?: string[];
@@ -87,7 +92,7 @@ export class LineCollector {
    * `days` (jours de service 0 et/ou 1), `tripId` (De Lijn, TEC : pour le temps réel ; absent pour la STIB).
    * Renvoie faux si le voyage ne permet aucun trajet (aucune montée suivie d'une descente).
    */
-  addTrip(routeIndex: number, route: { id: string; line: string; mode: Mode }, direction: number, head: Names,
+  addTrip(routeIndex: number, route: { id: string; line: string; mode: Mode; color?: string; text?: string }, direction: number, head: Names,
     positions: TripPosition[], days: number[], tripId?: string): boolean {
     if (positions.length < 2 || !days.length) return false;
     const flags = positions.map((p) => p.flag).join('');
@@ -95,6 +100,8 @@ export class LineCollector {
     let r = this.routes.get(routeIndex);
     if (!r) {
       r = { route: route.id, line: route.line, mode: route.mode, byKey: new Map(), pats: [], tripRank: new Map(), trips: [] };
+      if (route.color) r.color = route.color;
+      if (route.color && route.text) r.text = route.text;
       this.routes.set(routeIndex, r);
     }
     const areas = positions.map((p) => p.area);
@@ -160,6 +167,8 @@ export class LineCollector {
         return pat;
       });
       const line: LineData = { id: `${this.op}:${r.route}`, op: this.op, route: r.route, line: r.line, mode: r.mode, areas, pats };
+      if (r.color) line.color = r.color;
+      if (r.text) line.text = r.text;
       if (this.op !== 'stib') line.trips = r.trips;
       out.push(line);
     }
@@ -310,6 +319,8 @@ export function buildLineOutputs(lines: LineData[], stations: { id: string; lat:
     }
     const conn = keep.map((s) => [...s].sort((x, y) => x - y));
     const file: LineFile = { v: 1, id: l.id, op: l.op, route: l.route, line: l.line, mode: l.mode, areas: l.areas, pats: l.pats, conn };
+    if (l.color) file.color = l.color;
+    if (l.text) file.text = l.text;
     if (l.trips) file.trips = l.trips;
     files.push({ path: `lines/${l.op}/${routeFileKey(l.route)}.json`, file });
   });
@@ -327,7 +338,12 @@ export function buildLineOutputs(lines: LineData[], stations: { id: string; lat:
     v: 1,
     generatedAt,
     conn: CONN_M,
-    lines: kept.map((l) => [l.id, l.line, l.mode, l.pats.length]),
+    // 1.2.6 : la couleur officielle de la ligne, quand l'opérateur la publie, puis celle de son texte s'il la publie
+    // aussi (jamais d'élément vide : 4, 5 ou 6 éléments)
+    lines: kept.map((l): LineIndex['lines'][number] => {
+      if (!l.color) return [l.id, l.line, l.mode, l.pats.length];
+      return l.text ? [l.id, l.line, l.mode, l.pats.length, l.color, l.text] : [l.id, l.line, l.mode, l.pats.length, l.color];
+    }),
     stations: stationLines,
   };
 

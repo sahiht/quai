@@ -50,7 +50,9 @@ describe('ordre intelligent (M1.4)', () => {
     // 1.2.2 (réglages v4) : les arrêts sont rangés dans les gares et les lignes
     expect(PRESET_11.favorites.map((f) => f.id)).toEqual(['fav-bureau', 'fav-gand', 'fav-maison']);
     expect(PRESET_11.stations.map((x) => x.id)).toEqual(['fav-namur']);
-    expect(PRESET_11.lines.map((x) => x.id)).toEqual(['fav-gdn-3', 'fav-gdn-4', 'fav-dl-nord']);
+    expect(PRESET_11.lines.map((x) => x.id)).toEqual(['fav-dl-nord']);
+    // 1.2.6 : tram 3 et tram 4 gardés à « Gare du Nord » sont des lignes suivies
+    expect(PRESET_11.follows?.map((x) => x.id)).toEqual(['f-fav-gdn-3', 'f-fav-gdn-4']);
   });
 
   it('1.2.2 : réglages v4 sans arrêt favori : bureau (créneau), Gand, maison en fin (« tu y es »)', async () => {

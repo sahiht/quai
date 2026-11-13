@@ -20,6 +20,10 @@ export type ScreenId =
   | 'lines'
   /** 1.2.2 : détail d'une ligne à son arrêt, les deux sens (§ 3). */
   | 'line'
+  /** 1.2.6 : « Lignes », les lignes suivies sans arrêt, un sens par rangée. */
+  | 'follows'
+  /** 1.2.6 : toute une ligne dans un sens, l'attente à chaque arrêt. */
+  | 'lineRun'
   /** 1.2.2 : « {arrêt} : garder une ligne », ouvert par ★ des départs d'un arrêt (REVUE-USAGE n° 3). */
   | 'keepLine'
   | 'steps'
@@ -115,6 +119,13 @@ export interface StopsRoute {
   dep: Departure;
 }
 
+/** 1.2.6 : toute une ligne suivie (LineFollow.id) dans le sens `dir` (0 ou 1, ordre des terminus). */
+export interface LineRunRoute {
+  screen: 'lineRun';
+  follow: string;
+  dir: number;
+}
+
 /** 1.2.2 : « {arrêt} : garder une ligne » (lignes de l'arrêt, core.linesAt). */
 export interface KeepLineRoute {
   screen: 'keepLine';
@@ -138,6 +149,8 @@ export type Route =
   | { screen: 'stations' }
   /** `focus` : LinePick.id sous le curseur à l'ouverture (ligne `near` ouverte d'office, REVUE-USAGE n° 4). */
   | { screen: 'lines'; focus?: string }
+  | { screen: 'follows' }
+  | LineRunRoute
   | LineRoute
   | KeepLineRoute
   | StopsRoute

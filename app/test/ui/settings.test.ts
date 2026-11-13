@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_SETTINGS, type Favorite, type FavoriteStop, type LinePick, type Settings, type StationPick } from '../../src/core/api';
+import type { LineFollow } from '../../src/core/linerun';
 import {
   clampInt,
   CURRENT_VERSION,
@@ -12,6 +13,7 @@ import {
   newId,
   parseSettings,
   saveSettings,
+  SETTINGS_BACKUP_125_KEY,
   SETTINGS_BACKUP_KEY,
   SETTINGS_KEY,
   SettingsStore,
@@ -33,9 +35,13 @@ const withSchool = <T extends { places: unknown[] }>(raw: T): T => ({ ...raw, pl
 const PRESET_STATIONS: StationPick[] = [{ id: 'fav-namur', areaId: 'sncb:8863008', name: { fr: 'Namur', nl: 'Namen' }, lat: 50.4685, lon: 4.8625 }];
 const GDN = { areaId: 'stib:6357F', op: 'stib' as const, name: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86004, lon: 4.36017 };
 const PRESET_LINES: LinePick[] = [
-  { id: 'fav-gdn-3', ...GDN, line: '3', near: true },
-  { id: 'fav-gdn-4', ...GDN, line: '4', near: true },
   { id: 'fav-dl-nord', areaId: 'delijn:308611', op: 'delijn', name: { fr: 'Bruxelles-Nord', nl: 'Brussel Noordstation', l: 'nl' }, lat: 50.86183, lon: 4.35906 },
+];
+/** 1.2.6 (PRD-1.2.6 § 4) : tram 3 et tram 4 gardés à « Gare du Nord » deviennent des lignes suivies, l'arrêt en repère. */
+const VIA_GDN = { areaId: GDN.areaId, name: GDN.name, lat: GDN.lat, lon: GDN.lon };
+const PRESET_FOLLOWS: LineFollow[] = [
+  { id: 'f-fav-gdn-3', op: 'stib', line: '3', routes: [], via: VIA_GDN, near: true },
+  { id: 'f-fav-gdn-4', op: 'stib', line: '4', routes: [], via: VIA_GDN, near: true },
 ];
 /** Une seconde lecture (validation, migration, JSON) ne change rien. */
 const stable = (s: Settings) => {
@@ -60,6 +66,7 @@ describe('réglages : migration de la 1.1 et de la 1.0 (PRD-1.2 § 2.4, puis PRD
     expect(s.favorites[1]).toEqual(raw.favorites[2]);
     expect(s.stations).toEqual(PRESET_STATIONS);
     expect(s.lines).toEqual(PRESET_LINES);
+    expect(s.follows).toEqual(PRESET_FOLLOWS);
     // 1.2.5 (PRD-1.2.5 § 3) : « Pluie pendant la marche », nouveau, allumé
     expect([s.seenVersion, s.recent, s.display, s.alerts, s.maxWalkMin]).toEqual([raw.seenVersion, raw.recent, { ...raw.display, rain: true }, raw.alerts, raw.maxWalkMin]);
     // une seconde lecture ne change rien
@@ -84,6 +91,7 @@ describe('réglages : migration de la 1.1 et de la 1.0 (PRD-1.2 § 2.4, puis PRD
     const s = migrateSettings(read(PRESET_PATH));
     expect(s.stations).toEqual(PRESET_STATIONS);
     expect(s.lines).toEqual(PRESET_LINES);
+    expect(s.follows).toEqual(PRESET_FOLLOWS);
     expect(s.favorites.map((f) => `${f.kind}:${f.id}`)).toEqual(['place:fav-bureau', 'trip:fav-gand', 'place:maison']);
     expect(s.favorites.some((f) => f.kind === 'stop')).toBe(false);
     // le message « Quai 1.2.2 » s'affichera une fois : la version vue reste celle d'avant
@@ -201,8 +209,10 @@ describe('validation des réglages (v4)', () => {
       ],
     });
     expect(s.favorites.map((f) => f.id)).toEqual(['maison', 'd']);
-    // l'arrêt « a » (filtre dédoublonné : tram 3) devient sa ligne, ouverte d'office ; son doublon (même id) ignoré
-    expect(s.lines).toEqual([{ id: 'a', areaId: 'stib:6357F', op: 'stib', name: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86, lon: 4.36, line: '3', near: true }]);
+    // l'arrêt « a » (filtre dédoublonné : tram 3) devient sa ligne, ouverte d'office ; son doublon (même id) ignoré ;
+    // 1.2.6 : une ligne suivie, l'arrêt en repère
+    expect(s.lines).toEqual([]);
+    expect(s.follows).toEqual([{ id: 'f-a', op: 'stib', line: '3', routes: [], via: { areaId: 'stib:6357F', name: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86, lon: 4.36 }, near: true }]);
     const d = s.favorites[1];
     expect(d.propose).toBe('never');
     expect(d.kind === 'trip' && d.label).toBe('maison');
@@ -353,14 +363,16 @@ describe('réglages v4 : gares et lignes (PRD-1.2.2 § 5, CA-122.6)', () => {
     expect(s.v).toBe(4);
     expect(s.favorites.map((f) => f.id)).toEqual(['maison', 't1', 'bureau']);
     expect(s.stations.map((x) => x.id)).toEqual(['fav-namur']);
-    expect(s.lines.map((x) => `${x.id} ${x.line ?? '*'}${x.near ? ' près' : ''}`)).toEqual(['fav-gdn-3 3 près', 'fav-gdn-4 4 près', 'fav-dl *']);
+    expect(s.lines.map((x) => `${x.id} ${x.line ?? '*'}${x.near ? ' près' : ''}`)).toEqual(['fav-dl *']);
+    expect(s.follows?.map((x) => `${x.id} ${x.line}${x.near ? ' près' : ''} ${x.via?.areaId}`)).toEqual(['f-fav-gdn-3 3 près stib:6357F', 'f-fav-gdn-4 4 près stib:6357F']);
     expect([s.seenVersion, s.display.favOrder, s.onboarded]).toEqual(['1.2.1', 'mine', true]);
     stable(s);
     expect(parseSettings(JSON.stringify(v3))).toEqual(s);
     // des réglages v4 qui contiendraient encore un arrêt favori (version antérieure) : rangé à la lecture
     const late = validateSettings({ ...s, favorites: [...s.favorites, stopFav('tard', 'stib:6359', { filter: [{ line: '2', head: 'simonis' }] })] });
     expect(late.favorites).toEqual(s.favorites);
-    expect(late.lines.map((x) => x.id)).toEqual(['fav-gdn-3', 'fav-gdn-4', 'fav-dl', 'tard']);
+    expect(late.lines.map((x) => x.id)).toEqual(['fav-dl']);
+    expect(late.follows?.map((x) => x.id)).toEqual(['f-fav-gdn-3', 'f-fav-gdn-4', 'f-tard']);
     stable(late);
   });
 
@@ -399,19 +411,20 @@ describe('réglages v4 : gares et lignes (PRD-1.2.2 § 5, CA-122.6)', () => {
       { id: 'n', areaId: 'sncb:8863008', ...NAMUR, near: true },
       { id: 'midi', areaId: 'sncb:8814001', ...NAMUR },
     ]);
-    expect(s.lines.map((l) => [l.id, l.line, l.mode, l.near])).toEqual([
-      ['l3', '3', 'tram', true],
-      ['tout', undefined, undefined, undefined],
-      ['mode', '4', undefined, undefined],
-      ['long', 'x'.repeat(20), undefined, undefined],
+    expect(s.lines.map((l) => [l.id, l.line, l.mode, l.near])).toEqual([['tout', undefined, undefined, undefined]]);
+    // 1.2.6 : les lignes gardées à un arrêt deviennent des lignes suivies, dans le même ordre
+    expect(s.follows?.map((l) => [l.id, l.line, l.mode, l.near, l.via?.areaId])).toEqual([
+      ['f-l3', '3', 'tram', true, 'stib:6357F'],
+      ['f-mode', '4', undefined, undefined, 'stib:6357F'],
+      ['f-long', 'x'.repeat(20), undefined, undefined, 'stib:6357F'],
     ]);
     const many = validateSettings({
       v: 4,
       stations: Array.from({ length: 40 }, (_, i) => ({ id: `s${i}`, areaId: `sncb:88${i}`, ...NAMUR })),
       lines: Array.from({ length: 40 }, (_, i) => ({ id: `l${i}`, ...gdn, line: String(i) })),
     });
-    expect([many.stations.length, many.lines.length]).toEqual([32, 32]);
-    expect(many.lines.map((l) => l.line)).toEqual(Array.from({ length: 32 }, (_, i) => String(i)));
+    expect([many.stations.length, many.lines.length, many.follows?.length]).toEqual([32, 0, 32]);
+    expect(many.follows?.map((l) => l.line)).toEqual(Array.from({ length: 32 }, (_, i) => String(i)));
     stable(s);
     stable(many);
   });
@@ -475,7 +488,7 @@ describe('persistance (KV du SDK)', () => {
     backend.data.set(SETTINGS_KEY, v3);
     const kv = createKV(backend);
     const store = new SettingsStore(kv, await loadSettings(kv));
-    expect(store.get()).toMatchObject({ v: 4, favorites: [], lines: [{ id: 'gdn', areaId: 'stib:6357F', line: '3' }] });
+    expect(store.get()).toMatchObject({ v: 4, favorites: [], lines: [], follows: [{ id: 'f-gdn', op: 'stib', line: '3', via: { areaId: 'stib:6357F' } }] });
     // copie exacte du JSON lu, la clé des réglages inchangée tant que rien n'est enregistré
     expect(backend.data.get(SETTINGS_BACKUP_KEY)).toBe(v3);
     expect(backend.data.get(SETTINGS_KEY)).toBe(v3);
@@ -490,6 +503,76 @@ describe('persistance (KV du SDK)', () => {
     expect(backend.data.get(SETTINGS_BACKUP_KEY)).toBe(v3);
     // la 1.2.1 relit la copie : ses arrêts favoris y sont
     expect(JSON.parse(backend.data.get(SETTINGS_BACKUP_KEY)!).favorites[0]).toMatchObject({ kind: 'stop', id: 'gdn' });
+  });
+
+  it('1.2.6 (PRD-1.2.6 § 4) : une ligne gardée à un arrêt devient une ligne suivie, l’arrêt en repère ; gardée à deux arrêts : une fois', () => {
+    const gdn = { areaId: 'stib:6357F', op: 'stib', name: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86, lon: 4.36 };
+    const rogier = { ...gdn, areaId: 'stib:6359', name: { fr: 'Rogier', nl: 'Rogier' }, lat: 50.857, lon: 4.362 };
+    const s = validateSettings({
+      v: 4,
+      lines: [
+        { id: 'stop', ...gdn },
+        { id: 'l3', ...gdn, line: '3', mode: 'tram' },
+        { id: 'l3r', ...rogier, line: '03', near: true },
+        { id: 'w', areaId: 'tec:Bbrlmer1', op: 'tec', name: { fr: 'Merbraine', nl: 'Merbraine' }, lat: 50.68, lon: 4.39, line: 'W', near: true },
+      ],
+      follows: [{ id: 'f-4', op: 'stib', line: '4', routes: ['stib:4'], mode: 'tram', color: 'e5007d', text: 'ffffff' }, { id: 'bad', op: 'sncb', line: 'IC', routes: [] }, { id: 'f-4b', op: 'stib', line: '4', routes: [] }],
+    });
+    expect(s.lines.map((p) => p.id)).toEqual(['stop']);
+    // le tram 3 une fois (son premier arrêt en repère ; l'ouverture d'office d'un autre arrêt ne le suit pas) ; une
+    // ligne suivie déjà là gardée (couleur en majuscules), un train refusé, un doublon ignoré
+    expect(s.follows).toEqual([
+      { id: 'f-4', op: 'stib', line: '4', routes: ['stib:4'], mode: 'tram', color: 'E5007D', text: 'FFFFFF' },
+      { id: 'f-l3', op: 'stib', mode: 'tram', line: '3', routes: [], via: { areaId: 'stib:6357F', name: gdn.name, lat: 50.86, lon: 4.36 } },
+      { id: 'f-w', op: 'tec', line: 'W', routes: [], via: { areaId: 'tec:Bbrlmer1', name: { fr: 'Merbraine', nl: 'Merbraine' }, lat: 50.68, lon: 4.39 }, near: true },
+    ]);
+    stable(s);
+    // contrôle qualité : deux lignes du même numéro de deux régions (aucune variante commune) restent deux lignes ; une
+    // variante commune : la même ligne, une seule fois
+    const two = validateSettings({
+      v: 4,
+      follows: [
+        { id: 'w-braine', op: 'tec', line: 'W', routes: ['tec:B0536-23747'] },
+        { id: 'w-tournai', op: 'tec', line: 'W', routes: ['tec:T0900-23747'] },
+        { id: 'w-encore', op: 'tec', line: 'W', routes: ['tec:T0900-23747', 'tec:T0900-23748'] },
+      ],
+    });
+    expect(two.follows?.map((x) => x.id)).toEqual(['w-braine', 'w-tournai']);
+    stable(two);
+    // une ligne gardée à un arrêt qui devient une ligne suivie : identifiant unique, même si « f-l4 » existe déjà
+    const clash = validateSettings({ v: 4, follows: [{ id: 'f-l4', op: 'stib', line: '4', routes: ['stib:4'] }], lines: [{ id: 'l4', ...gdn, line: '3' }] });
+    expect(clash.follows?.map((x) => x.id)).toEqual(['f-l4', 'f-l4-2']);
+    stable(clash);
+    // `near` sans repère : ignoré ; repère sans coordonnées : sans repère
+    const odd = validateSettings({ v: 4, follows: [{ id: 'a', op: 'tec', line: '1', routes: ['x'], near: true }, { id: 'b', op: 'tec', line: '2', routes: [], via: { areaId: 'tec:1', name: { fr: 'X' } } }] });
+    expect(odd.follows).toEqual([
+      { id: 'a', op: 'tec', line: '1', routes: [] },
+      { id: 'b', op: 'tec', line: '2', routes: [] },
+    ]);
+  });
+
+  it('1.2.6 : réglages de la 1.2.5 qui gardent une ligne à un arrêt copiés tels quels sous quai.settings.v4-1.2.5 à la 1re lecture, jamais remplacés', async () => {
+    expect(SETTINGS_BACKUP_125_KEY).toBe('quai.settings.v4-1.2.5');
+    const gdn = { areaId: 'stib:6357F', op: 'stib', name: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86, lon: 4.36 };
+    const v125 = JSON.stringify({ ...validateSettings({}), lines: [{ id: 'l3', ...gdn, line: '3', mode: 'tram', near: true }] });
+    const backend = memoryBackend();
+    backend.data.set(SETTINGS_KEY, v125);
+    const s = await loadSettings(createKV(backend));
+    expect(s.follows).toMatchObject([{ id: 'f-l3', line: '3', near: true, via: { areaId: 'stib:6357F' } }]);
+    expect(backend.data.get(SETTINGS_BACKUP_125_KEY)).toBe(v125);
+    // la 1.2.5 relit la copie : sa ligne y est
+    expect(JSON.parse(backend.data.get(SETTINGS_BACKUP_125_KEY)!).lines[0]).toMatchObject({ id: 'l3', line: '3' });
+    // retour à la 1.2.5, autres réglages, puis 1.2.6 de nouveau : la première copie n'est pas remplacée
+    backend.data.set(SETTINGS_KEY, JSON.stringify({ ...JSON.parse(v125), lang: 'nl' }));
+    expect((await loadSettings(createKV(backend))).lang).toBe('nl');
+    expect(backend.data.get(SETTINGS_BACKUP_125_KEY)).toBe(v125);
+    // aucune copie sans ligne gardée à un arrêt, pour des réglages d'avant la v4 (leur copie est celle de la 1.2.2), ou illisibles
+    for (const raw of [JSON.stringify(validateSettings({})), JSON.stringify({ ...validateSettings({}), lines: [{ id: 's', ...gdn }] }), JSON.stringify({ v: 3, favorites: [] }), '{pas du json']) {
+      const b = memoryBackend();
+      b.data.set(SETTINGS_KEY, raw);
+      expect((await loadSettings(createKV(b))).v).toBe(4);
+      expect(b.data.has(SETTINGS_BACKUP_125_KEY), raw).toBe(false);
+    }
   });
 
   it('revue 1.2.2 : aucune copie pour des réglages déjà en v4, absents ou illisibles ; une copie impossible n’empêche pas la lecture', async () => {

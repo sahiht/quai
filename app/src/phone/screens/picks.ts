@@ -1,22 +1,26 @@
 /**
- * Gares et lignes choisies (PRD-1.2.2 § 4) : sections « Gares » et « Bus, tram, métro » de l'accueil du téléphone, et
- * donc de l'onglet Réglages de Quai Web. Chaque section : ses éléments dans l'ordre choisi (une gare : son nom ; une
- * ligne : « Bus W · Merbraine », ou « Gare du Nord · toutes les lignes »), « Ouvrir d’office à moins de 300 m »
- * (`near`, revue d'usage n° 4), « Retirer » confirmé dans la page, « Changer l’ordre » (« Monter », « Descendre »,
- * comme pour les favoris), « Ajouter une gare » ou « Ajouter une ligne » ; LIMITS.stations gares et LIMITS.lines lignes au
- * plus (settings.ts : assez pour que la migration ne perde aucun arrêt favori).
+ * Gares, arrêts et lignes choisis (PRD-1.2.2 § 4 ; 1.2.6, PRD-1.2.6 § 1 et § 5) : sections « Gares de train »,
+ * « Arrêts de bus, tram, métro » et « Lignes de bus, tram, métro » de l'accueil du téléphone, et donc de l'onglet
+ * Réglages de Quai Web. Chaque section : ses éléments dans l'ordre choisi (une gare, un arrêt : son nom, ses lignes à
+ * leur couleur ; une ligne : sa pastille, « Bus W », son réseau et ses terminus), « Ouvrir d’office à moins de 300 m »
+ * (`near`, revue d'usage n° 4 ; une ligne : seulement si elle a un arrêt repère), « Retirer » confirmé dans la page,
+ * « Changer l’ordre » (« Monter », « Descendre », comme pour les favoris), « Ajouter … » ; LIMITS.stations gares,
+ * LIMITS.lines arrêts et LIMITS.lines lignes au plus.
  * Règles d'ajout (withStation, withLine) partagées avec les écrans d'ajout (pick-add.ts) et « Un endroit ».
  */
 import type { LinePick, Mode, NameLang, Settings, StationPick } from '../../core/api';
 import { lineKey } from '../../core/linepicks';
-import { displayName, kindLabel } from '../../core/util';
+import { displayName, kindLabel, OP_NAME } from '../../core/util';
 import { LIMITS, newId } from '../../settings';
 import type { PhoneCtx } from '../app';
 import { h, icon, ICON, liveRegion, svgNode } from '../dom';
-import { linePickTitle, lineGoneText, lineLimitText, rankText, removeLineText, removeStationText, removeStopText, stationGoneText, stationLimitText, stopGoneText, T, typo } from '../text';
+import { lineName, linePickTitle, lineGoneText, lineLimitText, rankText, removeLineText, removeStationText, removeStopText, stationGoneText, stationLimitText, stopGoneText, stopLimitText, T, typo } from '../text';
 import { nextId } from '../ui';
+import { badgeRow, lineBadge } from '../badges';
+import { completeFollow, matchFollow, type LineFollow } from '../../core/linerun';
 
-export type PickKind = 'stations' | 'lines';
+/** Les trois sections : gares, arrêts (`lines` des réglages, sans `line`), lignes suivies (`follows`). */
+export type PickKind = 'stations' | 'lines' | 'follows';
 
 /* ------------------------------ Règles (sans DOM) ------------------------------ */
 
@@ -82,7 +86,7 @@ export function moveInGroup<P extends { id: string }>(list: P[], id: string, dir
 }
 
 /** Ouverture d'office à moins de 300 m : `near: true`, ou rien (jamais `near: false` dans les réglages). */
-export function withNear<P extends StationPick | LinePick>(list: P[], id: string, on: boolean): P[] {
+export function withNear<P extends { id: string; near?: boolean }>(list: P[], id: string, on: boolean): P[] {
   return list.map((x) => {
     if (x.id !== id) return x;
     const { near: _near, ...rest } = x;
@@ -94,7 +98,7 @@ export function withNear<P extends StationPick | LinePick>(list: P[], id: string
 
 /** Lignes connues d'un arrêt (core.linesAt), gardées le temps de la visite : mode d'une ligne migrée sans mode. */
 const known = new Map<string, Promise<{ line: string; mode: Mode }[]>>();
-function linesAtStop(ctx: Pick<PhoneCtx, 'core'>, areaId: string): Promise<{ line: string; mode: Mode }[]> {
+export function linesAtStop(ctx: Pick<PhoneCtx, 'core'>, areaId: string): Promise<{ line: string; mode: Mode }[]> {
   let p = known.get(areaId);
   if (!p) {
     p = ctx
@@ -136,6 +140,13 @@ function completeLine(ctx: Pick<PhoneCtx, 'core' | 'settings'>, p: LinePick, app
 /** 1.2.4 : nom d'un élément de « Bus, tram, métro » : « Bus W · Merbraine » ; un arrêt (toutes les lignes) : son nom seul. */
 export const linePickName = (p: LinePick, lang: NameLang): string => (p.line ? linePickTitle(p, lang) : displayName(p.name, lang));
 
+/** 1.2.6 : icône d'une gare, teintée en bleu (le train), distincte des bus, trams et métros. */
+export function trainIcon(): HTMLSpanElement {
+  const el = icon('train');
+  el.classList.add('train');
+  return el;
+}
+
 /** Icône d'une ligne : bus ou tram (métro compris), selon son mode, sinon son réseau ; 1.2.4 : un arrêt, l'épingle. */
 function lineIcon(p: LinePick): HTMLSpanElement {
   if (!p.line) return icon('pin');
@@ -143,9 +154,17 @@ function lineIcon(p: LinePick): HTMLSpanElement {
   return icon(p.op === 'stib' ? 'tram' : 'bus');
 }
 
+/** 1.2.6 : sous une ligne suivie, son réseau et ses terminus (« STIB · Churchill ↔ Esplanade »), sinon « les deux sens ». */
+export function followSub(f: LineFollow, lang: NameLang): string {
+  const ends = f.ends?.length ? f.ends.map((e) => displayName(e, lang)).join(' ↔ ') : T.bothWays;
+  return `${OP_NAME[f.op]} · ${ends}`;
+}
+
 /* ------------------------------ Sections de l'accueil ------------------------------ */
 
-interface SectionSpec<P extends StationPick | LinePick> {
+type Pickable = StationPick | LinePick | LineFollow;
+
+interface SectionSpec<P extends Pickable> {
   kind: PickKind;
   title: string;
   empty: string;
@@ -158,15 +177,17 @@ interface SectionSpec<P extends StationPick | LinePick> {
   list: (s: Settings) => P[];
   set: (s: Settings, list: P[]) => Settings;
   name: (p: P, lang: NameLang) => string;
-  icon: (p: P) => HTMLSpanElement;
+  icon: (p: P, ctx: PhoneCtx) => HTMLElement;
   complete?: (ctx: PhoneCtx, p: P, apply: (title: string, sub?: string) => void) => void;
   /** 1.2.4 : blocs de la section, chacun sous son intitulé et dans son ordre (« Arrêts », puis « Lignes »). */
   groups?: readonly PickGroup<P>[];
+  /** 1.2.6 : texte de « Ouvrir d’office à moins de 300 m » ; null : pas de case (une ligne sans arrêt repère). */
+  nearLabel?: (p: P, lang: NameLang) => string | null;
 }
 
 const STATIONS: SectionSpec<StationPick> = {
   kind: 'stations',
-  title: T.stations,
+  title: 'Gares de train', // 1.2.6 : le mode dans le titre
   empty: T.noStation,
   add: T.addStation,
   addHash: '#/gares/ajouter',
@@ -177,34 +198,59 @@ const STATIONS: SectionSpec<StationPick> = {
   list: (s) => s.stations,
   set: (s, stations) => ({ ...s, stations }),
   name: stationTitle,
-  icon: () => icon('train'),
+  // 1.2.6 : les gares de train en bleu, les lignes de bus, tram et métro à leur couleur
+  icon: () => trainIcon(),
 };
 
 const LINES: SectionSpec<LinePick> = {
   kind: 'lines',
-  title: T.lines,
-  empty: T.noLine,
-  add: T.addLine,
-  addHash: '#/lignes/ajouter',
+  // 1.2.6 : les arrêts (toutes leurs lignes) ; les lignes ont leur section (FOLLOWS)
+  title: T.stopsTitle,
+  empty: T.noStop,
+  add: T.addStop,
+  addHash: '#/arrets/ajouter',
   max: LIMITS.lines,
-  limit: lineLimitText,
+  limit: stopLimitText,
   question: (name, p) => (p.line ? removeLineText(name) : removeStopText(name)),
   gone: (name, p) => (p.line ? lineGoneText(name) : stopGoneText(name)),
-  list: (s) => s.lines,
-  set: (s, lines) => ({ ...s, lines }),
+  list: (s) => s.lines.filter((p) => !p.line),
+  set: (s, stops) => ({ ...s, lines: [...stops, ...s.lines.filter((p) => !!p.line)] }),
   name: linePickName,
   icon: lineIcon,
   complete: completeLine,
-  groups: [
-    { label: T.stopsGroup, has: (p) => !p.line },
-    { label: T.linesGroup, has: (p) => !!p.line },
-  ],
 };
 
-/** Ce qui se voit d'une liste (ordre et noms) : un changement venu d'ailleurs (lunettes de Quai Web) la redessine. */
-const shape = (list: readonly (StationPick | LinePick)[]): string => JSON.stringify(list.map((p) => [p.id, p.areaId, 'line' in p ? p.line ?? '' : '']));
+/**
+ * 1.2.6 : les lignes suivies, sans arrêt, dans les deux sens : la pastille à la couleur de la ligne, « Bus W », dessous
+ * « TEC · Braine-l’Alleud Gare ↔ Bruxelles Midi ». Une ligne reprise de la 1.2.5 (gardée à un arrêt) garde son arrêt en
+ * repère, et son « Ouvrir d’office » (les départs de cet arrêt).
+ */
+const FOLLOWS: SectionSpec<LineFollow> = {
+  kind: 'follows',
+  title: T.followsTitle,
+  empty: T.noFollows,
+  add: T.addFollow,
+  addHash: '#/lignes/ajouter',
+  max: LIMITS.lines,
+  limit: lineLimitText,
+  question: (name) => removeLineText(name),
+  gone: (name) => lineGoneText(name),
+  list: (s) => s.follows ?? [],
+  set: (s, follows) => ({ ...s, follows }),
+  name: (f) => lineName(f),
+  icon: (f, ctx) => lineBadge(ctx, f),
+  complete: (ctx, f, apply) => {
+    apply(lineName(f), followSub(f, ctx.settings.get().lang));
+    if (!f.routes.length) void completeLater(ctx, f);
+  },
+  nearLabel: (f, lang) => (f.via ? `${T.pickNear} de ${displayName(f.via.name, lang)}` : null),
+};
 
-function pickSection<P extends StationPick | LinePick>(ctx: PhoneCtx, spec: SectionSpec<P>, focus: boolean): HTMLElement {
+/** Ce qui se voit d'une liste (ordre, noms, terminus) : un changement venu d'ailleurs (lunettes de Quai Web) la redessine. */
+const shape = (list: readonly Pickable[]): string =>
+  JSON.stringify(list.map((p) => [p.id, 'areaId' in p ? p.areaId : '', 'line' in p ? p.line ?? '' : '', 'ends' in p ? (p.ends?.length ?? 0) : 0, 'mode' in p ? p.mode ?? '' : '']));
+
+function pickSection<P extends Pickable>(ctx: PhoneCtx, spec: SectionSpec<P>, focus: boolean): HTMLElement {
   const headingId = `h-${spec.kind}`;
   // 1.2.4 : une liste par bloc (« Arrêts », « Lignes »), chacune sous son intitulé ; une seule sans blocs (« Gares »).
   const list = h('div', { class: 'pick-lists' });
@@ -280,16 +326,24 @@ function pickSection<P extends StationPick | LinePick>(ctx: PhoneCtx, spec: Sect
       labelled.push([up, T.up], [down, T.down]);
       rename(title);
       spec.complete?.(ctx, p, rename);
-      return h('li', { class: 'order-row', 'data-id': p.id }, spec.icon(p), txt, h('span', { class: 'order-btns' }, up, down));
+      return h('li', { class: 'order-row', 'data-id': p.id }, spec.icon(p, ctx), txt, h('span', { class: 'order-btns' }, up, down));
     }
     const remove = h('button', { type: 'button', class: 'btn btn-danger btn-small' }, T.removePick);
     labelled.push([remove, T.removePick]);
+    const nearText = spec.nearLabel ? spec.nearLabel(p, s.lang) : T.pickNear;
     const near = h('input', { type: 'checkbox', checked: !!p.near, 'aria-describedby': nameId });
     near.addEventListener('change', () => void ctx.settings.update((x) => spec.set(x, withNear(spec.list(x), p.id, near.checked))));
-    const li = h('li', { class: 'pick-row', 'data-id': p.id }, h('div', { class: 'pick-main' }, spec.icon(p), txt, remove), h('label', { class: 'pick-near' }, near, h('span', null, T.pickNear)));
+    const li = h('li', { class: 'pick-row', 'data-id': p.id }, h('div', { class: 'pick-main' }, spec.icon(p, ctx), txt, remove), nearText ? h('label', { class: 'pick-near' }, near, h('span', null, nearText)) : null);
     remove.addEventListener('click', () => confirmRemove(li, p, () => title, remove));
     rename(title);
     spec.complete?.(ctx, p, rename);
+    // 1.2.6 : un arrêt montre ses lignes, chacune à sa couleur
+    if (spec.kind === 'lines' && !(p as LinePick).line) {
+      const lp = p as LinePick;
+      void linesAtStop(ctx, lp.areaId).then((ls) => {
+        if (ls.length) txt.append(badgeRow(ctx, lp.op, ls));
+      });
+    }
     return li;
   };
 
@@ -345,8 +399,33 @@ function pickSection<P extends StationPick | LinePick>(ctx: PhoneCtx, spec: Sect
   return section;
 }
 
-/** Section « Gares » de l'accueil ; `focus` : son titre reçoit le curseur (#/gares). */
+/** Section « Gares de train » de l'accueil ; `focus` : son titre reçoit le curseur (#/gares). */
 export const stationsSection = (ctx: PhoneCtx, focus = false): HTMLElement => pickSection(ctx, STATIONS, focus);
 
-/** Section « Bus, tram, métro » de l'accueil ; `focus` : son titre reçoit le curseur (#/lignes). */
+/** Section « Arrêts de bus, tram, métro » de l'accueil (1.2.6 ; avant : « Bus, tram, métro ») ; `focus` : #/arrets. */
 export const linesSection = (ctx: PhoneCtx, focus = false): HTMLElement => pickSection(ctx, LINES, focus);
+
+/** 1.2.6 : section « Lignes de bus, tram, métro » de l'accueil ; `focus` : son titre reçoit le curseur (#/lignes). */
+export const followsSection = (ctx: PhoneCtx, focus = false): HTMLElement => pickSection(ctx, FOLLOWS, focus);
+
+/** Lignes reprises de la 1.2.5 en cours de complément (une seule recherche par ligne). */
+const completing = new Set<string>();
+
+/**
+ * 1.2.6 : une ligne gardée à un arrêt en 1.2.5 n'a pas encore ses variantes ni ses terminus : on la retrouve près de son
+ * ancien arrêt (son repère) et on les garde, pour l'afficher « STIB · Churchill ↔ Esplanade ». Au mieux.
+ */
+async function completeLater(ctx: PhoneCtx, f: LineFollow): Promise<void> {
+  if (completing.has(f.id)) return;
+  completing.add(f.id);
+  try {
+    const core = await ctx.core();
+    const near = f.via ? { lat: f.via.lat, lon: f.via.lon } : undefined;
+    const m = matchFollow(f, await core.findLines(f.line, near));
+    if (!m) return;
+    const done = completeFollow(f, m);
+    await ctx.settings.update((x) => ({ ...x, follows: (x.follows ?? []).map((q) => (q.id === f.id && !q.routes.length ? done : q)) }));
+  } catch {
+    completing.delete(f.id);
+  }
+}

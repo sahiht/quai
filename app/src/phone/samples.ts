@@ -5,6 +5,7 @@
  * Nord) ; des gares, des arrêts et des lieux publics seulement.
  */
 import type { Favorite, FavoriteAnswer, Journey, LinePick, Settings, StationPick } from '../core/api';
+import type { LineFollow } from '../core/linerun';
 import { delayAlert, leaveAlert, platformAlert } from '../core/text';
 import { gtfsTime } from '../core/util';
 import type { AreaSummary, Mode, Names, Op } from '../../../shared/types';
@@ -82,7 +83,9 @@ const SAMPLE_FAVORITES: Favorite[] = [
 ];
 /** Gares et lignes d'exemple (PRD-1.2.2 § 2, § 3) : les anciens arrêts favoris de l'exemple. */
 const SAMPLE_STATIONS: StationPick[] = [{ id: 'ex-namur', areaId: NAMUR.id, name: NAMUR.n, lat: NAMUR.lat, lon: NAMUR.lon }];
-const SAMPLE_LINES: LinePick[] = [{ id: 'ex-gdn', areaId: GDN.id, op: 'stib', name: GDN.n, lat: GDN.lat, lon: GDN.lon, line: '3', mode: 'tram' }];
+/** 1.2.6 : un arrêt (toutes ses lignes) et une ligne suivie, sans arrêt. */
+const SAMPLE_LINES: LinePick[] = [{ id: 'ex-gdn', areaId: GDN.id, op: 'stib', name: GDN.n, lat: GDN.lat, lon: GDN.lon }];
+const SAMPLE_FOLLOWS: LineFollow[] = [{ id: 'ex-t3', op: 'stib', mode: 'tram', line: '3', routes: [] }];
 
 /** Un train entre deux gares, sans marche (`walk` : minutes à pied jusqu'à la gare de départ). */
 function trainJourney(id: string, from: AreaSummary, to: AreaSummary, dep: number, arr: number, walk = 0): Journey {
@@ -103,14 +106,14 @@ function sampleAnswers(): Map<string, FavoriteAnswer> {
 
 /** Réglages de l'aperçu : ceux du téléphone, avec les favoris, les gares et les lignes de l'exemple. */
 export function sampleSettings(settings: Settings): Settings {
-  return { ...settings, favorites: SAMPLE_FAVORITES, stations: SAMPLE_STATIONS, lines: SAMPLE_LINES };
+  return { ...settings, favorites: SAMPLE_FAVORITES, stations: SAMPLE_STATIONS, lines: SAMPLE_LINES, follows: SAMPLE_FOLLOWS };
 }
 
 /**
  * Aperçu « Affichage » (T5) : l'accueil des lunettes avec ses favoris, selon les réglages (« À l’ouverture de Quai »,
  * « Ordre des favoris », rayon, aides, signe ~). Exemple : 07:31 à la maison, à Namur. 1.2.1 (PRD-1.2.1 § 4) : les 3
  * favoris d'exemple sous « Favoris », une ligne chacun, dans l'ordre réglé ; l'accueil n'en montre pas plus que sa
- * place ne le permet. 1.2.2 : une gare et une ligne choisies (« Gares », « Bus, tram, métro »).
+ * place ne le permet. 1.2.6 : une gare, un arrêt et une ligne (« Gares de train », « Arrêts… », « Lignes… »).
  */
 export function homePreview(settings: Settings): GlassesView {
   const s = sampleSettings(settings);

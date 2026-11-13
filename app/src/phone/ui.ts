@@ -281,7 +281,9 @@ export function setPreviewPainter(p: PreviewPainter | null): void {
  * l'accueil (1.2.1 : « Bureau dans 4 min → 09:00 »), colonne c.
  */
 export function previewItemText(i: Item): string {
-  return [i.a, i.b, i.bRight ? `${i.bRight}${i.bRightTail ?? ''}` : '', i.c].filter(Boolean).join(' ');
+  // 1.2.5 et 1.2.6 : une ligne en mots clairs et pâles (segs) se lit dans l'ordre de l'écran
+  const words = i.segs?.map((g) => g.t).filter(Boolean).join(' ');
+  return [i.a || words, i.b, i.bRight ? `${i.bRight}${i.bRightTail ?? ''}` : '', i.c].filter(Boolean).join(' ');
 }
 
 /** Aperçu fidèle des lunettes : même mise en page que l'appareil, réduite. */

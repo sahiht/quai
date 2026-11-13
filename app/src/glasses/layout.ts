@@ -6,7 +6,7 @@
  * change que les textes (textContainerUpgrade, sans clignotement) ; seule une nouvelle forme
  * (autre écran, ligne d'alerte qui apparaît) impose rebuildPageContainer.
  */
-import { LINE_H, SCREEN_H, SPACE_W, frenchSpaces, padLeftTo, padRightTo, textWidth, truncate, utf8Bytes } from './font';
+import { LINE_H, SCREEN_H, SPACE_W, frenchSpaces, glyphSafe, padLeftTo, padRightTo, textWidth, truncate, utf8Bytes } from './font';
 import type { Brightness, ContainerSpec, GlassesView, Item, Layout, PageSpec, Seg } from './types';
 
 export const GEO = {
@@ -427,14 +427,16 @@ export function segRow(segs: Seg[], indentPx: number, right: string | undefined,
     const pad = ' '.repeat(Math.max(0, Math.round((x + space - cx - textWidth(out[key])) / SPACE_W)));
     // mesure du conteneur entier : le crénage à la jonction compte (± 1 px)
     const fits = (t: string): boolean => cx + textWidth(out[key] + pad + t) <= limit;
-    let t = p.t;
-    for (let w = limit - cx - textWidth(out[key] + pad); t && !fits(t); w--) t = w > 0 ? truncate(p.t, w) : '';
+    // 1.2.6 : comme truncate, les caractères invisibles (sens d'écriture) retirés, les absents remplacés
+    const word = glyphSafe(p.t);
+    let t = word;
+    for (let w = limit - cx - textWidth(out[key] + pad); t && !fits(t); w--) t = w > 0 ? truncate(word, w) : '';
     if (!t) break;
     out[key] += pad + t;
     shown.push(t);
     prev = key;
     x = cx + textWidth(out[key]);
-    if (t !== p.t) break;
+    if (t !== word) break;
   }
   return { ...out, c, log: shown.join(' ') + (r ? COL_SEP + r : '') };
 }

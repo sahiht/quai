@@ -66,62 +66,67 @@ describe('ancres de la 1.1 (« Mes lieux ») et de la 1.2', () => {
   });
 });
 
-describe('1.2.2 : #/gares, #/lignes (Quai Web), #/trajets', () => {
+describe('1.2.2 et 1.2.6 : #/gares, #/arrets, #/lignes (Quai Web), #/trajets', () => {
   const stations = [{ id: 'g-namur', areaId: 'sncb:8863008', name: { fr: 'Namur', nl: 'Namen' }, lat: 50.4685, lon: 4.8625 }];
-  const lines = [{ id: 'l-3', areaId: 'stib:6357F', op: 'stib' as const, name: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86004, lon: 4.36017, line: '3', mode: 'tram' as const }];
+  const lines = [{ id: 's-gdn', areaId: 'stib:6357F', op: 'stib' as const, name: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86004, lon: 4.36017 }];
+  const follows = [{ id: 'f-3', op: 'stib' as const, mode: 'tram' as const, line: '3', routes: [] }];
 
   for (const web of [false, true]) {
-    it(`${web ? 'Quai Web' : 'téléphone'} : vides, #/gares et #/lignes ouvrent l’ajout ; sinon la section de l’accueil, curseur sur son titre`, async () => {
-      let root = mountAt('#/gares', defaults(), web);
-      await until(() => textOf(root.querySelector('h1')) !== '');
-      expect(textOf(root.querySelector('h1'))).toBe('Ajouter une gare');
-      expect(document.activeElement?.id).toBe('gare-nom');
-      expect(document.title).toBe('Gares · Quai');
-      expect(document.body.classList.contains('grey')).toBe(false);
-      document.body.replaceChildren();
-      root = mountAt('#/lignes', defaults(), web);
-      await until(() => textOf(root.querySelector('h1')) !== '');
-      expect(textOf(root.querySelector('h1'))).toBe('Ajouter une ligne ou un arrêt');
-      expect(document.activeElement?.id).toBe('ligne-num');
-      document.body.replaceChildren();
-      root = mountAt('#/gares', defaults({ stations, lines }), web);
-      await until(() => textOf(root.querySelector('h1')) !== '');
-      expect(textOf(root.querySelector('h1'))).toBe('Bonjour');
-      expect(document.body.classList.contains('grey')).toBe(true);
-      expect(textOf(document.activeElement)).toBe('Gares');
-      expect(document.activeElement?.tagName).toBe('H2');
-      document.body.replaceChildren();
-      root = mountAt('#/lignes', defaults({ stations, lines }), web);
-      await until(() => textOf(root.querySelector('h1')) !== '');
-      expect(textOf(document.activeElement)).toBe('Bus, tram, métro');
-      // une seule section reçoit le curseur
-      expect(root.querySelectorAll('[data-focus]')).toHaveLength(1);
+    it(`${web ? 'Quai Web' : 'téléphone'} : vides, #/gares, #/arrets et #/lignes ouvrent l’ajout ; sinon la section de l’accueil, curseur sur son titre`, async () => {
+      for (const [hash, h1, field, title] of [
+        ['#/gares', 'Ajouter une gare', 'gare-nom', 'Gares de train · Quai'],
+        ['#/arrets', 'Ajouter un arrêt', 'arret-nom', 'Arrêts de bus, tram, métro · Quai'],
+        ['#/lignes', 'Ajouter une ligne', 'ligne-num', 'Lignes de bus, tram, métro · Quai'],
+      ] as const) {
+        const root = mountAt(hash, defaults(), web);
+        await until(() => textOf(root.querySelector('h1')) !== '');
+        expect(textOf(root.querySelector('h1')), hash).toBe(h1);
+        expect(document.activeElement?.id, hash).toBe(field);
+        expect(document.title, hash).toBe(title);
+        expect(document.body.classList.contains('grey'), hash).toBe(false);
+        document.body.replaceChildren();
+      }
+      for (const [hash, section] of [
+        ['#/gares', 'Gares de train'],
+        ['#/arrets', 'Arrêts de bus, tram, métro'],
+        ['#/lignes', 'Lignes de bus, tram, métro'],
+      ] as const) {
+        const root = mountAt(hash, defaults({ stations, lines, follows }), web);
+        await until(() => textOf(root.querySelector('h1')) !== '');
+        expect(textOf(root.querySelector('h1')), hash).toBe('Bonjour');
+        expect(document.body.classList.contains('grey'), hash).toBe(true);
+        expect(textOf(document.activeElement), hash).toBe(section);
+        expect(document.activeElement?.tagName, hash).toBe('H2');
+        // une seule section reçoit le curseur
+        expect(root.querySelectorAll('[data-focus]'), hash).toHaveLength(1);
+        document.body.replaceChildren();
+      }
     });
   }
 
-  it('1.2.3 : #/lignes/ajouter ouvre le choix (« Une ligne » d’office) ; #/lignes/ajouter/ligne, #/lignes/ajouter/arret', async () => {
-    const selected = (root: HTMLElement) => textOf(root.querySelector('[role="tab"][aria-selected="true"] .k1'));
-    for (const [hash, tab, field] of [
-      ['#/lignes/ajouter', 'Une ligne', 'ligne-num'],
-      ['#/lignes/ajouter/ligne', 'Une ligne', 'ligne-num'],
-      ['#/lignes/ajouter/arret', 'Un arrêt', 'arret-nom'],
+  it('1.2.6 : #/lignes/ajouter (et …/ligne) : « Ajouter une ligne » ; #/arrets/ajouter (et #/lignes/ajouter/arret) : « Ajouter un arrêt »', async () => {
+    for (const [hash, h1, field, title] of [
+      ['#/lignes/ajouter', 'Ajouter une ligne', 'ligne-num', 'Lignes de bus, tram, métro · Quai'],
+      ['#/lignes/ajouter/ligne', 'Ajouter une ligne', 'ligne-num', 'Lignes de bus, tram, métro · Quai'],
+      ['#/lignes/ajouter/arret', 'Ajouter un arrêt', 'arret-nom', 'Arrêts de bus, tram, métro · Quai'],
+      ['#/arrets/ajouter', 'Ajouter un arrêt', 'arret-nom', 'Arrêts de bus, tram, métro · Quai'],
     ] as const) {
-      const root = mountAt(hash, defaults({ stations, lines }));
+      const root = mountAt(hash, defaults({ stations, lines, follows }));
       await until(() => textOf(root.querySelector('h1')) !== '');
-      expect(textOf(root.querySelector('h1')), hash).toBe('Ajouter une ligne ou un arrêt');
-      expect(selected(root), hash).toBe(tab);
+      expect(textOf(root.querySelector('h1')), hash).toBe(h1);
+      expect(root.querySelector('[role="tablist"]'), hash).toBeNull();
       expect(document.activeElement?.id, hash).toBe(field);
-      expect(document.title, hash).toBe('Bus, tram, métro · Quai');
+      expect(document.title, hash).toBe(title);
       document.body.replaceChildren();
     }
   });
 
   it('#/gares/ajouter et #/lignes/ajouter même avec des éléments ; #/lignes/ajouter?arret=… ; #/trajets', async () => {
-    let root = mountAt('#/gares/ajouter', defaults({ stations, lines }));
+    let root = mountAt('#/gares/ajouter', defaults({ stations, lines, follows }));
     await until(() => textOf(root.querySelector('h1')) !== '');
     expect(textOf(root.querySelector('h1'))).toBe('Ajouter une gare');
     document.body.replaceChildren();
-    root = mountAt('#/lignes/ajouter?arret=stib%3A6357F', defaults({ stations, lines }));
+    root = mountAt('#/lignes/ajouter?arret=stib%3A6357F', defaults({ stations, lines, follows }));
     await until(() => root.querySelectorAll('.quick .shortcut').length > 0);
     expect(textOf(root.querySelector('.quick p'))).toBe('Lignes à Gare du Nord :');
     document.body.replaceChildren();

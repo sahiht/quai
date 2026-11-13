@@ -39,7 +39,7 @@ import type {
   StationPick,
   TripRequest,
 } from '../core/api';
-import { LABEL_TEXT, labelOf } from '../core/api';
+import { LABEL_TEXT, labelOf, type LineMatch } from '../core/api';
 import { MESSAGES, QuaiError } from '../core/errors';
 import { asTrip, endpointPoint, favoriteTitle, placeOf } from '../core/favorites';
 import { shortAddress } from '../core/text';
@@ -50,11 +50,12 @@ import { deadline } from '../platform/queue';
 import type { Fix, Platform } from '../platform/types';
 import { LIMITS, newId, type SettingsStore } from '../settings';
 import { APP_VERSION, compareVersions } from '../version';
-import { BOARD, HINTS, NB, SECTION, atTitle, catchable, lowerFirst, planHomeText, runningNext, shownMessage, towards, tripShort, upcoming } from './format';
+import { BOARD, HINTS, NB, SECTION, atTitle, catchable, lowerFirst, planHomeText, runningNext, shownMessage, towards, tripShort, upcoming, vehicleLong } from './format';
 import { DEBOUNCE, GestureFilter, type HubSignal } from './gestures';
 import { geometry, layoutPage, shapeKey } from './layout';
 import { anchorIndex, current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replace, replaceAt, reset, setSelection, type Gesture, type NavFrame, type NavState } from './nav';
 import type { AreaRef, GlassesView, Intent, Item, KeepLineRoute, LineRoute, OthersRoute, PageSpec, Route, StepsRoute, StopsRoute } from './types';
+import { completeFollow, isFollowed, matchFollow, sameFollow, type LineFollow, type LineRun } from '../core/linerun';
 import {
   alreadyThereView,
   arrivalView,
@@ -64,6 +65,11 @@ import {
   favoritesView,
   firstRunView,
   followedView,
+  followsOf,
+  followsView,
+  lineRunMissingView,
+  lineRunView,
+  type FollowRow,
   HOME_FAVORITES,
   homeView,
   inMissWindow,
@@ -147,7 +153,7 @@ export const TRIP_KEY = 'quai.trip';
  * ou avant), jamais après une installation neuve, ni tant que l'appli n'est pas en 1.2.3. Ses lignes : NEWS_LINES
  * (views.ts).
  */
-export const NEWS_SINCE = '1.2.5';
+export const NEWS_SINCE = '1.2.6';
 
 /**
  * Date du premier lancement (PRD-1.2.1 § 4.6), en ms : clé du stockage de l'appli sur le téléphone, hors du schéma des
@@ -353,12 +359,14 @@ export function routeKey(r: Route): string {
       return `arrival:${r.journey.id}:${r.leg}`;
     case 'message':
       return `message:${r.kind}:${r.title}`;
+    case 'lineRun':
+      return `lineRun:${r.follow}:${r.dir}`;
     default:
       return r.screen;
   }
 }
 
-const LIVE: ReadonlySet<Route['screen']> = new Set(['home', 'nearby', 'board', 'favorites', 'stations', 'lines', 'line', 'stops', 'steps', 'others', 'train', 'arrival']);
+const LIVE: ReadonlySet<Route['screen']> = new Set(['home', 'nearby', 'board', 'favorites', 'stations', 'lines', 'follows', 'lineRun', 'line', 'stops', 'steps', 'others', 'train', 'arrival']);
 const USES_POSITION: ReadonlySet<string> = new Set(['nearby']);
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e)) || 'Erreur inconnue';
@@ -427,7 +435,9 @@ export class GlassesController implements GlassesApi {
    * 1.2.2 : gare ou ligne retirée par ★ (départs, « garder une ligne »), rétablissable à l'identique pendant 5 s (M6.1).
    * `key` : écran où elle a été retirée ; `line` : la ligne touchée (« garder une ligne »).
    */
-  private undo: { key: string; until: number; index: number; station?: StationPick; pick?: LinePick; line?: string } | null = null;
+  private undo: { key: string; until: number; index: number; station?: StationPick; pick?: LinePick; follow?: LineFollow; line?: string } | null = null;
+  /** 1.2.6 : lignes de l'arrêt de « garder une ligne » retrouvées à son ouverture (lineHere), par numéro. */
+  private keepLines: { areaId: string; lines: Map<string, LineMatch | undefined> } | null = null;
   /** Route pour laquelle l'entrée dans l'écran a été traitée (ordre figé, annulation). */
   private entered: Route | null = null;
   /** 1.2.2 : réponses des adresses récentes de « Favoris » (clé recentKey), et heure du calcul. */
@@ -592,7 +602,7 @@ export class GlassesController implements GlassesApi {
     return { nav: this.homeNav(), resumed: false };
   }
 
-  /** Écrit la version vue (« Quai 1.2.5 » affiché une seule fois ; nouvelle installation : sans rien afficher). */
+  /** Écrit la version vue (« Quai 1.2.6 » affiché une seule fois ; nouvelle installation : sans rien afficher). */
   private async markSeen(): Promise<void> {
     if (this.settings().seenVersion === APP_VERSION) return;
     await this.d.settings.update((x) => ({ ...x, seenVersion: APP_VERSION }));
@@ -656,7 +666,13 @@ export class GlassesController implements GlassesApi {
       }
       // 1.2.4 : le tableau d'une gare ou d'un arrêt gardé porte son choix (`pick`) : zone retrouvée si elle a changé
       for (const p of s.stations) if (p.near) offer(p, () => ({ screen: 'board', areaId: p.areaId, name: p.name, pick: p.id }));
-      for (const p of s.lines) if (p.near) offer(p, (): Route => (p.line ? { screen: 'lines', focus: p.id } : { screen: 'board', areaId: p.areaId, name: p.name, pick: p.id }));
+      for (const p of s.lines) if (p.near) offer(p, (): Route => ({ screen: 'board', areaId: p.areaId, name: p.name, pick: p.id }));
+      // 1.2.6 : une ligne gardée à un arrêt avec « Ouvrir d'office » (1.2.5) : les départs de cet arrêt, comme l'arrêt
+      // favori de la 1.2.1
+      for (const f of s.follows ?? []) {
+        const via = f.via;
+        if (f.near && via) offer({ lat: via.lat, lon: via.lon }, (): Route => ({ screen: 'board', areaId: via.areaId, name: via.name }));
+      }
       const chosen = best as { d: number; route: () => Route } | null;
       if (chosen) return reset([home, chosen.route()]);
     }
@@ -1452,36 +1468,61 @@ export class GlassesController implements GlassesApi {
    */
   private async toggleLine(line: string, mode: Mode): Promise<void> {
     const r = current(this.nav).route;
-    if (r.screen !== 'keepLine') return;
+    if (r.screen !== 'keepLine' || r.op === 'sncb') return;
+    const op = r.op;
     const key = routeKey(r);
     const u = this.undo;
-    if (u?.pick && u.key === key && u.line === line && this.d.clock.now() < u.until) {
-      const pick = u.pick;
+    if (u?.follow && u.key === key && u.line === line && this.d.clock.now() < u.until) {
+      const follow = u.follow;
       this.undo = null;
       await this.d.settings.update((x) => {
-        if (x.lines.some((p) => p.id === pick.id || (p.areaId === pick.areaId && p.line === pick.line))) return x;
-        const lines = [...x.lines];
-        lines.splice(Math.min(u.index, lines.length), 0, pick);
-        return { ...x, lines };
+        const list = x.follows ?? [];
+        if (list.some((q) => q.id === follow.id || isFollowed(q, follow))) return x;
+        const follows = [...list];
+        follows.splice(Math.min(u.index, follows.length), 0, follow);
+        return { ...x, follows };
       });
       this.showToast('★ Ligne rétablie');
       return;
     }
     const s = this.settings();
-    const kept = s.lines.find((p) => p.areaId === r.areaId && p.line === line);
+    const list = s.follows ?? [];
+    const here = this.keepLines?.areaId === r.areaId ? this.keepLines.lines.get(line) : undefined;
+    const kept = list.find((q) => isFollowed(q, { op, line, routes: here?.routes }));
     if (kept) {
-      const index = s.lines.findIndex((p) => p.id === kept.id);
-      await this.d.settings.update((x) => ({ ...x, lines: x.lines.filter((p) => p.id !== kept.id) }));
-      this.undo = { key, until: this.d.clock.now() + UNDO_MS, index, pick: structuredClone(kept), line };
+      const index = list.findIndex((q) => q.id === kept.id);
+      await this.d.settings.update((x) => ({ ...x, follows: (x.follows ?? []).filter((q) => q.id !== kept.id) }));
+      this.undo = { key, until: this.d.clock.now() + UNDO_MS, index, follow: structuredClone(kept), line };
       this.showToast(`★ Retirée. Toucher encore${NB}: annuler`, UNDO_MS);
       return;
     }
     this.undo = null;
-    // 1.2.4 : la limite compte les lignes et les arrêts, comme le dit le téléphone
-    if (s.lines.length >= PICK_MAX.lines) return this.full(`${PICK_MAX.lines} lignes et arrêts`, 'un');
-    const pick: LinePick = { id: newId('ln', pickIds(s)), areaId: r.areaId, op: r.op, name: r.name, lat: r.lat, lon: r.lon, line, mode };
-    await this.d.settings.update((x) => ({ ...x, lines: [...x.lines, pick] }));
-    this.showToast('★ Ajoutée à Bus, tram, métro');
+    if (list.length >= PICK_MAX.lines) return this.full(`${PICK_MAX.lines} lignes`, 'une');
+    // 1.2.6 : la ligne entière, dans les deux sens ; cet arrêt sert de repère pour la reconnaître
+    const base: LineFollow = { id: newId('fl', list.map((q) => q.id)), op, mode, line, routes: [], via: { areaId: r.areaId, name: r.name, lat: r.lat, lon: r.lon } };
+    // relecture 1.2.6 : la ligne de cet arrêt déjà retrouvée (un numéro suivi ailleurs) : ses variantes tout de suite,
+    // pour qu'elle ne se confonde pas avec l'autre
+    const follow = here ? completeFollow(base, here) : base;
+    await this.d.settings.update((x) => ({ ...x, follows: [...(x.follows ?? []), follow] }));
+    this.resolved.delete(follow.id);
+    this.showToast('★ Ajoutée aux lignes');
+    void this.resolveFollow(follow.id).catch(() => undefined);
+  }
+
+  /** 1.2.6 : une ligne suivie du même réseau et du même numéro, aux variantes connues (à départager). */
+  private confusable(op: KeepLineRoute['op'], line: string): boolean {
+    return op !== 'sncb' && (this.settings().follows ?? []).some((f) => f.routes.length > 0 && sameFollow(f, { op: op as LineFollow['op'], line }));
+  }
+
+  /**
+   * 1.2.6 (contrôle qualité) : la ligne `line` qui passe à l'arrêt de « garder une ligne » (findLines autour de lui, à
+   * 300 m au plus), cherchée seulement quand une ligne suivie du même numéro a ses variantes : deux lignes du même
+   * numéro dans deux régions (le W de Waterloo et celui de Tournai) ne se confondent pas. Sans réponse : undefined (le
+   * numéro suffit, comme avant).
+   */
+  private async lineHere(r: Pick<KeepLineRoute, 'op' | 'lat' | 'lon'>, line: string): Promise<LineMatch | undefined> {
+    const ms = await this.d.core.findLines(line, { lat: r.lat, lon: r.lon }).catch(() => [] as LineMatch[]);
+    return ms.find((m) => m.op === r.op && (m.nearest?.distanceM ?? Infinity) <= 300);
   }
 
   /**
@@ -1810,6 +1851,14 @@ export class GlassesController implements GlassesApi {
         return this.fetchStations(r);
       case 'lines':
         return this.fetchLines(r);
+      case 'follows':
+        return this.fetchFollows(r);
+      case 'lineRun': {
+        const f = await this.resolveFollow(r.follow);
+        if (!f || !core.lineRun) return { run: null };
+        const run = await core.lineRun(f, r.dir, { near: this.hereLL() });
+        return { run, follow: f };
+      }
       case 'line': {
         // la ligne choisie ouverte : sa zone retrouvée si son identifiant a changé (le choix suit, pickMoved)
         const pick = r.pick ? s.lines.find((p) => p.id === r.pick && p.line === r.line) : undefined;
@@ -1822,11 +1871,16 @@ export class GlassesController implements GlassesApi {
         // une entrée par ligne (les deux sens), dans l'ordre du cœur ; jamais de train (une gare a sa propre ★)
         const seen = new Set<string>();
         const lines: StopLine[] = [];
+        const found = new Map<string, LineMatch | undefined>();
         for (const x of await core.linesAt(r.areaId)) {
           if (x.mode === 'train' || seen.has(x.line)) continue;
           seen.add(x.line);
-          lines.push({ line: x.line, mode: x.mode });
+          const here = this.confusable(r.op, x.line) ? await this.lineHere(r, x.line) : undefined;
+          found.set(x.line, here);
+          lines.push({ line: x.line, mode: x.mode, ...(here ? { routes: here.routes } : {}) });
         }
+        // le toucher (toggleLine) reprend ces lignes sans les relire
+        this.keepLines = { areaId: r.areaId, lines: found };
         return { lines };
       }
       case 'stops':
@@ -1924,6 +1978,48 @@ export class GlassesController implements GlassesApi {
       } catch (e) {
         if (areaUnknown(e)) out[p.id] = { missing: true };
         else console.warn('[Quai] ligne', p.areaId, p.line, errText(e));
+      }
+      return { ...out };
+    });
+    return out;
+  }
+
+  /** 1.2.6 : variantes d'une ligne suivie retrouvées une fois (findLines autour de son repère). */
+  private resolved = new Map<string, LineFollow | null>();
+
+  private async resolveFollow(id: string): Promise<LineFollow | null> {
+    const f = followsOf(this.settings()).find((x) => x.id === id);
+    if (!f) return null;
+    if (f.routes.length) return f;
+    if (this.resolved.has(id)) return this.resolved.get(id) ?? null;
+    const near = f.via ? { lat: f.via.lat, lon: f.via.lon } : this.hereLL();
+    const m = matchFollow(f, await this.d.core.findLines(f.line, near));
+    const out = m ? completeFollow(f, m) : null;
+    this.resolved.set(id, out);
+    // 1.2.6 : une ligne reprise de la 1.2.5 (sans variantes connues) garde ses variantes, terminus et couleur
+    if (out)
+      void this.d.settings
+        .update((x) => ({ ...x, follows: (x.follows ?? []).map((q) => (q.id === id && !q.routes.length ? out : q)) }))
+        .catch(() => undefined);
+    return out;
+  }
+
+  /** 1.2.6 : « Lignes » : chaque ligne suivie et ses sens, au fur et à mesure. */
+  private async fetchFollows(r: Route): Promise<Record<string, Omit<FollowRow, 'follow'>>> {
+    const out: Record<string, Omit<FollowRow, 'follow'>> = {};
+    await this.progressive(r, followsOf(this.settings()), async (f) => {
+      try {
+        const x = await this.resolveFollow(f.id);
+        if (!x) out[f.id] = { missing: true };
+        else {
+          // relecture 1.2.6 : aucun sens (la ligne n'est plus dans les horaires, même retrouvée par son numéro) :
+          // « introuvable », jamais une ligne qui disparaît de la liste alors que l'accueil la compte ; données
+          // injoignables : une exception, la ligne reste « … »
+          const heads = (await this.d.core.lineHeads?.(x)) ?? [];
+          out[f.id] = heads.length ? { mode: x.mode, heads } : { missing: true };
+        }
+      } catch (e) {
+        console.warn('[Quai] ligne suivie', f.line, errText(e));
       }
       return { ...out };
     });
@@ -2168,6 +2264,20 @@ export class GlassesController implements GlassesApi {
         const data = (value as Record<string, LineData> | undefined) ?? {};
         return linesView(ctx.settings.lines.map((pick): LineRow => ({ pick, ...data[pick.id] })), ctx, r.focus);
       }
+      case 'follows': {
+        const data = (value as Record<string, Omit<FollowRow, 'follow'>> | undefined) ?? {};
+        return followsView(followsOf(ctx.settings).map((follow): FollowRow => ({ follow, ...data[follow.id] })), ctx);
+      }
+      case 'lineRun': {
+        const v = value as { run: LineRun | null; follow?: LineFollow } | undefined;
+        if (!v) return loadingView(SECTION.followsTitle, 'Chargement de la ligne…', ctx, 'lineRun');
+        if (!v.run || !v.follow) {
+          // relecture 1.2.6 : le même message que lineRunView (majuscule, Quai Web), sous le nom de la ligne si elle est connue
+          const f = followsOf(ctx.settings).find((x) => x.id === r.follow);
+          return lineRunMissingView(f ? vehicleLong(f.mode ?? 'bus', f.line) : SECTION.followsTitle, ctx);
+        }
+        return lineRunView(r, v.follow, v.run, ctx);
+      }
       case 'line': {
         const title = linePickTitle({ ...r, id: r.pick ?? '', lat: 0, lon: 0 }, ctx.settings.lang);
         if (!value) return loadingView(title, 'Chargement des passages…', ctx, 'line');
@@ -2363,9 +2473,10 @@ export function stationOfArea(stations: readonly StationPick[], routeAreaId: str
  * 1.2.2 : départs gardés : la gare est dans « Gares », ou (arrêt de bus, tram, métro) une de ses lignes est dans « Bus,
  * tram, métro » (« ★ » en fin de titre, REVUE-USAGE n° 3 ; alerte travaux, n° 4).
  */
-export function boardKept(s: Pick<Settings, 'stations' | 'lines'>, routeAreaId: string, area: Pick<Board['area'], 'id' | 'aka' | 'op' | 'modes'>): boolean {
+export function boardKept(s: Pick<Settings, 'stations' | 'lines' | 'follows'>, routeAreaId: string, area: Pick<Board['area'], 'id' | 'aka' | 'op' | 'modes'>): boolean {
   if (isStationBoard({ area: area as Board['area'] })) return !!stationOfArea(s.stations, routeAreaId, area);
-  return s.lines.some((p) => sameArea(p.areaId, routeAreaId, area));
+  // 1.2.6 : l'arrêt gardé, ou l'arrêt repère d'une ligne suivie
+  return s.lines.some((p) => sameArea(p.areaId, routeAreaId, area)) || (s.follows ?? []).some((f) => !!f.via && sameArea(f.via.areaId, routeAreaId, area));
 }
 
 /** Identifiants déjà pris par les gares et les lignes (newId). */
@@ -2458,9 +2569,12 @@ function titleFor(r: Route, ctx: ViewCtx): string {
     case 'favorites':
       return 'Favoris';
     case 'stations':
-      return SECTION.stations;
+      return SECTION.stationsTitle;
     case 'lines':
-      return SECTION.lines;
+      return SECTION.stopsTitle;
+    case 'follows':
+    case 'lineRun':
+      return SECTION.followsTitle;
     case 'line':
       return linePickTitle({ ...r, id: r.pick ?? '', lat: 0, lon: 0 }, ctx.settings.lang);
     case 'keepLine':

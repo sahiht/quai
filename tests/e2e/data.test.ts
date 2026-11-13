@@ -202,6 +202,16 @@ describe('le validateur détecte les corruptions', () => {
   mutate('heure de train invalide', (d) => edit<TrainsDay>(d, 'trains/2026-11-10.json', (t) => (t.trips[0].s[1][1] = -2)), /heures invalides/);
   mutate('fichier de ligne vers une zone inconnue', (d) => edit<LineFile>(d, 'lines/stib/3.json', (l) => (l.areas[0][0] = 'stib:9999')), /zone stib:9999 sans fichier areas/);
   mutate('index d’une autre génération', (d) => edit<LineIndex>(d, 'lines/index.json', (x) => (x.generatedAt = '2026-11-09T01:15:00.000Z')), /deux générations/);
+  // 1.2.6 (PRD-1.2.6 § 6) : couleurs en 5e et 6e éléments, « RRGGBB » en majuscules, jamais un élément vide
+  mutate('couleur de ligne vide', (d) => edit<LineIndex>(d, 'lines/index.json', (x) => (x.lines[0] = [x.lines[0][0], x.lines[0][1], x.lines[0][2], x.lines[0][3], 'F57000', ''])), /couleur \?, texte \?/);
+  mutate('couleur de ligne en minuscules', (d) => edit<LineIndex>(d, 'lines/index.json', (x) => (x.lines[0] = [x.lines[0][0], x.lines[0][1], x.lines[0][2], x.lines[0][3], 'f57000'])), /couleur \?, texte \?/);
+  mutate('couleur d’un fichier de ligne différente de l’index', (d) => edit<LineFile>(d, 'lines/stib/2.json', (f) => (f.color = '000000')), /couleur différente de lines\/index\.json/);
+  it('1.2.6 : une couleur sans couleur du texte (5 éléments) est valide', () => {
+    const d = join(copy, 'couleur-seule');
+    cpSync(dir, d, { recursive: true });
+    edit<LineIndex>(d, 'lines/index.json', (x) => (x.lines[0] = [x.lines[0][0], x.lines[0][1], x.lines[0][2], x.lines[0][3], '0078AD']));
+    expect(validateData(d).errors.filter((e) => /lines\/index\.json : lines\[0\]/.test(e))).toEqual([]);
+  });
   mutate('meta.lines.files faux', (d) => edit<Meta>(d, 'meta.json', (m) => (m.lines = { files: 11, ops: ['stib', 'delijn', 'tec'], conn: 400 })), /lines\.files = 11/);
   mutate('conn sans une liste par zone', (d) => edit<LineFile>(d, 'lines/tec/N4.json', (l) => l.conn.pop()), /conn doit avoir une liste par zone/);
   mutate('correspondance trop lointaine', (d) => edit<LineFile>(d, 'lines/delijn/1.json', (l) => (l.conn[0] = [0, 4].filter((x) => x !== 0))), /sans arrêt à moins de 400 m/);

@@ -224,10 +224,10 @@ describe('« Nouveau favori » (PRD-1.2 § 2.2, PRD-1.2.1 § 7.1)', () => {
     // au-dessus du formulaire, le lien vers « Gares »
     const link = el.querySelector<HTMLButtonElement>('.jump')!;
     expect(link.compareDocumentPosition(el.querySelector('.place-form')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(link.textContent).toBe('Ses prochains départs\u00a0: ajouter Namur à Gares');
+    expect(link.textContent).toBe('Ses prochains départs\u00a0: ajouter Namur à tes gares');
     link.click();
     await until(() => textOf(el.querySelector('.jump-box .msg')) !== '');
-    expect(textOf(el.querySelector('.jump-box .msg'))).toBe('Namur ajoutée à Gares.');
+    expect(textOf(el.querySelector('.jump-box .msg'))).toBe('Namur ajoutée à tes gares.');
     expect(hz.settings.get().stations).toEqual([expect.objectContaining({ areaId: 'sncb:8863008', name: { fr: 'Namur', nl: 'Namen' } })]);
     link.click();
     await until(() => textOf(el.querySelector('.jump-box .msg')) === 'Déjà dans tes gares.');
@@ -239,15 +239,15 @@ describe('« Nouveau favori » (PRD-1.2 § 2.2, PRD-1.2.1 § 7.1)', () => {
     expect(hz.settings.get().favorites.some((f) => f.kind === 'stop')).toBe(false);
   });
 
-  it('revue d’usage n° 3 : un arrêt de tram donne un lieu ; le lien mène à « Ajouter une ligne », arrêt présélectionné', async () => {
+  it('revue d’usage n° 3 : un arrêt de tram donne un lieu ; le lien mène à « Ajouter un arrêt », lui en tête (1.2.6)', async () => {
     const hz = harness({ settings: defaults(), flags: { geo: 'down' } });
     const el = mount(newFavoriteScreen(hz.ctx));
     await pick(el, el.querySelector<HTMLInputElement>('#nf-lieu')!, 'gare du nord', 'Gare du Nord', 'tram STIB');
     const link = el.querySelector<HTMLAnchorElement>('a.jump')!;
-    expect(textOf(link)).toBe('Ses prochains passages : choisir une ligne dans Bus, tram, métro');
-    expect(link.getAttribute('href')).toBe('#/lignes/ajouter?arret=stib%3A6357F');
+    expect(textOf(link)).toBe('Ses prochains départs : l’ajouter à tes arrêts');
+    expect(link.getAttribute('href')).toBe('#/arrets/ajouter?arret=stib%3A6357F');
     expect(textOf(el.querySelector('.spot .t1'))).toBe('Près de Gare du Nord');
-    // pas de lien « Gares » pour un arrêt de tram, rien d'ajouté tant qu'on n'a pas choisi de ligne
+    // pas de lien « Gares » pour un arrêt de tram, rien d'ajouté tant qu'on n'a pas choisi
     expect(el.querySelector('button.jump')).toBeNull();
     expect(hz.settings.get().lines).toEqual([]);
   });

@@ -138,6 +138,9 @@ export interface LineFile {
   route: string;         // route_id normalisé (alertes)
   line: string;          // nom court, ex. '149'
   mode: Mode;
+  /** 1.2.6 : couleur officielle (route_color) et couleur du texte (route_text_color), « RRGGBB », si publiées. */
+  color?: string;
+  text?: string;
   /** Zones desservies : [AreaSummary.id, lat, lon, noms]. Coordonnées = celles de la zone (5 décimales). */
   areas: [id: string, lat: number, lon: number, n: Names][];
   pats: {
@@ -167,7 +170,8 @@ export interface LineIndex {
   conn: number;                                        // rayon des correspondances en mètres (400)
   /** numéro de ligne = rang dans ce tableau ; key = LineFile.id (`${op}:${route_id}`), fichier
    *  lines/{op}/{routeKey}.json (routeKey = route_id normalisé comme fileKey). */
-  lines: [key: string, line: string, mode: Mode, patterns: number][];
+  /** 1.2.6 : couleur officielle de la ligne (route_color, route_text_color des horaires, « RRGGBB ») quand l'opérateur la publie. */
+  lines: [key: string, line: string, mode: Mode, patterns: number, color?: string, text?: string][];
   stations: Record<string, number[]>;                  // gare SNCB (AreaSummary.id) → lignes à moins de `conn` m
 }
 

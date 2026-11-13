@@ -76,6 +76,16 @@ function mainRank(modes: string[]): number {
   return r < 0 ? MODE_RANK.length : r;
 }
 
+/** 1.2.6 : « STIB 86/86, De Lijn 1980/2018, TEC 0/928 » : lignes avec une couleur publiée, par réseau. */
+export function colorCoverage(files: readonly { op: string; mode: string; color?: string }[]): string {
+  const out: string[] = [];
+  for (const op of ['stib', 'delijn', 'tec'] as const) {
+    const mine = files.filter((f) => f.op === op && f.mode !== 'train');
+    if (mine.length) out.push(`${OP_LABEL[op]} ${mine.filter((f) => f.color).length}/${mine.length}`);
+  }
+  return out.join(', ') || 'aucune ligne';
+}
+
 /**
  * 1.1 : écrit lines/{op}/{routeKey}.json, linetiles/{ty}_{tx}.json et lines/index.json, et journalise leur taille
  * (brute et gzip niveau 6, comme GitHub Pages). Renvoie Meta.lines.
@@ -108,6 +118,8 @@ export async function writeLineFiles(writer: JsonWriter, lineData: LineData[], s
   const index = sum(['index']);
   say(`Fichiers de ligne : ${all.n} lignes${byOp ? ` (${byOp})` : ''}, ${mb(all.raw)} bruts, ${mb(all.gz)} en gzip ; `
     + `index ${mb(index.raw)} (${mb(index.gz)} en gzip) ; ${tiles.n} tuiles de lignes, ${mb(tiles.raw)} (${mb(tiles.gz)} en gzip)`);
+  // 1.2.6 : couleurs officielles des lignes (route_color), par réseau : les pastilles du téléphone en dépendent
+  say(`Couleurs des lignes : ${colorCoverage(out.files.map((f) => f.file))}`);
   return { files: out.files.length, ops: out.ops, conn: out.index.conn };
 }
 

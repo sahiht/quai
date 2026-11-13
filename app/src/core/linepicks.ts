@@ -58,13 +58,13 @@ export interface EndPattern {
 }
 
 /** Vecteur (m) du premier au dernier arrêt. */
-function vec(p: EndPattern): [number, number] {
+export function vec(p: EndPattern): [number, number] {
   const k = Math.cos((p.from.lat * Math.PI) / 180);
   return [(p.to.lat - p.from.lat) * 111_320, (p.to.lon - p.from.lon) * 111_320 * k];
 }
 
 /** Deux variantes vont en sens contraires (plus de 105° entre elles) ; une boucle (moins de 300 m) n'a pas de contraire. */
-function opposite(a: EndPattern, b: EndPattern): boolean {
+export function opposite(a: EndPattern, b: EndPattern): boolean {
   const [ay, ax] = vec(a);
   const [by, bx] = vec(b);
   const na = Math.hypot(ay, ax);
@@ -387,7 +387,7 @@ export function flagsOf(f: string | undefined, n: number): string {
 }
 
 /** Fichiers de ligne (identifiants LineFile.id), dans l'ordre demandé ; absents ou d'une autre génération ignorés. */
-async function loadLineFiles(src: LineData, keys: readonly string[]): Promise<LineFile[]> {
+export async function loadLineFiles(src: LineData, keys: readonly string[]): Promise<LineFile[]> {
   const files = await mapPool(keys, POOL, async (key) => {
     const path = linePath(key);
     if (!path) return null;
@@ -458,6 +458,12 @@ function matchOf(files: readonly LineFile[], near: LatLon | null | undefined): L
     ),
   );
   const m: LineMatch = { op: f0.op, mode: f0.mode, line: f0.line, ends, routes: files.map((f) => f.id) };
+  // 1.2.6 : couleur officielle, celle de la première variante qui en publie une
+  const colored = files.find((f) => f.color);
+  if (colored?.color) {
+    m.color = colored.color;
+    if (colored.text) m.text = colored.text;
+  }
   const st = near ? orderStops(stopsOfFiles(files), near)[0] : undefined;
   if (st) m.nearest = { areaId: st.areaId, name: st.name, distanceM: st.distanceM ?? 0 };
   return m;
@@ -516,6 +522,54 @@ export async function lineStopsIn(src: LineData, m: Pick<LineMatch, 'op' | 'line
     files = await loadLineFiles(src, keys.slice(0, FIND_FILES_MAX));
   }
   return orderStops(stopsOfFiles(files), near);
+}
+
+/**
+ * 1.2.6 : couleurs officielles des lignes de bus, tram et métro (lines/index.json), par réseau et numéro (`stib:3`).
+ * Contrôle qualité : un même numéro peut être deux lignes (De Lijn le réutilise d'une ville à l'autre) ; leurs couleurs
+ * diffèrent : aucune (pastille neutre), plutôt que celle d'une autre ville.
+ */
+export async function lineColorsIn(src: LineData): Promise<Map<string, { color: string; text?: string }>> {
+  const out = new Map<string, { color: string; text?: string }>();
+  const mixed = new Set<string>();
+  const index = await lineIndex(src);
+  for (const [key, line, mode, , color, text] of index?.lines ?? []) {
+    if (mode === 'train' || !color) continue;
+    const k = `${opOf(key)}:${lineKey(line)}`;
+    const prev = out.get(k);
+    if (!prev) out.set(k, text ? { color, text } : { color });
+    else if (prev.color.toUpperCase() !== color.toUpperCase() || (prev.text ?? '').toUpperCase() !== (text ?? '').toUpperCase()) mixed.add(k);
+  }
+  for (const k of mixed) out.delete(k);
+  return out;
+}
+
+/**
+ * 1.2.6 : lignes de bus, tram et métro « près de toi » : celles des arrêts à `radiusM` au plus (`stops` :
+ * réseau et numéros de chaque arrêt proche, comme « Autour de moi »), avec leurs terminus et leur arrêt le plus
+ * proche, du plus proche au plus loin.
+ */
+export async function linesNearIn(src: LineData, near: LatLon, stops: readonly { op: string; lines: readonly string[] }[], radiusM: number, max = Infinity): Promise<LineMatch[]> {
+  // `stops` du plus proche au plus loin : les lignes du plus proche arrêt d'abord. Contrôle qualité 1.2.6 : à un grand
+  // arrêt (40 lignes), chercher chaque ligne une à une faisait attendre « Près de toi » plusieurs secondes : 4 à la
+  // fois, et plus rien une fois les `max` plus proches trouvées
+  const want = new Map<string, { op: string; line: string }>();
+  for (const st of stops) if (st.op !== 'sncb') for (const l of st.lines) if (lineKey(l) && !want.has(`${st.op}:${lineKey(l)}`)) want.set(`${st.op}:${lineKey(l)}`, { op: st.op, line: l });
+  const out: LineMatch[] = [];
+  const todo = [...want.values()];
+  for (let i = 0; i < todo.length && out.length < max; i += 4) {
+    const found = await Promise.all(
+      todo.slice(i, i + 4).map(async (w) => {
+        const ms = await findLinesIn(src, w.line, near);
+        return ms.find((x) => x.op === w.op && (x.nearest?.distanceM ?? Infinity) <= radiusM + 150);
+      }),
+    );
+    for (const m of found) if (m && !out.some((o) => o.op === m.op && lineKey(o.line) === lineKey(m.line))) out.push(m);
+  }
+  const rank: Record<string, number> = { metro: 0, tram: 1, bus: 2 };
+  return out
+    .sort((a, b) => (a.nearest?.distanceM ?? 0) - (b.nearest?.distanceM ?? 0) || (rank[a.mode] ?? 3) - (rank[b.mode] ?? 3) || a.line.localeCompare(b.line, 'fr', { numeric: true }))
+    .slice(0, max);
 }
 
 /** Jour de service de `now` dans `dates` (meta.serviceDates) : avant 04:00, celui de la veille ; -1 s'il n'y est pas. */
