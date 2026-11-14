@@ -5,6 +5,7 @@ import {
   atLabel,
   atTitle,
   departText,
+  departureRightText,
   boardTitle,
   dayWord,
   distanceText,
@@ -68,7 +69,47 @@ describe('mise en forme', () => {
     expect(minutesText(dep({ est: at(13, 45) }), now, true)).toBe('13:45');
     expect(minutesText(dep({ est: at(13, 45), rt: false }), now, true)).toBe('~13:45');
     expect(minutesText(dep({ est: at(12, 9) }), now, true)).toBe('imminent');
-    expect(minutesText(dep({ est: at(12, 10, 40), rt: false }), now, true)).toBe('imminent');
+    expect(minutesText(dep({ est: at(12, 10, 40) }), now, true)).toBe('imminent');
+  });
+
+  it('1.2.9 : « imminent » réservé au temps réel ; horaire prévu à moins d’une minute : « ~1 min » ; SUPPRIMÉ d’abord', () => {
+    const soon = at(12, 10, 40);
+    // temps réel : inchangé, réglage « ~ » ou non
+    expect(minutesText(dep({ est: soon }), now, true)).toBe('imminent');
+    expect(minutesText(dep({ est: soon }), now, false)).toBe('imminent');
+    // horaire prévu : le même « ~ » que les autres horaires prévus ; sans le « ~ » (accueil, réglage) : « 1 min »
+    expect(nb(minutesText(dep({ est: soon, rt: false }), now, true))).toBe('~1 min');
+    expect(nb(minutesText(dep({ est: soon, rt: false }), now, false))).toBe('1 min');
+    // horaire prévu à peine passé (gardé 30 à 60 s par les listes) : « ~1 min » aussi, jamais « imminent » ni « ~0 min »
+    expect(nb(minutesText(dep({ est: at(12, 9, 30), rt: false }), now, true))).toBe('~1 min');
+    // une minute pleine : comme avant
+    expect(nb(minutesText(dep({ est: at(12, 11, 30), rt: false }), now, true))).toBe('~1 min');
+    // supprimé : toujours d'abord, temps réel ou non
+    expect(minutesText(dep({ est: soon, rt: false, cancelled: true }), now, true)).toBe('SUPPRIMÉ');
+    expect(minutesText(dep({ est: soon, cancelled: true }), now, true)).toBe('SUPPRIMÉ');
+    // Autour de moi et arrêts favoris (nextText), l'accueil sans « ~ » (departureRightText)
+    expect(nextText(dep({ est: soon }), now, true)).toBe('T3 imminent');
+    expect(nb(nextText(dep({ op: 'delijn', mode: 'bus', line: '232', est: soon, rt: false }), now, true))).toBe('232 ~1 min');
+    expect(nb(departureRightText(dep({ est: soon, rt: false }), now).text)).toBe('T3 1 min');
+    expect(departureRightText(dep({ est: soon }), now).text).toBe('T3 imminent');
+  });
+
+  it('1.2.9 : réponse d’un arrêt favori (lunettes et téléphone) : « ~1 min » sur l’horaire prévu, le « ~ » signalé', () => {
+    const s = preset11();
+    expect(s.display.markPlanned).toBe(true);
+    // T3 dans 20 s, T4 dans 50 s
+    const board = (rt: boolean): FavoriteAnswer => ({
+      favoriteId: 'fav-gdn', kind: 'stop', state: 'ok', updatedAt: now,
+      board: {
+        area: { id: 'stib:6357F', op: 'stib', n: N('Gare du Nord'), lat: 0, lon: 0, modes: ['tram'], lines: ['3', '4'] },
+        departures: [dep({ sched: at(12, 10, 20), est: at(12, 10, 20), rt }), dep({ line: '4', head: N('Stalle'), sched: at(12, 10, 50), est: at(12, 10, 50), rt })],
+        anyPlanned: !rt, rtErrors: [], updatedAt: now,
+      },
+    });
+    const planned = stopAnswerLine(board(false), now, s);
+    expect([nb(planned.right), nb(planned.second ?? ''), planned.planned]).toEqual(['T3 ~1 min', 'vers Churchill, puis T4 Stalle ~1 min', true]);
+    const live = stopAnswerLine(board(true), now, s);
+    expect([live.right, nb(live.second ?? ''), live.planned]).toEqual(['T3 imminent', 'vers Churchill, puis T4 Stalle imminent', false]);
   });
 
   it('colonne des trains : heure, retard, voie', () => {

@@ -55,8 +55,8 @@ export function mountShell(host: HTMLElement, initial: Panel): Shell {
   const help = h(
     'p',
     { class: 'w-help' },
-    h('span', null, 'Sur l’écran : glisse vers le haut ou le bas, touche une ou deux fois.'),
-    h('span', { class: 'w-help-keys' }, ' Clavier : ↑ ↓, Entrée = toucher, Échap = double toucher.'),
+    h('span', null, 'Sur l’écran : glisse vers le haut ou le bas, touche une ou deux fois.'),
+    h('span', { class: 'w-help-keys' }, ' Clavier : ↑ ↓, Entrée = toucher, Échap = double toucher.'),
   );
   const extra = h('div', { class: 'w-extra' });
   const lunettes = h(

@@ -1,7 +1,7 @@
 /**
  * Réglage 5 sur 6 : alertes, avec exemple dans les lunettes. Maquette Config5. 1.2.2 (revue d'usage n° 9) : les
  * alertes seulement ; la marge avant de partir est dans « Trajets » (#/trajets). Travaux et déviations : sur les
- * gares et les lignes choisies (revue d'usage n° 4).
+ * gares et les lignes choisies (revue d'usage n° 4). 1.2.9 (PRD-1.2.9 § 2.3) : retour à Réglages.
  */
 import type { Settings } from '../../core/api';
 import { LIMITS } from '../../settings';
@@ -28,7 +28,7 @@ export function alertsScreen(ctx: PhoneCtx): HTMLElement {
   return h(
     'div',
     { style: 'display:flex;flex-direction:column;gap:16px' },
-    header(ctx, 'Alertes', 'Une ligne en tête de l’écran des lunettes, pendant un trajet suivi.', { label: 'Accueil', hash: '#/' }),
+    header(ctx, T.alerts, 'Une ligne en tête de l’écran des lunettes, pendant un trajet suivi.', { label: T.settings, hash: '#/reglages' }),
     h(
       'div',
       { class: 'box' },

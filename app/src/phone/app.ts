@@ -7,6 +7,8 @@
  * ou l'ajout si elle est vide ; #/gares/ajouter, #/lignes/ajouter (?arret=… : arrêt présélectionné) ; #/trajets
  * (revue d'usage n° 9). 1.2.6 (PRD-1.2.6 § 5) : #/lignes (lignes suivies), #/arrets (arrêts) ; #/lignes/ajouter (et
  * #/lignes/ajouter/ligne) ajoute une ligne, #/arrets/ajouter (et #/lignes/ajouter/arret) un arrêt.
+ * 1.2.9 (PRD-1.2.9 § 2) : l'accueil en miroir de celui des lunettes ; #/reglages, les autres réglages derrière un seul
+ * bouton (Affichage, Alertes, Données, Position et langue et Trajets reviennent à Réglages).
  */
 import type { Core, GlassesApi, Meta } from '../core/api';
 import type { Freshness } from '../glasses/controller';
@@ -21,10 +23,10 @@ import { displayScreen } from './screens/display';
 import { favoriteEditScreen, fixedTripScreen, newFavoriteScreen } from './screens/favorite-edit';
 import { favoritesScreen } from './screens/favorites';
 import { homeScreen } from './screens/home';
-import type { PickKind } from './screens/picks';
+import { picksScreen, type PickKind } from './screens/picks';
 import { onboardingScreen, yourFavoritesScreen } from './screens/onboarding';
-import { addLineScreen, addStationScreen } from './screens/pick-add';
 import { searchScreen } from './screens/search';
+import { settingsScreen } from './screens/settings';
 import { tripsScreen } from './screens/trips';
 import { newsLines, T } from './text';
 
@@ -52,7 +54,7 @@ export interface PhoneCtx {
   /**
    * Bannière de l'accueil après la mise à jour (T1), une fois : visible si les réglages lus au lancement venaient
    * d'une version antérieure à NEWS_SINCE (seenVersion non vide), jusqu'à « OK ». Le téléphone n'écrit pas
-   * seenVersion pour elle : les lunettes s’en servent pour leur message « Quai 1.2.8 ».
+   * seenVersion pour elle : les lunettes s’en servent pour leur message « Quai 1.2.9 ».
    */
   news?: NewsState;
 }
@@ -68,20 +70,17 @@ interface Route {
 }
 
 /**
- * #/gares, #/arrets et #/lignes (PRD-1.2.2 § 1.3 et § 4, Quai Web ; 1.2.6 : trois rubriques) : la section de l'accueil,
- * curseur sur son titre ; vide, ou #/…/ajouter : l'ajout. #/lignes/ajouter/arret (1.2.3) : l'ajout d'un arrêt.
+ * #/gares, #/arrets et #/lignes (PRD-1.2.2 § 1.3 et § 4, Quai Web ; 1.2.6 : trois rubriques ; 1.2.9, PRD-1.2.9 § 2.2) :
+ * l'écran de la rubrique, sa liste et son ajout dessous. #/…/ajouter (#/lignes/ajouter/ligne aussi), ou une rubrique
+ * vide (les lunettes de Quai Web ouvrent l'ajout) : le même écran, curseur sur l'ajout. #/lignes/ajouter/arret (1.2.3)
+ * ajoute un arrêt : l'écran des arrêts, comme son titre de page.
  */
 function pickRoute(kind: PickKind): Route {
-  const count = (c: PhoneCtx): number => {
-    const s = c.settings.get();
-    return kind === 'stations' ? s.stations.length : kind === 'lines' ? s.lines.length : (s.follows ?? []).length;
-  };
-  const stop = (s: string[]): boolean => kind === 'lines' || (s[0] === 'ajouter' && s[1] === 'arret');
-  const adding = (c: PhoneCtx, s: string[]): boolean => s[0] === 'ajouter' || !count(c);
+  const shown = (s: string[]): PickKind => (kind === 'follows' && s[0] === 'ajouter' && s[1] === 'arret' ? 'lines' : kind);
   return {
-    screen: (c, s) => (adding(c, s) ? (kind === 'stations' ? addStationScreen(c) : addLineScreen(c, stop(s) ? 'stop' : 'line')) : homeScreen(c, [], { focus: kind })),
-    grey: (c, s) => !adding(c, s),
-    title: (_c, s) => (kind === 'stations' ? T.stationsTitle : stop(s) ? T.stopsTitle : T.followsTitle),
+    screen: (c, s) => picksScreen(c, shown(s), { add: s[0] === 'ajouter' }),
+    grey: true,
+    title: (_c, s) => (shown(s) === 'stations' ? T.stationsTitle : shown(s) === 'lines' ? T.stopsTitle : T.followsTitle),
   };
 }
 
@@ -92,8 +91,9 @@ const SCREENS: Record<string, Route> = {
   gares: pickRoute('stations'),
   arrets: pickRoute('lines'),
   lignes: pickRoute('follows'),
+  reglages: { screen: settingsScreen, grey: true, title: T.settings },
   trajets: { screen: tripsScreen, title: T.trips },
-  affichage: { screen: displayScreen, title: 'Affichage' },
+  affichage: { screen: displayScreen, grey: true, title: 'Affichage' },
   alertes: { screen: alertsScreen, title: 'Alertes' },
   donnees: { screen: dataScreen, title: 'Données' },
   recherche: { screen: searchScreen, grey: true, title: 'Rechercher un trajet' },
@@ -126,8 +126,8 @@ export function parseHash(hash: string): { name: string; sub: string[]; params: 
   return { name: parts[0] ?? '', sub: parts.slice(1), params: new URLSearchParams(query) };
 }
 
-/** Version qui a apporté les nouveautés de la bannière (PRD-1.2.8 § 4) : la 1.2.8. */
-export const NEWS_SINCE = '1.2.8';
+/** Version qui a apporté les nouveautés de la bannière (PRD-1.2.9 § 4) : la 1.2.9. */
+export const NEWS_SINCE = '1.2.9';
 
 /** Bannière « Nouveau » de l'accueil : visible ou non, « OK », et ses lignes (newsLines). */
 export interface NewsState {
@@ -137,25 +137,25 @@ export interface NewsState {
 }
 
 /**
- * Bannière « Nouveau » : une fois, au passage d’une version antérieure à la 1.2.8 (réglages vus avant 1.2.8 au
- * lancement), jusqu’à « OK », comme le message « Quai 1.2.8 » des lunettes ; jamais après une installation neuve.
+ * Bannière « Nouveau » : une fois, au passage d’une version antérieure à la 1.2.9 (réglages vus avant 1.2.9 au
+ * lancement), jusqu’à « OK », comme le message « Quai 1.2.9 » des lunettes ; jamais après une installation neuve.
  * `app` : la version de l'appli.
  */
-export function newsState(seenAtStart: string, since = NEWS_SINCE, app = APP_VERSION): NewsState {
+export function newsState(seenAtStart: string, since = NEWS_SINCE, app = APP_VERSION, web = false): NewsState {
   let shown = !!seenAtStart && compareVersions(seenAtStart, since) < 0 && compareVersions(app, since) >= 0;
   return {
     visible: () => shown,
     dismiss: () => {
       shown = false;
     },
-    lines: newsLines(seenAtStart),
+    lines: newsLines(seenAtStart, web),
   };
 }
 
 export function mountPhone(deps: PhoneDeps): { refresh(): void } {
   let seq = 0;
   // Lu avant que les lunettes n'écrivent la version courante (message « Quai 1.2.1 »).
-  const news = deps.news ?? newsState(deps.settings.get().seenVersion);
+  const news = deps.news ?? newsState(deps.settings.get().seenVersion, NEWS_SINCE, APP_VERSION, !!deps.web);
   const render = async (): Promise<void> => {
     const my = ++seq;
     // « Mes lieux » de la 1.1 : l'ancre est remplacée par celle de « Mes favoris » (sans entrée d'historique).

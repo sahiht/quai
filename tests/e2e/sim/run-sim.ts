@@ -18,6 +18,8 @@
  *     résultats, « Lunettes », « Garder en favori », « Trajets », données, premier lancement, et réouverture de Quai (le
  *     simulateur 0.9.5 ne garde pas setLocalStorage d'un lancement à l'autre ; Chrome garde le stockage local d'un
  *     chargement à l'autre : message et bannière une seule fois, aide des gestes de l'accueil les 7 premiers jours) ;
+ *     1.2.9 (docs/v1.2.9/PRD-1.2.9.md § 2) : accueil en miroir des lunettes, écrans Gares, Arrêts et Lignes (rangées
+ *     dépliables, ajout « Près de toi » sur place), Réglages, Affichage, bannière « Nouveau dans Quai 1.2.9 » repliée ;
  *   - Quai Web (build web) dans Chrome : onglet Lunettes (accueil, relief mesuré sur le canvas), rubrique « Position »
  *     avec une adresse (PRD-1.2 § 3).
  * Chrome sans aucun accès au réseau hors de la machine (sim/cdp.ts : ni proxy, ni nom d'hôte autre que 127.0.0.1).
@@ -132,10 +134,14 @@ const TRAIN_ROW = /^[○●] \S.*? {3}(dans ~?\d+ min|imminent|(à|demain|le \d\
 /** « Le suivant » vers le bureau à S1 : l'IC de 08:42 ; l'arrivée dépend du tram choisi par le classement du cœur (§ 7). */
 const NEXT_S1 = /^Le suivant {3}08:33 → (09:5\d|10:0\d)$/;
 /**
- * Message « Quai 1.2.8 » des lunettes (PRD-1.2.8 § 4) : depuis la 1.2.7 ou la 1.2.6, les trois lignes de la 1.2.8 ;
- * depuis une version antérieure, aussi les quatre lignes de la 1.2.6 (7 lignes ; celles de la 1.2.5 ne tiennent plus).
+ * Message « Quai 1.2.9 » des lunettes (PRD-1.2.9 § 4) : depuis la 1.2.8, les trois lignes de la 1.2.9 ; depuis une
+ * version antérieure, aussi les trois lignes de la 1.2.8 (6 lignes ; celles de la 1.2.6 et de la 1.2.5 ne tiennent
+ * plus : une version entière ou rien, 8 lignes au plus).
  */
-const NEWS_TITLE = 'Quai 1.2.8';
+const NEWS_TITLE = 'Quai 1.2.9';
+const NEWS_129 = ['« imminent » : seulement d’après le temps réel.', 'Téléphone : l’accueil reprend celui des lunettes.', 'Réglages : tout derrière un seul bouton.'];
+/** Quai Web (PRD-1.2.9 § 4) : la page du téléphone y est l'onglet Réglages. */
+const NEWS_129_WEB = [NEWS_129[0], 'Onglet Réglages : il reprend l’accueil des lunettes.', NEWS_129[2]];
 const NEWS_128 = ['Un train : tout son trajet, gares d’avant comprises.', 'Chaque gare : sa voie et dans combien de temps.', '● : là où le train arrive, d’après le temps réel.'];
 const NEWS_126 = [
   'Arrêts et lignes de bus, tram, métro, séparés.',
@@ -144,13 +150,32 @@ const NEWS_126 = [
   'Tes lignes gardées y sont déjà.',
 ];
 const NEWS_125 = ['Étapes : l’heure d’arrivée si tu rates ton départ.', 'Pluie prévue : dite sur la marche concernée.', 'Dans le véhicule : ta progression jusqu’à la descente.'];
-/** Lignes du message selon la version vue avant la mise à jour (une version entière ou rien, 8 lignes au plus). */
-const newsFor = (seen: string): string[] => [...NEWS_128, ...(cmpVersion(seen, '1.2.6') < 0 ? NEWS_126 : [])];
-void NEWS_125;
 /**
- * Bannière « Nouveau » du téléphone (app/src/phone/text.ts, NEWS_128 à NEWS_122) : celles des versions sautées, sans
- * celles qui parlent de « Bus, tram, métro », devenu deux rubriques.
+ * Lignes du message selon la version vue avant la mise à jour : la 1.2.9, puis les versions sautées de la plus récente
+ * à la plus ancienne, une version entière ou rien, 8 lignes au plus (un écran).
  */
+const newsFor = (seen: string): string[] => {
+  const out = [...NEWS_129];
+  for (const [since, lines] of [['1.2.8', NEWS_128], ['1.2.6', NEWS_126], ['1.2.5', NEWS_125]] as const) if (cmpVersion(seen, since) < 0 && out.length + lines.length <= 8) out.push(...lines);
+  return out;
+};
+/**
+ * Bannière « Nouveau » du téléphone (app/src/phone/text.ts, NEWS_129 à NEWS_122) : celles des versions sautées, sans
+ * celles qui parlent de « Bus, tram, métro », devenu deux rubriques. 1.2.9 (PRD-1.2.9 § 2.1) : repliée sous « Nouveau
+ * dans Quai 1.2.9 », dépliée par « Voir ce qui change ».
+ */
+const BANNER_TITLE = 'Nouveau dans Quai 1.2.9';
+const BANNER_129 = [
+  'Dans les lunettes, « imminent » ne s’affiche plus qu’avec le temps réel ; sur l’horaire prévu, c’est « dans ~1 min ».',
+  'L’accueil du téléphone reprend celui des lunettes, mêmes rubriques et même ordre ; tous les autres réglages sont derrière le bouton « Réglages ».',
+  'Gares, arrêts et lignes ont chacun leur écran : touche un élément pour l’ouvrir d’office, changer son ordre ou le retirer, et ajoute ceux près de toi sur place.',
+];
+/** Quai Web : la bannière parle de l'onglet Réglages, pas du téléphone. */
+const BANNER_129_WEB = [
+  BANNER_129[0],
+  'L’onglet Réglages reprend l’accueil des lunettes, mêmes rubriques et même ordre ; tous les autres réglages sont derrière le bouton « Réglages ».',
+  BANNER_129[2],
+];
 const BANNER_128 = [
   'Dans les lunettes, touche un train au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.',
   'À chaque gare, sa voie et le prochain passage en clair (« dans 6 min ») ; ● montre où arrive le train, d’après le temps réel.',
@@ -175,7 +200,8 @@ const BANNER_124 = [
 const BANNER_123 = ['Tableaux complets dans les lunettes : tous les départs des 2 prochaines heures.', 'Touche un départ : ses arrêts jusqu’au terminus, avec l’heure et la voie.'];
 const BANNER_122 = ['Nouveau : tes gares et tes lignes de bus, tram et métro sur l’accueil des lunettes.', 'Tes arrêts favoris y sont rangés, rien n’est perdu.', 'Dans les lunettes, Aller à… a rejoint Favoris.', 'Un trajet n’est suivi que si tu le demandes.'];
 const bannerFor = (seen: string): string[] => [
-  ...BANNER_128,
+  ...BANNER_129,
+  ...(cmpVersion(seen, '1.2.8') < 0 ? BANNER_128 : []),
   ...(cmpVersion(seen, '1.2.6') < 0 ? BANNER_126 : []),
   ...(cmpVersion(seen, '1.2.5') < 0 ? BANNER_125 : []),
   ...(cmpVersion(seen, '1.2.4') < 0 ? BANNER_124 : []),
@@ -205,10 +231,10 @@ function sameRows(s: Screen, before: Screen): void {
 /** Erreur au lancement (REVUE-USAGE n° 10). */
 const DATA_DOWN = 'Pas de connexion aux horaires : nouvel essai dans 30 s';
 /**
- * Message « Quai 1.2.8 » et bannière : seulement quand l'appli construite est en 1.2.8 (app.json) ; avant la montée
+ * Message « Quai 1.2.9 » et bannière : seulement quand l'appli construite est en 1.2.9 (app.json) ; avant la montée
  * de version, ils ne paraissent pas et les étapes qui les attendent le disent dans les notes.
  */
-const V125 = cmpVersion(APP_VERSION, '1.2.8') >= 0;
+const V125 = cmpVersion(APP_VERSION, '1.2.9') >= 0;
 /** Ligne du haut de l'accueil (jamais un élément sélectionnable). */
 const TOP_HOME = /^(Temps réel indisponible|Pas de réseau|Horaires |Près de |! )/;
 /** Alpha des captures du simulateur pour chaque niveau de luminosité (mesuré : 4 → 255, 3 → 230, 2 → 197). */
@@ -223,7 +249,7 @@ const DELIVERABLES: Record<string, { file: string; caption: string }> = {
   g04: { file: 'g04-lunettes-autres-trajets.png', caption: 'Lunettes, ▼ au bout du trajet : « Vers le bureau : autres trajets ». Par entrée, le nom et les heures, puis plus pâles les moyens et le pourquoi (« S1, 16 min plus tôt, mais 19 min à pied » ; « bus W + métro 2, à pied 2 + 2 + 3 min »).' },
   g05: { file: 'g05-lunettes-trajet-plus-tot.png', caption: 'Lunettes, « Plus tôt » ouvert depuis la liste : « Suivre ce trajet » sur la ligne du titre, « Plus tôt de 16 min, mais 19 min à pied » en haut, puis ses étapes (19 min à pied, S1 07:55 voie 1). Toucher : le suivre ; double toucher : retour à la liste.' },
   g06: { file: 'g06-lunettes-accueil-jour-ferie.png', caption: 'Lunettes, accueil le 11/11 (Armistice) à 07:31 à Waterloo : en dernière ligne, pâle, « Jour férié : horaires du dimanche » ; la ligne vide saute pour lui laisser la place. Le 12/11, rien.' },
-  g07: { file: 'g07-lunettes-message-quai-1-2-6.png', caption: 'Lunettes, message « Quai 1.2.6 », montré une seule fois à la première ouverture après la mise à jour depuis la 1.2.5 : arrêts et lignes séparés, toute une ligne et l’attente à chaque arrêt, dans les deux sens, les lignes gardées déjà là.' },
+  g07: { file: 'g07-lunettes-message-quai-1-2-9.png', caption: 'Lunettes, message « Quai 1.2.9 », montré une seule fois à la première ouverture après la mise à jour depuis la 1.2.8 : « imminent » seulement d’après le temps réel, l’accueil du téléphone qui reprend celui des lunettes, un seul bouton « Réglages ».' },
   g08: { file: 'g08-lunettes-gares.png', caption: 'Lunettes, « Gares de train » à 07:31 à Namur : la gare choisie et son prochain train à droite (retard et voie modifiée comme dans « Autour de moi »). Toucher : son tableau.' },
   g09: { file: 'g09-lunettes-ouverture-arret.png', caption: 'Lunettes (1.2.6), à 12:10 à la gare du Nord : les départs de l’arrêt repère du tram 3 et du tram 4 s’ouvrent seuls (à moins de 300 m), comme l’arrêt favori de la 1.2.1.' },
   g15: { file: 'g15-lunettes-lignes.png', caption: 'Lunettes (1.2.6), « Lignes de bus, tram, métro » : un sens par rangée, « Tram 3 vers Churchill », la ligne et sa destination au plus clair, « vers » pâle, sans attente.' },
@@ -319,7 +345,8 @@ function listRows(s: { screen: string; lines: string[] }): string[] {
 }
 /**
  * Minutes depuis minuit d'une ligne de tableau ou d'arrêt : l'heure (« 07:42 », « ~07:42 ») plus son retard (« +2 ») ;
- * un bus dans l'heure : `now` plus l'attente (« 4 min », « ~4 min », « imminent ») ; rien de lisible (« SUPPRIMÉ ») : NaN.
+ * un bus dans l'heure : `now` plus l'attente (« 4 min », « ~4 min », « imminent » ; 1.2.9 : « imminent » en temps réel
+ * seulement, « ~1 min » sur l'horaire prévu) ; rien de lisible (« SUPPRIMÉ ») : NaN.
  */
 function minutesOfRow(row: string, now = 0): number {
   const m = /(\d\d):(\d\d)(?: \+(\d+))?/.exec(row);
@@ -466,8 +493,10 @@ const P123 = preset('p/1.2.3.json');
 const P124 = preset('p/1.2.4.json');
 /** Utilisateur de la 1.2.5 (seenVersion 1.2.5) : « Quai 1.2.6 » une fois, les seules nouveautés de la 1.2.6. */
 const P125 = preset('p/1.2.5.json');
+/** 1.2.9 : utilisateur de la 1.2.8 (seenVersion 1.2.8), la version publiée avant celle-ci : « Quai 1.2.9 » seul. */
+const P128 = preset('p/1.2.8.json');
 /**
- * Utilisateur de la version construite : les réglages de la 1.1 avec les nouveautés déjà vues (seenVersion 1.2.5),
+ * Utilisateur de la version construite : les réglages de la 1.1 avec les nouveautés déjà vues (seenVersion 1.2.9),
  * migrés au lancement comme ceux d'un utilisateur réel : favoris Bureau, Vers Gand-Saint-Pierre et Maison ; « Gares » :
  * Namur ; « Bus, tram, métro » : tram 3 et tram 4 à Gare du Nord (ouverts d'office à moins de 300 m) et Bruxelles-Nord
  * De Lijn, toutes les lignes. Quai déjà utilisé (date du premier lancement absente, version vue connue) : pas d'aide
@@ -487,6 +516,11 @@ const PNICE = preset('p/nice.json');
  * de la 1.2.1, rangé dans « Gares ») ; seenVersion 1.2.5.
  */
 const PWAT = preset('p/waterloo.json');
+/**
+ * 1.2.9 : PCUR avec deux trajets fixes de plus entre des gares (Gand-Saint-Pierre → Bruxelles-Central,
+ * Bruxelles-Central → Namur) : 5 favoris, l'accueil du téléphone en montre 3, puis « Voir les 2 autres favoris ».
+ */
+const PMANY = preset('p/many.json');
 
 let scenario = '';
 interface StepOut {
@@ -1316,7 +1350,8 @@ async function s2(): Promise<void> {
     // 1.2.3 : curseur sur le premier passage (« vers … » ne se sélectionne jamais), la liste défile par page
     check(s.title === 'Tram 3 · Gare du Nord' && s.sel === 0, `« ${s.title} », curseur sur le 1er passage (sel ${s.sel})`);
     check(s.lines.filter((l) => /^vers (Churchill|Esplanade)$/.test(l)).length >= 1, `sens du tram 3 : ${JSON.stringify(s.lines)}`);
-    check(s.lines.filter((l) => /^~?\d\d:\d\d( .*)? {3}(dans \d+ min|imminent)$/.test(l)).length >= 4, `4 passages par sens (heure, attente) : ${JSON.stringify(s.lines)}`);
+    // 1.2.9 : à moins d'une minute, « imminent » en temps réel, « dans ~1 min » sur l'horaire prévu
+    check(s.lines.filter((l) => /^~?\d\d:\d\d( .*)? {3}(dans ~?\d+ min|imminent)$/.test(l)).length >= 4, `4 passages par sens (heure, attente) : ${JSON.stringify(s.lines)}`);
     common(s, H.line);
     return { screen: s, tour: ['glasses-line.png', 'Les passages du tram 3 à la gare du Nord, dans les deux sens, puis « Tous les départs de l’arrêt »'] };
   });
@@ -1786,8 +1821,9 @@ async function news(): Promise<void> {
         return { screen: h, shot: false };
       }
       const s = await sim.waitScreen(is('message', (x) => x.title === NEWS_TITLE), 20_000, `message « ${NEWS_TITLE} »`);
-      // PRD-1.2.8 § 4 : la 1.2.8, puis depuis la 1.2.5 ou d'avant la 1.2.6 (une version entière ou rien)
-      check(sameList(s.lines.slice(0, -1), newsFor(seen)), `texte ${JSON.stringify(s.lines)} (PRD-1.2.8 § 4, depuis la ${label})`);
+      // PRD-1.2.9 § 4 : la 1.2.9 seule depuis la 1.2.8, la 1.2.9 et la 1.2.8 depuis une version antérieure (une version
+      // entière ou rien)
+      check(sameList(s.lines.slice(0, -1), newsFor(seen)), `texte ${JSON.stringify(s.lines)} (PRD-1.2.9 § 4, depuis la ${label})`);
       common(s, H.news);
       return { screen: s, ...(withDeliver ? { deliver: 'g07' as const } : {}) };
     });
@@ -1835,8 +1871,10 @@ async function news(): Promise<void> {
     });
   };
   const ids = ['fav-bureau', 'fav-gand', 'fav-maison'];
-  // 1.2.6 : depuis la 1.2.5 (la version publiée avant celle-ci), les quatre lignes de la 1.2.6 seules
-  await from('1.2.5', P125, ids, true, '1.2.5');
+  // 1.2.9 : depuis la 1.2.8 (la version publiée avant celle-ci), les trois lignes de la 1.2.9 seules ; d'avant, aussi
+  // celles de la 1.2.8
+  await from('1.2.8', P128, ids, true, '1.2.8');
+  await from('1.2.5', P125, ids, false, '1.2.5');
   await from('1.2.4', P124, ids, false, '1.2.4');
   await from('1.2.3', P123, ids, false, '1.2.3');
   await from('1.2.2', P122, ids, false, '1.2.2');
@@ -2257,8 +2295,110 @@ function card(c: string | undefined, title: string, times: string | RegExp, mean
   if (phrase !== undefined) check(parts.includes(phrase), `phrase « ${phrase} » absente de la carte : ${c}`);
 }
 
-/** Texte d'une section de l'accueil du téléphone (vide si elle n'est pas là) : gares, arrêts (`lines`), lignes (`follows`). */
-const pickSectionText = (page: Page, kind: 'stations' | 'lines' | 'follows') => page.eval<string>(N(`document.querySelector('#h-${kind}')?.closest('section')?.innerText`));
+/** Normalisation dans la page : espaces insécables remplacées, espaces de bord retirées (à placer en tête d'une expression évaluée). */
+const NORM = `const n = (s) => (s ?? '').replace(/[\\u00a0\\u202f]/g, ' ').replace(/\\s+/g, ' ').trim();`;
+
+/** 1.2.9 (PRD-1.2.9 § 2.1) : accueil du téléphone affiché, « Dans tes lunettes » et sa carte « Favoris » comprises. */
+const waitHome = (page: Page, timeout = 15_000) => page.waitFor(`!!document.querySelector('.mirror-sec .fav-card')`, timeout, 'accueil du téléphone (« Dans tes lunettes »)');
+
+/**
+ * 1.2.9 (PRD-1.2.9 § 2.1) : lignes de « Dans tes lunettes » sur l'accueil du téléphone, dans l'ordre : titre, sous-titre
+ * (pastilles : leurs numéros), à droite (« 3 », « 1 gare », « à choisir »), ancre, nom lu par les lecteurs d'écran.
+ */
+interface HomeRow {
+  t1: string;
+  t2: string;
+  count: string;
+  href: string;
+  label: string;
+}
+const homeRows = (page: Page) =>
+  page.eval<HomeRow[]>(`(() => { ${NORM} return [...document.querySelectorAll('.mirror .nav-row')].map((a) => {
+    const b = [...a.querySelectorAll('.t2 .badge')].map((x) => n(x.textContent));
+    return { t1: n(a.querySelector('.t1')?.textContent), t2: b.length ? b.join(' ') : n(a.querySelector('.t2')?.textContent), count: n(a.querySelector('.count')?.textContent), href: a.getAttribute('href') ?? '', label: n(a.getAttribute('aria-label')) };
+  }); })()`);
+/** Rubriques de l'accueil des lunettes, mêmes mots et même ordre sur le téléphone (PRD-1.2.9 § 2.1). */
+const HOME_TITLES = ['Favoris', 'Autour de moi', 'Gares de train', 'Arrêts de bus, tram, métro', 'Lignes de bus, tram, métro'];
+/** 1.2.9 (relecture) : « Autour de moi » (comme « Aperçu ») ouvre Affichage, qui revient alors à l'accueil. */
+const AFFICHAGE_FROM_HOME = '#/affichage?retour=accueil';
+const HOME_HREFS = ['#/favoris', AFFICHAGE_FROM_HOME, '#/gares', '#/arrets', '#/lignes'];
+
+/**
+ * 1.2.9 (PRD-1.2.9 § 2.2) : rangées d'un écran Gares, Arrêts ou Lignes, dans l'ordre : nom, sous-titre, ce qu'en dit
+ * la rangée repliée (« Ouvre d’office… »), dépliée ou non, interrupteur « Ouvrir d’office » (sous-titre, état ; null
+ * sans interrupteur), rang (« 1er sur 2 »), ↑ et ↓ grisés, bouton de retrait.
+ */
+interface PickItem {
+  t1: string;
+  t2: string;
+  auto: string;
+  open: boolean;
+  shown: boolean;
+  near: string;
+  nearOn: boolean | null;
+  order: string;
+  up: boolean | null;
+  down: boolean | null;
+  remove: string;
+}
+const pickItems = (page: Page) =>
+  page.eval<PickItem[]>(`(() => { ${NORM} return [...document.querySelectorAll('.pick-item')].map((li) => {
+    const t2 = li.querySelector('.pick-head .t2');
+    const auto = li.querySelector('.pick-auto');
+    const detail = li.querySelector('.pick-detail');
+    const sw = li.querySelector('input[role=switch]');
+    const up = li.querySelector('[data-act=up]');
+    const down = li.querySelector('[data-act=down]');
+    return {
+      t1: n(li.querySelector('.pick-head .t1')?.textContent),
+      t2: t2 && !t2.hidden ? n(t2.textContent) : '',
+      auto: auto && !auto.hidden ? n(auto.textContent) : '',
+      open: li.querySelector('.pick-head')?.getAttribute('aria-expanded') === 'true',
+      shown: !!detail && !detail.hidden && detail.getClientRects().length > 0,
+      near: sw ? n(sw.closest('label')?.querySelector('.c1')?.textContent) + ' | ' + n(sw.closest('label')?.querySelector('.c2')?.textContent) : '',
+      nearOn: sw ? sw.checked : null,
+      order: n(li.querySelector('.pick-opt .c2')?.textContent),
+      up: up ? up.disabled : null,
+      down: down ? down.disabled : null,
+      remove: n(li.querySelector('[data-act=remove]')?.textContent),
+    };
+  }); })()`);
+/** Attend les rangées d'un écran Gares, Arrêts ou Lignes qui vérifient `ok` (noms complétés, terminus retrouvés). */
+async function waitItems(page: Page, ok: (items: PickItem[]) => boolean, label: string, timeout = 10_000): Promise<PickItem[]> {
+  const t0 = Date.now();
+  let items: PickItem[] = [];
+  while (Date.now() - t0 < timeout) {
+    items = await pickItems(page).catch(() => []);
+    if (ok(items)) return items;
+    await sleep(150);
+  }
+  throw new Check(`délai dépassé : ${label} (rangées : ${JSON.stringify(items)})`);
+}
+/** Touche la rangée « nom » d'un écran Gares, Arrêts ou Lignes : elle se déplie ou se replie. */
+const toggleItem = (page: Page, name: string) =>
+  page.eval<boolean>(`(() => { ${NORM} const li = [...document.querySelectorAll('.pick-item')].find((x) => n(x.querySelector('.pick-head .t1')?.textContent) === ${JSON.stringify(name)}); if (!li) return false; li.querySelector('.pick-head').click(); return true; })()`);
+/** Touche un contrôle (data-act : near, up, down, remove) de la rangée « nom », dépliée. */
+const itemAct = async (page: Page, name: string, act: 'near' | 'up' | 'down' | 'remove'): Promise<void> => {
+  const ok = await page.eval<boolean>(`(() => { ${NORM} const li = [...document.querySelectorAll('.pick-item')].find((x) => n(x.querySelector('.pick-head .t1')?.textContent) === ${JSON.stringify(name)}); const el = li?.querySelector('[data-act=${act}]'); if (!el || el.disabled) return false; el.click(); return true; })()`);
+  check(ok, `contrôle ${act} de « ${name} » introuvable ou grisé`);
+};
+/** En-tête d'un écran : retour, titre, phrase (espaces insécables normalisées). */
+const screenHead = (page: Page) =>
+  page.eval<{ back: string; title: string; lead: string }>(`(() => { ${NORM} const hd = document.querySelector('main header.head') ?? document.querySelector('header.head'); return { back: n(hd?.querySelector('.back')?.textContent), title: n(hd?.querySelector('h1')?.textContent), lead: n(hd?.querySelector('.lead')?.textContent) }; })()`);
+
+/**
+ * 1.2.9 (PRD-1.2.9 § 2.1) : bannière « Nouveau » sur une ligne : « Nouveau dans Quai 1.2.9 », « Voir ce qui change »
+ * replié et « OK » ; ses lignes sont dans la page (bannerLines), cachées jusqu'au dépliage.
+ */
+async function checkBannerFolded(page: Page): Promise<void> {
+  const b = await page.eval<Record<string, unknown>>(`(() => { ${NORM}
+    const b = document.querySelector('.news');
+    const more = b?.querySelector('.news-more');
+    const lines = b?.querySelector('.news-lines');
+    return { title: n(b?.querySelector('.news-title')?.textContent), see: n(b?.querySelector('.news-see')?.textContent), expanded: more?.getAttribute('aria-expanded') ?? null, hidden: !!lines?.hidden && !lines.getClientRects().length, ok: [...(b?.querySelectorAll('button') ?? [])].some((x) => n(x.textContent) === 'OK') };
+  })()`);
+  check(b.title === BANNER_TITLE && b.see === 'Voir ce qui change' && b.expanded === 'false' && b.hidden === true && b.ok === true, `bannière « ${BANNER_TITLE} » repliée, « Voir ce qui change » et « OK » : ${JSON.stringify(b)}`);
+}
 
 async function phone(): Promise<void> {
   // Migration visible depuis la 1.1 (CA-2.1, CA-122.6) : Maison et Bureau deviennent des lieux, sans doublon ; les
@@ -2266,32 +2406,56 @@ async function phone(): Promise<void> {
   await withChrome(async (page) => {
     await phoneStep(page, 'migration', async () => {
       await page.goto(pageUrl(P11(S1), '#/'));
-      await page.waitFor(`!!document.querySelector('#h-follows')`, 15_000, 'accueil du téléphone');
+      await waitHome(page);
       if (V125) {
         await page.waitFor(`!!document.querySelector('.news')`, 15_000, 'bannière « Nouveau » depuis la 1.1');
+        await checkBannerFolded(page);
         const lines = await bannerLines(page);
         check(sameList(lines, bannerFor('1.1.0')), `bannière ${JSON.stringify(lines)} (PRD-1.2.6 § 7 : les versions sautées, sans « Bus, tram, métro »)`);
       } else notes.push(`phone-migration : app.json en ${APP_VERSION}, bannière non vérifiée`);
       const t = await page.text('main');
       check(!/Mes lieux/.test(t), '« Mes lieux » encore sur l’accueil (PRD-1.2 § 2.2)');
-      check(/Mes favoris\s+3 favoris/.test(t), `ligne « Mes favoris », « 3 favoris » : ${/Mes favoris[^\n]*\n[^\n]*/.exec(t.split('Réglages').pop() ?? '')?.[0]}`);
+      // 1.2.9 (PRD-1.2.9 § 2.1) : la ligne « Favoris » et leur nombre à droite, vers « Mes favoris »
+      const home = await homeRows(page);
+      const row = (title: string) => home.find((r) => r.t1 === title);
+      const fav = row('Favoris');
+      check(fav?.count === '3' && fav.href === '#/favoris', `ligne « Favoris », « 3 » : ${JSON.stringify(fav)}`);
       // PRD-1.2.2 § 4 et § 5 : la gare de Namur dans « Gares de train », Bruxelles-Nord dans « Arrêts de bus, tram,
       // métro » ; 1.2.6 (PRD-1.2.6 § 4) : tram 3 et tram 4 (gardés à Gare du Nord) suivis dans « Lignes de bus, tram,
-      // métro », retrouvés avec leurs terminus
-      await page.waitFor(`${N(`document.querySelector('#h-follows')?.closest('section')?.innerText`)}.includes('Churchill ↔ Esplanade')`, 15_000, 'lignes reprises, terminus retrouvés');
-      const st = await pickSectionText(page, 'stations');
-      const ar = await pickSectionText(page, 'lines');
-      const li = await pickSectionText(page, 'follows');
-      check(/^Gares de train\n/.test(st) && /Namur/.test(st), `« Gares de train » : ${st}`);
-      check(/^Arrêts de bus, tram, métro\n/.test(ar) && /Bruxelles-Nord/.test(ar) && !/Tram 3/.test(ar), `« Arrêts de bus, tram, métro » : ${ar}`);
-      const at = (x: string) => li.indexOf(x);
-      check(/^Lignes de bus, tram, métro\n/.test(li) && at('Tram 3') >= 0 && at('Tram 3') < at('STIB · Churchill ↔ Esplanade') && at('STIB · Churchill ↔ Esplanade') < at('Tram 4') && /de Gare du Nord/.test(li), `« Lignes de bus, tram, métro » : ${li}`);
+      // métro » ; 1.2.9 : une ligne par rubrique sur l'accueil (ses noms, leur nombre), le détail sur son écran
+      const st = row('Gares de train');
+      const ar = row('Arrêts de bus, tram, métro');
+      const li = row('Lignes de bus, tram, métro');
+      check(st && /Namur/.test(st.t2) && st.count === '1 gare' && st.href === '#/gares', `« Gares de train » sur l’accueil : ${JSON.stringify(st)}`);
+      check(ar && /Bruxelles-Nord/.test(ar.t2) && !/Tram 3/.test(ar.t2) && ar.count === '1 arrêt' && ar.href === '#/arrets', `« Arrêts de bus, tram, métro » sur l’accueil : ${JSON.stringify(ar)}`);
+      // Nom lu : les lignes dans l'ordre. Les lignes reprises de la 1.2.5 n'ont leur mode (« Tram 3 ») qu'une fois
+      // complétées, ce que l'accueil lance lui-même à l'ouverture (comme en 1.2.8) : juste après, encore « Ligne 3 » ;
+      // le nom exact est vérifié plus bas.
+      check(li && li.t2 === '3 4' && li.count === '2 lignes' && li.href === '#/lignes' && /^Lignes de bus, tram, métro, 2 lignes : (Tram|Ligne) 3, (Tram|Ligne) 4$/.test(li.label), `« Lignes de bus, tram, métro » sur l’accueil (pastilles, puis leurs noms dans l’ordre) : ${JSON.stringify(li)}`);
+      if (/Ligne 3/.test(li.label)) notes.push(`phone-migration : lignes pas encore complétées à l’ouverture de l’accueil : « ${li.label} »`);
       if (V125) {
         const g = await page.waitScreen((x) => x.screen === 'message' && x.title === NEWS_TITLE, 20_000, `message « ${NEWS_TITLE} » dans les lunettes`);
         check(sameList(g.lines.slice(0, -1), newsFor('1.1.0')), `message des lunettes ${JSON.stringify(g.lines)}`);
         await page.clickText('OK', '.news');
         await page.waitFor(`!document.querySelector('.news')`, 5_000, 'bannière fermée par « OK »');
       }
+      // Le détail de chaque rubrique sur son écran (PRD-1.2.9 § 2.2)
+      await hashGo(page, '#/gares');
+      const gi = await waitItems(page, (x) => x.length === 1, '« Gares de train » : une gare');
+      check(/Namur/.test(gi[0].t1), `« Gares de train » : ${JSON.stringify(gi)}`);
+      await hashGo(page, '#/arrets');
+      const ai = await waitItems(page, (x) => x.length === 1, '« Arrêts de bus, tram, métro » : un arrêt');
+      check(/Bruxelles-Nord/.test(ai[0].t1) && !ai.some((x) => /Tram 3/.test(x.t1)), `« Arrêts de bus, tram, métro » : ${JSON.stringify(ai)}`);
+      // les lignes reprises, retrouvées avec leurs terminus, dans l'ordre ; ouvertes d'office près de leur arrêt repère
+      await hashGo(page, '#/lignes');
+      const fi = await waitItems(page, (x) => x[0]?.t2 === 'STIB · Churchill ↔ Esplanade', 'lignes reprises, terminus retrouvés', 15_000);
+      check(sameList(fi.map((x) => x.t1), ['Tram 3', 'Tram 4']), `« Lignes de bus, tram, métro » : ${JSON.stringify(fi)}`);
+      check(fi[0].near === 'Ouvrir d’office | à moins de 300 m de Gare du Nord' && fi[0].nearOn === true && fi[0].auto === 'Ouvre d’office près de Gare du Nord', `tram 3 ouvert d’office près de Gare du Nord : ${JSON.stringify(fi[0])}`);
+      // lignes complétées : leur nom exact sur l'accueil (les pastilles ne se lisent pas)
+      await hashGo(page, '#/');
+      await waitHome(page, 8_000);
+      const named = (await homeRows(page)).find((r) => r.t1 === 'Lignes de bus, tram, métro');
+      check(named?.label === 'Lignes de bus, tram, métro, 2 lignes : Tram 3, Tram 4', `nom lu de « Lignes » sur l’accueil, lignes complétées : ${JSON.stringify(named)}`);
       await hashGo(page, '#/favoris');
       await waitText(page, /Ajouter un favori/, 'écran « Mes favoris »');
       check((await page.text('main')).includes(FAVS_LEAD), 'chapeau de « Mes favoris »');
@@ -2314,19 +2478,20 @@ async function phone(): Promise<void> {
     });
   });
 
-  // Depuis la 1.2.5 : la 1.2.6 seule ; d'avant, les nouveautés des versions sautées, de la plus récente à la plus
-  // ancienne (PRD-1.2.6 § 7).
-  for (const [label, P] of [['1.2.5', P125], ['1.2.4', P124], ['1.2.3', P123], ['1.2.2', P122], ['1.2.1', P121], ['1.2.0', P120]] as const) {
+  // Depuis la 1.2.8 : la 1.2.9 seule ; d'avant, les nouveautés des versions sautées, de la plus récente à la plus
+  // ancienne (PRD-1.2.6 § 7, PRD-1.2.9 § 4).
+  for (const [label, P] of [['1.2.8', P128], ['1.2.5', P125], ['1.2.4', P124], ['1.2.3', P123], ['1.2.2', P122], ['1.2.1', P121], ['1.2.0', P120]] as const) {
     await withChrome(async (page) => {
       await phoneStep(page, `banner-${label}`, async () => {
         await page.goto(pageUrl(P(S1), '#/'));
         if (!V125) {
-          await page.waitFor(`!!document.querySelector('#h-follows')`, 15_000, 'accueil du téléphone');
+          await waitHome(page);
           check(!(await page.eval<boolean>(`!!document.querySelector('.news')`)), `bannière avant la montée de version (app.json ${APP_VERSION})`);
           notes.push(`phone-banner-${label} : app.json en ${APP_VERSION}, bannière non vérifiée`);
           return;
         }
         await page.waitFor(`!!document.querySelector('.news')`, 15_000, `bannière « Nouveau » depuis la ${label}`);
+        await checkBannerFolded(page);
         const lines = await bannerLines(page);
         check(sameList(lines, bannerFor(label)), `bannière ${JSON.stringify(lines)}`);
         const g = await page.waitScreen((x) => x.screen === 'message' && x.title === NEWS_TITLE, 20_000, `message « ${NEWS_TITLE} »`);
@@ -2339,25 +2504,59 @@ async function phone(): Promise<void> {
   await withChrome(async (page) => {
     await phoneStep(page, 'home', async () => {
       await page.goto(pageUrl(PCUR(S1), '#/'));
-      await page.waitFor(`document.querySelector('.home-favs')?.innerText.includes('partir à 07:35')`, 20_000, 'réponses des favoris sur l’accueil');
+      await page.waitFor(`document.querySelector('.fav-card')?.innerText.includes('partir à 07:35')`, 20_000, 'réponses des favoris sur l’accueil');
       const t = await page.text('main');
-      check(t.includes('Où vas-tu ?') && t.includes('Adresse, gare, arrêt ou favori') && t.includes('Mes favoris') && t.includes('Gérer mes favoris'), 'accueil : champ (REVUE-USAGE n° 5 : « ou favori ») et section « Mes favoris »');
-      check(t.includes('Gares de train') && t.includes('Ajouter une gare') && t.includes('Arrêts de bus, tram, métro') && t.includes('Ajouter un arrêt') && t.includes('Lignes de bus, tram, métro') && t.includes('Ajouter une ligne'), 'les trois sections (PRD-1.2.6 § 1)');
-      check(!(await page.eval<boolean>(`!!document.querySelector('.news')`)), 'pas de bannière pour qui a déjà vu la 1.2.3');
-      const buttons = await page.eval<number>(`document.querySelectorAll('.home-favs button.btn-glasses').length`);
+      check(t.includes('Où vas-tu ?') && t.includes('Adresse, gare, arrêt ou favori'), 'accueil : champ (REVUE-USAGE n° 5 : « ou favori »)');
+      // 1.2.9 (PRD-1.2.9 § 2.1) : « Quai », « Bonjour » et le bouton « Réglages » ; « Dans tes lunettes » : les rubriques
+      // de l'accueil des lunettes, mêmes mots, même ordre, chacune vers son écran (la carte « Favoris » remplace
+      // « Mes favoris » et « Gérer mes favoris » ; plus de sections, de liste « Réglages » ni de pied)
+      const head = await page.eval<string>(`(() => { ${NORM} const hd = document.querySelector('header.head-home'); const b = hd?.querySelector('a.head-btn'); return [n(hd?.querySelector('.eyebrow')?.textContent), n(hd?.querySelector('h1')?.textContent), n(b?.textContent), b?.getAttribute('href')].join(' | '); })()`);
+      check(head === 'Quai | Bonjour | Réglages | #/reglages', `en-tête de l’accueil : ${head}`);
+      check(nbn(await page.eval<string>(`document.querySelector('#h-miroir')?.textContent`)) === 'Dans tes lunettes', 'section « Dans tes lunettes »');
+      const rows = await homeRows(page);
+      check(sameList(rows.map((r) => r.t1), HOME_TITLES) && sameList(rows.map((r) => r.href), HOME_HREFS), `rubriques des lunettes, dans leur ordre : ${JSON.stringify(rows.map((r) => [r.t1, r.href]))}`);
+      check(rows[0].count === '3' && rows[1].t2 === 'à moins de 500 m', `« Favoris   3 », « Autour de moi » et son rayon : ${JSON.stringify(rows.slice(0, 2))}`);
+      check(sameList(rows.slice(2).map((r) => r.count), ['1 gare', '1 arrêt', '2 lignes']), `les trois rubriques et leur contenu (PRD-1.2.6 § 1) : ${JSON.stringify(rows.slice(2))}`);
+      check(!/Mes favoris|Gérer mes favoris|Ajouter une gare|Ajouter un arrêt|Ajouter une ligne|Les départs en direct|Belgian Mobility Company/.test(t), `plus de sections, de « Mes favoris » ni de pied sur l’accueil : ${t.slice(0, 600)}`);
+      check(!(await page.eval<boolean>(`!!document.querySelector('.news')`)), 'pas de bannière pour qui a déjà vu la 1.2.9');
+      const buttons = await page.eval<number>(`document.querySelectorAll('.fav-card .fav-row button.btn-glasses').length`);
       check(buttons === 3, `un bouton « Lunettes » par favori, lieux compris (${buttons})`);
-      const names = (await page.eval<string[]>(`[...document.querySelectorAll('.home-favs .fav-row')].map((r) => r.innerText.split('\\n')[0])`)).map(nbn);
+      const names = (await page.eval<string[]>(`[...document.querySelectorAll('.fav-card .fav-row .t1')].map((r) => r.textContent)`)).map(nbn);
       check(names.includes('Vers le bureau') && names.includes('Vers la maison'), `les lieux sur l’accueil : ${JSON.stringify(names)}`);
     });
     await phoneStep(page, 'favorite-to-glasses', async () => {
       // le bouton « Lunettes » est une demande : le trajet est suivi (PRD-1.2.2 § 6)
       const n = page.screens().length;
-      await page.eval(`(() => { const row = [...document.querySelectorAll('.home-favs .fav-row')].find((r) => r.innerText.includes('Vers le bureau')); row.querySelector('button').click(); return true; })()`);
+      await page.eval(`(() => { const row = [...document.querySelectorAll('.fav-card .fav-row')].find((r) => r.innerText.includes('Vers le bureau')); row.querySelector('button').click(); return true; })()`);
       const g = await page.waitScreen((x) => x.screen === 'steps' && x.followed === true, 20_000, 'étapes suivies dans les lunettes', n);
-      const msg = nbn(await page.waitFor<string>(`[...document.querySelectorAll('.home-favs .msg')].map((m) => m.textContent).filter(Boolean).join('|')`, 10_000, 'message à côté du bouton'));
+      const msg = nbn(await page.waitFor<string>(`[...document.querySelectorAll('.fav-card .msg')].map((m) => m.textContent).filter(Boolean).join('|')`, 10_000, 'message à côté du bouton'));
       check(msg === 'Affiché dans les lunettes : IC 07:42, voie 6.', `message « ${msg} »`);
       check(g.title === `Vers le bureau : 07:35 → 08:58${FOLLOWED}` && g.page === 1 && g.label === 'short', `lunettes « ${g.title} » page ${g.page} ${g.label}`);
       return { glasses: g };
+    });
+    await phoneStep(page, 'home-rubrics', async () => {
+      // 1.2.9 (PRD-1.2.9 § 2.1, § 2.2) : chaque rubrique ouvre son écran (retour « Accueil », titre, sa liste, puis son
+      // ajout « Ajouter une gare », « Ajouter un arrêt », « Ajouter une ligne », comme les sections de la 1.2.6) ;
+      // « Favoris » ouvre « Mes favoris »
+      const want: [string, string, string, string][] = [
+        ['Gares de train', '#/gares', 'Ajouter une gare', 'Namur'],
+        ['Arrêts de bus, tram, métro', '#/arrets', 'Ajouter un arrêt', 'Bruxelles-Nord'],
+        ['Lignes de bus, tram, métro', '#/lignes', 'Ajouter une ligne', 'Tram 3'],
+      ];
+      for (const [title, hash, add, first] of want) {
+        await page.eval(`(() => { ${NORM} [...document.querySelectorAll('.mirror .nav-row')].find((a) => n(a.querySelector('.t1')?.textContent) === ${JSON.stringify(title)}).click(); return true; })()`);
+        await page.waitFor(`location.hash === ${JSON.stringify(hash)}`, 5_000, `« ${title} » ouvre ${hash}`);
+        const items = await waitItems(page, (x) => x.length > 0, `liste de « ${title} »`);
+        const hd = await screenHead(page);
+        check(hd.back === 'Accueil' && hd.title === title && hd.lead.startsWith('Dans tes lunettes, dans cet ordre.'), `en-tête de ${hash} : ${JSON.stringify(hd)}`);
+        check(items[0].t1.includes(first) && items.every((x) => !x.open && !x.shown), `${hash} : rangées repliées, « ${first} » en tête : ${JSON.stringify(items)}`);
+        check(nbn(await page.eval<string>(`document.querySelector('.pick-add-section h2')?.textContent`)) === add, `${hash} : « ${add} » sous la liste`);
+        await page.clickText('Accueil', 'header.head');
+        await waitHome(page, 5_000);
+      }
+      await page.eval(`document.querySelector('.fav-card a.nav-row').click(), true`);
+      await waitText(page, /Ajouter un favori/, '« Favoris » ouvre « Mes favoris »');
+      check((await page.eval<string>('location.hash')) === '#/favoris', '« Favoris » mène à #/favoris');
     });
   });
 
@@ -2384,6 +2583,9 @@ async function phone(): Promise<void> {
       check(t.includes('Marge avant de partir'), '« Marge avant de partir » dans « Trajets »');
       const v = nbn(await page.eval<string>(`[...document.querySelectorAll('output')].map((o) => o.textContent).join('|')`));
       check(v.split('|')[0] === '10 min', `valeur « ${v} »`);
+      // 1.2.9 (PRD-1.2.9 § 2.3) : ancien lien toujours valable, retour à Réglages
+      const hd = await screenHead(page);
+      check(hd.back === 'Réglages' && hd.title === 'Trajets', `en-tête de « Trajets » : ${JSON.stringify(hd)}`);
       return { deliver: 'p04', scroll: { text: 'Marche maximale' } };
     });
     await phoneStep(page, 'new-favorite', async () => {
@@ -2481,10 +2683,14 @@ async function phone(): Promise<void> {
       await page.waitFor(`location.hash === '#/favoris'`, 5_000, 'retour à « Mes favoris »');
       const rows = await waitRows(page, 2);
       check(rows[1].t1 === 'Namur' && rows[1].t2 === 'Près de Namur' && /^Gare de Namur à \d+ min à pied/.test(rows[1].t3), `un lieu « Près de Namur » : ${rowText(rows[1])}`);
+      // 1.2.9 : la gare sur la ligne « Gares de train » de l'accueil, et dans la liste de son écran (#/gares)
       await hashGo(page, '#/');
-      await page.waitFor(`!!document.querySelector('#h-stations')`, 8_000, 'accueil du téléphone');
-      const st = await pickSectionText(page, 'stations');
-      check(/Namur/.test(st), `Namur dans « Gares » : ${st}`);
+      await waitHome(page, 8_000);
+      const st = (await homeRows(page)).find((r) => r.t1 === 'Gares de train');
+      check(st?.t2 === 'Namur' && st.count === '1 gare' && st.href === '#/gares', `Namur dans « Gares de train » sur l’accueil : ${JSON.stringify(st)}`);
+      await hashGo(page, '#/gares');
+      const items = await waitItems(page, (x) => x.length > 0, '« Gares de train »');
+      check(sameList(items.map((x) => x.t1), ['Namur']), `Namur dans « Gares de train » : ${JSON.stringify(items)}`);
       await hashGo(page, '#/favoris');
     });
     await phoneStep(page, 'fixed-trip', async () => {
@@ -2800,6 +3006,9 @@ async function phone(): Promise<void> {
       // favoris d'exemple du téléphone (samples.ts), puis « Autour de moi » et les trois rubriques (PRD-1.2.6 § 1)
       check(/^Aperçu dans les lunettes : Quai, Favoris 3, Bureau \S.*, Autour de moi \d+ arrêts?, Gares de train 1 gare, Arrêts de bus, tram, métro 1 arrêt, Lignes de bus, tram, métro 1 ligne$/.test(label), `aperçu : « Favoris », les favoris, « Autour de moi », les trois rubriques : ${label}`);
       check(!label.includes('Autres favoris') && !label.includes('Aller à'), `plus de « Autres favoris » ni de « Aller à… » : ${label}`);
+      // 1.2.9 (PRD-1.2.9 § 2.4) : retour à Réglages
+      const hd = await screenHead(page);
+      check(hd.back === 'Réglages' && hd.title === 'Affichage', `en-tête de « Affichage » : ${JSON.stringify(hd)}`);
       // CA-123.1 : le réglage « Départs par arrêt » n'existe plus (les tableaux montrent les 2 prochaines heures)
       const t = await page.text('main');
       check(!/départs par arrêt/i.test(t), `« Départs par arrêt » encore dans « Affichage » (PRD-1.2.3 § 1) : ${t.slice(0, 300)}`);
@@ -2850,7 +3059,7 @@ async function phone(): Promise<void> {
     await phoneStep(page, 'onboarding-done', async () => {
       const n = page.screens().length;
       await page.clickText('Terminer');
-      await page.waitFor(`document.querySelector('.home-favs')?.innerText.includes('Vers le bureau')`, 10_000, 'accueil avec « Mes favoris »');
+      await page.waitFor(`document.querySelector('.fav-card')?.innerText.includes('Vers le bureau')`, 10_000, 'accueil avec ses favoris (carte « Favoris »)');
       const g = await page.waitScreen((s) => s.screen === 'home' && s.lines[0] === 'Favoris   2' && /^Bureau {3}/.test(s.lines[1] ?? ''), 15_000, 'lunettes : « Favoris   2 », le bureau en tête (CA-S1.2)', n);
       await hashGo(page, '#/favoris');
       const rows = await waitRows(page, 2, 'deux lieux, sans autre favori');
@@ -3028,12 +3237,27 @@ async function webPosition(): Promise<void> {
       }
     });
   });
+  await withChrome(async (page) => {
+    await phoneStep(page, 'news-1.2.8', async () => {
+      // 1.2.9 (PRD-1.2.9 § 4) : sur Quai Web, depuis la 1.2.8, le message « Quai 1.2.9 » et la bannière de l'onglet
+      // Réglages parlent de l'onglet Réglages, pas du téléphone
+      await page.goto(pageUrl(P128(S1), '', { app: webApp.url }));
+      const g = await page.waitScreen((x) => x.screen === 'message' && x.title === NEWS_TITLE, 20_000, `message « ${NEWS_TITLE} » dans Quai Web`);
+      check(sameList(g.lines.slice(0, -1), NEWS_129_WEB), `message de Quai Web : ${JSON.stringify(g.lines)}`);
+      await page.waitFor(`!!document.querySelector('.news')`, 15_000, 'bannière « Nouveau » de l’onglet Réglages');
+      await checkBannerFolded(page);
+      const lines = await bannerLines(page);
+      check(sameList(lines, BANNER_129_WEB), `bannière de Quai Web : ${JSON.stringify(lines)}`);
+      return { glasses: g };
+    });
+  });
 }
 
 /* ------------------------------ Réouverture de Quai (Chrome : stockage gardé) ------------------------------ */
 
 async function reopen(): Promise<void> {
   for (const [name, P, seen] of [
+    ['news-once-1.2.8', P128, '1.2.8'],
     ['news-once-1.2.5', P125, '1.2.5'],
     ['news-once-1.2.4', P124, '1.2.4'],
     ['news-once-1.2.3', P123, '1.2.3'],
@@ -3050,6 +3274,7 @@ async function reopen(): Promise<void> {
           const g = await page.waitScreen((s) => s.screen === 'message' && s.title === NEWS_TITLE, 20_000, `message « ${NEWS_TITLE} »`);
           check(sameList(g.lines.slice(0, -1), newsFor(seen)), `message des lunettes ${JSON.stringify(g.lines)}`);
           await page.waitFor(`!!document.querySelector('.news')`, 15_000, 'bannière du téléphone');
+          await checkBannerFolded(page);
           const lines = await bannerLines(page);
           check(sameList(lines, bannerFor(seen)), `bannière ${JSON.stringify(lines)}`);
           check(!(await page.text('main')).includes('Bienvenue'), 'pas d’écran « Bienvenue » après la mise à jour');
@@ -3170,12 +3395,18 @@ async function reopen(): Promise<void> {
     await phoneStep(page, 'undo-identical', async () => {
       // REVUE-USAGE n° 3 : ★ des départs de la gare du Nord (ouverts seuls : l'arrêt repère du tram 3 et du tram 4),
       // « garder une ligne », le tram 3 retiré puis rétabli dans les 5 s : « Lignes de bus, tram, métro » du téléphone
-      // identique (place, nom, terminus, ouverture d'office à moins de 300 m)
-      await page.goto(pageUrl(PCUR(S2), '#/'));
-      const lines = `document.querySelector('#h-follows')?.closest('section')`;
-      const state = () => page.eval<string>(`(() => { const s = ${lines}; return s ? s.innerText + ' | ' + [...s.querySelectorAll('.pick-near input')].map((i) => i.checked).join(',') : ''; })()`);
-      await page.waitFor(`(${lines})?.innerText.includes('Churchill ↔ Esplanade')`, 15_000, '« Lignes de bus, tram, métro » du téléphone');
-      const before = await state();
+      // identique (place, nom, terminus, ouverture d'office à moins de 300 m) ; 1.2.9 : sur son écran, #/lignes (rangées,
+      // rang dans les lunettes, interrupteur « Ouvrir d’office » et son état)
+      await page.goto(pageUrl(PCUR(S2), '#/lignes'));
+      // terminus retrouvés pour chaque ligne (sinon « STIB · les deux sens » le temps de les chercher)
+      const terminus = (x: PickItem[]) => x.some((i) => i.t2 === 'STIB · Churchill ↔ Esplanade') && x.every((i) => i.t2 && !i.t2.endsWith('les deux sens'));
+      const before = JSON.stringify(await waitItems(page, terminus, '« Lignes de bus, tram, métro » du téléphone', 15_000));
+      check(/"t1":"Tram 3"/.test(before) && /"nearOn":true/.test(before), `tram 3 suivi, ouvert d’office : ${before}`);
+      // 1.2.9 (relecture) : l'accueil du téléphone, à côté des lunettes, suit la ligne retirée puis rétablie
+      await hashGo(page, '#/');
+      await waitHome(page, 8_000);
+      const linesCount = `(() => { ${NORM} const a = [...document.querySelectorAll('.mirror .nav-row')].find((x) => n(x.querySelector('.t1')?.textContent) === 'Lignes de bus, tram, métro'); return n(a?.querySelector('.count')?.textContent); })()`;
+      check((await page.eval<string>(linesCount)) === '2 lignes', `« Lignes de bus, tram, métro   2 lignes » sur l’accueil : « ${await page.eval<string>(linesCount)} »`);
       await page.waitScreen((s) => s.screen === 'board' && /★$/.test(s.title) && s.lines[0] === '★ garder une ligne', 20_000, 'départs de Gare du Nord ouverts seuls, ★');
       // la ligne ★ en tête du tableau (le curseur commence sur le premier départ) ; un glissement reçu juste après un
       // rendu est écarté par l'anti-rebond des lunettes (QUAI_GESTURE « écarté : après un rendu ») : refait, comme une
@@ -3189,11 +3420,12 @@ async function reopen(): Promise<void> {
       await page.waitScreen((s) => s.screen === 'keepLine' && s.lines[0] === 'tram 3   ★', 10_000, '« garder une ligne »');
       await page.gesture('tap');
       await page.waitScreen((s) => s.screen === 'keepLine' && s.lines[s.lines.length - 1] === '★ Retirée. Toucher encore : annuler', 5_000, 'retirée');
+      await page.waitFor(`${linesCount} === '1 ligne'`, 3_000, 'accueil du téléphone : « 1 ligne » après le retrait dans les lunettes');
       await page.gesture('tap');
       await page.waitScreen((s) => s.screen === 'keepLine' && s.lines[s.lines.length - 1] === '★ Ligne rétablie', 5_000, 'rétablie');
-      await page.goto(pageUrl({ ...S2 }, '#/'));
-      await page.waitFor(`(${lines})?.innerText.includes('Churchill ↔ Esplanade')`, 15_000, '« Lignes de bus, tram, métro » relu');
-      const after = await state();
+      await page.waitFor(`${linesCount} === '2 lignes'`, 3_000, 'accueil du téléphone : « 2 lignes » après le rétablissement');
+      await page.goto(pageUrl({ ...S2 }, '#/lignes'));
+      const after = JSON.stringify(await waitItems(page, terminus, '« Lignes de bus, tram, métro » relu', 15_000));
       check(after === before, `« Lignes de bus, tram, métro » identique (place, nom, ouverture d’office) :\n${before}\n≠\n${after}`);
       const stored = await page.eval<string>(`localStorage.getItem('quai.settings') ?? ''`);
       check(!/"kind":"stop"/.test(stored), 'jamais d’arrêt favori (PRD-1.2.2 § 4)');
@@ -3209,13 +3441,13 @@ async function tourPhone(): Promise<void> {
   type Shot = { file: string; params: Record<string, string>; hash: string; what: string; data?: string; scroll?: string };
   const shots: Shot[] = [
     { file: 'phone-onboarding.png', params: { ...S3, reset: '1' }, hash: '#/', what: 'Premier lancement, étape « Bienvenue »' },
-    { file: 'phone-home.png', params: PNICE(S3), hash: '#/', what: 'Accueil du téléphone : « Où vas-tu ? », « Mes favoris », puis les gares, les arrêts et les lignes' },
-    { file: 'phone-picks.png', params: PCUR(S3), hash: '#/gares', what: '« Gares de train », « Arrêts de bus, tram, métro » et « Lignes de bus, tram, métro » sur l’accueil du téléphone', scroll: 'Gares de train' },
+    { file: 'phone-home.png', params: PNICE(S3), hash: '#/', what: 'Accueil du téléphone (1.2.9) : « Bonjour » et « Réglages », « Où vas-tu ? », puis « Dans tes lunettes » : « Favoris » et les favoris, « Autour de moi », les gares, les arrêts et les lignes' },
+    { file: 'phone-picks.png', params: PCUR(S3), hash: '#/gares', what: 'Écran « Gares de train » (1.2.9) : la liste dans l’ordre des lunettes, puis « Ajouter une gare » et « Près de toi »', scroll: 'Gares de train' },
     { file: 'phone-places.png', params: PNICE(S1), hash: '#/favoris/fav-maison', what: 'Un lieu de « Mes favoris » : nom, adresse et accès, créneau « En tête de l’accueil »' },
     { file: 'phone-favorites.png', params: PNICE(S3), hash: '#/favoris', what: 'Mes favoris : endroits et trajets fixes dans une seule liste' },
     { file: 'phone-favorite-edit.png', params: PCUR(S2), hash: '#/favoris/fav-gand', what: 'Modifier un trajet fixe (en modification, pas de choix « Un endroit » ou « Un trajet de A à B »)' },
     { file: 'phone-trips.png', params: PCUR(S1), hash: '#/trajets', what: '« Trajets » : marche maximale et marge avant de partir' },
-    { file: 'phone-display.png', params: PCUR(S2), hash: '#/affichage', what: 'Affichage : « À l’ouverture de Quai », « Ordre des favoris » et l’aperçu de l’accueil des lunettes 1.2.2 (« Favoris », « Gares », « Bus, tram, métro »)', scroll: 'À l’ouverture de Quai' },
+    { file: 'phone-display.png', params: PCUR(S2), hash: '#/affichage', what: 'Affichage (1.2.9) : l’aperçu de l’accueil des lunettes en haut, puis « Accueil des lunettes » (rayon, ordre des favoris, ouverture de Quai) et « Sur tous les écrans »' },
     { file: 'phone-alerts.png', params: PCUR(S1), hash: '#/alertes', what: 'Alertes' },
     { file: 'phone-data.png', params: PCUR(S2), hash: '#/donnees', what: `Données, avec « Version de Quai ${APP_VERSION} » et « Adresses »` },
     { file: 'phone-search.png', params: PCUR(S3), hash: '#/recherche?q=Gand', what: 'Recherche « Gand » dans le champ unique' },
@@ -3373,44 +3605,68 @@ async function s126(): Promise<void> {
   });
   await withChrome(async (page) => {
     await phoneStep(page, 'tel-accueil', async () => {
+      // 1.2.9 : les trois rubriques sur l'accueil du téléphone, une ligne chacune (« Lignes » : le bus W, puis le tram 3
+      // et le tram 4 repris de la 1.2.5, leurs pastilles)
       await page.goto(pageUrl(P126(S2), '#/'));
-      await waitText(page, /Lignes de bus, tram, métro[\s\S]*Ajouter une ligne/, 'sections « Arrêts » et « Lignes »');
+      await waitHome(page);
+      const rows = (await homeRows(page)).slice(2);
+      check(sameList(rows.map((r) => `${r.t1} : ${r.count}`), ['Gares de train : 1 gare', 'Arrêts de bus, tram, métro : 1 arrêt', 'Lignes de bus, tram, métro : 3 lignes']) && rows[2].t2 === 'W 3 4', `rubriques « Gares », « Arrêts » et « Lignes » : ${JSON.stringify(rows)}`);
       await sleep(1_500);
       return { shot: true, scroll: { text: 'Gares de train' } };
     });
     await phoneStep(page, 'tel-ajout-ligne', async () => {
+      // 1.2.9 (PRD-1.2.9 § 2.2) : #/lignes/ajouter mène à l'écran de la liste, curseur sur l'ajout dessous
       await hashGo(page, '#/lignes/ajouter');
       await waitText(page, /Près de toi[\s\S]*Métro 2/, 'lignes près de toi');
+      check(nbn(await page.eval<string>(`document.activeElement?.textContent`)) === 'Ajouter une ligne', 'curseur sur « Ajouter une ligne »');
       await sleep(1_200);
-      return { shot: true };
+      return { shot: true, scroll: { text: 'Ajouter une ligne' }, keepFocus: true };
     });
     await phoneStep(page, 'tel-ajout-ligne-m2', async () => {
       await page.eval(`(() => { const r = [...document.querySelectorAll('.near-row')].find((x) => /Métro 2/.test(x.textContent)); r.querySelector('button').click(); return true; })()`);
       await page.waitFor(`[...document.querySelectorAll('.near-row')].some((x) => /Métro 2/.test(x.textContent) && /Ajoutée/.test(x.textContent))`, 5_000, 'métro 2 ajouté');
+      // 1.2.9 : la ligne ajoutée paraît aussitôt dans la liste au-dessus
+      await waitItems(page, (x) => x.some((i) => i.t1 === 'Métro 2'), 'Métro 2 dans la liste de « Lignes »', 5_000);
       await sleep(300);
-      return { shot: true };
+      return { shot: true, scroll: { text: 'Ajouter une ligne' } };
     });
     await phoneStep(page, 'tel-lignes', async () => {
+      // 1.2.9 : l'écran « Lignes de bus, tram, métro » (le métro 2 en dernier), et « 4 lignes » sur l'accueil
+      await hashGo(page, '#/lignes');
+      const all = ['Bus W', 'Tram 3', 'Tram 4', 'Métro 2'];
+      const items = await waitItems(page, (x) => sameList(x.map((i) => i.t1), all), 'Métro 2 en dernier dans « Lignes »');
+      check(items.every((i) => !i.open), `rangées repliées : ${JSON.stringify(items)}`);
       await hashGo(page, '#/');
-      await waitText(page, /Métro 2/, 'Métro 2 dans « Lignes »');
+      await waitHome(page, 8_000);
+      const li = (await homeRows(page)).find((r) => r.t1 === 'Lignes de bus, tram, métro');
+      check(li?.count === '4 lignes' && li.label === `Lignes de bus, tram, métro, 4 lignes : ${all.join(', ')}`, `« Lignes » sur l’accueil : ${JSON.stringify(li)}`);
+      await hashGo(page, '#/lignes');
+      await waitItems(page, (x) => x.length === 4, 'écran « Lignes »');
       await sleep(1_200);
-      return { shot: true, scroll: { text: 'Arrêts de bus, tram, métro' } };
+      return { shot: true };
     });
     await phoneStep(page, 'tel-ajout-arret', async () => {
       await hashGo(page, '#/lignes/ajouter/arret');
       await waitText(page, /Gare du Nord[\s\S]*Rogier/, 'arrêts proches');
+      check((await screenHead(page)).title === 'Arrêts de bus, tram, métro', '#/lignes/ajouter/arret : l’écran des arrêts');
       await sleep(1_500);
-      return { shot: true };
+      return { shot: true, scroll: { text: 'Ajouter un arrêt' } };
     });
     await phoneStep(page, 'tel-ajout-gare', async () => {
       await hashGo(page, '#/gares/ajouter');
       await waitText(page, /Près de toi[\s\S]*Bruxelles/, 'gares proches');
       await sleep(800);
-      return { shot: true };
+      return { shot: true, scroll: { text: 'Ajouter une gare' } };
     });
     await phoneStep(page, 'tel-nouveau', async () => {
+      // 1.2.9 (PRD-1.2.9 § 2.1) : bannière repliée ; « Voir ce qui change » déplie les nouveautés, dont celles de la 1.2.6
       await page.goto(pageUrl(P126NEWS(S2), '#/'));
-      await waitText(page, /trois rubriques/, 'bannière « Nouveau »');
+      await page.waitFor(`!!document.querySelector('.news')`, 15_000, 'bannière « Nouveau »');
+      await checkBannerFolded(page);
+      check(!/trois rubriques/.test(await page.text('main')), 'nouveautés cachées tant que la bannière est repliée');
+      await page.click('.news .news-more');
+      await waitText(page, /trois rubriques/, 'bannière dépliée');
+      check((await page.eval<string>(`document.querySelector('.news .news-more')?.getAttribute('aria-expanded')`)) === 'true', '« Voir ce qui change » : aria-expanded="true"');
       return { shot: true };
     });
   });
@@ -3492,9 +3748,249 @@ async function s128(): Promise<void> {
   });
 }
 
+/* ------------------------------ 1.2.9 : le téléphone en miroir des lunettes ------------------------------ */
+
+/** Réglages enregistrés dans le stockage local de la page (Chrome). */
+const stored = <T>(page: Page, expr: string) => page.eval<T>(`(() => { const s = JSON.parse(localStorage.getItem('quai.settings') || '{}'); return ${expr}; })()`);
+/** Annonce de l'écran d'une rubrique (liveRegion sous la liste). */
+const listLive = async (page: Page) => nbn(await page.eval<string>(`document.querySelector('.lists-screen > .live')?.textContent`));
+/** Rangée et contrôle qui ont le curseur dans un écran Gares, Arrêts ou Lignes : « Tram 3 up ». */
+const itemFocus = (page: Page) =>
+  page.eval<string>(`(() => { ${NORM} const a = document.activeElement; return n(a?.closest('.pick-item')?.querySelector('.pick-head .t1')?.textContent) + ' ' + (a?.dataset?.act ?? ''); })()`);
+/** Rangées « Près de toi » de l'ajout : « Tram 3 | Ajoutée ✓ ». */
+const nearRows = (page: Page) =>
+  page.eval<string[]>(`(() => { ${NORM} return [...document.querySelectorAll('.pick-add-section .near-row')].map((r) => n(r.querySelector('.t1')?.textContent) + ' | ' + n(r.querySelector('button')?.textContent)); })()`);
+
+/**
+ * 1.2.9 (docs/v1.2.9/PRD-1.2.9.md § 2, § 4) : un utilisateur de la 1.2.8 à 12:10 à la gare du Nord, dans Chrome. L'accueil
+ * en miroir des lunettes (§ 2.1 : « Bonjour » et « Réglages », « Où vas-tu ? », la bannière « Nouveau dans Quai 1.2.9 »
+ * repliée, dépliée, fermée, « Dans tes lunettes »), Réglages et ses pas-à-pas (§ 2.3), Affichage et son retour (§ 2.4),
+ * l'écran « Lignes de bus, tram, métro » (§ 2.2 : rangée dépliée, « Ouvrir d’office », ↑ et ↓, retrait confirmé dans la
+ * page, l'ajout « Près de toi » sur le même écran), une rubrique vide ; le message « Quai 1.2.9 » des lunettes (§ 4).
+ */
+async function s129(): Promise<void> {
+  await withChrome(async (page) => {
+    await phoneStep(page, 'tel-accueil', async () => {
+      await page.goto(pageUrl(P128(S2), '#/'));
+      await waitHome(page);
+      await page.waitFor(`(() => { const a = [...document.querySelectorAll('.fav-card .fav-row .answer')]; return a.length === 3 && a.every((x) => !x.textContent.endsWith('…')); })()`, 20_000, 'réponses des 3 favoris montrés');
+      const head = await page.eval<string>(`(() => { ${NORM} const hd = document.querySelector('header.head-home'); const b = hd?.querySelector('a.head-btn'); return [n(hd?.querySelector('.eyebrow')?.textContent), n(hd?.querySelector('h1')?.textContent), n(b?.textContent), b?.getAttribute('href')].join(' | '); })()`);
+      check(head === 'Quai | Bonjour | Réglages | #/reglages', `en-tête : ${head}`);
+      check(!/Les départs en direct|Belgian Mobility Company/.test(await page.text('main')), 'plus de phrase des départs en direct ni de sources sur l’accueil (PRD-1.2.9 § 2.1)');
+      // « Où vas-tu ? », puis la bannière, puis « Dans tes lunettes »
+      const order = await page.eval<boolean>(`(() => { const w = document.querySelector('.where'), b = document.querySelector('.news'), m = document.querySelector('.mirror-sec'); return !!(w && b && m) && !!(w.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) && !!(b.compareDocumentPosition(m) & Node.DOCUMENT_POSITION_FOLLOWING); })()`);
+      check(order, '« Où vas-tu ? », puis la bannière « Nouveau », puis « Dans tes lunettes »');
+      // depuis la 1.2.8 : les seules nouveautés de la 1.2.9, cachées tant que la bannière est repliée
+      await checkBannerFolded(page);
+      const lines = await bannerLines(page);
+      check(sameList(lines, bannerFor('1.2.8')) && sameList(lines, BANNER_129), `bannière depuis la 1.2.8 : ${JSON.stringify(lines)}`);
+      check(!(await page.text('main')).includes('reprend celui des lunettes'), 'nouveautés cachées, bannière repliée');
+      const sec = await page.eval<string>(`(() => { ${NORM} const s = document.querySelector('.mirror-sec'); const a = s?.querySelector('.sec-link'); return [n(s?.querySelector('h2')?.textContent), n(s?.querySelector('.sec-lead')?.textContent), n(a?.textContent), a?.getAttribute('href')].join(' | '); })()`);
+      check(sec === `Dans tes lunettes | Mêmes rubriques, même ordre. | Aperçu | ${AFFICHAGE_FROM_HOME}`, `section « Dans tes lunettes » : ${sec}`);
+      const rows = await homeRows(page);
+      check(sameList(rows.map((r) => r.t1), HOME_TITLES) && sameList(rows.map((r) => r.href), HOME_HREFS), `rubriques des lunettes, dans leur ordre : ${JSON.stringify(rows.map((r) => [r.t1, r.href]))}`);
+      check(rows[0].count === '3' && rows[1].t2 === 'à moins de 500 m' && sameList(rows.slice(2).map((r) => r.count), ['1 gare', '1 arrêt', '2 lignes']) && rows[4].t2 === '3 4', `nombres, rayon et pastilles : ${JSON.stringify(rows)}`);
+      // les 3 favoris montrés (HOME_FAVORITES), en retrait sous « Favoris », chacun sa réponse et son bouton « Lunettes »
+      const favs = await page.eval<string[]>(`(() => { ${NORM} return [...document.querySelectorAll('.fav-card .fav-row')].map((r) => { const t = n(r.querySelector('.t1')?.textContent); return [t, n(r.querySelector('.answer')?.textContent) ? 'réponse' : 'sans réponse', n(r.querySelector('button.btn-glasses')?.getAttribute('aria-label')) === 'Afficher ' + t + ' dans les lunettes' ? 'Lunettes' : 'sans bouton'].join(' | '); }); })()`);
+      check(favs.length === 3 && favs.every((f) => /^\S.* \| réponse \| Lunettes$/.test(f)), `favoris de l’accueil : ${JSON.stringify(favs)}`);
+      const g = await page.waitScreen((x) => x.screen === 'message' && x.title === NEWS_TITLE, 20_000, `message « ${NEWS_TITLE} » dans les lunettes`);
+      check(sameList(g.lines.slice(0, -1), NEWS_129), `message des lunettes depuis la 1.2.8 : les trois lignes de la 1.2.9 : ${JSON.stringify(g.lines)}`);
+      return { shot: true, glasses: g };
+    });
+    await phoneStep(page, 'tel-nouveau', async () => {
+      // « Voir ce qui change » déplie les nouveautés dans la bannière
+      await page.click('.news .news-more');
+      await page.waitFor(`(document.querySelector('.news')?.innerText ?? '').replace(/[\\u00a0\\u202f]/g, ' ').includes('reprend celui des lunettes')`, 5_000, 'nouveautés dépliées');
+      check((await page.eval<string>(`document.querySelector('.news .news-more')?.getAttribute('aria-expanded')`)) === 'true', '« Voir ce qui change » : aria-expanded="true"');
+      return { shot: true, scroll: '.news' };
+    });
+    await phoneStep(page, 'tel-reglages', async () => {
+      // « OK » ferme la bannière pour de bon, le curseur passe à « Dans tes lunettes »
+      await page.clickText('OK', '.news');
+      await page.waitFor(`!document.querySelector('.news')`, 5_000, 'bannière fermée par « OK »');
+      check((await page.eval<string>(`document.activeElement?.id`)) === 'h-miroir', 'curseur sur « Dans tes lunettes » après « OK »');
+      await page.click('header.head-home a.head-btn');
+      await page.waitFor(`location.hash === '#/reglages'`, 5_000, '« Réglages » ouvre #/reglages');
+      await waitText(page, /Marche maximale/, 'écran « Réglages »');
+      const hd = await screenHead(page);
+      check(hd.back === 'Accueil' && hd.title === 'Réglages' && hd.lead === 'Favoris, gares, arrêts et lignes se règlent sur l’accueil, dans l’ordre des lunettes.', `en-tête de « Réglages » : ${JSON.stringify(hd)}`);
+      const groups = (await page.eval<string[]>(`[...document.querySelectorAll('.screen .group-title')].map((g) => g.textContent)`)).map(nbn);
+      check(sameList(groups, ['Dans les lunettes', 'Tes trajets', 'Quai']), `groupes : ${JSON.stringify(groups)}`);
+      // Affichage (rayon, « ~ », pluie), Alertes, Position et langue, Données ; plus de « Mes favoris »
+      const nav = await page.eval<string[]>(`(() => { ${NORM} return [...document.querySelectorAll('.screen .nav-row')].map((a) => [n(a.querySelector('.t1')?.textContent), n(a.querySelector('.t2')?.textContent), a.getAttribute('href')].join(' | ')); })()`);
+      check(nav.length === 4 && /^Affichage \| Rayon 500 m, .+ \| #\/affichage$/.test(nav[0]) && /^Alertes \| \S.* \| #\/alertes$/.test(nav[1]) && nav[2] === 'Position et langue | Noms en français | #/bienvenue' && /^Données \| \S.* \| #\/donnees$/.test(nav[3]), `lignes de « Réglages » : ${JSON.stringify(nav)}`);
+      check(!(await page.text('main')).includes('Mes favoris'), '« Mes favoris » n’est plus dans les réglages');
+      // « Marche maximale » et « Marge avant de partir » réglables sur place, enregistrés tout de suite
+      const steppers = async () => page.eval<string[]>(`(() => { ${NORM} return [...document.querySelectorAll('.screen .stepper-row')].map((r) => n(r.querySelector('.c1')?.textContent) + ' | ' + n(r.querySelector('output')?.textContent)); })()`);
+      const st = await steppers();
+      check(st.length === 2 && st[0] === 'Marche maximale | 10 min' && /^Marge avant de partir \| \d+ min$/.test(st[1] ?? ''), `pas-à-pas : ${JSON.stringify(st)}`);
+      await page.click('button[aria-label="Augmenter la marche maximale"]');
+      await page.waitFor(`JSON.parse(localStorage.getItem('quai.settings') || '{}').maxWalkMin === 11`, 5_000, 'marche maximale 11 min enregistrée');
+      check((await steppers())[0] === 'Marche maximale | 11 min', `« + » : ${JSON.stringify(await steppers())}`);
+      await page.click('button[aria-label="Réduire la marche maximale"]');
+      await page.waitFor(`JSON.parse(localStorage.getItem('quai.settings') || '{}').maxWalkMin === 10`, 5_000, 'marche maximale 10 min enregistrée');
+      const foot = nbn(await page.eval<string>(`document.querySelector('.screen .foot.sources')?.textContent`));
+      check(foot === 'Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company', `sources en bas : « ${foot} »`);
+      return { shot: true };
+    });
+    await phoneStep(page, 'tel-affichage', async () => {
+      await page.eval(`(() => { ${NORM} [...document.querySelectorAll('.screen .nav-row')].find((a) => n(a.querySelector('.t1')?.textContent) === 'Affichage').click(); return true; })()`);
+      await page.waitFor(`location.hash === '#/affichage'`, 5_000, '« Affichage » ouvre #/affichage');
+      await waitText(page, /Ordre des favoris/, 'écran « Affichage »');
+      await page.waitFor(`!!document.querySelector('.preview-top .preview[role=img]')`, 8_000, 'aperçu de l’accueil des lunettes');
+      const hd = await screenHead(page);
+      check(hd.back === 'Réglages' && hd.title === 'Affichage', `en-tête de « Affichage » : ${JSON.stringify(hd)}`);
+      // l'aperçu en haut, puis « Accueil des lunettes » (rayon, ordre des favoris, ouverture) et « Sur tous les écrans »
+      const layout = await page.eval<{ second: string; groups: string[]; legends: string[]; switches: string[] }>(`(() => { ${NORM}
+        const s = document.querySelector('.screen.display');
+        const g = [...s.querySelectorAll('.group')];
+        return { second: s.children[1]?.className ?? '', groups: g.map((x) => n(x.querySelector('.group-title')?.textContent)), legends: g[0] ? [...g[0].querySelectorAll('legend')].map((l) => n(l.textContent)) : [], switches: g[1] ? [...g[1].querySelectorAll('.switch-row .c1')].map((l) => n(l.textContent)) : [] };
+      })()`);
+      check(layout.second === 'preview-top', `aperçu juste sous l’en-tête : ${layout.second}`);
+      check(sameList(layout.groups, ['Accueil des lunettes', 'Sur tous les écrans']), `groupes : ${JSON.stringify(layout.groups)}`);
+      check(sameList(layout.legends, ['Rayon de « Autour de moi »', 'Ordre des favoris', 'À l’ouverture de Quai']), `« Accueil des lunettes » : ${JSON.stringify(layout.legends)}`);
+      check(sameList(layout.switches, ['Aides de gestes', 'Signaler les horaires prévus', 'Pluie pendant la marche']), `« Sur tous les écrans » : ${JSON.stringify(layout.switches)}`);
+      return { shot: true };
+    });
+    await phoneStep(page, 'tel-lignes', async () => {
+      // Affichage revient à Réglages, Réglages à l'accueil ; « Lignes de bus, tram, métro » ouvre son écran
+      await page.clickText('Réglages', 'header.head');
+      await page.waitFor(`location.hash === '#/reglages'`, 5_000, 'Affichage revient à Réglages');
+      await page.clickText('Accueil', 'header.head');
+      await waitHome(page, 5_000);
+      await page.eval(`(() => { ${NORM} [...document.querySelectorAll('.mirror .nav-row')].find((a) => n(a.querySelector('.t1')?.textContent) === 'Lignes de bus, tram, métro').click(); return true; })()`);
+      await page.waitFor(`location.hash === '#/lignes'`, 5_000, '« Lignes de bus, tram, métro » ouvre #/lignes');
+      const hd = await screenHead(page);
+      check(hd.back === 'Accueil' && hd.title === 'Lignes de bus, tram, métro' && hd.lead === 'Dans tes lunettes, dans cet ordre. Chaque ligne s’y affiche dans les deux sens.', `en-tête de « Lignes » : ${JSON.stringify(hd)}`);
+      let items = await waitItems(page, (x) => x.length === 2 && x[0].t2 === 'STIB · Churchill ↔ Esplanade', 'tram 3 et tram 4, terminus retrouvés', 15_000);
+      check(sameList(items.map((i) => i.t1), ['Tram 3', 'Tram 4']) && items.every((i) => !i.open && !i.shown) && items[0].auto === 'Ouvre d’office près de Gare du Nord', `rangées repliées, ouvertes d’office près de leur arrêt repère : ${JSON.stringify(items)}`);
+      // une rangée se déplie au toucher : « Ouvrir d’office », « Ordre dans les lunettes » (↑ grisé en tête), « Retirer »
+      check(await toggleItem(page, 'Tram 3'), 'rangée « Tram 3 »');
+      items = await waitItems(page, (x) => !!x[0]?.open, 'tram 3 déplié', 3_000);
+      const t3 = items[0];
+      check(t3.shown && t3.auto === '' && t3.near === 'Ouvrir d’office | à moins de 300 m de Gare du Nord' && t3.nearOn === true && t3.order === '1er sur 2' && t3.up === true && t3.down === false && t3.remove === 'Retirer cette ligne', `rangée dépliée : ${JSON.stringify(t3)}`);
+      check(!items[1].open && !items[1].shown, `une seule rangée dépliée : ${JSON.stringify(items[1])}`);
+      return { shot: true };
+    });
+    await phoneStep(page, 'tel-lignes-ordre', async () => {
+      // ↓ : le tram 3 passe 2e (rang annoncé, curseur gardé sur la rangée, ↓ grisé au bout, ordre des lunettes
+      // enregistré) ; ↑ : de retour en tête
+      await itemAct(page, 'Tram 3', 'down');
+      let items = await waitItems(page, (x) => x[0]?.t1 === 'Tram 4', 'tram 3 descendu', 5_000);
+      check(items[1].t1 === 'Tram 3' && items[1].open && items[1].order === '2e sur 2' && items[1].down === true && items[1].up === false, `après ↓ : ${JSON.stringify(items)}`);
+      check((await itemFocus(page)) === 'Tram 3 up', `curseur sur ↑ du tram 3 (↓ grisé) : « ${await itemFocus(page)} »`);
+      check((await listLive(page)) === 'Tram 3 : 2e sur 2.', `annonce « ${await listLive(page)} »`);
+      const lines = await stored<string[]>(page, `(s.follows ?? []).map((f) => f.line)`);
+      check(sameList(lines, ['4', '3']), `ordre enregistré : ${JSON.stringify(lines)}`);
+      await itemAct(page, 'Tram 3', 'up');
+      items = await waitItems(page, (x) => x[0]?.t1 === 'Tram 3', 'tram 3 remonté', 5_000);
+      check(items[0].order === '1er sur 2' && items[0].up === true && items[0].down === false, `après ↑ : ${JSON.stringify(items[0])}`);
+    });
+    await phoneStep(page, 'tel-lignes-retrait', async () => {
+      // « Ouvrir d’office » coupé : enregistré, la rangée repliée ne le dit plus ; rallumé
+      await itemAct(page, 'Tram 3', 'near');
+      await page.waitFor(`(JSON.parse(localStorage.getItem('quai.settings') || '{}').follows ?? []).find((f) => f.line === '3')?.near !== true`, 5_000, 'ouverture d’office coupée, enregistrée');
+      await toggleItem(page, 'Tram 3');
+      let items = await waitItems(page, (x) => !!x[0] && !x[0].open, 'tram 3 replié', 3_000);
+      check(items[0].nearOn === false && items[0].auto === '', `coupé, replié : ${JSON.stringify(items[0])}`);
+      await toggleItem(page, 'Tram 3');
+      await itemAct(page, 'Tram 3', 'near');
+      await page.waitFor(`(JSON.parse(localStorage.getItem('quai.settings') || '{}').follows ?? []).find((f) => f.line === '3')?.near === true`, 5_000, 'ouverture d’office rallumée, enregistrée');
+      await toggleItem(page, 'Tram 3');
+      items = await waitItems(page, (x) => !!x[0] && !x[0].open, 'tram 3 replié', 3_000);
+      check(items[0].nearOn === true && items[0].auto === 'Ouvre d’office près de Gare du Nord', `rallumé, replié : ${JSON.stringify(items[0])}`);
+      // « Retirer cette ligne » : confirmé dans la page ; « Annuler » ne retire rien
+      await toggleItem(page, 'Tram 4');
+      await itemAct(page, 'Tram 4', 'remove');
+      const q = nbn(await page.waitFor<string>(`document.querySelector('.pick-item .confirm .confirm-q')?.textContent`, 3_000, 'question du retrait'));
+      check(q === 'Retirer Tram 4 de tes lignes ?', `question « ${q} »`);
+      await page.clickText('Annuler', '.pick-item .confirm');
+      await page.waitFor(`!document.querySelector('.pick-item .confirm')`, 3_000, '« Annuler »');
+      check((await pickItems(page)).length === 2, '« Annuler » : rien n’est retiré');
+      await itemAct(page, 'Tram 4', 'remove');
+      await page.waitFor(`!!document.querySelector('.pick-item .confirm')`, 3_000, 'question du retrait');
+      await page.clickText('Retirer', '.pick-item .confirm .confirm-actions');
+      items = await waitItems(page, (x) => x.length === 1, 'tram 4 retiré', 5_000);
+      check(items[0].t1 === 'Tram 3', `reste le tram 3 : ${JSON.stringify(items)}`);
+      check((await listLive(page)) === 'Tram 4 n’est plus dans tes lignes.', `annonce « ${await listLive(page)} »`);
+      check((await itemFocus(page)) === 'Tram 3 head', `curseur sur la rangée restante : « ${await itemFocus(page)} »`);
+      check(sameList(await stored<string[]>(page, `(s.follows ?? []).map((f) => f.line)`), ['3']), 'retrait enregistré');
+    });
+    await phoneStep(page, 'tel-lignes-ajout', async () => {
+      // l'ajout sur le même écran (#/lignes/ajouter : curseur sur « Ajouter une ligne ») : « Près de toi », « Ajoutée ✓ »
+      // pour le tram 3 suivi, « Ajouter » pour le tram 4 retiré ; un toucher le remet, en fin de liste
+      await hashGo(page, '#/lignes/ajouter');
+      check(nbn(await page.eval<string>(`document.activeElement?.textContent`)) === 'Ajouter une ligne', 'curseur sur « Ajouter une ligne »');
+      await page.waitFor(`document.querySelectorAll('.pick-add-section .near-row').length >= 3`, 10_000, '« Près de toi »');
+      const rows = await nearRows(page);
+      check(rows.includes('Tram 3 | Ajoutée ✓') && rows.includes('Tram 4 | Ajouter') && rows.includes('Métro 2 | Ajouter'), `« Près de toi » : ${JSON.stringify(rows)}`);
+      await page.eval(`(() => { ${NORM} const r = [...document.querySelectorAll('.pick-add-section .near-row')].find((x) => n(x.querySelector('.t1')?.textContent) === 'Tram 4'); r.querySelector('button').click(); return true; })()`);
+      await page.waitFor(`[...document.querySelectorAll('.pick-add-section .near-row')].some((x) => /Tram.4/.test(x.textContent) && /Ajoutée/.test(x.textContent))`, 5_000, 'tram 4 « Ajoutée ✓ »');
+      await waitItems(page, (x) => sameList(x.map((i) => i.t1), ['Tram 3', 'Tram 4']), 'tram 4 de nouveau dans la liste, en dernier', 5_000);
+      await sleep(600);
+      return { shot: true, scroll: { text: 'Ajouter une ligne' } };
+    });
+    await phoneStep(page, 'tel-accueil-vide', async () => {
+      // rubriques vides (PRD-1.2.9 § 2.1) : « à choisir », le toucher ouvre l'ajout ; sans favori : « Aucun favori » et
+      // le lien d'ajout
+      await page.goto(pageUrl(PEMPTY(S2), '#/'));
+      await waitHome(page);
+      const rows = await homeRows(page);
+      check(rows[0].t1 === 'Favoris' && rows[0].count === 'Aucun favori', `« Favoris » sans favori : ${JSON.stringify(rows[0])}`);
+      check(nbn(await page.eval<string>(`document.querySelector('.fav-card .add-link')?.textContent`)) === 'Ajouter un favori' && (await page.eval<string>(`document.querySelector('.fav-card .add-link')?.getAttribute('href')`)) === '#/favoris/nouveau', 'lien « Ajouter un favori »');
+      check(sameList(rows.slice(2).map((r) => `${r.count} ${r.href}`), ['à choisir #/gares/ajouter', 'à choisir #/arrets/ajouter', 'à choisir #/lignes/ajouter']), `rubriques vides : ${JSON.stringify(rows.slice(2))}`);
+      await page.eval(`(() => { ${NORM} [...document.querySelectorAll('.mirror .nav-row')].find((a) => n(a.querySelector('.t1')?.textContent) === 'Gares de train').click(); return true; })()`);
+      await page.waitFor(`location.hash === '#/gares/ajouter'`, 5_000, '« Gares de train » vide ouvre l’ajout');
+      await waitText(page, /Aucune gare|Ajouter une gare/, 'écran « Gares de train »');
+      check(nbn(await page.eval<string>(`document.activeElement?.textContent`)) === 'Ajouter une gare', 'curseur sur « Ajouter une gare »');
+      check((await pickItems(page)).length === 0, 'aucune gare dans la liste');
+    });
+    await phoneStep(page, 'tel-accueil-favoris', async () => {
+      // au-delà de 3 favoris (PRD-1.2.9 § 2.1, relecture) : « Voir les 2 autres favoris » les montre de la même façon,
+      // chacun sa réponse et son bouton « Lunettes » (rien ne disparaît : en 1.2.8, tous avaient le leur)
+      await page.goto(pageUrl(PMANY(S1), '#/'));
+      await waitHome(page);
+      const rows = await homeRows(page);
+      check(rows[0].t1 === 'Favoris' && rows[0].count === '5', `« Favoris   5 » : ${JSON.stringify(rows[0])}`);
+      const shown = await page.eval<number>(`document.querySelectorAll('.fav-card .fav-row').length`);
+      const more = nbn(await page.eval<string>(`document.querySelector('.fav-card .more-favs')?.textContent`));
+      check(shown === 3 && more === 'Voir les 2 autres favoris', `3 favoris, puis « ${more} » (${shown} montrés)`);
+      await page.click('.fav-card .more-favs');
+      await page.waitFor(`document.querySelectorAll('.fav-card .fav-row').length === 5 && !document.querySelector('.fav-card .more-favs')`, 5_000, 'les 2 autres favoris montrés');
+      check(await page.eval<boolean>(`document.activeElement === document.querySelectorAll('.fav-card .fav-row')[3]?.querySelector('button.btn-glasses')`), 'curseur sur le bouton « Lunettes » du premier favori ajouté');
+      await page.waitFor(`(() => { const a = [...document.querySelectorAll('.fav-card .fav-row .answer')]; return a.length === 5 && a.every((x) => x.textContent && !x.textContent.endsWith('…')); })()`, 25_000, 'réponses des 5 favoris');
+      const favs = await page.eval<string[]>(`(() => { ${NORM} return [...document.querySelectorAll('.fav-card .fav-row')].map((r) => { const t = n(r.querySelector('.t1')?.textContent); return n(r.querySelector('button.btn-glasses')?.getAttribute('aria-label')) === 'Afficher ' + t + ' dans les lunettes' ? t : 'sans bouton'; }); })()`);
+      check(favs.length === 5 && !favs.includes('sans bouton'), `les 5 favoris et leur bouton « Lunettes » : ${JSON.stringify(favs)}`);
+      check(new Set(favs).size === 5, `cinq favoris différents : ${JSON.stringify(favs)}`);
+      // le bouton d'un favori ajouté : ce favori dans les lunettes, le message à côté du bouton
+      const n = page.screens().length;
+      await page.eval(`document.querySelectorAll('.fav-card .fav-row')[4].querySelector('button.btn-glasses').click(), true`);
+      const g = await page.waitScreen((x) => x.screen === 'steps' && x.title.startsWith(favs[4]), 20_000, `« ${favs[4]} » dans les lunettes`, n);
+      const msg = nbn(await page.waitFor<string>(`document.querySelectorAll('.fav-card .fav-row')[4].querySelector('.msg')?.textContent`, 10_000, 'message à côté du bouton'));
+      check(/^Affiché dans les lunettes/.test(msg), `message « ${msg} »`);
+      return { shot: true, scroll: '.fav-card', glasses: g };
+    });
+    await phoneStep(page, 'tel-affichage-accueil', async () => {
+      // « Autour de moi » et « Aperçu » ouvrent Affichage, qui revient alors à l'accueil (PRD-1.2.9 § 2.1, § 2.3)
+      for (const [label, sel] of [['« Autour de moi »', `.mirror .nav-row[href="${AFFICHAGE_FROM_HOME}"]`], ['« Aperçu »', '.mirror-sec a.sec-link']]) {
+        await waitHome(page, 8_000);
+        await page.click(sel);
+        await page.waitFor(`location.hash === ${JSON.stringify(AFFICHAGE_FROM_HOME)}`, 5_000, `${label} ouvre Affichage`);
+        await waitText(page, /Ordre des favoris/, 'écran « Affichage »');
+        const hd = await screenHead(page);
+        check(hd.back === 'Accueil' && hd.title === 'Affichage', `${label} : en-tête de « Affichage » ${JSON.stringify(hd)}`);
+        await page.clickText('Accueil', 'header.head');
+        await page.waitFor(`location.hash === '#/'`, 5_000, `${label} : Affichage revient à l’accueil`);
+      }
+      await waitHome(page, 8_000);
+    });
+  });
+}
+
 /* ------------------------------ Lancement ------------------------------ */
 
 const SCENARIOS: [string, string, () => Promise<void>][] = [
+  ['s129', '1.2.9 : téléphone en miroir des lunettes (Chrome) : accueil, bannière « Nouveau dans Quai 1.2.9 », Réglages et ses pas-à-pas, Affichage, écran « Lignes » (rangée dépliée, ouvrir d’office, ordre, retrait), ajout « Près de toi », rubriques vides', s129],
   ['s128', '1.2.8 : un train, tout son trajet : de Namur, puis l’IC de 07:42 qui roule, vu de Bruxelles-Nord (gares quittées en pâle, ● où il arrive, curseur sur la gare du tableau)', s128],
   ['s126', '1.2.6 : départs de l’arrêt repère ouverts seuls, « Gares de train », « Arrêts » et « Lignes », toute la ligne dans un sens, l’autre sens, Waterloo et le bus W, message, téléphone (ajouts « Près de toi »)', s126],
   ['s1', 'le matin à Namur : accueil 1.2.6, étapes, « Suivre ce trajet », « Ne plus suivre », « Fin du trajet », « Autres trajets », Favoris et adresses récentes, Gares de train, tableau complet, arrêts d’un départ et retours (1.2.3), Arrêts, Lignes, toute la ligne, sortie', s1],
@@ -3507,14 +4003,14 @@ const SCENARIOS: [string, string, () => Promise<void>][] = [
   ['s3run', 'vers Gand en accéléré : dans le train, aide à l’arrivée, « ★ garder ce trajet » déjà gardé', s3run],
   ['waterloo', 'Waterloo : accueil (Favoris 3, Maison jamais montrée, la gare dans « Gares »), trajet au milieu et au bout, « Autres trajets », « Plus tôt », retours, rubrique vide', waterloo],
   ['holiday', 'jour férié : dernière ligne de l’accueil le 11/11, rien le 12/11', holiday],
-  ['news', `mise à jour depuis la 1.2.5, la 1.2.4, la 1.2.3, la 1.2.2, la 1.2.1, la 1.2.0, la 1.1 et la 1.0 : message « ${NEWS_TITLE} » (avec la 1.2.6 pour qui vient de la 1.2.5 ou d’avant), favoris migrés, arrêts et lignes rangés, « Favoris »`, news],
+  ['news', `mise à jour depuis la 1.2.8, la 1.2.5, la 1.2.4, la 1.2.3, la 1.2.2, la 1.2.1, la 1.2.0, la 1.1 et la 1.0 : message « ${NEWS_TITLE} » (avec la 1.2.8 pour qui vient de la 1.2.7 ou d’avant), favoris migrés, arrêts et lignes rangés, « Favoris »`, news],
   ['firstrun', 'premier lancement : bienvenue, accueil sans favori avec l’aide des gestes, « Favoris » vide, rubriques à choisir, sortie', firstrun],
   ['errors', 'horaires injoignables puis nouvel essai, relais muet, aucun arrêt, l’arrêt le plus proche', errors],
   ['stale', 'horaires périmés', stale],
   ['late', '23:30 : passages et départs de demain', late],
-  ['phone', 'téléphone (Chrome) : bannière, migration visible, Mes favoris, Trajets, Nouveau favori et ses onglets, gare vers « Gares », cartes 1.2.1, jour férié, Garder en favori, champ, ordre, Affichage, données, premier lancement', phone],
+  ['phone', 'téléphone (Chrome) : bannière, migration visible, accueil en miroir des lunettes et ses rubriques, Mes favoris, Trajets, Nouveau favori et ses onglets, gare vers « Gares », cartes 1.2.1, jour férié, Garder en favori, champ, ordre, Affichage, données, premier lancement', phone],
   ['keep', '« ★ garder ce trajet » depuis ma position (Chrome, accéléré) : un lieu', keep],
-  ['web', 'Quai Web (Chrome) : onglet Lunettes (accueil 1.2.2, relief), rubrique « Position » avec une adresse', webPosition],
+  ['web', 'Quai Web (Chrome) : onglet Lunettes (accueil 1.2.2, relief), rubrique « Position » avec une adresse, message et bannière « Quai 1.2.9 » de l’onglet Réglages', webPosition],
   ['reopen', `réouverture de Quai (Chrome) : « ${NEWS_TITLE} » et la bannière une fois, aide des gestes 7 jours, trajet repris, fin du trajet, ligne retirée puis rétablie à l’identique`, reopen],
   ['tour', 'images du téléphone pour app/test/screens (--tour)', tourPhone],
 ];
@@ -3554,7 +4050,8 @@ async function main(): Promise<void> {
   const p123 = { ...p11, seenVersion: '1.2.3' };
   const p124 = { ...p11, seenVersion: '1.2.4' };
   const p125 = { ...p11, seenVersion: '1.2.5' };
-  const pcur = { ...p11, seenVersion: '1.2.8' };
+  const p128 = { ...p11, seenVersion: '1.2.8' };
+  const pcur = { ...p11, seenVersion: '1.2.9' };
   // Adresses récentes : des lieux publics (PRD-1.2.2 : jamais d'adresse personnelle dans les tests ni les captures).
   const recent = [
     { label: 'Grand-Place, 1000 Bruxelles', lat: 50.8467, lon: 4.3525, at: Date.parse('2026-11-09T18:20:00+01:00') },
@@ -3570,6 +4067,7 @@ async function main(): Promise<void> {
   write('1.2.3.json', p123);
   write('1.2.4.json', p124);
   write('1.2.5.json', p125);
+  write('1.2.8.json', p128);
   write('current.json', pcur);
   write('recent.json', { ...pcur, recent });
   write('phone.json', {
@@ -3578,6 +4076,17 @@ async function main(): Promise<void> {
     recent: [{ label: 'Boulevard du Centenaire 1, 1020 Bruxelles', lat: 50.8915, lon: 4.334, at: Date.parse('2026-11-09T18:20:00+01:00') }],
   });
   write('empty.json', { ...pcur, places: [], favorites: [], recent: [] });
+  // 1.2.9 : 5 favoris, des trajets fixes entre des gares (lieux publics)
+  const favs11 = (p11 as unknown as { favorites: { id: string; from?: unknown; to?: unknown }[] }).favorites;
+  const gand = favs11.find((f) => f.id === 'fav-gand')!;
+  write('many.json', {
+    ...pcur,
+    favorites: [
+      ...favs11,
+      { kind: 'trip', id: 'fav-gand-retour', from: gand.to, to: gand.from, propose: 'never' },
+      { kind: 'trip', id: 'fav-central-namur', from: gand.from, to: { type: 'area', areaId: 'sncb:8863008', op: 'sncb', name: { fr: 'Namur', nl: 'Namen' }, lat: 50.4685, lon: 4.8625 }, propose: 'never' },
+    ],
+  });
   write('nice.json', {
     ...pcur,
     places: [

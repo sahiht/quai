@@ -166,6 +166,8 @@ export function placeForm(ctx: PhoneCtx, o: PlaceFormOptions): HTMLElement {
   // Modification : l'endroit se change dans le champ unique (avec « Ma position actuelle »).
   const legacy = !!existing && needsCheck(existing);
   let field: ReturnType<typeof placeField> | null = null;
+  // Choix en cours : une position arrivée après un autre choix (ou une saisie) ne le remplace pas.
+  let pickSeq = 0;
   if (existing) {
     field = placeField(ctx, {
       id: 'pl-lieu',
@@ -175,17 +177,21 @@ export function placeForm(ctx: PhoneCtx, o: PlaceFormOptions): HTMLElement {
       recent: true,
       // Texte changé après un choix (« 25 » corrigé en « 52 ») : le choix ne vaut plus, il faut en refaire un.
       onEdit: () => {
+        pickSeq++;
+        live.say('');
         spot = null;
         confirmSpot();
         sync();
       },
       onPick: async (c) => {
+        const my = ++pickSeq;
         if (c.kind === 'here') {
           spot = null;
           confirmSpot();
           sync();
           live.say(T.hereSearching);
           const s = await hereSpot(ctx);
+          if (my !== pickSeq) return;
           if (!s) return live.say(typo(ctx.web ? T.hereDownWeb : T.hereDown), true);
           spot = s;
           live.say('');

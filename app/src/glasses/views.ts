@@ -159,7 +159,17 @@ export function firstRunView(ctx: ViewCtx): GlassesView {
 }
 
 /** Titre du message de nouveautés (une fois, après la mise à jour depuis une version antérieure). */
-export const NEWS_TITLE = 'Quai 1.2.8';
+export const NEWS_TITLE = 'Quai 1.2.9';
+
+/** 1.2.9 : lignes du message « Quai 1.2.9 » (PRD-1.2.9 § 4) ; chacune tient sur une ligne des lunettes. */
+export const NEWS_LINES_129: readonly string[] = [
+  `« imminent »${NB}: seulement d’après le temps réel.`,
+  `Téléphone${NB}: l’accueil reprend celui des lunettes.`,
+  `Réglages${NB}: tout derrière un seul bouton.`,
+];
+
+/** 1.2.9 : les mêmes sur Quai Web, où la page du téléphone est l'onglet Réglages. */
+export const NEWS_LINES_129_WEB: readonly string[] = [NEWS_LINES_129[0], `Onglet Réglages${NB}: il reprend l’accueil des lunettes.`, NEWS_LINES_129[2]];
 
 /** 1.2.8 : lignes du message « Quai 1.2.8 » (PRD-1.2.8 § 4) ; chacune tient sur une ligne des lunettes. */
 export const NEWS_LINES_128: readonly string[] = [
@@ -187,12 +197,13 @@ export const NEWS_LINES_125: readonly string[] = [
 ];
 
 /**
- * Lignes du message « Quai 1.2.8 », une seule fois : celles de la 1.2.8 ; à qui vient d'avant la 1.2.6, aussi celles de
- * la 1.2.6, puis d'avant la 1.2.5, celles de la 1.2.5 : les plus récentes d'abord, une version entière ou rien, NEWS_MAX
- * lignes au plus (un écran).
+ * Lignes du message « Quai 1.2.9 », une seule fois : celles de la 1.2.9 ; à qui vient d'avant la 1.2.8, aussi celles de
+ * la 1.2.8, puis d'avant la 1.2.6, celles de la 1.2.6, puis d'avant la 1.2.5, celles de la 1.2.5 : les plus récentes
+ * d'abord, une version entière ou rien, NEWS_MAX lignes au plus (un écran).
  */
-export function newsLines(seen = ''): string[] {
-  const blocks: (readonly string[])[] = [NEWS_LINES_128];
+export function newsLines(seen = '', web = false): string[] {
+  const blocks: (readonly string[])[] = [web ? NEWS_LINES_129_WEB : NEWS_LINES_129];
+  if (seen && compareVersions(seen, '1.2.8') < 0) blocks.push(NEWS_LINES_128);
   if (seen && compareVersions(seen, '1.2.6') < 0) blocks.push(NEWS_LINES);
   if (seen && compareVersions(seen, '1.2.5') < 0) blocks.push(NEWS_LINES_125);
   const out: string[] = [];
@@ -200,9 +211,9 @@ export function newsLines(seen = ''): string[] {
   return out;
 }
 
-/** Message « Quai 1.2.8 » : toucher mène à l'accueil. `lines` : celles calculées à l'ouverture (route du message). */
-export function newsView(ctx: ViewCtx, lines: string[] = newsLines()): GlassesView {
-  return messageView(NEWS_TITLE, lines.length ? lines : newsLines(), ctx, { hints: HINTS.news, tap: { kind: 'continue' } });
+/** Message « Quai 1.2.9 » : toucher mène à l'accueil. `lines` : celles calculées à l'ouverture (route du message). */
+export function newsView(ctx: ViewCtx, lines: string[] = newsLines('', !!ctx.web)): GlassesView {
+  return messageView(NEWS_TITLE, lines.length ? lines : newsLines('', !!ctx.web), ctx, { hints: HINTS.news, tap: { kind: 'continue' } });
 }
 
 export function notConfiguredView(ctx: ViewCtx): GlassesView {
@@ -657,9 +668,12 @@ function stopItem(r: LineRow, ctx: ViewCtx, f: PassageFlags): Item {
   const stop = displayName(p.name, l);
   if (r.missing || r.stop?.missing) return missingLine({ a: stop, segs: [{ t: stop }] }, ctx, true);
   const deps = r.stop ? upcoming(r.stop.departures, ctx.now).slice(0, 2) : undefined;
+  // 1.2.9 : un tableau gardé (rafraîchissement en échec, shownRows) dont tous les départs sont passés ne dit plus rien
+  // de sûr : « … », jamais « aucun passage dans les prochaines heures »
+  const stale = !!deps && !deps.length && !!r.stop?.departures.length;
   if (r.stop?.rtErrors.length) f.rtDown = true;
   for (const d of deps ?? []) if (!d.rt && !d.cancelled) f.planned = true;
-  const sub: SubRow[] = !deps
+  const sub: SubRow[] = !deps || stale
     ? [{ b: '…' }]
     : deps.length
       ? deps.map((d) => ({ b: '', segs: lineWords(vehicleLong(d.mode, d.line), headText(d.head, l, d.op)), bRight: departureWait(d, ctx.now, mp(ctx)) }))
@@ -748,11 +762,13 @@ export function lineRunMissingView(title: string, ctx: ViewCtx): GlassesView {
 /**
  * 1.2.6 : toute la ligne dans un sens, « Tram 3 vers Churchill » : chaque arrêt dans l'ordre, ○ devant son nom, ● quand
  * un véhicule arrive (il est entre l'arrêt d'avant et celui-ci) ; un arrêt d'une variante, que seuls certains voyages
- * desservent : ◇ (◆ quand un véhicule y arrive). À droite les 2 prochains passages (« imminent · 8 min », « ~4 · ~12
- * min », « demain ~05:32 ») ; l'arrêt le plus proche dit sa distance (« à 80 m ») et porte le curseur à l'ouverture ;
- * enfin « ↔ Autre sens vers Esplanade » quand la ligne a un sens inverse (`run.other` ; une ligne en morceaux a un sens
- * par morceau). Ligne du haut : la légende de ce qui est à l'écran, « ● : un tram arrive », « ◇ : pas tous les trams »,
- * ou les deux. Toucher un arrêt : les passages de la ligne à cet arrêt (détail de la 1.2.2).
+ * desservent : ◇ (◆ quand un véhicule y arrive). À droite, 1.2.7 : le prochain passage en clair (nextPassageText :
+ * « dans 5 min », « dans ~5 min », « demain ~05:32 » ; à moins d'une minute, « imminent » avec le temps réel,
+ * « dans ~1 min » sur l'horaire prévu, 1.2.9) ; l'arrêt le plus proche dit sa distance (« à 80 m ») et porte le
+ * curseur à l'ouverture ; enfin « ↔ Autre sens vers Esplanade » quand la ligne a un sens inverse (`run.other` ; une
+ * ligne en morceaux a un sens par morceau). Ligne du haut : la légende de ce qui est à l'écran, « ● : un tram
+ * arrive », « ◇ : pas tous les trams », ou les deux. Toucher un arrêt : les passages de la ligne à cet arrêt (détail
+ * de la 1.2.2).
  */
 export function lineRunView(r: LineRunRoute, follow: LineFollow, run: LineRun, ctx: ViewCtx): GlassesView {
   const l = lang(ctx);
@@ -809,9 +825,10 @@ export function lineRunView(r: LineRunRoute, follow: LineFollow, run: LineRun, c
 /**
  * Détail d'une ligne à son arrêt (§ 3) : pour chaque sens, « vers {terminus} » puis ses 4 prochains passages, en
  * retrait : heure prévue (« ~ » sans temps réel, retard « +3 »), terminus s'il diffère (« jusqu'à Waterloo Eglise »
- * pour un passage partiel), attente (« dans 3 min », « imminent », « SUPPRIMÉ ») ; enfin « Tous les départs de
- * l'arrêt ». 1.2.3 (PRD-1.2.3 § 2) : curseur de passage en passage, la liste défile par page ; toucher un passage :
- * ses arrêts ; « Tous les départs de l'arrêt » : le tableau complet. `works` : alerte travaux (ligne du haut).
+ * pour un passage partiel), attente (« dans 3 min », « SUPPRIMÉ » ; à moins d'une minute, « imminent » avec le temps
+ * réel, « dans 1 min » sur l'horaire prévu, dont l'heure porte déjà le « ~ », 1.2.9) ; enfin « Tous les départs de l'arrêt ». 1.2.3 (PRD-1.2.3 § 2) :
+ * curseur de passage en passage, la liste défile par page ; toucher un passage : ses arrêts ; « Tous les départs de
+ * l'arrêt » : le tableau complet. `works` : alerte travaux (ligne du haut).
  */
 export function lineView(r: LineRoute, b: LineBoard, ctx: ViewCtx, works?: string): GlassesView {
   const l = lang(ctx);
@@ -830,7 +847,8 @@ export function lineView(r: LineRoute, b: LineBoard, ctx: ViewCtx, works?: strin
       // 1.2.3 (§ 2) : toucher un passage ouvre ses arrêts
       // 1.2.4 (PRD-1.2.4 § 4) : l'heure alignée dans sa case (bLead), le « ~ » dans le retrait
       const t = passageParts(d, mp(ctx));
-      const item: Item = { a: '', bLead: t.lead, b: other ? `${t.rest}  ${other}` : t.rest, c: waitText(d, ctx.now), action: { kind: 'open', route: stopsRoute(b.area.id, d) }, key: departureKey(d) };
+      // 1.2.9 : l'attente ne répète pas le « ~ » déjà devant l'heure (« ~07:59   dans 1 min ») ; la note « ~ » suit la page
+      const item: Item = { a: '', bLead: t.lead, b: other ? `${t.rest}  ${other}` : t.rest, c: waitText(d, ctx.now, false), action: { kind: 'open', route: stopsRoute(b.area.id, d) }, key: departureKey(d), ...(t.lead.includes('~') ? { planned: true } : {}) };
       if (k === 0) item.group = group;
       const last = lastMark(d);
       if (last) item.bTail = last;
@@ -841,7 +859,10 @@ export function lineView(r: LineRoute, b: LineBoard, ctx: ViewCtx, works?: strin
   v.items.push({ a: SECTION.allDepartures, action: { kind: 'open', route: { screen: 'board', areaId: r.areaId, name: r.name } } });
   if (works) v.top = { text: `! ${works}`, strong: true };
   // Le détail dit le terminus d'un passage partiel en toutes lettres : la ligne du bas n'a pas besoin de « * ».
-  v.note = passagesNote({ ...f, partial: false }, ctx);
+  // 1.2.9 : « ~ horaire prévu » seul : dit sous une page qui montre un « ~ » (notePlanned), comme toute la ligne
+  const note = passagesNote({ ...f, partial: false }, ctx);
+  if (note === NOTE_PLANNED) v.notePlanned = note;
+  else v.note = note;
   v.reserveNote = true;
   // 1.2.3 : curseur de passage en passage (sur le premier à l'ouverture), la liste défile par page
   v.paged = true;
@@ -1017,6 +1038,20 @@ export function stopsTitle(d: Pick<Departure, 'op' | 'mode' | 'line' | 'head'>, 
 }
 
 /**
+ * 1.2.9 : titre d'un départ d'un autre jour, « Bus 69 vers Braine-le-Chateau Quatre Bras (Rue…, demain » : la
+ * destination est coupée avant le jour, jamais lui (les heures des arrêts ne le disent pas).
+ */
+function dayTitle(title: string, day: string): string {
+  return fitTitle(title, `, ${day}`);
+}
+
+/** 1.2.9 : un titre dont la fin (« , SUPPRIMÉ », « , +3 min », « , demain ») n'est jamais coupée : le début l'est avant. */
+function fitTitle(title: string, tail: string): string {
+  if (!tail || textWidth(title + tail) <= WIDTHS.title) return title + tail;
+  return `${truncate(title, WIDTHS.title - textWidth(tail))}${tail}`;
+}
+
+/**
  * 1.2.3 (PRD-1.2.3 § 2) : les arrêts d'un départ. En haut, au plus clair, l'arrêt du tableau (son heure, son nom, sa
  * voie) ; dessous, un ton plus pâle, les arrêts suivants jusqu'au terminus : l'heure prévue (« ~ » sans temps réel,
  * retard « +3 »), le nom, la voie d'un train (modifiée : « voie 6 ! ») ou « SUPPRIMÉ ». Curseur sur le premier arrêt
@@ -1031,7 +1066,7 @@ export function stopsView(r: StopsRoute, ds: DepartureStops, ctx: ViewCtx): Glas
   if (ds.op === 'sncb') return trainRunView(ds, ctx);
   const [first, ...rest] = ds.stops;
   const day = dayWord(first.sched, ctx.now);
-  const v = base('stops', 'stops', day ? `${title}, ${day}` : title, ctx);
+  const v = base('stops', 'stops', day ? dayTitle(title, day) : title, ctx);
   const m = mp(ctx);
   // 1.2.4 (PRD-1.2.4 § 4) : heures alignées dans leur case (aLead), retard à la suite
   const t0 = stopTimeParts(first, m);
@@ -1039,11 +1074,17 @@ export function stopsView(r: StopsRoute, ds: DepartureStops, ctx: ViewCtx): Glas
   v.top = { text: [stopTimeText(first, m), cols[1], cols[2]].filter(Boolean).join(COL_SEP), cols, lead: t0.lead, strong: true };
   for (const c of rest) {
     const t = stopTimeParts(c, m);
-    const item: Item = { a: t.rest, aLead: t.lead, b: displayName(c.name, l), c: stopRightText(c) };
+    const item: Item = { a: t.rest, aLead: t.lead, b: displayName(c.name, l), c: stopRightText(c), ...(t.lead.includes('~') ? { planned: true } : {}) };
     if (c.areaId) item.action = { kind: 'open', route: { screen: 'board', areaId: c.areaId, name: c.name } };
     v.items.push(item);
   }
-  v.note = ctx.stale ?? (ds.anyPlanned && m ? NOTE_PLANNED : undefined);
+  // 1.2.9 : « ~ horaire prévu » sous une page qui montre un « ~ » (notePlanned) ; l'arrêt du haut, à l'horaire prévu,
+  // le montre sur toutes les pages : la note aussi
+  if (ctx.stale) v.note = ctx.stale;
+  else if (ds.anyPlanned && m) {
+    if (t0.lead.includes('~')) v.note = NOTE_PLANNED;
+    else v.notePlanned = NOTE_PLANNED;
+  }
   v.reserveNote = true;
   v.paged = true;
   v.hints = hints(ctx, HINTS.stops);
@@ -1055,9 +1096,10 @@ export function stopsView(r: StopsRoute, ds: DepartureStops, ctx: ViewCtx): Glas
  * 1.2.8 (PRD-1.2.8 § 1, § 2) : tout le trajet d'un train touché dans un tableau, comme toute la ligne : ses gares, de sa
  * gare de départ à son terminus ; ○ devant chacune, ● sur celle où il arrive (d'après le temps réel seul,
  * trainProgress), dit par la ligne du haut ; le nom au plus clair, la voie en pâle (modifiée : au plus clair,
- * « voie 6 ! ») ; à droite le passage en clair (« dans 6 min », « imminent », « à 23:40 », « ~ » sans temps réel) ou
- * « SUPPRIMÉ ». Les gares que le train a quittées, tout en pâle, avec leur heure. Curseur sur la gare du tableau, la
- * gare d'avant au-dessus d'elle ; toucher une gare : ses départs. Départ d'un autre jour : « , demain » au titre.
+ * « voie 6 ! ») ; à droite le passage en clair (« dans 6 min », « à 23:40 », « ~ » sans temps réel ; « imminent » avec
+ * le temps réel seulement, « dans ~1 min » sur l'horaire prévu, 1.2.9) ou « SUPPRIMÉ ». Les gares que le train a
+ * quittées, tout en pâle, avec leur heure. Curseur sur la gare du tableau, la gare d'avant au-dessus d'elle ; toucher
+ * une gare : ses départs. Départ d'un autre jour : « , demain » au titre.
  */
 export function trainRunView(ds: DepartureStops, ctx: ViewCtx): GlassesView {
   const l = lang(ctx);
@@ -1065,7 +1107,7 @@ export function trainRunView(ds: DepartureStops, ctx: ViewCtx): GlassesView {
   const at = Math.min(Math.max(0, ds.at ?? 0), ds.stops.length - 1);
   const title = stopsTitle(ds, l);
   const day = dayWord(ds.stops[at].sched, ctx.now);
-  const v = base('trainRun', 'lines', day ? `${title}, ${day}` : title, ctx);
+  const v = base('trainRun', 'lines', day ? dayTitle(title, day) : title, ctx);
   const { passed, vehicle } = trainProgress(ds.stops, ctx.now);
   ds.stops.forEach((c, i) => {
     const gone = passed[i];
@@ -1536,16 +1578,24 @@ export function othersView(r: OthersRoute, journeys: Journey[], ctx: ViewCtx): G
 
 /** Titre de « Dans le train » : « IC vers Bruxelles-Midi, +2 min » ; 1.2.2 (n° 8) : « Tram 4 vers Stalle », « Bus W vers … ». */
 export function trainTitle(leg: Leg, l: NameLang, now?: number): string {
+  const p = trainTitleParts(leg, l, now);
+  return p.main + p.tail;
+}
+
+/** 1.2.9 : le titre de « Dans le train » en deux parties : le véhicule et sa destination, puis l'état et le jour. */
+function trainTitleParts(leg: Leg, l: NameLang, now?: number): { main: string; tail: string } {
   const head = leg.head ? ` vers ${headText(leg.head, l, leg.op)}` : '';
   const delay = leg.cancelled ? ', SUPPRIMÉ' : leg.delayMin && leg.delayMin > 0 ? `, +${minText(leg.delayMin)}` : '';
   const day = now === undefined ? '' : dayWord(leg.schedDep, now);
-  return `${vehicleWords(leg)}${head}${delay}${day ? `, ${day}` : ''}`;
+  return { main: `${vehicleWords(leg)}${head}`, tail: `${delay}${day ? `, ${day}` : ''}` };
 }
 
 export function trainView(j: Journey, legIndex: number, ctx: ViewCtx): GlassesView {
   const leg = j.legs[legIndex];
   if (!leg || leg.kind !== 'ride') return messageView('Dans le train', ['Trajet introuvable.'], ctx, { hints: HINTS.message });
-  const v = base('train', 'train', trainTitle(leg, lang(ctx), ctx.now), ctx);
+  // 1.2.9 : « , SUPPRIMÉ », « , +3 min » et « , demain » jamais coupés par une longue destination (fitTitle)
+  const t = trainTitleParts(leg, lang(ctx), ctx.now);
+  const v = base('train', 'train', fitTitle(t.main, t.tail), ctx);
   const known = (leg.stops?.length ?? 0) >= 2;
   const stops = known
     ? leg.stops!

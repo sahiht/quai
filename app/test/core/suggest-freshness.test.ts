@@ -70,9 +70,10 @@ describe('suggest', () => {
     };
     // sans position : les trajets « ici » sont ignorés, l'arrêt favori est proposé
     const s = await core.suggest(null, evening);
-    expect(s).toMatchObject({ favoriteId: 'fav-dl', autoOpen: false, title: 'Bruxelles-Nord\u00a0: 232 Vilvorde imminent' });
+    // scène noRT : horaire prévu à moins d’une minute, jamais « imminent » mais « ~1 min » (1.2.9)
+    expect(s).toMatchObject({ favoriteId: 'fav-dl', autoOpen: false, title: 'Bruxelles-Nord\u00a0: 232 Vilvorde ~1\u00a0min' });
     const nl = await core.suggest(null, { ...evening, lang: 'nl' });
-    expect(nl?.title).toBe('Brussel Noordstation\u00a0: 232 Vilvoorde imminent');
+    expect(nl?.title).toBe('Brussel Noordstation\u00a0: 232 Vilvoorde ~1\u00a0min');
     // depuis la gare du Nord (1.1 : retours du soir vers Namur) : l'IC 17:18 pour la maison de Namur
     const toNamur = await core.suggest(POS.s2, evening);
     expect(toNamur).toMatchObject({ favoriteId: 'fav-namur', title: 'Pour la maison\u00a0: IC 17:18, voie 3', subtitle: 'partir à 17:13, 3\u00a0min à pied' });

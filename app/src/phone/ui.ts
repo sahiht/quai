@@ -152,6 +152,44 @@ export function radios<T extends string>(opts: { legend: string; big?: boolean; 
   );
 }
 
+/** Icône décorative des écrans 1.2.9, même dessin que celles de dom.ts (trait vert, 2 px). */
+const glyph = (body: string, size = 20): string =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="#1F7A45" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+
+/** 1.2.9 : icônes de l'accueil en miroir des lunettes (PRD-1.2.9 § 2.1). */
+export const MIRROR_ICON = {
+  star: glyph('<path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z"></path>'),
+  nearby: glyph('<path d="M3 11l18-8-8 18-2-8z"></path>'),
+  eye: glyph('<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle>', 18),
+  info: glyph('<circle cx="12" cy="12" r="9"></circle><path d="M12 11v5"></path><path d="M12 8h.01"></path>'),
+  down: glyph('<path d="M6 9l6 6 6-6"></path>', 16),
+};
+
+/**
+ * 1.2.9 : ligne de liste qui ouvre un écran (un vrai lien) : icône, titre (un texte, ou le mot clé et sa précision
+ * pâle), sous-titre (texte ou pastilles), à droite ce que contient l'écran (« 2 gares », « à choisir »), chevron.
+ * `label` : nom pour les lecteurs d'écran quand le contenu ne se lit pas seul (pastilles, nombre seul).
+ */
+export function navRow(opts: { href: string; icon: Child; title: Child; sub?: Child; subClass?: string; right?: string; label?: string }): HTMLLIElement {
+  return h(
+    'li',
+    null,
+    h(
+      'a',
+      { class: 'row nav-row', href: opts.href, 'aria-label': opts.label },
+      opts.icon,
+      h('span', { class: 'txt' }, h('span', { class: 't1' }, opts.title), opts.sub ? h('span', { class: `t2${opts.subClass ? ` ${opts.subClass}` : ''}` }, opts.sub) : null),
+      opts.right ? h('span', { class: 'count' }, opts.right) : null,
+      h('span', { class: 'chev', html: ICON.chevron }),
+    ),
+  );
+}
+
+/** 1.2.9 : titre d'un groupe de réglages (« Dans les lunettes », « Tes trajets »), petit et pâle, au-dessus de sa carte. */
+export function group(id: string, title: string, ...body: Child[]): HTMLElement {
+  return h('section', { class: 'group', 'aria-labelledby': id }, h('h2', { id, class: 'group-title' }, title), ...body);
+}
+
 /** Ligne de liste cliquable : icône, titre, sous-titres (sub2 en texte courant, sub3 discret), chevron. */
 export function listRow(opts: { icon: Child; title: string; sub?: string; sub2?: string; sub3?: string; label?: string; onClick: () => void }): HTMLLIElement {
   return h(

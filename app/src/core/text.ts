@@ -61,14 +61,18 @@ export function timeText(ms: number, now: number, planned = false): string {
 export const WAIT_MAX_MIN = 60;
 
 /**
- * Attente d'un bus, d'un tram ou d'un métro (S6) : « imminent » (moins d'1 min), « 5 min », « ~5 min » ; à partir
- * de 60 min, l'heure : « 13:18 », « ~13:18 », « demain ~06:02 ». `planned` : horaire prévu à signaler (« ~ »).
+ * Attente d'un bus, d'un tram ou d'un métro (S6) : « 5 min », « ~5 min » ; à partir de 60 min, l'heure : « 13:18 »,
+ * « ~13:18 », « demain ~06:02 ». À moins d'1 min, 1.2.9 (PRD-1.2.9 § 1) : « imminent » avec le temps réel seulement ;
+ * sur l'horaire prévu, jamais « imminent » : « ~1 min » (« 1 min » quand le « ~ » n'est pas montré). Un horaire prévu
+ * à peine passé (encore gardé 30 à 60 s par les listes) s'écrit de même : sans temps réel, rien ne dit que le véhicule
+ * est passé, et le « ~ » dit déjà que l'heure est approchée. `planned` : horaire prévu à signaler (« ~ ») ; `rt` :
+ * l'attente vient du temps réel (par défaut : quand aucun « ~ » n'est demandé).
  */
-export function waitText(est: number, now: number, planned = false): string {
+export function waitText(est: number, now: number, planned = false, rt = !planned): string {
   const m = minutesUntil(est, now);
   if (m >= WAIT_MAX_MIN) return timeText(est, now, planned);
-  if (m < 1) return 'imminent';
-  return `${planned ? '~' : ''}${m}${NB}min`;
+  if (m < 1 && rt) return 'imminent';
+  return `${planned ? '~' : ''}${Math.max(1, m)}${NB}min`;
 }
 
 /** Destination affichée : STIB sans le « (P) » final des parkings de dissuasion (affichage seulement). */
@@ -191,7 +195,8 @@ export function rideSummary(l: Leg, now?: number): string {
 
 /**
  * Départ en une ligne : « T3 Churchill 2 min », « 232 Vilvorde ~5 min », « T3 Churchill 4 min, dernier », « IC 12:22 +2,
- * voie 9 » ; bus de remplacement de la SNCB : « bus SNCB Landen 5 min ».
+ * voie 9 » ; bus de remplacement de la SNCB : « bus SNCB Landen 5 min ». À moins d'une minute (waitText) : « T3
+ * Churchill imminent » avec le temps réel, « 232 Vilvorde ~1 min » sur l'horaire prévu (1.2.9).
  */
 export function departureSummary(d: Departure, now: number, lang: NameLang, markPlanned: boolean): string {
   const label = isSncbBus(d) ? SNCB_BUS_TEXT : lineLabel(d.mode, d.line);
@@ -203,5 +208,5 @@ export function departureSummary(d: Departure, now: number, lang: NameLang, mark
   const head = headName(d, lang);
   if (d.cancelled) return `${label} ${head} supprimé`;
   const last = d.last ? LAST_MARK : '';
-  return `${label} ${head} ${waitText(d.est, now, !d.rt && markPlanned)}${last}`;
+  return `${label} ${head} ${waitText(d.est, now, !d.rt && markPlanned, d.rt)}${last}`;
 }

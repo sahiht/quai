@@ -1,20 +1,25 @@
 /**
- * Accueil du téléphone (T1) : champ « Où vas-tu ? » qui ouvre la recherche, « Mes favoris » (endroits et trajets) avec
- * leur réponse courte et un bouton « Lunettes » (S8), puis « Gares » et « Bus, tram, métro » (PRD-1.2.2 § 4),
- * réglages (« Trajets » sous « Position et langue », revue d'usage n° 9), état des données.
+ * Accueil du téléphone (T1). 1.2.9 (PRD-1.2.9 § 2.1, piste C « Le miroir des lunettes ») : en-tête « Bonjour » et
+ * bouton « Réglages » (#/reglages) ; alertes « Quai n’est pas configuré » et « Horaires périmés » ; « Où vas-tu ? »
+ * (la recherche) ; bannière « Nouveau » sur une ligne, les nouveautés dépliées à la demande ; « Dans tes lunettes » :
+ * les rubriques de l'accueil des lunettes, mêmes mots, même ordre, une ligne chacune qui ouvre son écran. « Favoris »
+ * et, en retrait, jusqu'à 3 favoris dans l'ordre des lunettes, chacun avec sa réponse courte et son bouton « Lunettes »
+ * (S8) ; « Autour de moi » ; « Gares de train », « Arrêts de bus, tram, métro », « Lignes de bus, tram, métro », leur
+ * contenu à droite ou « à choisir » (le toucher ouvre alors l'ajout). Les autres réglages sont dans Réglages.
  */
 import type { Core, FavoriteAnswer, Settings } from '../../core/api';
 import { asTrip, favoriteTitle } from '../../core/favorites';
-import type { PhoneCtx } from '../app';
-import { h, icon, ICON } from '../dom';
+import type { LineFollow } from '../../core/linerun';
+import { NEWS_SINCE, type PhoneCtx } from '../app';
+import { lineBadge } from '../badges';
+import { h, icon, ICON, svgNode, type Child } from '../dom';
 import { glassesButton, showTrip } from '../glasses-link';
-import { catchable } from '../../glasses/format';
-import { shortAnswer, T, tripsSummary, typo } from '../text';
-import { listRow, messageHub } from '../ui';
+import { catchable, SECTION } from '../../glasses/format';
+import { HOME_FAVORITES } from '../../glasses/views';
+import { counted, lineName, newsTitle, shortAnswer, T, typo, withinText } from '../text';
+import { messageHub, MIRROR_ICON, navRow, nextId } from '../ui';
 import { shownFavorites, type ShownFavorite } from './favorites';
-import { followsSection, linesSection, stationsSection, type PickKind } from './picks';
-
-const LANG_TEXT = { fr: 'Noms en français', nl: 'Noms en néerlandais', local: 'Noms comme sur place' } as const;
+import { linePickName, stationTitle, type PickKind, completeLater } from './picks';
 
 /** Rafraîchissement des réponses des favoris (comme les lunettes). */
 export const ANSWER_REFRESH_MS = 30_000;
@@ -34,18 +39,6 @@ export function reusable(a: FavoriteAnswer | undefined, now: number): a is Favor
 /** Dernières réponses connues, pour l'ordre (règle 5) et un affichage immédiat au retour sur l'accueil. */
 const lastAnswers = new Map<string, FavoriteAnswer>();
 
-/** Sous-titre de la ligne « Données » (T1) : panne du temps réel dite juste (M8). */
-export function dataSubtitle(ctx: PhoneCtx): string {
-  const fresh = ctx.freshness();
-  if (!ctx.configured) return 'Appli non configurée';
-  if (ctx.coreError()) return 'Connexion à vérifier';
-  if (fresh && !fresh.ok) return 'Horaires périmés';
-  const rt = ctx.coreNow()?.status?.().rt;
-  if (rt === 'down') return T.rtDown;
-  if (rt === 'offline') return typo(T.offline);
-  return 'Tout est à jour';
-}
-
 /** Favoris dans l'ordre des lunettes (ordre intelligent du cœur, ou « Dans mon ordre ») : endroits et trajets. */
 export function orderedFavorites(core: Core | null, settings: Settings, here: { lat: number; lon: number } | null): ShownFavorite[] {
   const all = shownFavorites(settings.favorites);
@@ -61,25 +54,74 @@ export function orderedFavorites(core: Core | null, settings: Settings, here: { 
   }
 }
 
+/* ------------------------------ Rubriques (sans DOM) ------------------------------ */
+
+/** Une rubrique de l'accueil des lunettes, son contenu et l'écran qu'elle ouvre. */
+export interface Rubric {
+  kind: PickKind;
+  /** Mot clé et précision pâle, les mots des lunettes (SECTION : « Gares » et « de train »). */
+  key: string;
+  qual: string;
+  /** Ses éléments, dans l'ordre des lunettes (« Namur », « Gare du Nord », « Tram 3 »). */
+  names: string[];
+  /** À droite : « 2 gares », « 1 arrêt », « 3 lignes », ou « à choisir » pour une rubrique vide. */
+  right: string;
+  /** Son écran (#/gares), ou son ajout quand elle est vide (#/gares/ajouter), comme le toucher dans les lunettes. */
+  href: string;
+}
+
+/** « Gares de train », « Arrêts de bus, tram, métro », « Lignes de bus, tram, métro » : dans l'ordre des lunettes. */
+export function rubrics(s: Settings): Rubric[] {
+  const rubric = (kind: PickKind, key: string, qual: string, word: string, hash: string, names: string[]): Rubric => ({
+    kind,
+    key,
+    qual,
+    names,
+    right: names.length ? counted(names.length, word) : SECTION.empty,
+    href: names.length ? hash : `${hash}/ajouter`,
+  });
+  return [
+    rubric('stations', SECTION.stations, SECTION.trainQual, 'gare', '#/gares', s.stations.map((p) => stationTitle(p, s.lang))),
+    rubric('lines', SECTION.stops, SECTION.transitQual, 'arrêt', '#/arrets', s.lines.filter((p) => !p.line).map((p) => linePickName(p, s.lang))),
+    rubric('follows', SECTION.follows, SECTION.transitQual, 'ligne', '#/lignes', (s.follows ?? []).map((f) => lineName(f))),
+  ];
+}
+
+/* ------------------------------ Carte « Favoris » ------------------------------ */
+
 /**
- * Section « Mes favoris » (S8) : réponse courte, bouton « Lunettes », lien « Gérer mes favoris ».
- * `answered` : appelé après chaque rafraîchissement des réponses (l'état du temps réel est alors connu).
+ * Carte « Favoris » (S8) : la ligne « Favoris » et leur nombre (#/favoris), dessous jusqu'à 3 favoris dans l'ordre des
+ * lunettes, figé tant que l'accueil reste affiché, chacun avec sa réponse courte (rafraîchie toutes les 30 s) et son
+ * bouton « Lunettes ». 1.2.9 (relecture) : au-delà de 3, « Voir les 2 autres favoris » les montre de la même façon
+ * (rien ne disparaît : en 1.2.8, tous avaient leur bouton « Lunettes ») ; leurs réponses ne sont calculées qu'alors.
+ * Sans favori : « Aucun favori » et « Ajouter un favori ».
  */
-function favoritesSection(ctx: PhoneCtx, answered?: () => void): HTMLElement {
+function favoritesCard(ctx: PhoneCtx): HTMLElement {
   const s = ctx.settings.get();
+  const n = shownFavorites(s.favorites).length;
+  const list = h('ul', { class: 'list box mirror fav-card' });
+  list.appendChild(
+    navRow({
+      href: '#/favoris',
+      icon: h('span', { class: 'ico', html: MIRROR_ICON.star }),
+      title: T.favorites,
+      right: n ? String(n) : T.noFavShort,
+      label: n ? typo(`${T.favorites}, ${counted(n, 'favori')} : ajouter, modifier, changer l’ordre`) : `${T.favorites}, aucun favori`,
+    }),
+  );
+  if (!n) {
+    list.appendChild(h('li', { class: 'fav-sub' }, h('a', { class: 'add-link', href: '#/favoris/nouveau' }, svgNode(ICON.plus), h('span', null, T.addFav))));
+    return list;
+  }
   const hub = messageHub();
   const fix = ctx.location.last();
   const here = fix ? { lat: fix.lat, lon: fix.lon } : null;
-  const list = h('ul', { class: 'list box fav-list' });
-  const section = h('section', { class: 'home-favs', 'aria-labelledby': 'h-favs' }, h('h2', { id: 'h-favs' }, T.myFavs), list, h('a', { class: 'more-link', href: '#/favoris' }, T.manageFavs));
-  if (!shownFavorites(s.favorites).length) {
-    list.appendChild(h('li', { class: 'small empty-row' }, T.noFav));
-    return section;
-  }
-  // Ordre figé tant que l'accueil reste affiché (comme les lunettes).
-  const order = orderedFavorites(ctx.coreNow(), s, here);
+  // Ordre figé tant que l'accueil reste affiché (comme les lunettes) ; les premiers (HOME_FAVORITES), les autres sur demande.
+  const ordered = orderedFavorites(ctx.coreNow(), s, here);
+  const shown = ordered.slice(0, HOME_FAVORITES);
+  const rest = ordered.slice(HOME_FAVORITES);
   const rows = new Map<string, { name: HTMLElement; answer: HTMLElement }>();
-  for (const f of order) {
+  const favRow = (f: ShownFavorite): HTMLLIElement => {
     const name = h('span', { class: 't1' }, favoriteTitle(f, s));
     const answer = h('span', { class: 't2 answer' }, typo(shortAnswer(lastAnswers.get(f.id), ctx.clock.now(), s)));
     rows.set(f.id, { name, answer });
@@ -98,14 +140,30 @@ function favoritesSection(ctx: PhoneCtx, answered?: () => void): HTMLElement {
       const trip = asTrip(fav);
       return showTrip(ctx, { title: favoriteTitle(fav, st), from: trip.from, to: trip.to, favoriteId: fav.id, result, index: 0 });
     });
-    list.appendChild(h('li', { class: 'fav-row' }, h('span', { class: 'txt' }, name, answer), button, message));
+    return h('li', { class: 'fav-row' }, h('span', { class: 'txt' }, name, answer), button, message);
+  };
+  for (const f of shown) list.appendChild(favRow(f));
+  if (rest.length) {
+    const more = h('button', { type: 'button', class: 'add-link more-favs' }, rest.length === 1 ? 'Voir l’autre favori' : `Voir les ${rest.length} autres favoris`);
+    const moreRow = h('li', { class: 'fav-sub' }, more);
+    more.addEventListener('click', () => {
+      const added = rest.map(favRow);
+      moreRow.replaceWith(...added);
+      shown.push(...rest);
+      added[0]?.querySelector<HTMLElement>('button')?.focus();
+      // un calcul en cours ne connaît pas les favoris ajoutés : un autre le suit (sinon « … » jusqu'au suivant, 30 s)
+      if (busy) again = true;
+      void refresh();
+    });
+    list.appendChild(moreRow);
   }
 
   let busy = false;
+  let again = false;
   let first = true;
   const refresh = async (): Promise<void> => {
     // Le premier calcul part avant que le routeur n'attache l'écran ; les suivants s'arrêtent avec lui.
-    if (busy || (!first && !section.isConnected)) return;
+    if (busy || (!first && !list.isConnected)) return;
     first = false;
     busy = true;
     try {
@@ -113,7 +171,7 @@ function favoritesSection(ctx: PhoneCtx, answered?: () => void): HTMLElement {
       const fx = ctx.location.last() ?? (await ctx.location.current(6000));
       const pos = fx ? { lat: fx.lat, lon: fx.lon } : null;
       await Promise.all(
-        order.map(async (f) => {
+        shown.map(async (f) => {
           const st = ctx.settings.get();
           const fav = shownFavorites(st.favorites).find((x) => x.id === f.id);
           if (!fav) return;
@@ -134,42 +192,99 @@ function favoritesSection(ctx: PhoneCtx, answered?: () => void): HTMLElement {
       /* cœur indisponible : les réponses restent « … » */
     } finally {
       busy = false;
-      answered?.();
+      if (again) {
+        again = false;
+        void refresh();
+      }
     }
   };
   queueMicrotask(() => void refresh());
   const timer = setInterval(() => {
-    if (!section.isConnected) clearInterval(timer);
+    if (!list.isConnected) clearInterval(timer);
     else void refresh();
   }, ANSWER_REFRESH_MS);
-  return section;
+  return list;
 }
 
+/* ------------------------------ Carte des rubriques ------------------------------ */
+
+/** Pastilles des lignes suivies, dans leur ordre, à leur couleur officielle (8 au plus, puis « +3 »). */
+const MAX_BADGES = 8;
+function followBadges(ctx: PhoneCtx, follows: readonly LineFollow[]): HTMLElement {
+  const row = h('span', { class: 'badges', 'aria-hidden': 'true' }, follows.slice(0, MAX_BADGES).map((f) => lineBadge(ctx, f, true)));
+  if (follows.length > MAX_BADGES) row.append(h('span', { class: 'badge sm more' }, `+${follows.length - MAX_BADGES}`));
+  return row;
+}
+
+const RUBRIC_ICON: Record<PickKind, () => HTMLElement> = { stations: () => icon('train'), lines: () => icon('pin'), follows: () => icon('trip') };
+
+/** Ligne d'une rubrique : « Gares de train », ses noms (une ligne) ou ses pastilles, « 2 gares » ou « à choisir ». */
+function rubricRow(ctx: PhoneCtx, r: Rubric, s: Settings): HTMLLIElement {
+  const title: Child = [h('span', { class: 'kw' }, r.key), ' ', h('span', { class: 'qual' }, r.qual)];
+  const empty = !r.names.length;
+  const badges = !empty && r.kind === 'follows';
+  return navRow({
+    href: r.href,
+    icon: RUBRIC_ICON[r.kind](),
+    title,
+    sub: empty ? undefined : badges ? followBadges(ctx, s.follows ?? []) : r.names.join(', '),
+    subClass: badges ? 'sub-badges' : 'names',
+    right: r.right,
+    // Les pastilles ne se lisent pas : leurs noms dans celui du lien (« Lignes de bus, tram, métro, 3 lignes : Tram 3, … »).
+    label: badges ? typo(`${r.key} ${r.qual}, ${r.right} : ${r.names.join(', ')}`) : undefined,
+  });
+}
+
+/* ------------------------------ Bannière « Nouveau » ------------------------------ */
+
 /**
- * Accueil. `focus` (#/gares, #/lignes, PRD-1.2.2 § 1.3 et § 4) : le titre de cette section reçoit le curseur et la
- * page la montre.
+ * Bannière « Nouveau » (une fois, PRD-1.2.9 § 2.1) : « Nouveau dans Quai 1.2.9 » sur une ligne, « Voir ce qui change »
+ * déplie les nouveautés dans la bannière (aria-expanded), « OK » la ferme pour de bon ; le curseur passe alors à `next`.
  */
-export function homeScreen(ctx: PhoneCtx, _sub: string[] = [], opts: { focus?: PickKind } = {}): HTMLElement {
+function newsBanner(ctx: PhoneCtx, next: () => HTMLElement): HTMLElement | null {
+  const news = ctx.news;
+  if (!news?.visible()) return null;
+  const id = nextId('news');
+  const lines = h('div', { class: 'news-lines', id: `${id}-lignes`, hidden: true }, news.lines.map((l) => h('p', null, typo(l))));
+  // Le titre et « Voir ce qui change » forment un seul bouton (une cible de 44 px au moins, comme la maquette).
+  const more = h(
+    'button',
+    { type: 'button', class: 'news-more', 'aria-expanded': 'false', 'aria-controls': lines.id },
+    h('strong', { class: 'news-title', id: `${id}-titre` }, newsTitle(NEWS_SINCE)),
+    h('span', { class: 'news-see' }, T.seeNews, svgNode(MIRROR_ICON.down)),
+  );
+  more.addEventListener('click', () => {
+    const open = lines.hidden;
+    lines.hidden = !open;
+    more.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  const ok = h('button', { type: 'button', class: 'btn btn-secondary news-ok' }, 'OK');
+  const el = h('section', { class: 'news', 'aria-labelledby': `${id}-titre` }, h('div', { class: 'news-head' }, svgNode(MIRROR_ICON.info), more, ok), lines);
+  ok.addEventListener('click', () => {
+    news.dismiss();
+    el.remove();
+    const to = next();
+    to.tabIndex = -1;
+    to.focus();
+  });
+  return el;
+}
+
+/* ------------------------------ Accueil ------------------------------ */
+
+/** 1.2.9 (relecture) : Affichage ouvert depuis l'accueil (« Aperçu », « Autour de moi ») y revient d'un toucher. */
+export const AFFICHAGE_FROM_HOME = '#/affichage?retour=accueil';
+
+/** Ce que montre la carte des rubriques : elle n'est redessinée que si cela change. */
+const rubricKey = (s: Settings): string => JSON.stringify([s.lang, s.display.radiusM, s.stations, s.lines, s.follows ?? []]);
+
+/**
+ * Accueil. `opts.focus` (#/gares, #/arrets, #/lignes tant que leur route mène ici) : ignoré depuis la 1.2.9, les
+ * sections ayant quitté l'accueil.
+ */
+export function homeScreen(ctx: PhoneCtx, _sub: string[] = [], _opts: { focus?: PickKind } = {}): HTMLElement {
   const s = ctx.settings.get();
   const fresh = ctx.freshness();
-  const n = shownFavorites(s.favorites).length;
-  const dataRow = listRow({ icon: icon('data'), title: 'Données', sub: dataSubtitle(ctx), onClick: () => ctx.go('#/donnees') });
-  // Bannière « Nouveau » (PRD-1.2.1 § 6) : une ligne par nouveauté, « OK » dessous.
-  const banner = ctx.news?.visible()
-    ? h(
-        'div',
-        { class: 'news', role: 'status' },
-        h('div', { class: 'news-lines' }, ctx.news.lines.map((l) => h('p', null, typo(l)))),
-        h('button', {
-          type: 'button',
-          class: 'btn btn-secondary',
-          onclick: (e: Event) => {
-            ctx.news?.dismiss();
-            (e.currentTarget as HTMLElement).closest('.news')?.remove();
-          },
-        }, 'OK'),
-      )
-    : null;
   // « Où vas-tu ? » ouvre la recherche, curseur dans « Arrivée » (M4.1).
   const where = h(
     'button',
@@ -177,51 +292,69 @@ export function homeScreen(ctx: PhoneCtx, _sub: string[] = [], opts: { focus?: P
     h('span', { class: 'where-label' }, typo(T.where)),
     h('span', { class: 'where-box', html: `${ICON.searchGrey}<span>${T.wherePlaceholder}</span>` }),
   );
+  const heading = h('h2', { id: 'h-miroir' }, T.inGlasses);
+  // « Autour de moi » et les trois rubriques ; 1.2.9 (relecture) : une gare, un arrêt ou une ligne gardés ou retirés
+  // ailleurs (★ des lunettes, Quai Web côte à côte) : la carte suit
+  const rubricList = h('ul', { class: 'list box mirror' });
+  const paintRubrics = (st: Settings): void => {
+    // 1.2.9 (relecture) : une ligne reprise de la 1.2.5, pas encore complétée (« Ligne 3 ») : l'accueil la complète, comme
+    // en 1.2.8 ; la carte suit alors (« Tram 3 »)
+    for (const f of st.follows ?? []) if (!f.routes.length) void completeLater(ctx, f);
+    rubricList.replaceChildren(
+      navRow({ href: AFFICHAGE_FROM_HOME, icon: h('span', { class: 'ico', html: MIRROR_ICON.nearby }), title: T.nearby, sub: withinText(st.display.radiusM) }),
+      ...rubrics(st).map((r) => rubricRow(ctx, r, st)),
+    );
+  };
+  const mirror = h(
+    'section',
+    { class: 'mirror-sec', 'aria-labelledby': 'h-miroir' },
+    h(
+      'div',
+      { class: 'sec-head' },
+      h('div', { class: 'sec-titles' }, heading, h('p', { class: 'sec-lead' }, T.mirrorLead)),
+      h('a', { class: 'sec-link', href: AFFICHAGE_FROM_HOME, 'aria-label': T.previewLabel }, svgNode(MIRROR_ICON.eye), h('span', null, T.preview)),
+    ),
+    favoritesCard(ctx),
+    rubricList,
+  );
+  paintRubrics(s);
   const el = h(
     'div',
     { class: 'screen home' },
-    h('header', { class: 'head' }, h('span', { class: 'eyebrow' }, 'Quai'), h('h1', null, 'Bonjour'), h('p', { class: 'lead' }, ctx.web ? 'Les départs en direct s’affichent dans l’onglet Lunettes.' : 'Les départs en direct s’affichent dans tes lunettes.')),
-    banner,
+    h(
+      'header',
+      { class: 'head head-home' },
+      h('div', { class: 'head-titles' }, h('span', { class: 'eyebrow' }, 'Quai'), h('h1', null, 'Bonjour')),
+      h('a', { class: 'btn btn-secondary head-btn', href: '#/reglages' }, svgNode(ICON.settings), h('span', null, T.settings)),
+    ),
     !ctx.configured
       ? h('div', { class: 'warn', role: 'alert' }, h('strong', null, 'Quai n’est pas configuré.'), typo('Les adresses des horaires et du relais manquent : lancez « npm run configure » avant de créer le paquet.'))
       : fresh && !fresh.ok
         ? h('div', { class: 'warn', role: 'alert' }, h('strong', null, typo(fresh.message ?? 'Horaires périmés')), h('a', { href: '#/donnees' }, 'Voir l’écran Données'))
         : null,
     where,
-    favoritesSection(ctx, () => {
-      const sub = dataRow.querySelector('.t2');
-      if (sub) sub.textContent = dataSubtitle(ctx);
-    }),
-    stationsSection(ctx, opts.focus === 'stations'),
-    linesSection(ctx, opts.focus === 'lines'),
-    followsSection(ctx, opts.focus === 'follows'),
-    h('h2', null, 'Réglages'),
-    h(
-      'ul',
-      { class: 'list box', style: 'background:#fff' },
-      listRow({ icon: icon('lang'), title: 'Position et langue', sub: LANG_TEXT[s.lang], onClick: () => ctx.go('#/bienvenue') }),
-      listRow({ icon: icon('walker'), title: T.trips, sub: typo(tripsSummary(s.maxWalkMin, s.alerts.leaveBeforeMin)), onClick: () => ctx.go('#/trajets') }),
-      listRow({ icon: icon('trip'), title: T.myFavs, sub: n ? `${n} favori${n > 1 ? 's' : ''}` : 'Aucun favori', onClick: () => ctx.go('#/favoris') }),
-      listRow({ icon: icon('display'), title: 'Affichage', sub: typo(`Rayon ${s.display.radiusM} m`), onClick: () => ctx.go('#/affichage') }),
-      listRow({ icon: icon('alert'), title: 'Alertes', sub: alertsSummary(s.alerts), onClick: () => ctx.go('#/alertes') }),
-      dataRow,
-    ),
-    h('p', { class: 'foot' }, 'Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company'),
+    newsBanner(ctx, () => heading),
+    mirror,
   );
-  // L'état du temps réel change : le sous-titre de « Données » suit (toutes les 30 s, comme les réponses).
-  const sub = dataRow.querySelector('.t2');
-  const timer = setInterval(() => {
-    if (!el.isConnected) clearInterval(timer);
-    else if (sub) sub.textContent = dataSubtitle(ctx);
-  }, ANSWER_REFRESH_MS);
+  // l'écran quitté, ou jamais posé (le routeur est passé à un autre), la carte ne suit plus
+  let drawn = rubricKey(s);
+  let seen = false;
+  const stop = ctx.settings.subscribe((st) => {
+    if (el.isConnected) seen = true;
+    else if (seen) {
+      stop();
+      return;
+    }
+    const k = rubricKey(st);
+    if (k === drawn) return;
+    drawn = k;
+    paintRubrics(st);
+  });
+  setTimeout(() => {
+    if (el.isConnected) seen = true;
+    else if (!seen) stop();
+  }, 0);
   return el;
-}
-
-function alertsSummary(a: { platform: boolean; delay: boolean; cancel: boolean; leave: boolean; works: boolean }): string {
-  const on = [a.platform && 'voie', a.delay && 'retard', a.cancel && 'suppression', a.leave && 'départ à pied', a.works && 'travaux'].filter(Boolean) as string[];
-  if (!on.length) return 'Aucune alerte';
-  const t = on.join(', ');
-  return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
 /** Pour les tests : oublie les réponses gardées entre deux accueils. */

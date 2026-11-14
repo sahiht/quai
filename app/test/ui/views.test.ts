@@ -31,7 +31,7 @@ import {
   linesView,
   loadingView,
   nearbyView,
-  NEWS_LINES,
+  NEWS_LINES_129,
   NEWS_LINES_128,
   newsLines,
   newsView,
@@ -758,21 +758,20 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
       'toucher : continuer   double : quitter',
     ]);
     expect(check(firstRunView({ ...ctx, web: true })).at(-2)).toBe('position, langue et tes favoris, en une minute.');
-    // PRD-1.2.8 § 4 : un seul message ; depuis la 1.2.7 ou la 1.2.6, les lignes de la 1.2.8 ; d'avant, aussi celles de
-    // la 1.2.6 (une version entière ou rien : la 1.2.5 ne tient plus) ; espace insécable devant « : »
-    const news = newsView(ctx, newsLines('1.2.7'));
-    expect(news.title).toBe('Quai 1.2.8');
-    expect(check(news)).toEqual(['Un train : tout son trajet, gares d’avant comprises.', 'Chaque gare : sa voie et dans combien de temps.', '● : là où le train arrive, d’après le temps réel.', 'toucher : continuer']);
-    expect(check(newsView(ctx, newsLines('1.2.5'))).slice(3, 8)).toEqual([
-      'Arrêts et lignes de bus, tram, métro, séparés.',
-      'Une ligne : tout son parcours, l’attente à chaque arrêt.',
-      'Dans les deux sens, sans choisir d’arrêt.',
-      'Tes lignes gardées y sont déjà.',
+    // PRD-1.2.9 § 4 : un seul message ; depuis la 1.2.8, les lignes de la 1.2.9 ; d'avant, aussi celles de la 1.2.8 (une
+    // version entière ou rien : la 1.2.6 et la 1.2.5 ne tiennent plus) ; espace insécable devant « : »
+    const news = newsView(ctx, newsLines('1.2.8'));
+    expect(news.title).toBe('Quai 1.2.9');
+    expect(check(news)).toEqual(['« imminent » : seulement d’après le temps réel.', 'Téléphone : l’accueil reprend celui des lunettes.', 'Réglages : tout derrière un seul bouton.', 'toucher : continuer']);
+    expect(check(newsView(ctx, newsLines('1.2.5'))).slice(3, 7)).toEqual([
+      'Un train : tout son trajet, gares d’avant comprises.',
+      'Chaque gare : sa voie et dans combien de temps.',
+      '● : là où le train arrive, d’après le temps réel.',
       'toucher : continuer',
     ]);
     expect(newsLines('1.1.0')).toEqual(newsLines('1.2.4'));
-    expect(newsLines('1.2.4')).toEqual(newsLines('1.2.5'));
-    expect(newsLines('1.2.5')).toEqual([...NEWS_LINES_128, ...NEWS_LINES]);
+    expect(newsLines('1.2.4')).toEqual(newsLines('1.2.7'));
+    expect(newsLines('1.2.7')).toEqual([...NEWS_LINES_129, ...NEWS_LINES_128]);
     expect(news.tap).toEqual({ kind: 'continue' });
     expect(newsView({ ...ctx, web: true }, newsLines('1.2.0')).items).toEqual(newsView(ctx, newsLines('1.2.0')).items);
     const root = errorView('Quai', 'Pas de connexion aux horaires : nouvel essai dans 30 s', ctx, { root: true });

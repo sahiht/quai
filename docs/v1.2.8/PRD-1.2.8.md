@@ -5,7 +5,8 @@ gare de Namur, il choisit le train pour Liège et voudrait, une fois sur place, 
 le train part, (2) avoir les petits points de suivi, comme pour les trams, (3) voir aussi les gares d'avant, pas
 seulement à partir de la gare choisie. Il a aussi demandé de corriger les défauts trouvés en chemin, sans en inventer.
 Ce qui était prévu pour la 1.2.8 (rappel avant la descente, écran calme, radar de la veille, plan B avec le retard
-mesuré, arrêt dépassé, flèche, écran en marchant) passe en 1.2.9. Règle de confidentialité inchangée : jamais
+mesuré, arrêt dépassé, flèche, écran en marchant) passe en 1.2.9, puis en 1.2.10 (la 1.2.9 est consacrée aux réglages du
+téléphone, PRD-1.2.9). Règle de confidentialité inchangée : jamais
 d'adresse ni de position personnelle dans le dépôt, les tests ou les captures.
 
 ## 1. Tout le trajet d'un train (CA-128.1)
