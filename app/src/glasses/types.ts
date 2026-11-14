@@ -37,6 +37,10 @@ export type ScreenId =
   | 'trainRun'
   | 'train'
   | 'arrival'
+  /** 1.2.10 : guidage « Y aller » ou « J'y descends » : écran calme, moments, « où tu en es » (PRD-1.2.10 § 3). */
+  | 'guide'
+  /** 1.2.10 : menu de l'appui long, rendu par Quai quand les lunettes n'ont pas de menu système (Quai Web). */
+  | 'menu'
   | 'message';
 
 /** Zone d'arrêt identifiée (gare, arrêt) pour les routes. */
@@ -162,7 +166,17 @@ export type Route =
   | { screen: 'followed' }
   | { screen: 'train'; journey: Journey; leg: number; label?: string; auto?: boolean; trip?: { from: AreaRef; to: AreaRef } }
   | { screen: 'arrival'; journey: Journey; leg: number; trip?: { from: AreaRef; to: AreaRef } }
+  /** 1.2.10 : le guidage en cours (un seul à la fois, celui du trajet suivi). */
+  | { screen: 'guide' }
+  /** 1.2.10 : menu de l'appui long (Quai Web), mêmes choix que le menu système des lunettes. */
+  | { screen: 'menu'; items: MenuItem[] }
   | { screen: 'message'; kind: MessageKind; title: string; lines: string[] };
+
+/** 1.2.10 : un choix du menu de l'appui long (32 octets UTF-8 au plus, 10 choix au plus, SDK 0.0.14+). */
+export interface MenuItem { id: number; label: string }
+
+/** 1.2.10 : identifiants des choix du menu pendant un guidage. */
+export const MENU_IDS = { stopGuide: 1, allSteps: 2 } as const;
 
 /** news : message « Quai 1.2.4 » (une fois, après la mise à jour depuis une version antérieure ; lignes dans la route). */
 export type MessageKind = 'loading' | 'error' | 'empty' | 'firstRun' | 'notConfigured' | 'info' | 'news';
@@ -189,7 +203,15 @@ export type Intent =
   /** Quai Web : ouvrir un écran des réglages (#/…) ; dans l'appli Even, `text` s'affiche en message. */
   | { kind: 'phone'; hash: string; text: string }
   | { kind: 'retry' }
-  | { kind: 'continue' };
+  | { kind: 'continue' }
+  /** 1.2.10 : « y aller » depuis les étapes d'un trajet : lance le guidage de la proposition affichée. */
+  | { kind: 'goGuide' }
+  /** 1.2.10 : « j'y descends » : rang de l'arrêt de descente dans la liste des arrêts du départ (route 'stops'). */
+  | { kind: 'alight'; index: number }
+  /** 1.2.10 : écran du guidage : effacer le moment ou « où tu en es » (écran vide → afficher, sinon → effacer). */
+  | { kind: 'guideTap' }
+  /** 1.2.10 : un choix du menu (menu système des lunettes ou écran 'menu' de Quai Web). */
+  | { kind: 'menu'; id: number };
 
 /**
  * 1.2.5 : un mot ou un groupe de mots d'une ligne, au plus clair (`hi`, conteneur de la colonne a) ou pâle
@@ -277,6 +299,8 @@ export interface Item {
 
 /** Gabarits de colonnes (largeurs fixes : pas de reconstruction de page lors des rafraîchissements). */
 export type Layout =
+  /** 1.2.10 : guidage : moment (image à gauche, texte), « où tu en es », écran vide (PRD-1.2.10 § 3). */
+  | 'guide'
   | 'menu'
   /** 1.2.1 : accueil, favoris en retrait sous « Favoris » (PRD-1.2.1 § 4). */
   | 'home'
@@ -362,6 +386,10 @@ export interface GlassesView {
   paged?: boolean;
   /** Champs ajoutés au journal QUAI_SCREEN (order, page, pages, label, followed). */
   log?: Record<string, unknown>;
+  /** 1.2.10 : images de la page (guidage), positions décidées par la vue ; copiées dans PageSpec.images. */
+  images?: ImageSpec[];
+  /** 1.2.10 : choix du menu système de l'appui long (pages du guidage) ; copiés dans PageSpec.menu. */
+  menu?: MenuItem[];
 }
 
 export type Brightness = 0 | 1 | 2 | 3 | 4;
@@ -379,8 +407,32 @@ export interface ContainerSpec {
   capture: boolean;
 }
 
+/**
+ * 1.2.10 : image d'un conteneur d'image (PRD-1.2.10 § 3.9) : flèche d'un virage, panneau (« bus » / « 6 », « voie » /
+ * « 3 », « à pied » / « 5 » / « min »), flèche à vol d'oiseau. Rendue en 16 niveaux de vert par glasses/images.ts.
+ */
+export type ImageKind =
+  | { kind: 'turn'; turn: import('../core/guide-types').TurnKind }
+  | { kind: 'sign'; label: string; value: string; foot?: string }
+  | { kind: 'bearing'; deg: number };
+
+/** 1.2.10 : conteneur d'image (288 × 144 px au plus, 4 par page au plus). */
+export interface ImageSpec {
+  id: number;
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  image: ImageKind;
+}
+
 export interface PageSpec {
   containers: ContainerSpec[];
+  /** 1.2.10 : conteneurs d'image de la page (guidage) ; absent : aucun. */
+  images?: ImageSpec[];
+  /** 1.2.10 : choix ajoutés au menu système de l'appui long (guidage) ; absent : aucun. */
+  menu?: MenuItem[];
   /** Pour QUAI_SCREEN : textes affichés, dans l'ordre (colonnes séparées par 3 espaces). */
   lines: string[];
   screen: ScreenId;

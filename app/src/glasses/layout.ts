@@ -144,6 +144,8 @@ export const LAYOUTS: Record<Layout, LayoutDef> = {
   train: { a: { x: X_TEXT, level: 4 }, b: { x: right(96) - GAP - TIME_W, w: TIME_W, align: 'right', level: 4 }, c: { x: right(96), w: 96, level: 3 } },
   arrival: { a: { x: X_TEXT, w: 96, level: 4 }, b: { x: X_TEXT + 96 + GAP, level: 3 }, c: { x: right(96), w: 96, align: 'right', level: 4 } },
   message: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(96), w: 96, level: 3 } },
+  /** 1.2.10 : guidage (provisoire : gabarit de message ; écrit par l'équipe des écrans, PRD-1.2.10 § 3.9). */
+  guide: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(96), w: 96, level: 3 } },
 };
 
 /** Largeurs utiles (au pixel) des colonnes des menus et des étapes, pour les tests de largeur (CA-M1.7). */

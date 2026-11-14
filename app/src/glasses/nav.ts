@@ -7,7 +7,8 @@ import { clampTop, ensureVisible, maxTop, pageTop, prevPageTop, visibleRange } f
 import type { GlassesView, Intent, Item, Route } from './types';
 import { selectable, tapIntent } from './views';
 
-export type Gesture = 'up' | 'down' | 'tap' | 'double';
+/** 1.2.10 : `long` : appui long (bouton « Appui long » de Quai Web ; dans l'appli Even, le menu système s'ouvre). */
+export type Gesture = 'up' | 'down' | 'tap' | 'double' | 'long';
 
 export interface NavFrame {
   route: Route;
@@ -161,6 +162,9 @@ export function handleGesture(
     case 'double':
       if (s.stack.length > 1) return { state: pop(s), effect: { kind: 'back' } };
       return { state: s, effect: { kind: 'exit' } };
+    // 1.2.10 : l'appui long est traité par le contrôleur (menu du guidage) ; rien ici.
+    case 'long':
+      return { state: s, effect: { kind: 'none' } };
     case 'tap': {
       if (view.scroll) {
         const state = setSelection(s, f.sel, top);

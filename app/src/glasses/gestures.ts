@@ -16,7 +16,11 @@ export type HubSignal =
   | { kind: 'gesture'; gesture: Gesture }
   | { kind: 'foreground' }
   | { kind: 'background' }
-  | { kind: 'exit'; abnormal: boolean };
+  | { kind: 'exit'; abnormal: boolean }
+  /** 1.2.10 : choix du menu système de l'appui long (menuItemClickEvent), identifiant MenuItem.id. */
+  | { kind: 'menu'; id: number }
+  /** 1.2.10 : lunettes reconnectées ou remises (onDeviceStatusChanged) : la page est reconstruite. */
+  | { kind: 'device'; connected: boolean; wearing?: boolean };
 
 const CLICK = 0;
 const SCROLL_TOP = 1;
@@ -84,6 +88,12 @@ export class GestureFilter {
   }
 
   accept(g: Gesture, t: number): boolean {
+    // 1.2.10 : l'appui long (Quai Web) passe comme un toucher (même anti-rebond) ; le contrôleur ouvre le menu.
+    if (g === 'long') {
+      if (t - this.lastTap < this.cfg.tapCooldownMs) return this.reject('après un toucher');
+      this.lastTap = t;
+      return true;
+    }
     if (g === 'tap' || g === 'double') {
       const elapsed = t - this.lastTap;
       const dup = g === 'double' ? this.cfg.doubleDuplicateMs : this.cfg.tapDuplicateMs;
