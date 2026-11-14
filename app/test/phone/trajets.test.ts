@@ -1,39 +1,39 @@
 // @vitest-environment happy-dom
 /**
- * Réglages de trajet au même endroit (revue d'usage n° 9, PRD-1.2.2 § 8) : ligne « Trajets » sous « Position et
- * langue » (« Marche 10 min au plus, marge 2 min »), écran « Trajets » (« Marche maximale », « Marge avant de partir »,
- * comprise dans l'heure de départ conseillée), « Alertes » qui ne garde que les alertes. Mêmes clés de réglages.
+ * Réglages de trajet au même endroit (revue d'usage n° 9, PRD-1.2.2 § 8) : écran « Trajets » (« Marche maximale »,
+ * « Marge avant de partir », comprise dans l'heure de départ conseillée), « Alertes » qui ne garde que les alertes.
+ * Mêmes clés de réglages. 1.2.9 (PRD-1.2.9 § 2.3) : les deux pas-à-pas sont réglables sur place dans Réglages
+ * (« Tes trajets », avant « Position et langue ») ; #/trajets reste valable et revient à Réglages.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { alertsScreen } from '../../src/phone/screens/alerts';
-import { homeScreen, resetAnswers } from '../../src/phone/screens/home';
+import { settingsScreen } from '../../src/phone/screens/settings';
 import { tripsScreen } from '../../src/phone/screens/trips';
 import { defaults, harness, mount, plain, textOf, until } from './helpers';
 
 afterEach(() => {
   document.body.replaceChildren();
-  resetAnswers();
 });
 
 const steppers = (el: HTMLElement) => [...el.querySelectorAll('.stepper-row')].map((r) => [textOf(r.querySelector('.c1')), textOf(r.querySelector('.c2')), textOf(r.querySelector('output'))]);
 
 describe('« Trajets » (revue d’usage n° 9)', () => {
-  it('ligne « Trajets » des réglages, sous « Position et langue » : « Marche 10 min au plus, marge 2 min »', () => {
-    const hz = harness({ settings: defaults() });
-    const el = mount(homeScreen(hz.ctx));
-    const rows = [...el.querySelectorAll<HTMLButtonElement>('.list.box .row')];
-    const i = rows.findIndex((r) => textOf(r.querySelector('.t1')) === 'Trajets');
-    expect(textOf(rows[i - 1].querySelector('.t1'))).toBe('Position et langue');
-    expect(rows[i].querySelector('.t2')!.textContent).toBe('Marche 10 min au plus, marge 2 min');
-    rows[i].click();
-    expect(hz.went).toEqual(['#/trajets']);
+  it('1.2.9 : dans Réglages, « Tes trajets » : les deux pas-à-pas sur place, puis « Position et langue » ; plus de ligne « Trajets »', () => {
+    const el = mount(settingsScreen(harness({ settings: defaults() }).ctx));
+    const group = [...el.querySelectorAll<HTMLElement>('section.group')].find((g) => textOf(g.querySelector('h2')) === 'Tes trajets')!;
+    expect(steppers(group).map(([l, , v]) => [l, v])).toEqual([
+      ['Marche maximale', '10 min'],
+      ['Marge avant de partir', '2 min'],
+    ]);
+    expect([...group.querySelectorAll('.nav-row .t1')].map((t) => textOf(t))).toEqual(['Position et langue']);
+    expect(el.querySelector('a[href="#/trajets"]')).toBeNull();
   });
 
   it('écran « Trajets » : « Marche maximale » (sous-titre de la 1.2.1) et « Marge avant de partir » ; mêmes clés de réglages', async () => {
     const hz = harness({ settings: defaults() });
     const el = mount(tripsScreen(hz.ctx));
     expect(textOf(el.querySelector('h1'))).toBe('Trajets');
-    expect(textOf(el.querySelector('.back'))).toBe('Accueil');
+    expect(textOf(el.querySelector('.back'))).toBe('Réglages');
     expect(steppers(el)).toEqual([
       ['Marche maximale', 'D’abord les trajets dans cette limite ; au-delà, s’il n’y a pas mieux', '10 min'],
       ['Marge avant de partir', 'comprise dans l’heure de départ conseillée', '2 min'],

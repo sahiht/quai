@@ -1,0 +1,48 @@
+/* 1.2.9 (PRD-1.2.9 § 2.2) : écrans « Gares de train », « Arrêts de bus, tram, métro » et « Lignes de bus, tram, métro »
+   (picks.ts) : une rangée compacte par élément, qui se déplie au toucher ; l'ajout sous la liste (pick-add.ts).
+   Couleurs, polices et composants de styles.css (variables, .list, .box, .switch-row, .confirm, .btn). */
+
+.lists-screen > .live:empty { min-height: 0; }
+
+/* Rangée repliée : icône ou pastille, nom et détail, « Ouvre d’office … », chevron. */
+.pick-item { display: flex; flex-direction: column; }
+.pick-head { width: 100%; min-height: 60px; display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 14px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.pick-head:hover { background: rgba(31, 122, 69, 0.04); }
+/* La liste coupe ce qui dépasse (coins arrondis) : le contour du curseur est dessiné à l'intérieur. */
+.pick-head:focus-visible { outline-offset: -3px; }
+.pick-head > .ico { width: 36px; height: 36px; border-radius: 10px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.pick-head > .badge { min-width: 36px; }
+.pick-head .txt { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-width: 0; }
+.pick-head .t1 { font-size: 16px; line-height: 22px; font-weight: 600; overflow-wrap: anywhere; }
+.pick-head .t2 { font-size: 14px; line-height: 19px; color: var(--muted); overflow-wrap: anywhere; }
+.pick-auto { display: flex; align-items: center; gap: 5px; margin-top: 2px; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--accent-ink); }
+.pick-auto svg { flex-shrink: 0; }
+.pick-chev { display: flex; flex-shrink: 0; color: var(--muted); transition: transform 0.15s; }
+.pick-head[aria-expanded="true"] .pick-chev { transform: rotate(180deg); }
+
+/* Rangée dépliée : « Ouvrir d’office », « Ordre dans les lunettes », « Retirer … », alignés sur le nom. */
+.pick-detail { display: flex; flex-direction: column; padding: 0 12px 4px 62px; }
+.pick-detail .switch-row, .pick-opt, .pick-remove-row { border-top: 1px solid var(--divider); }
+.pick-detail .switch-row { min-height: 58px; padding: 6px 0; border-bottom: 0; }
+.pick-opt { display: flex; align-items: center; gap: 8px; min-height: 58px; padding: 6px 0; }
+.pick-opt .cc { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.pick-opt .c1 { font-size: 15px; line-height: 20px; font-weight: 500; }
+.pick-opt .c2 { font-size: 13px; line-height: 18px; color: var(--muted); }
+.pick-moves { display: flex; gap: 8px; flex-shrink: 0; }
+.pick-move { width: 44px; height: 44px; padding: 0; border: 1px solid var(--btn-border); border-radius: 12px; background: var(--card); color: var(--accent); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.pick-move:hover:not([disabled]) { background: var(--accent-soft); }
+.pick-move[disabled] { opacity: 0.45; cursor: not-allowed; }
+.pick-remove-row { display: flex; flex-direction: column; padding-top: 2px; }
+.pick-remove { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 8px 0 0; border: 0; background: transparent; color: #8a2a1d; font-size: 15px; line-height: 20px; font-weight: 600; cursor: pointer; }
+.pick-remove-row .confirm { margin: 4px 0 10px; }
+/* Téléphone étroit : la rangée dépliée prend toute la largeur. */
+@media (max-width: 360px) {
+  .pick-detail { padding-left: 14px; }
+}
+
+/* Ajout sous la liste : titre, limite, « Près de toi », puis la recherche. */
+.pick-add-section { display: flex; flex-direction: column; gap: 10px; padding-top: 8px; }
+.pick-add-title { font-size: 18px; line-height: 24px; }
+.station-add { display: flex; flex-direction: column; gap: 14px; }
+/* « Ajouter » et « Ajoutée ✓ » : 44 px au moins (40 px dans styles.css). */
+.lists-screen .near-row .btn { min-height: 44px; }

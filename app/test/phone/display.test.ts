@@ -62,14 +62,58 @@ describe('Affichage', () => {
     expect(legends).toContain('À l’ouverture de Quai');
     expect(legends).toContain('Ordre des favoris');
     const labels = [...el.querySelectorAll('label.choice')].map((l) => [l.querySelector('input')!.value, textOf(l)]);
+    // 1.2.9 (PRD-1.2.9 § 2.4) : l'ordre des favoris, puis l'ouverture de Quai
     expect(labels).toEqual([
+      ['smart', 'Automatique, selon l’heure et ta position'],
+      ['mine', 'Dans mon ordre'],
       ['suggest', 'L’accueil, avec mes favoris en tête'],
       ['firstFavorite', 'Directement mon premier favori'],
       ['home', 'L’accueil, sans favoris'],
-      ['smart', 'Automatique, selon l’heure et ta position'],
-      ['mine', 'Dans mon ordre'],
     ]);
     expect(textOf(el)).not.toMatch(/propos|le lieu/);
+  });
+
+  it('1.2.9 (PRD-1.2.9 § 2.4) : retour « Réglages », l’aperçu en haut, groupes « Accueil des lunettes » et « Sur tous les écrans »', () => {
+    const hz = harness({ settings: defaults() });
+    const el = mount(displayScreen(hz.ctx));
+    expect(textOf(el.querySelector('h1'))).toBe('Affichage');
+    const back = el.querySelector<HTMLButtonElement>('.back')!;
+    expect(textOf(back)).toBe('Réglages');
+    back.click();
+    expect(hz.went).toEqual(['#/reglages']);
+    const groups = [...el.querySelectorAll<HTMLElement>('section.group')];
+    expect(groups.map((g) => textOf(g.querySelector('h2')))).toEqual(['Accueil des lunettes', 'Sur tous les écrans']);
+    for (const g of groups) expect(g.getAttribute('aria-labelledby')).toBe(g.querySelector('h2')!.id);
+    // l'aperçu avant les groupes
+    const preview = el.querySelector('.preview')!;
+    expect(preview.compareDocumentPosition(groups[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect([...groups[0].querySelectorAll('legend')].map((l) => textOf(l))).toEqual(['Rayon de « Autour de moi »', 'Ordre des favoris', 'À l’ouverture de Quai']);
+    expect([...groups[0].querySelectorAll('.seg label')].map((l) => textOf(l))).toEqual(['300 m', '500 m', '800 m']);
+    expect([...groups[1].querySelectorAll('.switch-row')].map((r) => [textOf(r.querySelector('.c1')), r.querySelector<HTMLInputElement>('input')!.checked])).toEqual([
+      ['Aides de gestes', true],
+      ['Signaler les horaires prévus', true],
+      ['Pluie pendant la marche', true],
+    ]);
+    // un seul trait entre deux interrupteurs
+    expect(groups[1].querySelectorAll('.box > .bordered')).toHaveLength(2);
+    expect(groups[1].querySelector('.box > :first-child')!.classList.contains('bordered')).toBe(false);
+  });
+
+  it('chaque réglage est enregistré, et l’aperçu suit (rayon, aides de gestes, signe ~, ouverture)', async () => {
+    const hz = harness({ settings: defaults() });
+    const el = mount(displayScreen(hz.ctx));
+    const label = () => el.querySelector('.preview')!.getAttribute('aria-label')!.replace(/ /g, ' ');
+    expect(label()).toContain('Autour de moi 3 arrêts');
+    [...el.querySelectorAll<HTMLInputElement>('.seg input')].find((r) => r.value === '800')!.click();
+    await until(() => hz.settings.get().display.radiusM === 800 && label().includes('Autour de moi 4 arrêts'));
+    const sw = (name: string) => [...el.querySelectorAll<HTMLInputElement>('input.switch')].find((c) => textOf(c.closest('label')).startsWith(name))!;
+    sw('Aides de gestes').click();
+    await until(() => hz.settings.get().display.gestureHints === false);
+    sw('Signaler les horaires prévus').click();
+    await until(() => hz.settings.get().display.markPlanned === false);
+    [...el.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find((r) => r.value === 'home')!.click();
+    await until(() => hz.settings.get().display.opening === 'home');
+    expect(hz.settings.get().display).toMatchObject({ radiusM: 800, gestureHints: false, markPlanned: false, rain: true, opening: 'home', favOrder: 'smart' });
   });
 
   it('« Dans mon ordre » est enregistré (S3)', async () => {

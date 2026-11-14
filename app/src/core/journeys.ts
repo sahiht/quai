@@ -474,7 +474,8 @@ async function worksFor(j: Journey, env: RefreshEnv): Promise<string[]> {
           const prep = await env.area(id);
           if (!prep) continue;
           stops.push(...prep.file.stops.map((s) => s.rt || s.id));
-          routes.push(...prep.file.patterns.filter((p) => p.line === l.line).map((p) => p.route));
+          // 1.2.9 : STIB, messages WaitingTimes par numéro de ligne (son route_id n'est pas son numéro : métro 2 « 4 »)
+          routes.push(...prep.file.patterns.filter((p) => p.line === l.line).map((p) => (l.op === 'stib' ? p.line : p.route)));
         } catch {
           /* rien */
         }

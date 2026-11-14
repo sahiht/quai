@@ -1,6 +1,7 @@
 /**
- * Textes 1.1 du cœur (PRD S6, § 6.1) : « imminent », heure au-delà de 60 min avec « ~ » devant l'heure, « demain »
- * jamais avant 04:00, « Vers … » (article de la 1.0), adresse courte. CA-S6.1, CA-S6.2 (cas synthétique), CA-S6.4.
+ * Textes 1.1 du cœur (PRD S6, § 6.1) : « imminent » (1.2.9 : avec le temps réel seulement), heure au-delà de 60 min avec
+ * « ~ » devant l'heure, « demain » jamais avant 04:00, « Vers … » (article de la 1.0), adresse courte. CA-S6.1, CA-S6.2
+ * (cas synthétique), CA-S6.4.
  */
 import { describe, expect, it } from 'vitest';
 import type { Departure } from '../../src/core/api';
@@ -13,11 +14,34 @@ describe('S6 : attentes et heures', () => {
   it('CA-S6.1 : « imminent » à moins d’une minute ; minutes avec espace insécable', () => {
     const now = at(12, 10);
     expect(waitText(at(12, 10, 0, 59), now)).toBe('imminent');
-    expect(waitText(at(12, 10, 0, 30), now, true)).toBe('imminent');
     expect(waitText(at(12, 9, 0, 40), now)).toBe('imminent'); // déjà passé de quelques secondes
     expect(waitText(at(12, 11), now)).toBe(`1${NB}min`);
     expect(waitText(at(12, 15), now, true)).toBe(`~5${NB}min`);
     expect(waitText(at(13, 9, 0, 59), now)).toBe(`59${NB}min`);
+  });
+
+  it('1.2.9 : « imminent » réservé au temps réel ; horaire prévu à moins d’une minute : « ~1 min »', () => {
+    const now = at(12, 10);
+    // temps réel : inchangé
+    expect(waitText(at(12, 10, 0, 30), now, false, true)).toBe('imminent');
+    // horaire prévu signalé (« ~ ») : jamais « imminent », le même « ~ » que les autres horaires prévus
+    expect(waitText(at(12, 10, 0, 30), now, true)).toBe(`~1${NB}min`);
+    expect(waitText(at(12, 10, 0, 30), now, true, false)).toBe(`~1${NB}min`);
+    // horaire prévu sans le « ~ » (réglage) : « 1 min », toujours pas « imminent »
+    expect(waitText(at(12, 10, 0, 30), now, false, false)).toBe(`1${NB}min`);
+    // horaire prévu à peine passé (les listes le gardent encore un moment) : « ~1 min » aussi
+    expect(waitText(at(12, 9, 0, 40), now, true)).toBe(`~1${NB}min`);
+    // une minute pleine ou plus : comme avant
+    expect(waitText(at(12, 11, 0, 30), now, true)).toBe(`~1${NB}min`);
+    expect(waitText(at(12, 12), now, true)).toBe(`~2${NB}min`);
+    // résumé d'un départ (suggestions) : d'après le temps réel du départ, pas seulement d'après le « ~ » montré
+    const bus = (rt: boolean, est = at(12, 10, 0, 20)): Departure => ({ op: 'delijn', mode: 'bus', line: '232', head: { fr: 'Vilvorde', nl: 'Vilvoorde' }, sched: est, est, rt, delayMin: 0, cancelled: false });
+    expect(departureSummary(bus(true), now, 'fr', true)).toBe('232 Vilvorde imminent');
+    expect(departureSummary(bus(false), now, 'fr', true)).toBe(`232 Vilvorde ~1${NB}min`);
+    expect(departureSummary(bus(false), now, 'fr', false)).toBe(`232 Vilvorde 1${NB}min`);
+    expect(departureSummary(bus(true), now, 'fr', false)).toBe('232 Vilvorde imminent');
+    // supprimé : toujours d'abord
+    expect(departureSummary({ ...bus(false), cancelled: true }, now, 'fr', true)).toBe('232 Vilvorde supprimé');
   });
 
   it('CA-S6.2 : au-delà de 60 min, une heure, « ~ » devant l’heure (jamais « ~298 min »)', () => {

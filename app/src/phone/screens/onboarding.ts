@@ -9,7 +9,7 @@ import { APP_VERSION } from '../../version';
 import { header, type PhoneCtx } from '../app';
 import { h, ICON, liveRegion } from '../dom';
 import { placeField, privacyNote, type FieldChoice } from '../field';
-import { typo } from '../text';
+import { T, typo } from '../text';
 import { radios } from '../ui';
 import { makePlace, spotOf, withPlace } from './places';
 
@@ -31,7 +31,8 @@ export function onboardingScreen(ctx: PhoneCtx): HTMLElement {
   save.addEventListener('click', async () => {
     // La version vue est celle-ci : pas de message « Quai 1.1 » après une nouvelle installation (S2).
     await ctx.settings.update((x) => ({ ...x, lang, onboarded: true, seenVersion: first ? APP_VERSION : x.seenVersion }));
-    ctx.go(first ? '#/bienvenue/favoris' : '#/?accueil=1');
+    // 1.2.9 (PRD-1.2.9 § 2.3) : « Position et langue » revient à Réglages, d'où elle s'ouvre.
+    ctx.go(first ? '#/bienvenue/favoris' : '#/reglages');
   });
   // Quai Web : position du navigateur, adresse ou arrêt choisi (même rubrique que sous l'écran des lunettes).
   const position = ctx.positionPicker
@@ -53,7 +54,7 @@ export function onboardingScreen(ctx: PhoneCtx): HTMLElement {
   return h(
     'div',
     { class: 'screen' },
-    first ? header(ctx, 'Bienvenue', 'Quelques réglages, et Quai est prêt.') : header(ctx, 'Position et langue', undefined, { label: 'Accueil', hash: '#/' }),
+    first ? header(ctx, 'Bienvenue', 'Quelques réglages, et Quai est prêt.') : header(ctx, T.placeLang, undefined, { label: T.settings, hash: '#/reglages' }),
     position,
     h(
       'section',

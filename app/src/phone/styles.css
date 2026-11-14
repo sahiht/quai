@@ -83,6 +83,8 @@ body.grey .box { background: var(--card); }
 .row .t2 { font-size: 13px; line-height: 18px; color: var(--muted); }
 .row .t3 { font-size: 13px; line-height: 18px; color: var(--body); }
 .row .chev { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+/* 1.2.9 : une ligne de liste garde un contour de focus visible (la liste coupe ce qui dépasse) */
+.list > li > .row:focus-visible { outline-offset: -3px; border-radius: 12px; }
 
 /* Champs */
 .field { display: flex; flex-direction: column; gap: 6px; }
@@ -222,21 +224,59 @@ input.switch:checked::after { left: 21px; }
 .where-label { font-size: 16px; line-height: 22px; font-weight: 600; color: var(--text); }
 .where-box { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 14px; border: 1px solid var(--input); border-radius: 12px; background: var(--card); font-size: 16px; color: var(--muted); }
 .where:hover .where-box { border-color: var(--accent); }
-.home-favs { display: flex; flex-direction: column; gap: 8px; }
-.fav-list { background: var(--card); }
-.fav-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; min-height: 60px; padding: 8px 10px 8px 16px; }
+.empty-row { padding: 14px 16px; }
+
+/* 1.2.9 : accueil en miroir des lunettes (en-tête et bouton « Réglages », « Dans tes lunettes », cartes des rubriques) */
+.head-home { flex-direction: row; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.head-titles { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.head-btn { flex-shrink: 0; min-height: 44px; padding: 0 14px 0 12px; }
+.mirror-sec { display: flex; flex-direction: column; gap: 10px; }
+.sec-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.sec-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sec-lead { margin: 0; font-size: 14px; line-height: 19px; color: var(--muted); }
+.sec-link { flex-shrink: 0; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 4px; font-size: 15px; line-height: 20px; font-weight: 600; text-decoration: none; }
+.mirror { background: var(--card); }
+/* Ligne qui ouvre un écran : à droite ce qu'il contient (« 2 gares », « à choisir »), puis le chevron */
+.nav-row { padding-right: 0; }
+.nav-row .t1 { font-weight: 600; }
+.nav-row .t1 .qual { font-size: 15px; font-weight: 400; color: var(--muted); }
+.nav-row .t2.names { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-row .t2.sub-badges .badges { margin-top: 2px; }
+.nav-row .count { flex-shrink: 0; margin-left: -6px; font-size: 15px; line-height: 20px; font-weight: 500; color: var(--body); white-space: nowrap; }
+.nav-row .count + .chev { width: 30px; margin-left: -6px; }
+/* « Favoris » puis, en retrait sous son titre, les favoris de l'accueil des lunettes */
+.fav-card > li { border-bottom: 0; }
+.fav-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; min-height: 60px; margin-left: 62px; padding: 8px 10px 8px 0; border-top: 1px solid var(--divider); }
 .fav-row .txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.fav-row .t1 { font-size: 16px; line-height: 22px; font-weight: 500; }
+.fav-row .t1 { font-size: 15px; line-height: 20px; font-weight: 500; overflow-wrap: anywhere; }
 .fav-row .t2 { font-size: 14px; line-height: 20px; color: var(--body); }
 .fav-row .msg { grid-column: 1 / -1; }
-.empty-row { padding: 14px 16px; }
-.more-link { align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-size: 15px; font-weight: 500; text-decoration: none; }
-/* 1.2.1 : une ligne par nouveauté, la première un ton plus fort, « OK » dessous à droite */
-.news { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); }
-.news-lines { display: flex; flex-direction: column; gap: 4px; }
+.fav-sub { margin-left: 62px; padding: 6px 0; border-top: 1px solid var(--divider); }
+.add-link { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding-right: 10px; font-size: 15px; line-height: 20px; font-weight: 500; text-decoration: none; }
+/* 1.2.9 : « Voir les 2 autres favoris », un bouton qui a l'air du lien « Ajouter un favori » */
+button.add-link { border: 0; background: transparent; padding-left: 0; color: var(--accent); font-family: inherit; cursor: pointer; }
+/* 1.2.9 : bannière « Nouveau » sur une ligne ; « Voir ce qui change » déplie les nouveautés, « OK » la ferme */
+.news { display: flex; flex-direction: column; gap: 8px; padding: 6px 6px 6px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.news-head { display: flex; align-items: center; gap: 10px; }
+.news-head > svg { flex-shrink: 0; }
+.news-more { flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--text); display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; text-align: left; cursor: pointer; }
+.news-title { font-size: 15px; line-height: 20px; font-weight: 600; }
+.news-see { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); font-size: 14px; line-height: 19px; font-weight: 500; }
+.news-more:hover .news-see { color: var(--accent-dark); text-decoration: underline; }
+.news-see svg { flex-shrink: 0; transition: transform 0.15s; }
+.news-more[aria-expanded="true"] .news-see svg { transform: rotate(180deg); }
+.news .news-ok { flex-shrink: 0; min-height: 44px; min-width: 56px; padding: 0 14px; }
+.news-lines { display: flex; flex-direction: column; gap: 4px; padding: 0 6px 8px 30px; }
 .news p { margin: 0; font-size: 15px; line-height: 21px; }
-.news p:first-child { font-weight: 600; }
-.news .btn { min-height: 44px; min-width: 88px; align-self: flex-end; }
+
+/* 1.2.9 : Réglages et Affichage, réglages rangés par groupe (titre pâle au-dessus de sa carte) */
+.group { display: flex; flex-direction: column; gap: 8px; }
+.group-title { padding-left: 4px; font-size: 14px; line-height: 18px; font-weight: 600; color: var(--muted); }
+.pad-row { padding: 12px 16px; }
+.pad-row.tight { padding-bottom: 2px; }
+/* Affichage : les trois réglages de « Accueil des lunettes » titrés de la même façon (comme le rayon) */
+.pad-row .legend-sm { margin-bottom: 4px; font-size: 15px; line-height: 20px; font-weight: 500; color: var(--text); }
+.preview-top { display: flex; flex-direction: column; gap: 8px; }
 
 /* 1.1 : favoris (ordre), lieux (confirmation de position) */
 .order-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 60px; padding: 8px 10px 8px 14px; }

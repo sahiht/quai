@@ -319,7 +319,8 @@ function listRows(s: { screen: string; lines: string[] }): string[] {
 }
 /**
  * Minutes depuis minuit d'une ligne de tableau ou d'arrêt : l'heure (« 07:42 », « ~07:42 ») plus son retard (« +2 ») ;
- * un bus dans l'heure : `now` plus l'attente (« 4 min », « ~4 min », « imminent ») ; rien de lisible (« SUPPRIMÉ ») : NaN.
+ * un bus dans l'heure : `now` plus l'attente (« 4 min », « ~4 min », « imminent » ; 1.2.9 : « imminent » en temps réel
+ * seulement, « ~1 min » sur l'horaire prévu) ; rien de lisible (« SUPPRIMÉ ») : NaN.
  */
 function minutesOfRow(row: string, now = 0): number {
   const m = /(\d\d):(\d\d)(?: \+(\d+))?/.exec(row);
@@ -1316,7 +1317,8 @@ async function s2(): Promise<void> {
     // 1.2.3 : curseur sur le premier passage (« vers … » ne se sélectionne jamais), la liste défile par page
     check(s.title === 'Tram 3 · Gare du Nord' && s.sel === 0, `« ${s.title} », curseur sur le 1er passage (sel ${s.sel})`);
     check(s.lines.filter((l) => /^vers (Churchill|Esplanade)$/.test(l)).length >= 1, `sens du tram 3 : ${JSON.stringify(s.lines)}`);
-    check(s.lines.filter((l) => /^~?\d\d:\d\d( .*)? {3}(dans \d+ min|imminent)$/.test(l)).length >= 4, `4 passages par sens (heure, attente) : ${JSON.stringify(s.lines)}`);
+    // 1.2.9 : à moins d'une minute, « imminent » en temps réel, « dans ~1 min » sur l'horaire prévu
+    check(s.lines.filter((l) => /^~?\d\d:\d\d( .*)? {3}(dans ~?\d+ min|imminent)$/.test(l)).length >= 4, `4 passages par sens (heure, attente) : ${JSON.stringify(s.lines)}`);
     common(s, H.line);
     return { screen: s, tour: ['glasses-line.png', 'Les passages du tram 3 à la gare du Nord, dans les deux sens, puis « Tous les départs de l’arrêt »'] };
   });

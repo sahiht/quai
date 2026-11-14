@@ -167,7 +167,57 @@ export const T = {
   searchDown: 'Recherche impossible pour l’instant : réessaie dans un instant.',
   /** « Un endroit » (revue d'usage n° 3 ; 1.2.6) : un arrêt de bus, tram ou métro mène à « Ajouter un arrêt », lui en tête. */
   nextPassagesLink: 'Ses prochains départs : l’ajouter à tes arrêts',
+  /**
+   * 1.2.9 (PRD-1.2.9 § 2) : l'accueil du téléphone en miroir de celui des lunettes, les autres réglages derrière un seul
+   * bouton « Réglages ».
+   */
+  settings: 'Réglages',
+  settingsLead: 'Favoris, gares, arrêts et lignes se règlent sur l’accueil, dans l’ordre des lunettes.',
+  inGlasses: 'Dans tes lunettes',
+  mirrorLead: 'Mêmes rubriques, même ordre.',
+  preview: 'Aperçu',
+  previewLabel: 'Aperçu de l’accueil des lunettes',
+  favorites: 'Favoris',
+  noFavShort: 'Aucun favori',
+  nearby: 'Autour de moi',
+  seeNews: 'Voir ce qui change',
+  groupGlasses: 'Dans les lunettes',
+  groupTrips: 'Tes trajets',
+  groupQuai: 'Quai',
+  groupHome: 'Accueil des lunettes',
+  groupAll: 'Sur tous les écrans',
+  placeLang: 'Position et langue',
+  display: 'Affichage',
+  alerts: 'Alertes',
+  data: 'Données',
+  sources: 'Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company',
 } as const;
+
+/** Titre de la bannière « Nouveau » de l'accueil (1.2.9 : sur une ligne, les nouveautés dépliées à la demande). */
+export const newsTitle = (version: string): string => `Nouveau dans Quai ${version}`;
+
+/** « 1 gare », « 2 arrêts », « 3 lignes » : comme à droite des rubriques de l'accueil des lunettes. */
+export const counted = (n: number, word: string): string => `${n}${NB}${word}${n > 1 ? 's' : ''}`;
+
+/** Sous-titre de « Autour de moi » : le rayon réglé (« à moins de 500 m »). */
+export const withinText = (radiusM: number): string => typo(`à moins de ${radiusM} m`);
+
+/** Langue des noms (sous-titre de « Position et langue »). */
+export const LANG_TEXT: Record<NameLang, string> = { fr: 'Noms en français', nl: 'Noms en néerlandais', local: 'Noms comme sur place' };
+
+/** Sous-titre de « Affichage » dans Réglages : le rayon, puis le signe « ~ » et la pluie s'ils sont allumés. */
+export function displaySummary(d: Pick<Settings['display'], 'radiusM' | 'markPlanned' | 'rain'>): string {
+  const parts = [`Rayon ${d.radiusM} m`, d.markPlanned ? 'horaires prévus « ~ »' : '', d.rain !== false ? 'pluie pendant la marche' : ''];
+  return typo(parts.filter(Boolean).join(', '));
+}
+
+/** Sous-titre de « Alertes » : les alertes allumées, le retard avec son seuil (« retard dès 5 min »). */
+export function alertsSummary(a: Pick<Settings['alerts'], 'platform' | 'delay' | 'delayMin' | 'cancel' | 'leave' | 'works'>): string {
+  const on = [a.platform && 'voie', a.delay && `retard dès ${a.delayMin} min`, a.cancel && 'suppression', a.leave && 'départ à pied', a.works && 'travaux'].filter(Boolean) as string[];
+  if (!on.length) return 'Aucune alerte';
+  const t = on.join(', ');
+  return typo(t.charAt(0).toUpperCase() + t.slice(1));
+}
 
 /**
  * Bannière « Nouveau » de l'accueil du téléphone, message « Quai 1.2.5 » (PRD-1.2.5 § 8) : une ligne par nouveauté,
@@ -215,6 +265,20 @@ export const NEWS_126: readonly string[] = [
   'Tes lignes gardées à un arrêt sont déjà dans Lignes.',
 ];
 
+/** 1.2.9 : nouveautés de la bannière (comme le message « Quai 1.2.9 » des lunettes). */
+export const NEWS_129: readonly string[] = [
+  'Dans les lunettes, « imminent » ne s’affiche plus qu’avec le temps réel ; sur l’horaire prévu, c’est « dans ~1 min ».',
+  'L’accueil du téléphone reprend celui des lunettes, mêmes rubriques et même ordre ; tous les autres réglages sont derrière le bouton « Réglages ».',
+  'Gares, arrêts et lignes ont chacun leur écran : touche un élément pour l’ouvrir d’office, changer son ordre ou le retirer, et ajoute ceux près de toi sur place.',
+];
+
+/** 1.2.9 : les mêmes sur Quai Web, où la page du téléphone est l'onglet Réglages. */
+export const NEWS_129_WEB: readonly string[] = [
+  NEWS_129[0],
+  'L’onglet Réglages reprend l’accueil des lunettes, mêmes rubriques et même ordre ; tous les autres réglages sont derrière le bouton « Réglages ».',
+  NEWS_129[2],
+];
+
 /** 1.2.8 : nouveautés de la bannière (comme le message « Quai 1.2.8 » des lunettes). */
 export const NEWS_128: readonly string[] = [
   'Dans les lunettes, touche un train au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.',
@@ -225,12 +289,13 @@ export const NEWS_128: readonly string[] = [
 const stillTrue = (l: string): boolean => !/^Bus, tram, métro\b/.test(l);
 
 /**
- * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.8 ; depuis une version
+ * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.9 ; depuis une version
  * antérieure (`seen` : la version vue avant la mise à jour), celles des versions sautées ensuite, de la plus récente à
  * la plus ancienne, sans celles qui ne sont plus vraies.
  */
-export function newsLines(seen = ''): string[] {
-  const out = [...NEWS_128];
+export function newsLines(seen = '', web = false): string[] {
+  const out = [...(web ? NEWS_129_WEB : NEWS_129)];
+  if (seen && compareVersions(seen, '1.2.8') < 0) out.push(...NEWS_128);
   if (seen && compareVersions(seen, '1.2.6') < 0) out.push(...NEWS_126);
   if (seen && compareVersions(seen, '1.2.5') < 0) out.push(...NEWS_125.filter(stillTrue));
   if (seen && compareVersions(seen, '1.2.4') < 0) out.push(...NEWS_124.filter(stillTrue));
@@ -267,8 +332,6 @@ export const stopLinesText = (stop: string): string => (stop ? `Lignes à ${stop
 export const notServedText = (stop: string): string => `Cette ligne ne passe pas à ${stop}.`;
 /** Rang annoncé après « Monter » ou « Descendre » : « Namur : 2e sur 3. » */
 export const rankText = (name: string, rank: number, total: number): string => `${name} : ${rank === 1 ? '1er' : `${rank}e`} sur ${total}.`;
-/** Ligne « Trajets » des réglages (revue d'usage n° 9) : « Marche 10 min au plus, marge 2 min ». */
-export const tripsSummary = (maxWalkMin: number, marginMin: number): string => `Marche ${maxWalkMin} min au plus, marge ${marginMin} min`;
 export const noStopText = (min: number): string => `Aucun arrêt à moins de ${min} min à pied de cette adresse.`;
 export const noFullTripText = (station: string): string => `Pas de trajet complet. Essaie ${station}, puis le tram.`;
 export const searchTowards = (station: string): string => `Chercher vers ${station}`;

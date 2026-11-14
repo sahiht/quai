@@ -149,11 +149,11 @@ export const WEB_DEBOUNCE: typeof DEBOUNCE = {
 export const TRIP_KEY = 'quai.trip';
 
 /**
- * Message de nouveautés « Quai 1.2.8 » : montré une fois à qui avait vu une version antérieure (PRD-1.2.8 § 4 ; 1.2.7
- * ou avant ; la 1.2.7, corrective, n'en avait pas), jamais après une installation neuve, ni tant que l'appli n'est pas
- * en 1.2.8. Ses lignes : newsLines (views.ts).
+ * Message de nouveautés « Quai 1.2.9 » : montré une fois à qui avait vu une version antérieure (PRD-1.2.9 § 4 ; 1.2.8
+ * ou avant), jamais après une installation neuve, ni tant que l'appli n'est pas en 1.2.9. Ses lignes : newsLines
+ * (views.ts).
  */
-export const NEWS_SINCE = '1.2.8';
+export const NEWS_SINCE = '1.2.9';
 
 /**
  * Date du premier lancement (PRD-1.2.1 § 4.6), en ms : clé du stockage de l'appli sur le téléphone, hors du schéma des
@@ -595,7 +595,7 @@ export class GlassesController implements GlassesApi {
     if (!s.onboarded) return { nav: initNav({ screen: 'message', kind: 'firstRun', title: 'Quai', lines: [] }), resumed: false };
     if (seen && compareVersions(seen, NEWS_SINCE) < 0 && compareVersions(APP_VERSION, NEWS_SINCE) >= 0) {
       void this.markSeen();
-      return { nav: initNav({ screen: 'message', kind: 'news', title: NEWS_TITLE, lines: newsLines(seen) }), resumed: false };
+      return { nav: initNav({ screen: 'message', kind: 'news', title: NEWS_TITLE, lines: newsLines(seen, !!this.d.web) }), resumed: false };
     }
     const run = this.resumeNav(initNav({ screen: 'home' }), true);
     if (run) return { nav: run, resumed: true };
@@ -1934,12 +1934,22 @@ export class GlassesController implements GlassesApi {
   }
 
   /**
+   * 1.2.9 : rangées déjà à l'écran d'une liste chargée au fur et à mesure (« Gares », « Arrêts », « Lignes ») : la réponse
+   * finale remplace celle de l'écran (load) ; une rangée en erreur y garde ainsi sa dernière valeur, jamais « … » qui
+   * revient (progressive).
+   */
+  private shownRows<T>(r: Route): Record<string, T> {
+    const prev = this.cache.get(routeKey(r));
+    return prev?.ok && prev.value ? { ...(prev.value as Record<string, T>) } : {};
+  }
+
+  /**
    * 1.2.2 : « Gares » (PRD-1.2.2 § 2) : le prochain train de chaque gare choisie, 3 gares à la fois, affiché au fur et à
    * mesure ; une gare en erreur garde sa dernière valeur (« … » sinon) ; introuvable : « introuvable » ; retrouvée sous
    * un autre identifiant : le choix suit (pickMoved).
    */
   private async fetchStations(r: Route): Promise<Record<string, StationData>> {
-    const out: Record<string, StationData> = {};
+    const out: Record<string, StationData> = this.shownRows(r);
     await this.progressive(r, this.settings().stations, async (p) => {
       try {
         const b = await this.d.core.board(p.areaId, { limit: 3, near: pickPlace(p) });
@@ -1961,7 +1971,7 @@ export class GlassesController implements GlassesApi {
    * (jamais « … » pour toujours) ; retrouvé sous un autre identifiant : le choix suit (pickMoved).
    */
   private async fetchLines(r: Route): Promise<Record<string, LineData>> {
-    const out: Record<string, LineData> = {};
+    const out: Record<string, LineData> = this.shownRows(r);
     // 1.2.4 : dans l'ordre de l'écran (les arrêts d'abord) : le haut de la liste se remplit en premier
     await this.progressive(r, linesInOrder(this.settings().lines), async (p) => {
       try {
@@ -2006,7 +2016,7 @@ export class GlassesController implements GlassesApi {
 
   /** 1.2.6 : « Lignes » : chaque ligne suivie et ses sens, au fur et à mesure. */
   private async fetchFollows(r: Route): Promise<Record<string, Omit<FollowRow, 'follow'>>> {
-    const out: Record<string, Omit<FollowRow, 'follow'>> = {};
+    const out: Record<string, Omit<FollowRow, 'follow'>> = this.shownRows(r);
     await this.progressive(r, followsOf(this.settings()), async (f) => {
       try {
         const x = await this.resolveFollow(f.id);

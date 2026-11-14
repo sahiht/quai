@@ -1,0 +1,3 @@
+« imminent » ne s’affiche plus qu’avec le temps réel ; un horaire prévu à moins d’une minute s’écrit « dans ~1 min ».
+Téléphone : l’accueil reprend celui des lunettes (mêmes rubriques, même ordre) et tous les autres réglages passent par le bouton « Réglages ».
+Gares, arrêts et lignes : chacun son écran, chaque élément se déplie (ouvrir d’office, ordre, retirer) et « Près de toi » s’ajoute sur place.

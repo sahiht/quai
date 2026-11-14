@@ -1,25 +1,26 @@
 /**
  * Ajout d'une gare, d'un arrêt ou d'une ligne (PRD-1.2.2 § 4, PRD-1.2.3 § 3 ; 1.2.6, PRD-1.2.6 § 5), sur le téléphone
- * et dans l'onglet Réglages de Quai Web. Chacun commence par « Près de toi » (calculé sur le téléphone, la position ne
- * le quitte pas) : « Ajouter » à droite, « Ajoutée ✓ » ensuite, un second toucher retire ; dessous, la recherche.
- *  - « Ajouter une gare » : les gares à moins de 2 km ; « Une autre gare » : un champ limité aux gares SNCB
- *    (core.search filtré), les plus proches d'abord ; une gare déjà choisie est signalée « Déjà dans tes gares ».
- *  - « Ajouter un arrêt » : les arrêts de bus, tram et métro les plus proches, avec leurs lignes à leur couleur ;
- *    « Un autre arrêt » : un champ limité à ces arrêts (core.search sans les gares SNCB) ; un toucher ajoute l'arrêt
- *    avec toutes ses lignes (LinePick sans `line`). ?arret={zone} (lien de « Un endroit », revue d'usage n° 3) : cet
- *    arrêt en tête.
- *  - « Ajouter une ligne » : les lignes des arrêts à 500 m (8 au plus) ; « Une autre ligne » : « Numéro de la ligne »
+ * et dans l'onglet Réglages de Quai Web. 1.2.9 (PRD-1.2.9 § 2.2) : chaque ajout est sous la liste de son écran
+ * (picks.ts, « Ajouter une gare », « Ajouter un arrêt », « Ajouter une ligne ») ; après un ajout, le curseur va à
+ * l'élément dans la liste au-dessus. Chacun commence par « Près de toi » (calculé sur le téléphone, la position ne le
+ * quitte pas) : « Ajouter » à droite, « Ajoutée ✓ » ensuite, un second toucher retire ; dessous, la recherche.
+ *  - Gares : les gares à moins de 2 km ; « Une autre gare » : un champ limité aux gares SNCB (core.search filtré), les
+ *    plus proches d'abord ; une gare déjà choisie est signalée « Déjà dans tes gares ».
+ *  - Arrêts : les arrêts de bus, tram et métro les plus proches, avec leurs lignes à leur couleur ; « Un autre arrêt » :
+ *    un champ limité à ces arrêts (core.search sans les gares SNCB) ; un toucher ajoute l'arrêt avec toutes ses lignes
+ *    (LinePick sans `line`). ?arret={zone} (lien de « Un endroit », revue d'usage n° 3) : cet arrêt en tête.
+ *  - Lignes : les lignes des arrêts à 500 m (8 au plus) ; « Une autre ligne » : « Numéro de la ligne »
  *    (core.findLines : « Bus W TEC, Braine-l’Alleud ↔ Bruxelles Midi », les plus proches d'abord) ; un toucher ajoute
  *    la ligne entière, dans les deux sens (LineFollow), et confirme. ?arret={zone} : les lignes de cet arrêt en
  *    raccourcis.
  * Erreurs, limites et listes vides dites en clair ; jamais de coordonnées à l'écran.
  */
-import type { AreaSummary, LatLon, LineMatch, Mode, Names, Op, SearchItem } from '../../core/api';
+import type { AreaSummary, LatLon, LineMatch, LinePick, Mode, Names, Op, SearchItem, StationPick } from '../../core/api';
 import { lineKey } from '../../core/linepicks';
 import { displayName, distanceM, kindLabel, mainMode } from '../../core/util';
 import { LIMITS } from '../../settings';
 import { normalizeForSearch } from '../../../../shared/names';
-import { header, type PhoneCtx } from '../app';
+import type { PhoneCtx } from '../app';
 import { debounce, h, icon } from '../dom';
 import { distanceText, lineAddedText, lineFollowedText, lineLimitText, lineMatchText, lineName, stationAddedText, stationLimitText, stopAddedText, stopLimitText, stopLinesText, T, typo } from '../text';
 import { followsOf } from '../../glasses/views';
@@ -27,7 +28,7 @@ import { badgeRow, lineBadge } from '../badges';
 import { isFollowed, type LineFollow } from '../../core/linerun';
 import { OP_NAME } from '../../core/util';
 import { messageHub } from '../ui';
-import { linesAtStop, trainIcon, withLine, withStation } from './picks';
+import { linesAtStop, trainIcon, withLine, withStation, type Pickable, type PickKind } from './picks';
 
 /** Gares proposées sans texte : à moins de 2 km de la position (3 × 3 tuiles autour d'elle, recherche légère). */
 export const NEAR_STATIONS_M = 2000;
@@ -93,11 +94,14 @@ function toggleRow(o: { ctx: Pick<PhoneCtx, 'settings'>; icon: HTMLElement; t1: 
   return li;
 }
 
-/** 1.2.6 : bloc « Près de toi » (caché tant qu'il est vide) et l'intitulé de la recherche dessous. */
+/**
+ * 1.2.6 : bloc « Près de toi » (caché tant qu'il est vide) et l'intitulé de la recherche dessous ; 1.2.9 : des h3, sous
+ * le titre de l'ajout (h2) de l'écran de la liste.
+ */
 function nearBlock(other: string): { box: HTMLElement; list: HTMLUListElement; other: HTMLElement; show(n: number): void } {
   const list = h('ul', { class: 'list box' });
-  const box = h('div', { class: 'step', hidden: true }, h('h2', { class: 'sub-head' }, 'Près de toi'), list);
-  const head = h('h2', { class: 'sub-head', hidden: true }, other);
+  const box = h('div', { class: 'step', hidden: true }, h('h3', { class: 'sub-head' }, 'Près de toi'), list);
+  const head = h('h3', { class: 'sub-head', hidden: true }, other);
   return {
     box,
     list,
@@ -109,8 +113,11 @@ function nearBlock(other: string): { box: HTMLElement; list: HTMLUListElement; o
   };
 }
 
-/** Champ d'une recherche : étiquette, saisie, note sous le champ (état, erreur). */
-function searchField(o: { id: string; label: string; placeholder: string; autofocus?: boolean }): { el: HTMLElement; input: HTMLInputElement; note: HTMLParagraphElement; say(text: string, error?: boolean): void } {
+/**
+ * Champ d'une recherche : étiquette, saisie, note sous le champ (état, erreur). 1.2.9 : jamais le curseur à
+ * l'ouverture (le titre de l'ajout le reçoit, sans ouvrir le clavier par-dessus « Près de toi »).
+ */
+function searchField(o: { id: string; label: string; placeholder: string }): { el: HTMLElement; input: HTMLInputElement; note: HTMLParagraphElement; say(text: string, error?: boolean): void } {
   const note = h('p', { class: 'field-note', id: `${o.id}-etat`, role: 'status', 'aria-live': 'polite' });
   const input = h('input', {
     id: o.id,
@@ -122,7 +129,6 @@ function searchField(o: { id: string; label: string; placeholder: string; autofo
     spellcheck: 'false',
     enterkeyhint: 'search',
     'aria-describedby': note.id,
-    'data-autofocus': o.autofocus,
   });
   const el = h('div', { class: 'field' }, h('label', { for: o.id }, o.label), input, note);
   return {
@@ -168,12 +174,12 @@ export function stationsOf(items: readonly SearchItem[], pos: LatLon | null): St
   return items.filter((it) => it.op === 'sncb').map((it) => ofItem(it, pos));
 }
 
-export function addStationScreen(ctx: PhoneCtx): HTMLElement {
-  const field = searchField({ id: 'gare-nom', label: T.stationField, placeholder: T.stationPlaceholder, autofocus: true });
+/** « Ajouter une gare » : « Près de toi », puis « Une autre gare » (le champ). */
+function stationPanel(ctx: PhoneCtx, opts: AddPanelOpts): HTMLElement {
+  const field = searchField({ id: 'gare-nom', label: T.stationField, placeholder: T.stationPlaceholder });
   const list = h('ul', { class: 'list box opts', 'aria-label': T.stations, hidden: true });
   const hub = messageHub();
   const msg = hub.slot();
-  const done = h('button', { type: 'button', class: 'btn btn-secondary btn-block', hidden: true, onclick: () => ctx.go('#/gares') }, T.done);
   let shown: StationChoice[] = [];
   let seq = 0;
   const nbS = nearBlock('Une autre gare');
@@ -269,12 +275,12 @@ export function addStationScreen(ctx: PhoneCtx): HTMLElement {
       return typeof again === 'object' ? again.settings : x;
     });
     hub.say(msg, stationAddedText(name));
-    done.hidden = false;
     // Prêt pour une autre gare : le champ se vide, les gares proches reviennent (celle-ci « déjà dans tes gares »).
     field.input.value = '';
     await run();
-    // le bouton touché a disparu avec la liste : le curseur va à « Terminé » (sans rouvrir le clavier)
-    done.focus();
+    // le bouton touché a disparu avec la liste : le curseur va à la gare, en fin de liste au-dessus (1.2.9 ; sans
+    // rouvrir le clavier)
+    opts.reveal((p) => (p as StationPick).areaId === c.areaId);
   }
 
   field.input.addEventListener('input', debounce(() => void run(), TYPE_DELAY_MS));
@@ -284,7 +290,7 @@ export function addStationScreen(ctx: PhoneCtx): HTMLElement {
     list.querySelector<HTMLButtonElement>('button')?.focus();
   });
   void run();
-  return h('div', { class: 'screen' }, header(ctx, T.addStation, T.stationLead, { label: 'Accueil', hash: '#/' }), nbS.box, nbS.other, field.el, msg, done, list);
+  return h('div', { class: 'station-add' }, nbS.box, nbS.other, field.el, msg, list);
 }
 
 /* ------------------------------ Ajouter une ligne ou un arrêt ------------------------------ */
@@ -325,15 +331,21 @@ function followOf(m: LineMatch, now: number): LineFollow {
   return f;
 }
 
-function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset> | null): HTMLElement {
+/**
+ * « Ajouter une ligne » : « Près de toi », puis « Une autre ligne » (son numéro) ; la ligne choisie est ajoutée et dite,
+ * avec « Ajouter une autre ligne » et « Terminé » (1.2.9 : le curseur va à la ligne dans la liste au-dessus).
+ */
+function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset> | null, opts: AddPanelOpts): HTMLElement {
   const lang = () => ctx.settings.get().lang;
   let preset: Preset | null = null;
   let seq = 0;
+  /** Dernière ligne choisie (« Terminé » la montre dans la liste). */
+  let picked: LineMatch | null = null;
   const hub = messageHub();
   const msg1 = hub.slot();
 
   /* --- 1. Numéro de la ligne --- */
-  const num = searchField({ id: 'ligne-num', label: T.lineField, placeholder: T.linePlaceholder, autofocus: true });
+  const num = searchField({ id: 'ligne-num', label: T.lineField, placeholder: T.linePlaceholder });
   const quick = h('div', { class: 'quick', hidden: true });
   const found = h('ul', { class: 'list box opts', 'aria-label': T.linesFound, hidden: true });
   const step1 = h('div', { class: 'step' }, num.el, quick, found);
@@ -343,7 +355,7 @@ function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
   const change = h('button', { type: 'button', class: 'btn-link' }, T.changeLine);
   const msg2 = hub.slot();
   const again = h('button', { type: 'button', class: 'btn btn-secondary btn-block' }, T.anotherLine);
-  const done = h('button', { type: 'button', class: 'btn btn-secondary btn-block', onclick: () => ctx.go('#/lignes') }, T.done);
+  const done = h('button', { type: 'button', class: 'btn btn-secondary btn-block' }, T.done);
   const after = h('div', { class: 'after-add', hidden: true }, again, done);
   const step2 = h('div', { class: 'step', hidden: true }, h('div', { class: 'chosen' }, chosen, change), msg2, after);
 
@@ -406,6 +418,7 @@ function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
   });
 
   async function choose(m: LineMatch): Promise<void> {
+    picked = m;
     hub.clear();
     nearBox.hidden = true;
     otherHead.hidden = true;
@@ -423,7 +436,8 @@ function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
     again.focus();
   }
 
-  const back = (clear: boolean): void => {
+  /** Retour au champ (`clear` : vidé) ; `focus` : le curseur y va (pas pour « Terminé »). */
+  const back = (clear: boolean, focus = true): void => {
     seq++;
     hub.clear();
     step2.hidden = true;
@@ -435,10 +449,16 @@ function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
       paintFound([]);
       num.say('');
     }
-    num.input.focus();
+    if (focus) num.input.focus();
   };
   change.addEventListener('click', () => back(false));
   again.addEventListener('click', () => back(true));
+  // 1.2.9 : « Terminé » : l'ajout revient à son début (sans clavier) et le curseur va à la ligne dans la liste
+  done.addEventListener('click', () => {
+    const m = picked;
+    back(true, false);
+    opts.reveal((p) => !!m && isFollowed(p as LineFollow, m));
+  });
 
   // Arrêt présélectionné (« Un endroit ») : son nom, ses lignes en raccourcis ; trié depuis lui.
   if (arret && presetP) {
@@ -468,8 +488,8 @@ function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
   }
   /* --- 1.2.6 : « Près de toi », les lignes des arrêts proches, un toucher pour les ajouter --- */
   const nearList = h('ul', { class: 'list box' });
-  const nearBox = h('div', { class: 'step', hidden: true }, h('h2', { class: 'sub-head' }, 'Près de toi'), nearList);
-  const otherHead = h('h2', { class: 'sub-head', hidden: true }, 'Une autre ligne');
+  const nearBox = h('div', { class: 'step', hidden: true }, h('h3', { class: 'sub-head' }, 'Près de toi'), nearList);
+  const otherHead = h('h3', { class: 'sub-head', hidden: true }, 'Une autre ligne');
   const followed = (m: LineMatch): boolean => followsOf(ctx.settings.get()).some((f) => isFollowed(f, m));
   const nearRow = (m: LineMatch): HTMLLIElement => {
     const s = ctx.settings.get();
@@ -503,7 +523,7 @@ function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
       otherHead.hidden = nearBox.hidden;
     })
     .catch(() => undefined);
-  return h('div', { class: 'line-add' }, h('p', { class: 'lead' }, T.lineLead), nearBox, msg1, otherHead, step1, step2);
+  return h('div', { class: 'line-add' }, nearBox, msg1, otherHead, step1, step2);
 }
 
 /** 1.2.6 : « Près de toi » : lignes des arrêts à 500 m au plus, 8 au plus. */
@@ -534,12 +554,11 @@ const ofStopArea = (a: AreaSummary, d?: number): StopChoice => ({ areaId: a.id, 
  * les plus proches de la position, l'arrêt présélectionné en tête) ; un toucher ajoute l'arrêt avec toutes ses lignes
  * (LinePick sans `line` ni `mode`) et confirme ; un arrêt déjà choisi en entier est signalé.
  */
-function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset> | null): HTMLElement {
-  const field = searchField({ id: 'arret-nom', label: T.stopField, placeholder: T.stopSearchPlaceholder, autofocus: true });
+function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset> | null, opts: AddPanelOpts): HTMLElement {
+  const field = searchField({ id: 'arret-nom', label: T.stopField, placeholder: T.stopSearchPlaceholder });
   const list = h('ul', { class: 'list box opts', 'aria-label': T.stopsFound, hidden: true });
   const hub = messageHub();
   const msg = hub.slot();
-  const done = h('button', { type: 'button', class: 'btn btn-secondary btn-block', hidden: true, onclick: () => ctx.go('#/arrets') }, T.done);
   let preset: Preset | null = null;
   let shown: StopChoice[] = [];
   let seq = 0;
@@ -653,12 +672,12 @@ function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
       return typeof again === 'object' ? again.settings : x;
     });
     hub.say(msg, typo(stopAddedText(name)));
-    done.hidden = false;
     // Prêt pour un autre arrêt : le champ se vide, les arrêts proches reviennent (celui-ci « déjà dans tes arrêts »).
     field.input.value = '';
     await run();
-    // le bouton touché a disparu avec la liste : le curseur va à « Terminé » (sans rouvrir le clavier)
-    done.focus();
+    // le bouton touché a disparu avec la liste : le curseur va à l'arrêt, en fin de liste au-dessus (1.2.9 ; sans
+    // rouvrir le clavier)
+    opts.reveal((p) => (p as LinePick).areaId === c.areaId && !(p as LinePick).line);
   }
 
   field.input.addEventListener('input', debounce(() => void run(), TYPE_DELAY_MS));
@@ -674,23 +693,26 @@ function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
     });
   }
   void run();
-  return h('div', { class: 'stop-add' }, h('p', { class: 'lead' }, T.stopLead), nbA.box, nbA.other, field.el, msg, done, list);
+  return h('div', { class: 'stop-add' }, nbA.box, nbA.other, field.el, msg, list);
 }
 
-/** Les deux ajouts de bus, tram et métro (1.2.6) : une ligne suivie, ou un arrêt. */
-export type LineAddKind = 'line' | 'stop';
+/** 1.2.9 : ce que l'écran de la liste (picks.ts) donne à son ajout. */
+export interface AddPanelOpts {
+  /**
+   * Après un ajout par la recherche (le bouton touché disparaît avec la liste) ou « Terminé » : le curseur va à
+   * l'élément de la liste au-dessus qui répond à `is`, sinon au titre de l'ajout.
+   */
+  reveal(is: (p: Pickable) => boolean): void;
+}
 
 /**
- * 1.2.6 : « Ajouter une ligne » (#/lignes/ajouter) ou « Ajouter un arrêt » (#/arrets/ajouter), chacun son écran.
- * La limite atteinte est dite d'emblée (le bouton de l'accueil est alors grisé, pas le lien de « Un endroit »).
- * « Accueil » ramène à l'accueil (revue 1.2.2).
+ * 1.2.9 (PRD-1.2.9 § 2.2) : l'ajout d'une rubrique, sous sa liste : une gare (`stations`), un arrêt avec toutes ses
+ * lignes (`lines`) ou une ligne entière (`follows`). ?arret={zone} : pour un arrêt, lui en tête ; pour une ligne, les
+ * lignes de cet arrêt en raccourcis. La limite atteinte est dite par l'écran, au-dessus (picks.ts).
  */
-export function addLineScreen(ctx: PhoneCtx, initial: LineAddKind = 'line'): HTMLElement {
+export function addPanel(ctx: PhoneCtx, kind: PickKind, opts: AddPanelOpts): HTMLElement {
+  if (kind === 'stations') return stationPanel(ctx, opts);
   const arret = ctx.params.get('arret');
   const presetP = arret ? loadPreset(ctx, arret) : null;
-  const s = ctx.settings.get();
-  const stop = initial === 'stop';
-  const full = stop ? s.lines.length >= LIMITS.lines : (s.follows ?? []).length >= LIMITS.lines;
-  const limit = full ? h('p', { class: 'msg err', role: 'status' }, typo(stop ? stopLimitText(LIMITS.lines) : lineLimitText(LIMITS.lines))) : null;
-  return h('div', { class: 'screen' }, header(ctx, stop ? T.addStop : T.addFollow, undefined, { label: 'Accueil', hash: '#/' }), limit, stop ? stopPanel(ctx, arret, presetP) : linePanel(ctx, arret, presetP));
+  return kind === 'lines' ? stopPanel(ctx, arret, presetP, opts) : linePanel(ctx, arret, presetP, opts);
 }

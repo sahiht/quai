@@ -2,11 +2,15 @@
  * refresh() : temps réel réappliqué, heure de départ conseillée recalculée, alertes rédigées (≤ 48 caractères),
  * étiquette et raison gardées (1.1). Temps réel des bus, trams et métros : test/core/routing/rt.test.ts.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { Alert, Journey, Settings } from '../../src/core/api';
+import type { AreaFile } from '../../../shared/types';
+import type { Alert, Journey, Leg, Settings } from '../../src/core/api';
 import { forLabel, withArticle } from '../../src/core/text';
 import { hhmm } from '../../src/core/util';
 import { makeEnv, type TestEnv } from './support/env';
+import { CORE_DATA_DIR } from './support/network';
 
 const MAISON = { lat: 50.4655, lon: 4.859 };
 /** Textes comparés sans les espaces insécables (typographie française des alertes, core/text.ts). */
@@ -173,5 +177,48 @@ describe('alertes', () => {
       expect(a.text.length).toBeLessThanOrEqual(48);
       expect(a.text).not.toContain('—');
     }
+  });
+});
+
+describe('1.2.9 : travaux STIB d’un trajet, route_id différent du numéro de ligne', () => {
+  it('le message WaitingTimes du métro 2 pris à Rogier, jamais celui du tram 4', async () => {
+    const env = makeEnv({ now: '2026-11-10T12:10' });
+    // données réelles du 13/11 (lines/index.json) : à la STIB, le route_id n'est pas le numéro (métro 2 : « 4 », tram 4 : « 5 ») ;
+    // les fixtures avaient route_id = numéro, ce qui cachait l'écart
+    const REAL_ROUTE: Record<string, string> = { '2': '4', '4': '5' };
+    const realRoutes = (path: string): AreaFile => {
+      const f = JSON.parse(readFileSync(join(CORE_DATA_DIR, path), 'utf8')) as AreaFile;
+      for (const p of f.patterns) p.route = REAL_ROUTE[p.line] ?? p.route;
+      env.server.memFiles.set(path, JSON.stringify(f));
+      return f;
+    };
+    const rogier = realRoutes('areas/stib/6359.json');
+    realRoutes('areas/stib/6364.json');
+    // un message du tram 4 au quai de Rogier (WaitingTimes : lineId = numéro de ligne)
+    env.server.relay.stib.points['6359'] = [{ line: '4', dest: { fr: 'STALLE (P)', nl: 'STALLE (P)' }, times: ['2026-11-10T12:15:00+01:00'], msg: 'Tram 4 : arrêt Rogier déplacé' }] as never;
+    const t = env.clock.t;
+    const N = (fr: string) => ({ fr, nl: fr });
+    const ride: Leg = {
+      kind: 'ride',
+      from: { name: N('Rogier'), lat: rogier.lat, lon: rogier.lon, areaId: 'stib:6359' },
+      to: { name: N('Gare du Midi'), lat: 50.8357, lon: 4.3364, areaId: 'stib:6364' },
+      dep: t + 4 * 60_000,
+      arr: t + 14 * 60_000,
+      schedDep: t + 4 * 60_000,
+      schedArr: t + 14 * 60_000,
+      op: 'stib',
+      mode: 'metro',
+      line: '2',
+      head: N('Gare du Midi'),
+      rt: false,
+      delayMin: 0,
+      cancelled: false,
+    };
+    const j: Journey = { id: 'm2', legs: [ride], dep: ride.dep, arr: ride.arr, leaveAt: ride.dep, transfers: 0, rt: false, alerts: [] };
+    const settings: Settings = { ...env.preset, alerts: { ...env.preset.alerts, works: true, leave: false, platform: false, delay: false, cancel: false } };
+    const r = await env.core.refresh(j, settings);
+    const works = r.alerts.filter((a) => a.kind === 'works').map((a) => nb(a.text));
+    expect(works.some((w) => w.includes('Botanique'))).toBe(true);
+    expect(works.some((w) => w.includes('Tram 4'))).toBe(false);
   });
 });

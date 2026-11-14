@@ -241,6 +241,8 @@ export function placeField(ctx: FieldCtx, o: FieldOptions): PlaceField {
     }
     if (q.length >= 3) {
       timer = setTimeout(() => {
+        // 1.2.9 : champ quitté entre-temps (écran changé, page fermée) : pas de recherche d'adresse ni de rendu
+        if (typeof document === 'undefined' || !input.isConnected) return;
         void (async () => {
           let ans: GeocodeAnswer;
           try {
@@ -248,7 +250,7 @@ export function placeField(ctx: FieldCtx, o: FieldOptions): PlaceField {
           } catch {
             ans = { results: [], error: 'down' };
           }
-          if (my !== seq) return;
+          if (my !== seq || typeof document === 'undefined' || !input.isConnected) return;
           if (ans.attribution) lastAttribution = ans.attribution;
           st.geo = ans;
           render();

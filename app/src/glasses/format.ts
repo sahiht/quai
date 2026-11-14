@@ -1,7 +1,7 @@
 /**
  * Mise en forme des textes des lunettes (français). Fonctions pures.
  * 1.1 : textes exacts du PRD § 6.1 ; jours et attentes selon core/text.ts (« demain » jamais avant 04:00,
- * « imminent »), titres des trajets par vers() du cœur, comme sur le téléphone.
+ * « imminent », réservé au temps réel depuis la 1.2.9), titres des trajets par vers() du cœur, comme sur le téléphone.
  */
 import type { Departure, FavoriteAnswer, Journey, Leg, LineDeparture, NameLang, PlanResult, Settings, StopCall } from '../core/api';
 import { meansText, rideName } from '../core/means';
@@ -222,16 +222,21 @@ export function plannedMark(rt: boolean, markPlanned: boolean): string {
 export const minText = (n: number): string => `${n}${NB}min`;
 
 /**
- * Attente d'un bus, tram ou métro : « imminent » (moins d'une minute, S6), « 2 min », « ~4 min », « SUPPRIMÉ » ;
- * au-delà d'une heure, l'heure seule (« ~13:45 ») : le jour éventuel est dit ailleurs sur la ligne.
+ * Attente d'un bus, tram ou métro (Autour de moi, arrêts favoris, téléphone, tableaux) : « 2 min », « ~4 min »,
+ * « SUPPRIMÉ » (toujours d'abord) ; au-delà d'une heure, l'heure seule (« ~13:45 ») : le jour éventuel est dit ailleurs
+ * sur la ligne. À moins d'une minute (S6), 1.2.9 (PRD-1.2.9 § 1) : « imminent » avec le temps réel seulement ; sur
+ * l'horaire prévu, « ~1 min », avec le même « ~ » que les autres horaires prévus (« 1 min » sans lui : accueil,
+ * réglage). Un horaire prévu à peine passé (les listes le gardent encore 30 à 60 s) s'écrit aussi « ~1 min » : sans
+ * temps réel, rien ne dit que le véhicule est passé, et le « ~ » dit déjà que l'heure est approchée (comme waitText du
+ * cœur).
  */
 export function minutesText(d: Pick<Departure, 'est' | 'rt' | 'cancelled'>, now: number, markPlanned: boolean): string {
   if (d.cancelled) return 'SUPPRIMÉ';
   const m = minutesUntil(d.est, now);
   const mark = plannedMark(d.rt, markPlanned);
   if (m >= 60) return `${mark}${hhmm(d.est)}`;
-  if (m < 1) return 'imminent';
-  return `${mark}${minText(m)}`;
+  if (m < 1 && d.rt) return 'imminent';
+  return `${mark}${minText(Math.max(1, m))}`;
 }
 
 /** Voie : « voie 9 », voie modifiée : « voie 6 ! ». Forme courte « v.9 » pour Autour de moi. */
@@ -262,7 +267,10 @@ export function trainCellParts(d: Departure, markPlanned: boolean): TimeParts {
   return { lead: `${plannedMark(d.rt, markPlanned)}${hhmm(d.sched)}`, rest: `${delaySuffix(d.delayMin)}${plat ? '  ' + plat : ''}` };
 }
 
-/** Prochain départ dans « Autour de moi » et les arrêts favoris : « T3 2 min », « 232 ~4 min », « IC 12:22 v.9 », « T3 imminent ». */
+/**
+ * Prochain départ dans « Autour de moi » et les arrêts favoris : « T3 2 min », « 232 ~4 min », « IC 12:22 v.9 », « T3
+ * imminent » (temps réel), « 232 ~1 min » (horaire prévu à moins d'une minute, minutesText, 1.2.9).
+ */
 export function nextText(d: Departure | undefined, now: number, markPlanned: boolean): string {
   if (!d) return '';
   const line = lineLabel(d.mode, d.line);
@@ -677,15 +685,19 @@ export function lineTitle(mode: Mode | undefined, line: string, stop: string): s
 /** Arrêt sans filtre : « Gare du Nord · toutes les lignes ». */
 export const allLinesTitle = (stop: string): string => `${stop} · ${SECTION.allLines}`;
 
-/** Un passage comme sur les tableaux : « 3 » (minutes), « ~4 », « imminent », « SUPPRIMÉ », « ~08:45 » au-delà d'1 h. */
+/**
+ * Un passage comme sur les tableaux : « 3 » (minutes), « ~4 », « SUPPRIMÉ » (toujours d'abord), « ~08:45 » au-delà
+ * d'1 h ; à moins d'une minute, « imminent » avec le temps réel seulement, « ~1 » sur l'horaire prévu (1.2.9, comme
+ * minutesText, horaire prévu à peine passé compris).
+ */
 function passage(d: LineDeparture, now: number, markPlanned: boolean): { v: string; minutes: boolean; partial: boolean } {
   const partial = !!d.partial;
   if (d.cancelled) return { v: 'SUPPRIMÉ', minutes: false, partial };
   const m = minutesUntil(d.est, now);
   const mark = plannedMark(d.rt, markPlanned);
   if (m >= 60) return { v: `${mark}${hhmm(d.est)}`, minutes: false, partial };
-  if (m < 1) return { v: 'imminent', minutes: false, partial };
-  return { v: `${mark}${m}`, minutes: true, partial };
+  if (m < 1 && d.rt) return { v: 'imminent', minutes: false, partial };
+  return { v: `${mark}${Math.max(1, m)}`, minutes: true, partial };
 }
 
 /** « demain » (ou « le 12/11 ») devant des heures d'un autre jour, comme les tableaux (S6) ; '' le jour même. */
@@ -694,10 +706,11 @@ function laterDay(d: Pick<Departure, 'est' | 'cancelled'> | undefined, now: numb
 }
 
 /**
- * Les 2 prochains passages d'un sens (PRD-1.2.2 § 3) : « 3 · 18 min », « imminent · 9 min », « ~4 · ~19 min »,
- * « SUPPRIMÉ · 18 min », « 45 min · 08:45 » ; un seul : « 3 min » ; aucun : « aucun passage ». Un passage partiel
- * (`partial`, il s'arrête avant le terminus du sens) est marqué « * » : « 3* · 18 min », « 3 · 18 min* ». Le
- * lendemain, comme les tableaux : « demain 06:02 · 06:10 ».
+ * Les 2 prochains passages d'un sens (PRD-1.2.2 § 3) : « 3 · 18 min », « imminent · 9 min » (temps réel seulement),
+ * « ~4 · ~19 min », horaire prévu à moins d'une minute « ~1 · ~9 min » (1.2.9), « SUPPRIMÉ · 18 min », « 45 min ·
+ * 08:45 » ; un seul : « 3 min » ; aucun : « aucun passage ». Un passage partiel (`partial`, il s'arrête avant le
+ * terminus du sens) est marqué « * » : « 3* · 18 min », « 3 · 18 min* ». Le lendemain, comme les tableaux : « demain
+ * 06:02 · 06:10 ».
  */
 export function passagesText(deps: readonly LineDeparture[], now: number, markPlanned: boolean, maxPx = HOME_RIGHT_PX): string {
   const ps = deps.slice(0, 2).map((d) => passage(d, now, markPlanned));
@@ -715,15 +728,18 @@ export function passagesText(deps: readonly LineDeparture[], now: number, markPl
 
 /**
  * 1.2.7 : toute la ligne : le prochain passage seul, en clair (« 5 · 20 min » se lisait mal) : « dans 5 min »,
- * « imminent », au-delà d'une heure « à 23:40 », un autre jour « demain 06:04 » ; « ~ » devant le nombre sans temps
- * réel (« dans ~5 min ») ; aucun : « aucun passage ». Les passages suivants : toucher l'arrêt.
+ * au-delà d'une heure « à 23:40 », un autre jour « demain 06:04 » ; « ~ » devant le nombre sans temps réel (« dans ~5
+ * min ») ; aucun : « aucun passage ». Les passages suivants : toucher l'arrêt. 1.2.8 : aussi chaque gare de tout le
+ * trajet d'un train. À moins d'une minute, 1.2.9 (PRD-1.2.9 § 1) : « imminent » avec le temps réel seulement,
+ * « dans ~1 min » sur l'horaire prévu (« dans 1 min » sans le « ~ » du réglage), horaire prévu à peine passé compris
+ * (minutesText).
  */
 export function nextPassageText(d: Pick<LineDeparture, 'est' | 'rt'> | undefined, now: number, markPlanned: boolean): string {
   if (!d) return SECTION.noPassage;
   const m = minutesUntil(d.est, now);
-  if (m < 1) return 'imminent';
+  if (m < 1 && d.rt) return 'imminent';
   const mark = plannedMark(d.rt, markPlanned);
-  if (m < 60) return `dans ${mark}${minText(m)}`;
+  if (m < 60) return `dans ${mark}${minText(Math.max(1, m))}`;
   const day = dayWord(d.est, now);
   return `${day || 'à'} ${mark}${hhmm(d.est)}`;
 }
@@ -740,11 +756,18 @@ export function passageParts(d: Departure, markPlanned: boolean): TimeParts {
   return { lead: `${plannedMark(d.rt, markPlanned)}${hhmm(d.sched)}`, rest: delaySuffix(d.delayMin) };
 }
 
-/** Détail d'une ligne : l'attente (« dans 3 min », « imminent », « dans 1 h 05 », « SUPPRIMÉ »). */
-export function waitText(d: Pick<Departure, 'est' | 'cancelled'>, now: number): string {
+/**
+ * Détail d'une ligne : l'attente (« dans 3 min », « dans 1 h 05 », « SUPPRIMÉ » toujours d'abord) ; le « ~ » d'un
+ * passage prévu est devant son heure (passageParts). À moins d'une minute, 1.2.9 (PRD-1.2.9 § 1) : « imminent » avec
+ * le temps réel seulement ; sur l'horaire prévu, « dans ~1 min » (« dans 1 min » sans `markPlanned`), horaire prévu à
+ * peine passé compris (minutesText). Le détail d'une ligne passe `markPlanned` à faux : le « ~ » est déjà devant
+ * l'heure de la rangée (« ~07:59   dans 1 min »).
+ */
+export function waitText(d: Pick<Departure, 'est' | 'rt' | 'cancelled'>, now: number, markPlanned: boolean): string {
   if (d.cancelled) return 'SUPPRIMÉ';
   const m = minutesUntil(d.est, now);
-  return m < 1 ? 'imminent' : `dans ${durationText(m)}`;
+  if (m >= 1) return `dans ${durationText(m)}`;
+  return d.rt ? 'imminent' : `dans ${plannedMark(d.rt, markPlanned)}${minText(1)}`;
 }
 
 /** Durées des marches d'au moins 1 min, dans l'ordre du trajet. */

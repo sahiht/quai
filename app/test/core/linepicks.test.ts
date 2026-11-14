@@ -5,12 +5,14 @@
  */
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { AreaFile, AreaSummary, Meta, TileFile } from '../../../shared/types';
+import type { AreaFile, AreaSummary, LineFile, LineIndex, Meta, TileFile } from '../../../shared/types';
 import type { Departure, LineBoard, PickPlace } from '../../src/core/api';
 import { QuaiError } from '../../src/core/errors';
 import {
   directionGroups,
   directionsOf,
+  FIND_FILES_MAX,
+  findLinesIn,
   groupDirections,
   lineKey,
   mainEnds,
@@ -351,5 +353,49 @@ describe('vrai cœur sur les fixtures : gare ou ligne choisie dont la zone a cha
     // la zone qui existe et celle retrouvée par son nom restent servies comme les autres jours
     expect((await env.core.lineBoard('stib:6357F', '3')).state).toBe('ok');
     expect(await env.core.lineBoard('stib:64', '3', { near: GDN })).toMatchObject({ state: 'ok', movedTo: 'stib:6357F' });
+  });
+});
+
+describe('1.2.9 : une ligne jamais coupée par la limite de fichiers de findLines', () => {
+  // Données du 13/11 et du 14/11 (balayage de nuit : « delijn:30021 (« 2 »), delijn:50441 (« 4 ») non retrouvés ») : De
+  // Lijn publie un fichier par sens ; le « 2 » de Louvain (30020, 30021) tombait de part et d'autre des 16 fichiers lus,
+  // et la ligne trouvée n'avait qu'un sens (l'ajouter n'en suivait qu'un).
+  const city = (k: number) => ({ lat: 50 + k * 0.2, lon: 3 + k * 0.2 });
+  // sens retour (`back`) : du nord au sud
+  const file = (id: string, at: { lat: number; lon: number }, from: string, to: string, back = false): LineFile => ({
+    v: 1,
+    id,
+    op: 'delijn',
+    route: id.slice(id.indexOf(':') + 1),
+    line: '2',
+    mode: 'bus',
+    areas: [
+      [`delijn:${from}`, at.lat + (back ? 0.01 : 0), at.lon, N(from)],
+      [`delijn:${to}`, at.lat + (back ? 0 : 0.01), at.lon, N(to)],
+    ],
+    pats: [{ head: N(to), a: [0, 1], s: ['', ''], prof: [[0, 5]], t: [[0, 480, 0]] }],
+    conn: [[], []],
+  });
+  const files: LineFile[] = [];
+  // cinq lignes « 2 » de cinq villes, trois fichiers chacune (deux sens et une variante) : 15 fichiers
+  for (let k = 0; k < 5; k++) {
+    const at = city(k);
+    files.push(file(`delijn:1${k}020`, at, `a${k}`, `b${k}`), file(`delijn:1${k}021`, at, `b${k}`, `a${k}`, true), file(`delijn:1${k}022`, at, `a${k}`, `c${k}`));
+  }
+  // le « 2 » de Louvain : ses deux sens, 16e et 17e fichiers
+  files.push(file('delijn:30020', city(6), 'Engels Plein', 'Heverlee Campus Arenberg'), file('delijn:30021', city(6), 'Heverlee Campus Arenberg', 'Engels Plein', true));
+  const meta = { v: 1, generatedAt: 'nuit', serviceDates: ['2026-11-14', '2026-11-15'], tile: { lat: 0.02, lon: 0.03 }, lines: { files: files.length, ops: ['delijn'], conn: 400 } } as unknown as Meta;
+  const index: LineIndex = { v: 1, generatedAt: 'nuit', conn: 400, lines: files.map((f) => [f.id, f.line, f.mode, f.pats.length]), stations: {} };
+  const byPath = new Map<string, unknown>([['lines/index.json', index], ...files.map((f) => [`lines/delijn/${f.route}.json`, f] as [string, unknown])]);
+  const src = { meta, json: async <T,>(path: string, valid: (x: unknown) => x is T): Promise<T | null> => { const x = byPath.get(path); return x !== undefined && valid(x) ? x : null; } };
+
+  it('les deux sens du « 2 » de Louvain, même au-delà des 16 premiers fichiers', async () => {
+    expect(files.length).toBe(FIND_FILES_MAX + 1);
+    const ms = await findLinesIn(src, '2', null);
+    const leuven = ms.find((m) => m.routes.includes('delijn:30020'));
+    expect(leuven?.routes).toEqual(['delijn:30020', 'delijn:30021']);
+    expect(leuven?.ends.map((e) => e.fr).sort()).toEqual(['Engels Plein', 'Heverlee Campus Arenberg']);
+    // les autres lignes restent entières, une par ville
+    expect(ms.filter((m) => m !== leuven).map((m) => m.routes.length)).toEqual([3, 3, 3, 3, 3]);
   });
 });

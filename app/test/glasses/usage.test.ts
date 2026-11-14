@@ -106,7 +106,7 @@ describe('REVUE-USAGE n° 10 : « Autour de moi » vide, une issue', () => {
 
   it('contrôleur : recherche légère jusqu’à 3 km seulement quand la liste est vide ; toucher ouvre les départs nommés', async () => {
     const calls: string[] = [];
-    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.8' }), core: (now) => stubCore(now, { nearby: 0, calls }) });
+    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.9' }), core: (now) => stubCore(now, { nearby: 0, calls }) });
     await h.until((x) => x.screen === 'home');
     calls.length = 0;
     await h.c.replaceRoute({ screen: 'nearby' });
@@ -116,7 +116,7 @@ describe('REVUE-USAGE n° 10 : « Autour de moi » vide, une issue', () => {
     expect(s.lines[1]).toBe('Rayon réglable sur le téléphone : Affichage.');
     h.c.stop();
     const busy: string[] = [];
-    const g = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.8' }), core: (now) => stubCore(now, { nearby: 3, calls: busy }) });
+    const g = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.9' }), core: (now) => stubCore(now, { nearby: 3, calls: busy }) });
     await g.until((x) => x.screen === 'home');
     busy.length = 0;
     await g.c.replaceRoute({ screen: 'nearby' });

@@ -1,6 +1,6 @@
 /**
  * Réglage 6 sur 6 : données (T6, maquette Config6) : état du relais (/api/health) et des services d'adresses,
- * fraîcheur des horaires, temps réel, version de Quai.
+ * fraîcheur des horaires, temps réel, version de Quai. 1.2.9 (PRD-1.2.9 § 2.3) : retour à Réglages.
  */
 import type { HealthResponse, Meta } from '../../core/api';
 import { brusselsParts, hhmm, localDate } from '../../core/util';
@@ -9,7 +9,7 @@ import { APP_VERSION } from '../../version';
 import { header, type PhoneCtx } from '../app';
 import { h, liveRegion } from '../dom';
 import { addressAttribution } from '../field';
-import { typo } from '../text';
+import { T, typo } from '../text';
 
 /** Nom affiché du flux GitHub Actions (`name:` de .github/workflows/nightly.yml), tel que GitHub le montre. */
 export const NIGHTLY_WORKFLOW_NAME = 'Données de nuit';
@@ -186,7 +186,7 @@ export function dataScreen(ctx: PhoneCtx): HTMLElement {
   return h(
     'div',
     { style: 'display:flex;flex-direction:column;gap:14px' },
-    header(ctx, 'Données', undefined, { label: 'Accueil', hash: '#/' }),
+    header(ctx, T.data, undefined, { label: T.settings, hash: '#/reglages' }),
     staleBox,
     h(
       'section',

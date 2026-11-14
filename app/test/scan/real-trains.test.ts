@@ -52,7 +52,7 @@ describe.skipIf(!DIR)('1.2.8 : balayage des trains (QUAI_SCAN_DATA)', () => {
     const date = meta.serviceDates[0];
     const file = JSON.parse(await readFile(join(dir, `trains/${date}.json`), 'utf8')) as TrainsDay;
     const day = indexDay(file);
-    const settings = settingsWith([], { seenVersion: '1.2.8' });
+    const settings = settingsWith([], { seenVersion: '1.2.9' });
 
     const errors: string[] = [];
     const lengths: number[] = [];

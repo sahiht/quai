@@ -497,6 +497,13 @@ export async function findLinesIn(src: LineData, query: string, near?: LatLon | 
     src,
     cand.slice(0, FIND_FILES_MAX).map((li) => index.lines[li][0]),
   );
+  // 1.2.9 : jamais une ligne coupée par la limite (De Lijn publie un fichier par sens : le « 2 » de Louvain n'avait qu'un
+  // sens) ; les fichiers suivants sont lus tant qu'ils prolongent une ligne déjà lue
+  for (let k = FIND_FILES_MAX; k < cand.length; k++) {
+    const [next] = await loadLineFiles(src, [index.lines[cand[k]][0]]);
+    if (!next || !files.some((f) => sameLine(f, next))) break;
+    files.push(next);
+  }
   // regroupement de proche en proche (variantes, sens)
   const parent = files.map((_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));

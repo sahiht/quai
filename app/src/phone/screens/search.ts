@@ -219,7 +219,8 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
   );
   timeInput.addEventListener('change', () => {
     const [hh, mm] = timeInput.value.split(':').map(Number);
-    if (!Number.isFinite(hh)) return;
+    // Heure effacée dans le sélecteur (« Effacer ») : Number('') vaut 0, ce n'est pas minuit.
+    if (!timeInput.value || !Number.isFinite(hh)) return;
     // Heure belge : on part de l'heure actuelle (à la minute) et on décale de la différence demandée.
     const now = ctx.clock.now();
     const [ch, cm] = hhmm(now).split(':').map(Number);
@@ -313,8 +314,10 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
       timeBox,
       status,
     );
-    if (busy) status.textContent = 'Recherche…';
-    else if (failure) {
+    if (busy) {
+      status.textContent = 'Recherche…';
+      status.classList.remove('err');
+    } else if (failure) {
       status.textContent = typo(failure);
       status.classList.add('err');
     } else if (result?.journeys.length) {
