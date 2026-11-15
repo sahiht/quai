@@ -255,10 +255,6 @@ const ROUTE_FRESH_MS = 10_000;
 const BEYOND_COORDS = 3;
 /** 1.2.10 (§ 3.7) : guidage enregistré à chaque changement, au plus toutes les 5 s (lancement, arrêt : tout de suite). */
 const GUIDE_SAVE_MS = 5_000;
-/** 1.2.10 (even-g2-notes, page-lifecycle.md) : la boîte de sortie paraît environ 100 ms après la demande ; 3 s au plus. */
-const EXIT_DIALOG_MS = 3_000;
-/** 1.2.10 (même source) : un événement de cycle de vie en double (50 à 100 ms d'écart) est ignoré dans les 600 ms. */
-const LIFECYCLE_DUP_MS = 600;
 
 /** 1.2.10 : textes du guidage (toasts des lunettes, messages du téléphone à côté du bouton « Y aller »). */
 export const GUIDE_TEXT = {
@@ -267,7 +263,6 @@ export const GUIDE_TEXT = {
   /** « Arrêter le guidage » (§ 3.4). */
   stopped: 'Guidage arrêté',
   launched: 'Guidage lancé sur les lunettes',
-  followedPhone: 'Trajet suivi sur les lunettes',
   noFavorite: 'Ce favori n’existe plus.',
   noRoute: 'Ce favori n’a pas de trajet.',
   noTrip: 'Aucun trajet trouvé pour l’instant.',
@@ -582,10 +577,6 @@ export class GlassesController implements GlassesApi {
   /** Enregistrement du trajet suivi différé (guidage : au plus toutes les 5 s). */
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   private savedAt = -Infinity;
-  /** Boîte de sortie demandée (shutDownPageContainer(1)) : instant de la demande, et si elle a paru. */
-  private exitAsk: { at: number; shown: boolean } | null = null;
-  /** Dernier signal de cycle de vie (le matériel en envoie parfois deux pour un même passage). */
-  private lastLife: { kind: string; at: number } | null = null;
   /** Lunettes connectées et portées (signal `device`) ; null : aucun signal encore. */
   private deviceUp: boolean | null = null;
   /** Réglage « Me guider pendant un trajet » au dernier changement des réglages. */
@@ -902,24 +893,16 @@ export class GlassesController implements GlassesApi {
         this.onGesture(s.gesture);
         return;
       case 'background':
-        if (this.lifeDup(s.kind)) return;
-        // 1.2.10 (even-g2-notes, page-lifecycle.md) : « Non » dans la boîte de sortie arrive comme FOREGROUND_EXIT : ce
-        // n'est pas un passage en arrière-plan, l'appli continue et la page du moment est reconstruite
-        if (this.exitPending() && this.exitAsk?.shown) {
-          this.exitAsk = null;
-          void this.render(true);
-          return;
-        }
-        this.exitAsk = null;
         // L'appli n'est plus affichée dans les lunettes : on suspend le rafraîchissement de l'écran, l'affichage attend
-        // le retour. 1.2.10 : le guidage continue (positions, minuterie, temps réel du trajet suivi).
+        // le retour. 1.2.10 : le guidage continue (positions, minuterie, temps réel du trajet suivi). Les doublons du
+        // matériel et la boîte de sortie (son « Non » arrive comme `foreground`) sont traités par la plateforme
+        // (glasses/gestures.ts : SignalDedup, ExitDialog).
         this.paused = true;
         this.clearTimers();
         return;
       case 'foreground':
-        if (this.lifeDup(s.kind)) return;
-        // 1.2.10 : la boîte de sortie paraît (événements inversés) : l'hôte a déjà effacé la page, on la reconstruit
-        if (this.exitPending() && this.exitAsk) this.exitAsk.shown = true;
+        // 1.2.10 : retour au premier plan, boîte de sortie affichée (page effacée par l'hôte) ou refusée : la page est
+        // reconstruite
         this.paused = false;
         this.startTimers();
         // 1.2.10 : la page du moment présent, tout de suite (guidage recalculé), puis les données rafraîchies
@@ -948,26 +931,6 @@ export class GlassesController implements GlassesApi {
     }
   }
 
-  /** 1.2.10 : un même signal de cycle de vie reçu deux fois en moins de 600 ms (doublon du matériel) : le second est ignoré. */
-  private lifeDup(kind: string): boolean {
-    const t = performanceNow();
-    if (this.lastLife && this.lastLife.kind === kind && t - this.lastLife.at < LIFECYCLE_DUP_MS) return true;
-    this.lastLife = { kind, at: t };
-    return false;
-  }
-
-  /**
-   * 1.2.10 : boîte de sortie demandée (double toucher sur l'accueil) et pas encore répondue : elle paraît dans les 3 s
-   * (FOREGROUND_ENTER), puis attend la réponse (FOREGROUND_EXIT : « Non » ; SYSTEM_EXIT : « Oui »).
-   */
-  private exitPending(): boolean {
-    const e = this.exitAsk;
-    if (!e) return false;
-    if (e.shown || performanceNow() - e.at <= EXIT_DIALOG_MS) return true;
-    this.exitAsk = null;
-    return false;
-  }
-
   onGesture(g: Gesture): void {
     const view = this.view;
     if (!view) return;
@@ -992,9 +955,8 @@ export class GlassesController implements GlassesApi {
       case 'exit':
         // Quai Web : il n'y a rien à fermer, la page reste ouverte ; 1.2.1 : sans message (PRD-1.2.1 § 4.5).
         if (this.d.web) return;
-        // Boîte de confirmation système ; le nettoyage se fait sur SYSTEM_EXIT_EVENT. 1.2.10 : elle inverse les
-        // événements de premier plan (onSignal) : la demande est notée avant de partir.
-        this.exitAsk = { at: performanceNow(), shown: false };
+        // Boîte de confirmation système ; le nettoyage se fait sur SYSTEM_EXIT_EVENT (1.2.10 : ses événements de premier
+        // plan inversés sont remis à l'endroit par la plateforme).
         void this.d.platform.glasses.exit(1);
         return;
       case 'intent':
@@ -1996,7 +1958,7 @@ export class GlassesController implements GlassesApi {
     this.startGuide('trip', journeys[0], { key: this.newKey(), title, journeys, from, to, favoriteId: f.id });
     if (!this.guideOn()) {
       this.showToast(GUIDE_TEXT.followed);
-      return GUIDE_TEXT.followedPhone;
+      return GUIDE_TEXT.followed;
     }
     const route: Route = { screen: 'guide' };
     await this.showNav(reset([{ screen: 'home' }, route]), route);
@@ -3377,13 +3339,14 @@ export class GlassesController implements GlassesApi {
     this.filter.notifyRender(performanceNow());
     let changed = true;
     let built = true;
+    const before = this.page;
     const extra = pageExtra(page);
     if (!this.page) {
       // createStartUpPageContainer une seule fois par WebView ; ensuite rebuildPageContainer.
       if (this.d.pageStarted) await glasses.rebuild(page.containers, extra);
       else if (!(await glasses.start(page.containers, extra))) await glasses.rebuild(page.containers, extra);
     } else if (force || pageShape(page) !== pageShape(this.page)) {
-      // 1.2.10 : une image ou un menu qui change reconstruit aussi la page (les images sont ensuite dessinées)
+      // 1.2.10 : des conteneurs d'image ou un menu système qui changent reconstruisent aussi la page
       await glasses.rebuild(page.containers, extra);
     } else {
       built = false;
@@ -3396,10 +3359,12 @@ export class GlassesController implements GlassesApi {
       }
     }
     this.page = page;
-    // 1.2.10 (PRD-1.2.10 § 3.9) : les images de la page, une à la fois, après sa construction ; un envoi qui échoue laisse
-    // le texte seul (le guidage continue)
-    if (built && page.images?.length && glasses.paint) {
-      for (const img of page.images) {
+    // 1.2.10 (PRD-1.2.10 § 3.9) : les images de la page, une à la fois : toutes après sa construction, sinon celles qui
+    // changent dans leur conteneur (dessin seul) ; un envoi qui échoue laisse le texte seul (le guidage continue)
+    const toPaint = (page.images ?? []).filter((img) => built || JSON.stringify(before?.images?.find((o) => o.id === img.id)?.image) !== JSON.stringify(img.image));
+    if (toPaint.length && glasses.paint) {
+      changed = true;
+      for (const img of toPaint) {
         let ok = false;
         try {
           ok = await glasses.paint(img);
@@ -3617,9 +3582,13 @@ function pageExtra(p: PageSpec): PageExtra | undefined {
   return { ...(p.images?.length ? { images: p.images } : {}), ...(p.menu?.length ? { menu: p.menu } : {}) };
 }
 
-/** 1.2.10 : forme d'une page : ses conteneurs de texte, ses images (place et dessin) et son menu système. */
+/**
+ * 1.2.10 : forme d'une page : ses conteneurs de texte, ses conteneurs d'image (place, taille ; pas leur dessin : une autre
+ * image dans le même conteneur se dessine sans reconstruire) et son menu système.
+ */
 function pageShape(p: PageSpec): string {
-  return `${shapeKey(p)}#${JSON.stringify(p.images ?? [])}#${JSON.stringify(p.menu ?? [])}`;
+  const imgs = (p.images ?? []).map((i) => `${i.id}:${i.name}:${i.x},${i.y},${i.w},${i.h}`).join('|');
+  return `${shapeKey(p)}#${imgs}#${JSON.stringify(p.menu ?? [])}`;
 }
 
 /** 1.2.10 : un point connu (ni absent, ni 0,0 : arrêt sans coordonnées dans les arrêts d'un départ). */

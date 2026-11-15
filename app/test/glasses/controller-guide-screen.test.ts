@@ -143,7 +143,7 @@ describe('PRD-1.2.10 § 3.2, § 3.9 : rendu de l’écran du guidage', () => {
     expect(h.lastBuild()!.extra?.menu).toBeUndefined();
   });
 
-  it('image : reconstruction puis dessin, une à la fois ; les chiffres qui bougent : mise à jour sans reconstruction', async () => {
+  it('image : reconstruction puis dessin ; chiffres qui bougent : mise à jour ; autre image dans le même conteneur : dessin seul', async () => {
     const h = await guided();
     let n = h.calls.length;
     await show(h, moment('turn', 'turn:j-bureau:0:1', NOW, NOW + 30 * MIN, { turn: 'left', distM: 40 }));
@@ -158,10 +158,13 @@ describe('PRD-1.2.10 § 3.2, § 3.9 : rendu de l’écran du guidage', () => {
     expect(b.length).toBeGreaterThan(0);
     expect(b.every((x) => x.op === 'upgrade')).toBe(true);
     expect(h.last().lines).toContain('dans 20 m');
-    // autre image (autre virage) : reconstruction puis dessin
+    // autre image dans le même conteneur (autre virage) : textes mis à jour, puis l'image dessinée, sans reconstruction
     n = h.calls.length;
     await show(h, moment('turn', 'turn:j-bureau:0:2', NOW, NOW + 30 * MIN, { turn: 'right', distM: 40 }));
-    expect(h.since(n).map((x) => x.op)).toEqual(['rebuild', 'paint']);
+    const c = h.since(n);
+    expect(c.some((x) => x.op === 'rebuild')).toBe(false);
+    expect(c.at(-1)).toMatchObject({ op: 'paint', arg: expect.objectContaining({ id: 9, image: { kind: 'turn', turn: 'right' } }) });
+    expect(c.filter((x) => x.op === 'paint')).toHaveLength(1);
     // plus d'image : reconstruction, aucun dessin
     n = h.calls.length;
     await show(h, null);

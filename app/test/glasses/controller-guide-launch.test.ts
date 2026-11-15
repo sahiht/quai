@@ -392,10 +392,10 @@ describe('PRD-1.2.10 § 3.5 : réglage « Me guider pendant un trajet » éteint
     expect(h.c.state.nav.stack.map((f) => f.route.screen)).toEqual(['home', 'steps']);
   });
 
-  it('bouton « Y aller » : suivi, message « Trajet suivi sur les lunettes », l’écran des lunettes reste', async () => {
+  it('bouton « Y aller » : suivi, message « Trajet suivi », l’écran des lunettes reste', async () => {
     const h = await guideSetup({ settings: off(), stub: { answers } });
     await h.until(homeReady);
-    expect(await h.c.goFavorite('fav-bureau')).toBe(GUIDE_TEXT.followedPhone);
+    expect(await h.c.goFavorite('fav-bureau')).toBe('Trajet suivi');
     await h.settle();
     expect(h.c.followed?.guide?.kind).toBe('trip');
     expect(h.last().screen).toBe('home');

@@ -101,27 +101,10 @@ describe('PRD-1.2.10 § 3.7 : premier plan quitté, puis revenu', () => {
     expect(h.last()).toMatchObject({ screen: 'guide', show: 'empty' });
     expect(h.screens().some((s) => s.moment === 'leave:j-bureau')).toBe(false);
   });
-
-  it('événements de cycle de vie en double (moins de 600 ms) : une seule reconstruction', async () => {
-    const h = await guided();
-    await h.emit({ kind: 'background' });
-    await h.emit({ kind: 'background' });
-    const n = h.calls.length;
-    await h.emit({ kind: 'foreground' });
-    await h.emit({ kind: 'foreground' });
-    expect(h.since(n).filter((x) => x.op === 'rebuild')).toHaveLength(1);
-    // plus tard, un nouveau passage compte de nouveau
-    await h.settle(700);
-    await h.emit({ kind: 'background' });
-    await h.settle(700);
-    const k = h.calls.length;
-    await h.emit({ kind: 'foreground' });
-    expect(h.since(k).filter((x) => x.op === 'rebuild')).toHaveLength(1);
-  });
 });
 
-describe('even-g2-notes : boîte de sortie (événements inversés)', () => {
-  it('« Non » : FOREGROUND_EXIT ne met pas l’appli en arrière-plan ; la page est reconstruite et suit le guidage', async () => {
+describe('even-g2-notes : boîte de sortie (la plateforme remet ses événements à l’endroit)', () => {
+  it('« Non » : la plateforme donne foreground à l’apparition puis au refus : la page est reconstruite chaque fois, rien n’est suspendu', async () => {
     const h = await guided();
     await h.gesture('double');
     expect(screensOf(h)).toEqual(['home']);
@@ -132,9 +115,10 @@ describe('even-g2-notes : boîte de sortie (événements inversés)', () => {
     await h.emit({ kind: 'foreground' });
     expect(h.since(n).map((x) => x.op)).toContain('rebuild');
     n = h.calls.length;
-    await h.emit({ kind: 'background' });
+    await h.settle(2_000);
+    await h.emit({ kind: 'foreground' });
     expect(h.since(n).map((x) => x.op)).toContain('rebuild');
-    // toujours au premier plan : « En cours » rouvre le guidage, qui s'affiche
+    // toujours au premier plan : « En cours » rouvre le guidage, qui s'affiche et suit le moteur
     await intent(h, { kind: 'resume' });
     await h.settle();
     expect(h.last()).toMatchObject({ screen: 'guide' });
@@ -158,15 +142,13 @@ describe('even-g2-notes : boîte de sortie (événements inversés)', () => {
     expect(engine.calls.length).toBe(n);
   });
 
-  it('pas de boîte dans les 3 s : un FOREGROUND_EXIT ensuite est un vrai passage en arrière-plan', async () => {
+  it('sortie anormale : tout s’arrête, la page n’est pas fermée par Quai', async () => {
+    out = { location: 'high' };
     const h = await guided();
-    await h.gesture('double', 'double');
-    await h.settle(3_500);
-    await h.emit({ kind: 'background' });
-    const n = h.calls.length;
-    cur = moment('board', 'board:j-bureau:1', NOW, NOW + 60 * MIN);
-    await h.settle(61_000);
-    expect(h.since(n)).toEqual([]);
+    const w = h.watching()!;
+    await h.emit({ kind: 'exit', abnormal: true });
+    expect(h.closeWebView).not.toHaveBeenCalled();
+    expect(w.stopped).toBe(true);
   });
 });
 
