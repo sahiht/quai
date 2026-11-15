@@ -29,7 +29,7 @@ import type {
 } from './guide-types';
 import { journeyId } from './journeys';
 import { isSncbBus, rideName } from './means';
-import { headName } from './text';
+import { headName, placeNoun, vers } from './text';
 import { displayName, distanceM, hhmm } from './util';
 import { bearingDeg, cumulative, knownPoint, projectOn, relativeDeg, routePoints, turnsOf, walkProgress } from './guide-walk';
 
@@ -1400,7 +1400,7 @@ export function rideJourney(dep: Departure, stops: DepartureStops, board: number
  * « Maintenant : … » de la carte « En cours » du téléphone : « bus 6 vers Gare des Guillemins », « à pied vers l’arrêt
  * du bus 6 », « IC vers Courtrai, voie 3 », « partir à 07:05 », « à pied, arrivée 08:54 », « tu y es ».
  */
-export function guideNowText(state: GuideState, journey: Journey, lang: NameLang): string {
+export function guideNowText(state: GuideState, journey: Journey, lang: NameLang, title?: string): string {
   const legs = journey.legs;
   const ph = state.phase;
   const toward = (l: Leg): string => `${rideName(l)} vers ${headName({ op: l.op, head: l.head ?? l.to.name }, lang)}`;
@@ -1413,7 +1413,8 @@ export function guideNowText(state: GuideState, journey: Journey, lang: NameLang
     }
     case 'walk': {
       const r = legs[ph.leg + 1];
-      if (!r || r.kind !== 'ride') return `à pied, arrivée ${hhmm(journey.arr)}`;
+      // dernière marche : vers où (la ligne du dessus de la carte dit déjà l'arrivée) ; sans titre, l'arrivée
+      if (!r || r.kind !== 'ride') return title?.trim() ? `à pied ${towardText(title)}` : `à pied, arrivée ${hhmm(journey.arr)}`;
       if (isTrain(r)) {
         const p = platformOf(r);
         if (ph.leg > 0 && legs[ph.leg - 1].kind === 'ride' && p) return `à pied vers la voie ${p}`;
@@ -1440,5 +1441,12 @@ export function guideNowText(state: GuideState, journey: Journey, lang: NameLang
 
 /** Carte « En cours » du téléphone (PRD § 4.3). `guided` : réglage « Me guider pendant un trajet ». */
 export function guideStatusOf(state: GuideState, journey: Journey, title: string, guided: boolean, lang: NameLang): GuideStatus {
-  return { kind: state.kind, title, arr: journey.arr, now: guideNowText(state, journey, lang), guided };
+  return { kind: state.kind, title, arr: journey.arr, now: guideNowText(state, journey, lang, title), guided };
+}
+
+/** « vers le bureau », « vers Gand-Saint-Pierre », « vers chez Karim » (titre du trajet, « Vers … » gardé). */
+function towardText(title: string): string {
+  const t = title.trim();
+  const v = /^Vers\s/.test(t) ? t : vers(placeNoun(t));
+  return v.charAt(0).toLowerCase() + v.slice(1);
 }

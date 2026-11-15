@@ -236,6 +236,13 @@ describe('téléphone : « Maintenant : … »', () => {
   it('carte « En cours »', () => {
     expect(guideStatusOf(st({ kind: 'ride', leg: 1, next: 1 }), j, 'Bureau', true, 'fr')).toEqual({ kind: 'trip', title: 'Bureau', arr: at('08:54'), now: 'bus 6 vers Gare des Guillemins', guided: true });
   });
+
+  it('carte « En cours », dernière marche : « à pied vers le bureau », jamais l’arrivée répétée de la ligne du dessus', () => {
+    expect(guideStatusOf(st({ kind: 'walk', leg: 6 }), j, 'Bureau', true, 'fr').now).toBe('à pied vers le bureau');
+    expect(guideStatusOf(st({ kind: 'walk', leg: 6 }), j, 'Gand-Saint-Pierre', true, 'fr').now).toBe('à pied vers Gand-Saint-Pierre');
+    expect(guideStatusOf(st({ kind: 'walk', leg: 6 }), j, 'Vers chez Karim', true, 'fr').now).toBe('à pied vers chez Karim');
+    for (const t of ['Bureau', 'Gand-Saint-Pierre']) expect(guideStatusOf(st({ kind: 'walk', leg: 6 }), j, t, true, 'fr').now).not.toMatch(/arrivée/);
+  });
 });
 
 function IC_ONLY() {
