@@ -8,12 +8,12 @@
   "permissions": [
     {
       "name": "network",
-      "desc": "Télécharge les horaires préparés chaque nuit (GitHub Pages, par zones d’environ 2 km) et, depuis ton relais personnel, le temps réel (retards, voies, suppressions), la pluie prévue sur une carte fixe de la Belgique et les adresses : seul le texte tapé est envoyé, jamais la position.",
+      "desc": "Télécharge les horaires et les chemins à pied préparés chaque nuit (GitHub Pages, par zones de 2 km) et, depuis ton relais personnel, le temps réel (retards, voies, suppressions), la pluie prévue sur une carte fixe de la Belgique et les adresses : seul le texte tapé est envoyé, jamais la position.",
       "whitelist": []
     },
     {
       "name": "location",
-      "desc": "Trouve les arrêts proches et propose le bon trajet. La position exacte reste sur le téléphone : l’appli ne télécharge que les horaires de ta zone (environ 2 km) et n’envoie jamais ta position au relais."
+      "desc": "Trouve les arrêts proches, propose le bon trajet et te guide pendant le trajet. La position exacte reste sur le téléphone : l’appli ne télécharge que les horaires et les chemins de ta zone (environ 2 km) et n’envoie jamais ta position au relais."
     }
   ],
   "supported_languages": [
