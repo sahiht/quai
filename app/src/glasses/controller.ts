@@ -20,6 +20,7 @@
  * tu en es », vide), menu de l'appui long (système dans l'appli Even, écran `menu` dans Quai Web). Le guidage ne dépend
  * pas du premier plan : quitté, seul l'affichage attend.
  */
+import type { TripJournal } from '../core/journal-types';
 import type {
   AreaSummary,
   Board,
@@ -155,6 +156,8 @@ export interface ControllerDeps {
   web?: boolean;
   /** Quai Web : ouvre un écran des réglages (ancre #/…), par exemple « Autre adresse » → recherche. */
   openPhone?: (hash: string) => void;
+  /** 1.3.0 (PRD-1.3.0 § 6.4) : journal des trajets guidés, écrit par le contrôleur (absent : rien n'est noté). */
+  journal?: TripJournal;
 }
 
 /** Quai Web : boutons, clavier et écran tactile n'ont pas les doublons du pavé des G2 ; seul un défilement très rapide est freiné. */

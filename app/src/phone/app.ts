@@ -11,6 +11,7 @@
  * bouton (Affichage, Alertes, Données, Position et langue et Trajets reviennent à Réglages).
  * 1.2.10 (PRD-1.2.10 § 4.4) : #/affichage/ouverture, « À l’ouverture de Quai » sur son écran (retour à Affichage).
  */
+import type { TripJournal } from '../core/journal-types';
 import type { Core, GlassesApi, Meta } from '../core/api';
 import type { Freshness } from '../glasses/controller';
 import type { Clock } from '../platform/clock';
@@ -58,6 +59,8 @@ export interface PhoneCtx {
    * seenVersion pour elle : les lunettes s’en servent pour leur message « Quai 1.2.10 ».
    */
   news?: NewsState;
+  /** 1.3.0 (PRD-1.3.0 § 6.4) : journal des trajets guidés (Réglages, Données, « Journal des trajets »). */
+  journal?(): TripJournal | null;
 }
 
 export type Screen = (ctx: PhoneCtx, sub: string[]) => HTMLElement | Promise<HTMLElement>;

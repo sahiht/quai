@@ -40,3 +40,10 @@ export interface TripJournal {
   text(id: string): string;
   clear(): void;
 }
+
+/**
+ * Fabrique (core/journal.ts, équipe H) : lit `quai.journal` dans le stockage du téléphone, puis répond tout de suite
+ * (liste et texte en mémoire) et enregistre en arrière-plan. Branchée dans main.ts et web/main.ts : donnée au
+ * contrôleur (ControllerDeps.journal) et au téléphone (PhoneCtx.journal).
+ */
+export type CreateJournal = (kv: import('./api').KV, opts?: { now?: () => number }) => Promise<TripJournal>;

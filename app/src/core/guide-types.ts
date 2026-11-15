@@ -249,4 +249,6 @@ export interface GuideStatus {
   now: string;
   /** guidage avec l'écran calme (réglage « Me guider pendant un trajet ») ; faux : suivi sans messages */
   guided: boolean;
+  /** 1.3.0 (PRD-1.3.0 § 6.3) : problèmes de la vérification en cours (« Lunettes : 12 % de batterie »), deux au plus */
+  check?: string[];
 }
