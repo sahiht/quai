@@ -204,6 +204,9 @@ export const T = {
   testAsk: `Lève la tête. Que vois-tu dans les lunettes${NB}?`,
   testAnswersLabel: 'Ce que tu vois dans les lunettes',
   testClosed: 'Ouvre Quai sur les lunettes, puis recommence.',
+  /** Le test et le guidage ne vont jamais ensemble : un guidage en cours l'empêche, un guidage qui démarre l'arrête. */
+  testGuiding: 'Arrête d’abord le guidage en cours, puis recommence.',
+  testStoppedGuide: `Test arrêté${NB}: un guidage a commencé.`,
   /** 1.3.0 (PRD-1.3.0 § 6.4) : carte « Journal des trajets » de l'écran Données. */
   journalTitle: 'Journal des trajets',
   journalLead: `Tes 10 derniers trajets guidés, gardés sur ce téléphone seulement${NB}: des heures et des arrêts, jamais ta position.`,

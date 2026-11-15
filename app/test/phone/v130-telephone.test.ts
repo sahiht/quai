@@ -16,7 +16,7 @@ import { gtfsTime } from '../../src/core/util';
 import { checkLines } from '../../src/glasses/guide-views';
 import { mountPhone, NEWS_SINCE, newsState, parseHash } from '../../src/phone/app';
 import { dataScreen, journalCard } from '../../src/phone/screens/data';
-import { DISPLAY_TEST_HASH, displayTestScreen, openDisplayTest, START_WINDOW_MS, TEST_WATCH_MS, TICK_MS } from '../../src/phone/screens/display-test';
+import { DISPLAY_TEST_HASH, displayTestScreen, GUIDE_CAUSE_MS, openDisplayTest, START_WINDOW_MS, TEST_WATCH_MS, TICK_MS } from '../../src/phone/screens/display-test';
 import { homeScreen, resetAnswers } from '../../src/phone/screens/home';
 import { settingsScreen } from '../../src/phone/screens/settings';
 import {
@@ -38,7 +38,7 @@ import {
 } from '../../src/phone/text';
 import { createKV, memoryBackend } from '../../src/platform/kv';
 import { loadSettings, migrateSettings, parseSettings, saveSettings, SETTINGS_KEY, SettingsStore, validateSettings } from '../../src/settings';
-import { at, button, defaults, harness, mount, plain, preset11, settle, sleep, textOf, until, withGuide, type Harness } from './helpers';
+import { at, button, defaults, harness, mount, plain, preset11, settle, sleep, textOf, until, withGuide, type FakeGuide, type Harness } from './helpers';
 
 beforeEach(() => resetAnswers());
 afterEach(() => {
@@ -203,16 +203,18 @@ describe('1.3.0 : « Tester l’écran des lunettes » dans Réglages (PRD-1.3.0
 /* ------------------------------ § 6.1 : écran du test ------------------------------ */
 
 /** L'écran du test, ouvert par le bouton de Réglages (openDisplayTest) ou non (historique, rechargement). */
-function testScreen(opts: { start?: boolean; reply?: FakeTest['reply'] } = {}): { hz: Harness; t: FakeTest; el: HTMLElement } {
+function testScreen(opts: { start?: boolean; reply?: FakeTest['reply'] } = {}): { hz: Harness; t: FakeTest; el: HTMLElement; guide: FakeGuide } {
   const hz = harness({ settings: defaults() });
   const t = withDisplayTest(hz.glasses, opts.reply);
+  // guidage des lunettes (1.2.10) : aucun trajet suivi au départ
+  const guide = withGuide(hz.glasses, null);
   if (opts.start !== false) {
     // le bouton de Réglages : il ouvre l'écran (ancre notée par le faux routeur, oubliée ici)
     openDisplayTest(hz.ctx);
     hz.went.length = 0;
   }
   const el = mount(displayTestScreen(hz.ctx));
-  return { hz, t, el };
+  return { hz, t, el, guide };
 }
 const stepText = (el: HTMLElement): string => textOf(el.querySelector('.test-step'));
 const leftText = (el: HTMLElement): string | null => {
@@ -343,6 +345,77 @@ describe('1.3.0 : écran du test de l’écran des lunettes (PRD-1.3.0 § 6.1)',
       t.emit({ step: 'wait', left: 30 });
       expect(stepText(el), step).toBe('Test arrêté.');
     }
+  });
+
+  it('un guidage en cours : le test ne démarre pas, « Arrête d’abord le guidage en cours, puis recommence. »', async () => {
+    let guidingNow = true;
+    const { t, el } = testScreen({ reply: (c) => (c.kind === 'start' ? (guidingNow ? { step: 'idle', error: 'guiding' } : { step: 'wait', left: 45 }) : { step: 'idle' }) });
+    await until(() => stepText(el) === 'Arrête d’abord le guidage en cours, puis recommence.');
+    expect(leftText(el)).toBeNull();
+    expect(buttons(el)).toEqual(['Recommencer le test']);
+    // le guidage arrêté : « Recommencer le test » le lance
+    guidingNow = false;
+    button(el, 'Recommencer le test').click();
+    await until(() => leftText(el) === '45 s');
+    expect(t.cmds).toEqual([{ kind: 'start' }, { kind: 'start' }]);
+  });
+
+  it('un guidage qui démarre pendant le test l’arrête : « Test arrêté : un guidage a commencé. » (état guiding, ou arrêt seul avec un guidage)', async () => {
+    const STATUS: GuideStatus = { kind: 'trip', title: 'Bureau', arr: at(8, 54), now: 'à pied vers l’arrêt du bus 6', guided: true };
+    // les lunettes le disent (error: 'guiding' pendant le test), à chaque étape
+    for (const step of ['wait', 'sent', 'ask'] as const) {
+      const { t, el } = testScreen();
+      await until(() => leftText(el) === '45 s');
+      if (step !== 'wait') t.emit({ step, left: step === 'sent' ? 15 : undefined });
+      t.emit({ step: 'idle', error: 'guiding' });
+      expect(stepText(el), step).toBe('Test arrêté : un guidage a commencé.');
+      expect(el.querySelector('.test-step')!.textContent, step).toBe('Test arrêté\u00a0: un guidage a commencé.');
+      expect(leftText(el), step).toBeNull();
+      expect(buttons(el), step).toEqual(['Recommencer le test']);
+      // le test était arrêté par les lunettes : rien à annuler
+      expect(t.cmds, step).toEqual([{ kind: 'start' }]);
+    }
+    // arrêté seul (idle sans résultat) alors qu'un guidage est en cours
+    let s = testScreen();
+    let guide = s.guide;
+    await until(() => leftText(s.el) === '45 s');
+    guide.status = STATUS;
+    s.t.emit({ step: 'idle' });
+    expect(stepText(s.el)).toBe('Test arrêté : un guidage a commencé.');
+    // arrêté seul, le guidage annoncé juste après (onGuide)
+    s = testScreen();
+    guide = s.guide;
+    await until(() => leftText(s.el) === '45 s');
+    s.t.emit({ step: 'idle' });
+    expect(stepText(s.el)).toBe('Test arrêté.');
+    guide.emit(STATUS);
+    expect(stepText(s.el)).toBe('Test arrêté : un guidage a commencé.');
+    // arrêté seul, sans guidage : « Test arrêté. » seulement
+    s = testScreen();
+    guide = s.guide;
+    await until(() => leftText(s.el) === '45 s');
+    s.t.emit({ step: 'idle' });
+    expect(stepText(s.el)).toBe('Test arrêté.');
+    // un guidage lancé bien plus tard n'en est pas la cause
+    const later = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + GUIDE_CAUSE_MS + 1);
+    guide.emit(STATUS);
+    later.mockRestore();
+    expect(stepText(s.el)).toBe('Test arrêté.');
+    // « Arrêter le test » : arrêté par la personne, jamais attribué à un guidage, même juste après un arrêt seul
+    s = testScreen();
+    guide = s.guide;
+    await until(() => leftText(s.el) === '45 s');
+    s.t.emit({ step: 'idle' });
+    button(s.el, 'Recommencer le test').click();
+    await until(() => leftText(s.el) === '45 s');
+    button(s.el, 'Arrêter le test').click();
+    guide.emit(STATUS);
+    expect(stepText(s.el)).toBe('Test arrêté.');
+    // quitter l'écran : plus d'abonnement au guidage non plus
+    expect(guide.listeners()).toBe(1);
+    s.el.querySelector<HTMLButtonElement>('.back')!.click();
+    expect(guide.listeners()).toBe(0);
+    expect(s.t.listeners()).toBe(0);
   });
 
   it('arrêté puis relancé aussitôt : la réponse tardive du « cancel » ne remplace pas le nouveau test', async () => {
@@ -501,6 +574,8 @@ describe('1.3.0 : écran du test de l’écran des lunettes (PRD-1.3.0 § 6.1)',
     expect(T.testSent).toBe('Touche une fois les lunettes.');
     expect(T.testAsk).toBe('Lève la tête. Que vois-tu dans les lunettes\u00a0?');
     expect(T.testClosed).toBe('Ouvre Quai sur les lunettes, puis recommence.');
+    expect(T.testGuiding).toBe('Arrête d’abord le guidage en cours, puis recommence.');
+    expect(T.testStoppedGuide).toBe('Test arrêté\u00a0: un guidage a commencé.');
     expect(T.testStop).toBe('Arrêter le test');
     expect(TEST_ANSWERS.map((a) => [a.answer, a.label])).toEqual([
       ['quai', 'Le test de Quai'],

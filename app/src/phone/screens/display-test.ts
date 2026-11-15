@@ -8,7 +8,10 @@
  * - ask : « Lève la tête. Que vois-tu dans les lunettes ? », trois réponses (« Le test de Quai », « Le Dashboard »,
  *   « Rien ») ;
  * - done : le conseil du PRD selon le résultat (aucun résultat : vérifier « Head-Up » dans l'appli Even) ;
- * - Quai fermé sur les lunettes : « Ouvre Quai sur les lunettes, puis recommence. »
+ * - Quai fermé sur les lunettes : « Ouvre Quai sur les lunettes, puis recommence. » ;
+ * - un guidage en cours (le test et le guidage ne vont jamais ensemble) : « Arrête d’abord le guidage en cours, puis
+ *   recommence. » ; un guidage qui démarre pendant le test l'arrête : « Test arrêté : un guidage a commencé. » (état
+ *   `guiding`, ou test arrêté seul alors qu'un guidage est en cours ou arrive aussitôt), sinon « Test arrêté. ».
  * « Arrêter le test » pendant le test. Le test ne commence que par le bouton de Réglages (openDisplayTest) ou par
  * « Commencer le test » : revenir sur l'écran par l'historique, ou le recharger, ne le relance pas. Quitter l'écran
  * arrête le test en cours et le suivi de son état. Retour à Réglages.
@@ -29,6 +32,11 @@ export const TEST_WATCH_MS = 1000;
  * plus tard (TICK_MS + 100) pour qu'un état envoyé chaque seconde par les lunettes passe toujours avant.
  */
 export const TICK_MS = 1000;
+/**
+ * Test arrêté seul (état idle pendant le test) : un guidage annoncé dans ce délai (onGuide) en est la cause, et le
+ * téléphone le dit (« Test arrêté : un guidage a commencé. »).
+ */
+export const GUIDE_CAUSE_MS = 5000;
 
 /** Écran qui a lancé le test en cours : lui seul l'arrête en partant (un écran plus récent l'a peut-être relancé). */
 let testOwner = 0;
@@ -156,14 +164,29 @@ export function displayTestScreen(ctx: PhoneCtx): HTMLElement {
     void send({ kind: 'start' });
   };
 
+  const restart = (): HTMLButtonElement => button(T.testRestart, 'btn-secondary', () => begin());
+
+  /** « Arrêter le test » : arrêté par la personne (« stopped-user »), jamais attribué à un guidage. */
   const stop = (b: HTMLButtonElement): void => {
     b.disabled = true;
     round += 1;
     active = false;
     countdown(undefined);
-    show('stopped', T.testStopped, [button(T.testRestart, 'btn-secondary', () => begin())]);
+    show('stopped-user', T.testStopped, [restart()]);
     void send({ kind: 'cancel' });
   };
+
+  /** Un guidage est-il en cours (carte « En cours ») ? */
+  const guiding = (): boolean => {
+    try {
+      return !!g?.guideStatus?.();
+    } catch {
+      return false;
+    }
+  };
+  /** Heure à laquelle le test s'est arrêté seul (état idle pendant le test), pour en trouver la cause. */
+  let stoppedAt = 0;
+  const running = (): boolean => shown === 'wait' || shown === 'sent' || shown === 'ask';
 
   const answers = (): HTMLElement => {
     const group = h('div', { class: 'test-answers', role: 'group', 'aria-label': T.testAnswersLabel });
@@ -182,7 +205,14 @@ export function displayTestScreen(ctx: PhoneCtx): HTMLElement {
     if (s.error === 'closed') {
       active = false;
       countdown(undefined);
-      return show('closed', T.testClosed, [button(T.testRestart, 'btn-secondary', () => begin())]);
+      return show('closed', T.testClosed, [restart()]);
+    }
+    if (s.error === 'guiding') {
+      // au départ : un guidage est en cours ; pendant le test : un guidage vient de commencer et l'a arrêté
+      const during = running();
+      active = false;
+      countdown(undefined);
+      return during ? show('stopped-guide', T.testStoppedGuide, [restart()]) : show('guiding', T.testGuiding, [restart()]);
     }
     switch (s.step) {
       case 'wait':
@@ -203,14 +233,15 @@ export function displayTestScreen(ctx: PhoneCtx): HTMLElement {
             leave();
             ctx.go('#/reglages');
           }),
-          button(T.testRestart, 'btn-secondary', () => begin()),
+          restart(),
         ]);
       }
       default:
-        // plus de test en cours (arrêté ailleurs, lunettes) : on le dit
+        // plus de test en cours, arrêté seul (lunettes) : un guidage en cours en est la cause, sinon on le dit seulement
         active = false;
         countdown(undefined);
-        return show('stopped', T.testStopped, [button(T.testRestart, 'btn-secondary', () => begin())]);
+        stoppedAt = Date.now();
+        return guiding() ? show('stopped-guide', T.testStoppedGuide, [restart()]) : show('stopped', T.testStopped, [restart()]);
     }
   };
 
@@ -225,10 +256,12 @@ export function displayTestScreen(ctx: PhoneCtx): HTMLElement {
     clearTimeout(tick);
     clearInterval(watch);
     window.removeEventListener('hashchange', onHash);
-    try {
-      off?.();
-    } catch {
-      /* au mieux */
+    for (const unsubscribe of [off, offGuide]) {
+      try {
+        unsubscribe?.();
+      } catch {
+        /* au mieux */
+      }
     }
     if (active && testOwner === me && g?.displayTest) {
       active = false;
@@ -260,6 +293,18 @@ export function displayTestScreen(ctx: PhoneCtx): HTMLElement {
       : undefined;
   } catch {
     off = undefined;
+  }
+  // le test s'est arrêté seul et un guidage arrive aussitôt après : c'est lui qui l'a arrêté
+  let offGuide: (() => void) | undefined;
+  try {
+    offGuide = can
+      ? g?.onGuide?.((st) => {
+          if (!alive()) return;
+          if (st && shown === 'stopped' && Date.now() - stoppedAt < GUIDE_CAUSE_MS) show('stopped-guide', T.testStoppedGuide, [restart()]);
+        })
+      : undefined;
+  } catch {
+    offGuide = undefined;
   }
 
   if (!can) showOff();

@@ -930,21 +930,23 @@ describe('« Ajouter un arrêt », sous la liste (PRD-1.2.3 § 3, PRD-1.2.6 § 5
   });
 });
 
-describe('bannière « Nouveau » depuis un préréglage 1.1 (accueil de la 1.2.10)', () => {
-  it('préréglage 1.1 migré, mis à jour : la bannière « Quai 1.2.10 » une fois, sans les nouveautés qui parlent de « Bus, tram, métro »', () => {
+describe('bannière « Nouveau » depuis un préréglage 1.1 (accueil de la 1.3.0)', () => {
+  it('préréglage 1.1 migré, mis à jour : la bannière « Quai 1.3.0 » une fois, sans les nouveautés qui ne sont plus vraies (« Bus, tram, métro », détail des favoris en bas)', () => {
     const s = preset11();
     expect(s.seenVersion).toBe('1.1.0');
     const hz = harness({ settings: s });
-    hz.ctx.news = newsState(s.seenVersion, NEWS_SINCE, '1.2.10');
+    hz.ctx.news = newsState(s.seenVersion, NEWS_SINCE, '1.3.0');
     const el = mount(homeScreen(hz.ctx));
     const shown = [...el.querySelectorAll('.news p')].map((p) => plain(p.textContent));
-    // 1.2.10 (4 lignes), 1.2.9 (3), 1.2.8 (2), 1.2.6 (4)…
-    expect(shown[0]).toBe('« Y aller » : Quai te guide de porte à porte. L’écran des lunettes reste vide et t’écrit seulement quand tu dois agir : partir, tourner, monter, descendre.');
-    expect(shown[4]).toBe('Dans les lunettes, « imminent » ne s’affiche plus qu’avec le temps réel ; sur l’horaire prévu, c’est « dans ~1 min ».');
-    expect(shown[7]).toBe('Dans les lunettes, touche un train au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.');
-    expect(shown[9]).toBe('Gares de train, arrêts et lignes de bus, tram, métro : trois rubriques séparées.');
-    expect(shown[12]).toBe('Tes lignes gardées à un arrêt sont déjà dans Lignes.');
+    // 1.3.0 (4 lignes), 1.2.10 (3 : le détail des favoris en bas de l'écran n'est plus vrai), 1.2.9 (3), 1.2.8 (2), 1.2.6 (4)…
+    expect(shown[0]).toBe('Écran d’un trajet dans les lunettes : une ligne « ▶ Y aller » dit ce que fait un toucher. Dans « Autres trajets », ▲ sur la première ligne ramène au trajet proposé.');
+    expect(shown[4]).toBe('« Y aller » : Quai te guide de porte à porte. L’écran des lunettes reste vide et t’écrit seulement quand tu dois agir : partir, tourner, monter, descendre.');
+    expect(shown[7]).toBe('Dans les lunettes, « imminent » ne s’affiche plus qu’avec le temps réel ; sur l’horaire prévu, c’est « dans ~1 min ».');
+    expect(shown[10]).toBe('Dans les lunettes, touche un train au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.');
+    expect(shown[12]).toBe('Gares de train, arrêts et lignes de bus, tram, métro : trois rubriques séparées.');
+    expect(shown[15]).toBe('Tes lignes gardées à un arrêt sont déjà dans Lignes.');
     expect(shown.some((l) => l.startsWith('Bus, tram, métro'))).toBe(false);
+    expect(shown.some((l) => /en bas de l’écran/.test(l))).toBe(false);
     button(el, 'OK').click();
     expect(mount(homeScreen(hz.ctx)).querySelector('.news')).toBeNull();
   });
