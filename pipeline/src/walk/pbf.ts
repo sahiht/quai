@@ -66,10 +66,30 @@ class Pb {
     throw new PbfError('varint trop long');
   }
 
-  /** int64 (négatif codé sur 10 octets) : approché au-delà de 2^53, suffisant pour les décalages. */
+  /** int64 (complément à deux sur 10 octets pour un négatif), exact jusqu'à 2^53 en valeur absolue. */
   int64(): number {
-    const v = this.varint();
-    return v >= 9223372036854775808 ? v - 18446744073709551616 : v;
+    const b = this.buf;
+    let lo = 0;
+    let hi = 0;
+    let c = 0;
+    for (let shift = 0; shift < 28; shift += 7) {
+      c = b[this.pos++];
+      lo |= (c & 0x7f) << shift;
+      if (c < 0x80) return lo >>> 0;
+    }
+    c = b[this.pos++];
+    lo |= (c & 0x0f) << 28;
+    hi = (c & 0x7f) >> 4;
+    if (c >= 0x80) {
+      for (let shift = 3; shift < 32; shift += 7) {
+        c = b[this.pos++];
+        if (c === undefined) throw new PbfError('varint tronqué');
+        hi |= (c & 0x7f) << shift;
+        if (c < 0x80) break;
+      }
+      if (c >= 0x80) throw new PbfError('varint trop long');
+    }
+    return (hi | 0) * 4294967296 + (lo >>> 0);
   }
 
   /** sint64 (zigzag). */
