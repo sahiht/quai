@@ -83,6 +83,30 @@ Avec `--deliver <dossier>`, les captures choisies pour le propriétaire (`g01` �
 pour le téléphone, `w01` pour Quai Web) y sont copiées avec `manifest.json` (fichier → ce qu’il montre). Avec `--tour`,
 les images de la visite de `app/test/screens/` (noms de la 1.0) sont refaites, et `tour.json` dit ce que montre chacune.
 
+## Guidage 1.2.10 : positions poussées et appui long
+
+Pendant un guidage, l’appli suit la position par un flux (`LocationPort.watch`, PRD-1.2.10 § 3.7). En mode test
+(`?e2e=1` dans l’adresse), la page expose de quoi le piloter :
+
+- `window.__quaiPushFix({ lat, lon, accuracy?, speed?, heading?, at? })` pousse une position : elle va au flux actif
+  telle quelle (sans le tri par intervalle et distance des vraies positions) et devient `last()`. `accuracy` en
+  mètres, `speed` en m/s, `heading` en degrés depuis le nord (sens horaire), `at` en ms sur l’horloge de l’appli
+  (`mockNow`, `mockSpeed`) ; sans `at`, l’heure de l’appli au moment de l’appel. Renvoie `true` si la position a été
+  prise, `false` si elle est invalide (0, 0 compris) ou si aucun port de position n’est en service. Exemple avec
+  `sim/cdp.ts` : `await page.eval('window.__quaiPushFix({ lat: 50.6245, lon: 5.5667, accuracy: 5 })')`.
+- Avec `mockLat` et `mockLon`, le flux donne une fois la position simulée à son départ, puis seulement les positions
+  poussées ; `current()` rend la dernière position poussée à l’heure de l’appel. Rien n’est rejoué : le moteur oublie
+  une position de plus de 60 s (temps simulé), il faut donc pousser régulièrement en accéléré pour garder une position
+  fraîche, et ne rien pousser pour un scénario « sans position ».
+- Quai Web avec un endroit choisi dans la rubrique « Position » : pas de flux, la position poussée est refusée
+  (`false`), comme une vraie position. Ne pas combiner avec `mockPath` : `app/src/main.ts` remplace alors la position,
+  et `__quaiPushFix` renvoie `false`.
+- Hors du mode test, `window.__quaiPushFix` n’existe pas.
+
+Appui long sur Quai Web : bouton « Appui long » (`button[data-gesture="long"]`, à côté de « Toucher » et « Double
+toucher »), touche L du clavier, ou doigt gardé 600 ms sur l’écran des lunettes. Dans l’appli Even, l’appui long ouvre
+le menu système, où Quai ajoute ses choix sur les pages du guidage ; un choix arrive comme le signal `menu`.
+
 ## Notes
 
 - L’affichage du simulateur 0.9.5 peut avoir un temps de retard sur le journal : la mise à jour d’un conteneur est

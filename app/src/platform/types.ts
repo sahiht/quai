@@ -44,6 +44,13 @@ export interface Fix {
   source: 'sdk' | 'browser' | 'mock' | 'manual';
 }
 
+/** 1.2.10 : réglage d'un flux de positions (PRD § 3.7 : high 5 m et 2 s, medium 50 m et 30 s). */
+export interface WatchOptions {
+  accuracy: 'high' | 'medium';
+  intervalMs: number;
+  distanceM: number;
+}
+
 export interface LocationPort {
   /** Position actuelle, ou null (refus, délai dépassé, indisponible). Ne lève jamais. */
   current(timeoutMs?: number): Promise<Fix | null>;
@@ -52,8 +59,13 @@ export interface LocationPort {
   /**
    * 1.2.10 : positions continues pendant un guidage (SDK : startAppLocationUpdates ; navigateur : watchPosition).
    * Renvoie la fonction d'arrêt. Ne lève jamais ; sans position possible, `cb` n'est simplement jamais appelé.
+   *
+   * Un seul flux actif : un nouvel appel remplace le précédent (le dernier réglage gagne) et la fonction d'arrêt d'un
+   * flux remplacé ne fait plus rien. Positions transmises au plus une par `intervalMs`, dès `distanceM` parcourus, et au
+   * moins toutes les 20 s même immobile (position fraîche à l'arrêt : le moteur ignore les positions de plus de 60 s).
+   * `last()` suit le flux. Mode test (?e2e=1) : window.__quaiPushFix (tests/e2e/README.md).
    */
-  watch?(opts: { accuracy: 'high' | 'medium'; intervalMs: number; distanceM: number }, cb: (f: Fix) => void): () => void;
+  watch?(opts: WatchOptions, cb: (f: Fix) => void): () => void;
 }
 
 export interface Platform {

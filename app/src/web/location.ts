@@ -3,7 +3,13 @@
  * gare ou arrêt) quand la position est refusée, indisponible ou trop imprécise. L'endroit choisi est gardé dans ce
  * navigateur.
  * Ne lève jamais ; l'état sert aux messages (rubrique « Position »).
+ *
+ * 1.2.10 (PRD-1.2.10 § 3.7) : positions continues pendant un guidage (`watch`, watchPosition), avec le même tri que
+ * l'appli Even (platform/location.ts). Endroit choisi à la main : pas de flux (le guidage avance à l'heure), last()
+ * inchangé ; le flux reprend si l'on revient à la position du navigateur. Mode test : position simulée (une fois au
+ * départ du flux) et window.__quaiPushFix.
  */
+import { browserWatch, isE2E, lazyPushTarget, pushedFix, singleFlux, watchOptions, type GeoWatch } from '../platform/location';
 import type { Fix, LocationPort } from '../platform/types';
 
 export type WebLocationState =
@@ -38,6 +44,9 @@ export const MANUAL_KEY = 'quai.web.position';
 
 interface GeoLike {
   getCurrentPosition(ok: (p: { coords: { latitude: number; longitude: number; accuracy?: number } }) => void, err: (e: { code: number }) => void, o?: PositionOptions): void;
+  /** 1.2.10 : flux du guidage. */
+  watchPosition?: GeoWatch['watchPosition'];
+  clearWatch?: GeoWatch['clearWatch'];
 }
 interface StoreLike {
   getItem(k: string): string | null;
@@ -53,6 +62,8 @@ export interface WebLocationOptions {
   secure?: boolean;
   store?: StoreLike | null;
   permissions?: PermissionsLike | null;
+  /** 1.2.10 : mode test (?e2e=1 par défaut) : window.__quaiPushFix. */
+  e2e?: boolean;
 }
 
 const valid = (lat: unknown, lon: unknown): lat is number =>
@@ -72,6 +83,7 @@ function readManual(store: StoreLike | null): ManualPosition | null {
 function defaults(): Required<WebLocationOptions> {
   const nav = typeof navigator !== 'undefined' ? navigator : undefined;
   return {
+    e2e: isE2E(),
     geo: nav && 'geolocation' in nav ? (nav.geolocation as GeoLike) : null,
     secure: typeof window === 'undefined' ? true : window.isSecureContext !== false,
     store: (() => {
@@ -93,6 +105,13 @@ export function createWebLocation(now: () => number, options: WebLocationOptions
   let manual = readManual(o.store);
   let mock: { lat: number; lon: number } | null = null;
   let inflight: Promise<Fix | null> | null = null;
+  /** 1.2.10 : dernière position poussée en mode test (last() la rend telle quelle). */
+  let pushedMock: Fix | null = null;
+  const flux = singleFlux(() => undefined);
+  /** Arrêt du watchPosition en cours (null : pas de flux du navigateur). */
+  let geoStop: (() => void) | null = null;
+  /** Flux pour lequel le watchPosition tourne. */
+  let geoFor: unknown = null;
 
   const set = (s: WebLocationState): void => {
     if (JSON.stringify(s) === JSON.stringify(state)) return;
@@ -101,6 +120,74 @@ export function createWebLocation(now: () => number, options: WebLocationOptions
   };
   const manualFix = (m: ManualPosition): Fix => ({ lat: m.lat, lon: m.lon, accuracy: 30, at: now(), source: 'manual' });
   if (manual) state = { kind: 'manual', label: manual.label };
+  const mockFix = (): Fix =>
+    pushedMock && mock ? { ...pushedMock, at: now() } : { lat: mock!.lat, lon: mock!.lon, accuracy: 5, at: now(), source: 'mock' };
+
+  /** Position du navigateur reçue par le flux : comme une réponse de current(). */
+  const gpsFix = (f: Fix): void => {
+    lastFix = f;
+    set({ kind: 'gps', ...(f.accuracy !== undefined ? { accuracy: f.accuracy } : {}) });
+  };
+
+  /**
+   * Le watchPosition tourne seulement s'il y a un flux, sans position simulée ni endroit choisi, en https, avec l'API et
+   * sans refus.
+   */
+  function syncStream(): void {
+    const f = flux.current();
+    const want = !!f && !mock && !manual && o.secure && typeof o.geo?.watchPosition === 'function' && state.kind !== 'denied';
+    if (geoStop && (!want || geoFor !== f)) {
+      geoStop();
+      geoStop = null;
+      geoFor = null;
+    }
+    if (!want || geoStop || !f) return;
+    const geo = o.geo!;
+    let stopped = false;
+    const stopWatch = browserWatch(
+      {
+        watchPosition: (ok, err, opts) =>
+          geo.watchPosition!(ok, (e) => {
+            if (!stopped && e?.code === 1) {
+              // refusée : plus de position du navigateur, le flux s'arrête jusqu'à une nouvelle permission
+              lastFix = null;
+              set({ kind: 'denied' });
+              syncStream();
+            }
+            err?.(e);
+          }, opts),
+        clearWatch: (id) => geo.clearWatch?.(id),
+      },
+      f.opts,
+      now,
+      (fix) => {
+        if (stopped || manual || mock) return;
+        if (flux.deliver(f, fix, true)) gpsFix(fix);
+      },
+    );
+    geoStop = () => {
+      stopped = true;
+      stopWatch();
+    };
+    geoFor = f;
+  }
+
+  const touch = lazyPushTarget(o.e2e, {
+    push(p) {
+      const f = pushedFix(p, now());
+      if (!f) return false;
+      if (mock) {
+        mock = { lat: f.lat, lon: f.lon };
+        pushedMock = f;
+      } else if (manual) {
+        // endroit choisi : il garde la main, comme pour une vraie position
+        return false;
+      } else gpsFix(f);
+      const fl = flux.current();
+      if (fl) flux.deliver(fl, f, false);
+      return true;
+    },
+  });
 
   function ask(timeoutMs: number): Promise<Fix | null> {
     const geo = o.geo;
@@ -157,7 +244,8 @@ export function createWebLocation(now: () => number, options: WebLocationOptions
 
   const loc: WebLocation = {
     current(timeoutMs = 8000) {
-      if (mock) return Promise.resolve({ lat: mock.lat, lon: mock.lon, accuracy: 5, at: now(), source: 'mock' });
+      touch();
+      if (mock) return Promise.resolve(mockFix());
       if (manual) return Promise.resolve(manualFix(manual));
       if (!inflight) {
         inflight = ask(timeoutMs)
@@ -172,7 +260,8 @@ export function createWebLocation(now: () => number, options: WebLocationOptions
       return inflight;
     },
     last() {
-      if (mock) return { lat: mock.lat, lon: mock.lon, accuracy: 5, at: now(), source: 'mock' };
+      touch();
+      if (mock) return pushedMock ?? mockFix();
       if (manual) return manualFix(manual);
       return lastFix;
     },
@@ -191,11 +280,30 @@ export function createWebLocation(now: () => number, options: WebLocationOptions
       }
       if (manual) set({ kind: 'manual', label: manual.label });
       else set(lastFix ? { kind: 'gps', ...(lastFix.accuracy !== undefined ? { accuracy: lastFix.accuracy } : {}) } : { kind: 'idle' });
+      syncStream();
     },
     manual: () => manual,
     useMock(lat, lon) {
+      touch();
       mock = { lat, lon };
+      pushedMock = null;
       set({ kind: 'mock' });
+      syncStream();
+    },
+    watch(opts, cb) {
+      touch();
+      return flux.watch(watchOptions(opts), cb, (f) => {
+        // position simulée : donnée une fois au départ du flux (puis les positions poussées)
+        if (mock) void Promise.resolve().then(() => mock && flux.deliver(f, mockFix(), false));
+        syncStream();
+        return () => {
+          if (geoFor === f) {
+            geoStop?.();
+            geoStop = null;
+            geoFor = null;
+          }
+        };
+      });
     },
   };
 
@@ -212,6 +320,7 @@ export function createWebLocation(now: () => number, options: WebLocationOptions
         } else if (p.state === 'granted' && !manual && !mock) {
           void loc.current().then(() => {
             for (const l of [...listeners]) l(state);
+            syncStream();
           });
         }
       });
