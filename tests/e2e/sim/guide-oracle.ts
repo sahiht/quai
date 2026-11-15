@@ -100,7 +100,7 @@ export function leaveLines(j: OJourney, title: string, now: number): Want[] {
   const margin = minutesFloor(l.dep - now) - walkMin;
   const base = `${vehicle(l)} à ${time(l.dep, l.rt)}`;
   // marge à la minute près selon l'instant exact du calcul : les deux formes sont admises à la frontière
-  if (margin <= 0) out.push(`${base}, très juste`, /^Si tu le rates : arrivée \d\d:\d\d, \d+ min plus tard$/);
+  if (margin <= 0) out.push(`${base}, très juste`, /^Si tu le rates : arrivée \d\d:\d\d(, \d+ min plus tard)?$/);
   else if (margin === 1 || margin === 2) out.push(new RegExp(`^${esc(base)}(, très juste)?$`));
   else out.push(base);
   return out;

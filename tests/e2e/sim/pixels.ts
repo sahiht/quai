@@ -38,7 +38,7 @@ import { STEP_TIME_PX } from '../../../app/src/glasses/views';
 
 const LINE_H = 27;
 const SCREEN_H = 288;
-const TOL = 3;
+const TOL_SIM = 3;
 /** Fin de texte : le dernier pixel allumé peut précéder l'avance du dernier caractère (approche, « . », « : »). */
 const END_TOL = 9;
 
@@ -53,7 +53,7 @@ export interface LoggedScreen {
 type Seg = { from: number; to: number; text: string };
 
 /** Écrans en liste à une colonne de droite (gabarit de chacun, layout.ts). */
-const MENU: Record<string, keyof typeof LAYOUTS> = { favorites: 'favorites', stations: 'stations', keepLine: 'menu', followed: 'menu' };
+const MENU: Record<string, keyof typeof LAYOUTS> = { favorites: 'favorites', stations: 'stations', keepLine: 'menu', followed: 'menu', menu: 'menu' };
 const CHECKED = new Set(['home', 'steps', 'others', 'lines', 'follows', 'lineRun', 'trainRun', 'line', 'board', 'stops', 'train', ...Object.keys(MENU)]);
 /** 1.2.3 : ligne du haut d'un tableau (message de l'opérateur, « Départs de demain ») ; sa note, jamais une ligne de liste. */
 const TOP_BOARD = /^(! |Départs de demain$)/;
@@ -510,7 +510,8 @@ function bands(s: LoggedScreen): Band[] | null {
 /**
  * Contrôle une capture. Renvoie la liste des écarts (vide : tout tient).
  */
-export function checkPixels(png: Buffer, s: LoggedScreen): string[] {
+export function checkPixels(png: Buffer, s: LoggedScreen, opts: { tol?: number } = {}): string[] {
+  const TOL = opts.tol ?? TOL_SIM;
   const all = bands(s);
   if (!all) return [];
   const { w, h, lit } = litMap(png);

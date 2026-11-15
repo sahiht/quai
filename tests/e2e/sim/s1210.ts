@@ -150,8 +150,12 @@ async function waitGuide(r: Run, label: string, pred: (s: GlassesScreen) => bool
 }
 
 const isGuide = (s: GlassesScreen) => s.screen === 'guide';
-/** « Si tu le rates » (règle 1.2.5) : 4e ligne du moment « leave » quand la marge est d'une minute ou moins. */
-const RATES = /^Si tu le rates : arrivée \d\d:\d\d, \d+ min plus tard$/;
+/**
+ * « Si tu le rates » (règle 1.2.5) : 4e ligne du moment « leave » quand la marge est d'une minute ou moins ; l'écart
+ * (« , 30 min plus tard ») tombe quand la ligne ne tient pas à côté de l'image (guide-views.ts, missFit) : les deux
+ * formes, la longue seulement si elle tient (contrôle au pixel).
+ */
+const RATES = /^Si tu le rates : arrivée \d\d:\d\d(, \d+ min plus tard)?$/;
 const isEmpty = (s: GlassesScreen) => s.screen === 'guide' && !s.title && s.lines.every((l) => !l.trim());
 const momentOf = (s: GlassesScreen) => (typeof s.moment === 'string' ? s.moment : undefined);
 
@@ -183,19 +187,20 @@ async function gstep(r: Run, name: string, fn: () => Promise<{ screen?: GlassesS
     if (out.screen && out.shot) {
       await sleep(250);
       const buf = await canvasShot(r);
-      writeFileSync(file, buf);
-      res.shot = file.slice(file.indexOf('tests/e2e/') + 10);
       const s = out.screen;
       let bad: string[] = [];
       if (out.shot.kind === 'empty') {
         const n = litCount(buf);
         if (n) bad = [`écran calme attendu (aucun pixel allumé), ${n} pixels allumés`];
-      } else if (out.shot.kind === 'layout') {
-        // écrans à gabarit (accueil, trajet, arrêts) : contrôlés au pixel dans le simulateur (s1210sim) ; sur le canvas,
-        // la police du système déborde de 1 à 4 px l'avance des G2 aux extrémités : capture seulement, aucun écran noir
-        if (!litCount(buf)) bad = ['écran noir'];
-        void checkPixels;
+      } else if (out.shot.kind === 'layout' || out.shot.kind === 'menu') {
+        // écrans à gabarit (accueil, trajet, arrêts, menu de l'appui long) : le contrôle des colonnes de layout.ts, avec
+        // 6 px de marge (canvas : la police du système déborde de 1 à 4 px l'avance des G2 aux extrémités)
+        bad = litCount(buf) ? checkPixels(buf, s, { tol: 6 }) : ['écran noir'];
       } else bad = checkGuidePixels(buf, s as unknown as GuideShot, { image: out.shot.kind === 'guide' && out.shot.image, tol: 5 });
+      // une capture en échec au pixel garde le nom -ECHEC (jamais livrée sous le nom de l'étape)
+      const target = bad.length ? join(r.ctx.shots, `s1210-${name}-ECHEC.png`) : file;
+      writeFileSync(target, buf);
+      res.shot = target.slice(target.indexOf('tests/e2e/') + 10);
       check(!bad.length, `contrôle au pixel (${name}) :\n        ${bad.join('\n        ')}`);
     }
     console.log(`  ✓ ${res.scenario}-${name}${out.screen ? `\n      ${show(out.screen)}` : ''}`);
@@ -592,7 +597,7 @@ async function s1210menu(ctx: Ctx): Promise<void> {
       const m = await waitGuide(r, 'menu de l’appui long (§ 3.4)', (s) => s.screen === 'menu');
       const items = m.lines.filter((l) => O.MENU.some((x) => O.norm(l).endsWith(x)));
       check(items.length === 2 && O.norm(items[0]).endsWith(O.MENU[0]) && O.norm(items[1]).endsWith(O.MENU[1]), `menu : « ${O.MENU.join(' », « ')} » attendus dans cet ordre, vu ${JSON.stringify(m.lines)}`);
-      return { screen: m, shot: { kind: 'layout' } };
+      return { screen: m, shot: { kind: 'menu' } };
     }, { critical: true });
     await gstep(r, 'menu-voir-tout-le-trajet', async () => {
       await gesture(r, 'down');
@@ -617,8 +622,9 @@ async function s1210menu(ctx: Ctx): Promise<void> {
       await waitGuide(r, 'menu', (s) => s.screen === 'menu');
       await gesture(r, 'tap');
       const h = await waitGuide(r, 'accueil après « Arrêter le guidage » (§ 3.4)', (s) => s.screen === 'home');
-      const toast = r.page.screens().slice(r.mark).some((s) => s.lines.some((l) => O.norm(l).includes(O.TOASTS.stopped)));
-      check(toast, `toast « ${O.TOASTS.stopped} » absent après l’arrêt (§ 3.4)`);
+      // le toast prend la place du titre de l'accueil (app/test/glasses/controller-guide-screen.test.ts)
+      const toast = r.page.screens().slice(r.mark).some((s) => O.norm(s.title) === O.TOASTS.stopped || s.lines.some((l) => O.norm(l).includes(O.TOASTS.stopped)));
+      check(toast, `toast « ${O.TOASTS.stopped} » absent après l’arrêt (titre de l’accueil, § 3.4) : ${r.page.screens().slice(r.mark).map(show).join(' | ')}`);
       check(!(await followed(r)), 'trajet encore suivi après « Arrêter le guidage »');
       return { screen: h };
     });
