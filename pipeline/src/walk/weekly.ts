@@ -181,7 +181,8 @@ export async function weeklyWalk(o: WeeklyOptions): Promise<WeeklyResult> {
     if (known && known.v === 1 && known.week === week) {
       const s = await stat(pbf).catch(() => null);
       have = !!s && s.size === known.bytes;
-      if (!have) return { state: 'failed', message: `extrait déjà téléchargé cette semaine (${known.date}) mais absent du cache : nouvel essai la semaine prochaine` };
+      // nuits ordinaires : jamais deux téléchargements la même semaine ; la vérification (lancée à la main) le peut
+      if (!have && !o.force) return { state: 'failed', message: `extrait déjà téléchargé cette semaine (${known.date}) mais absent du cache : nouvel essai la semaine prochaine` };
     }
     if (!have) {
       const url = o.url ?? GEOFABRIK_URL;
