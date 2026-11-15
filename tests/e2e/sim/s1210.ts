@@ -527,9 +527,12 @@ async function s1210missed(ctx: Ctx): Promise<void> {
 async function s1210passed(ctx: Ctx): Promise<void> {
   await ctx.withChrome(async (page) => {
     const r: Run = { ctx, page, mark: 0 };
+    let title = FONTAINAS;
     await gstep(r, 'guide-arret-depasse', async () => {
       await openWeb(r, { ...START, ...ctx.preset('p/1210.json') });
-      const { j, title } = await launch(r);
+      const go = await launch(r);
+      const j = go.j;
+      title = go.title;
       const ic = j.legs[rideLeg(j)];
       for (let t = T('07:31'); t <= T('08:43'); t += 60_000) await goTo(r, NAMUR_PASSED, t);
       // arrêts de l'IC après la descente : lus par le guidage au début de l'étape à bord et gardés avec lui, par étape
@@ -545,6 +548,27 @@ async function s1210passed(ctx: Ctx): Promise<void> {
       expectLines(s, O.passedLines(ic.to.name.fr, 'Bruxelles-Central', central.est, ic.rt, newArr), 'arrêt dépassé (§ 3.2, passed ; § 3.6)');
       momentCommon(s, title);
       return { screen: s, shot: { kind: 'guide', image: false } };
+    });
+    await gstep(r, 'guide-arret-depasse-descendre', async () => {
+      // le nouveau trajet garde l'IC jusqu'à Bruxelles-Central (décision du 15/11) : la suite d'un trajet normal,
+      // « Descends au prochain arrêt » la dernière minute, puis la marche ; jamais « Partir maintenant » dans le train
+      const j2 = (await followed(r))?.journey;
+      const k = j2 ? j2.legs.findIndex((l) => l.kind === 'ride' && l.to.name.fr === 'Bruxelles-Central') : -1;
+      check(j2 && k >= 0, `le nouveau trajet ne garde pas l’IC jusqu’à Bruxelles-Central : ${JSON.stringify(j2?.legs.map((l) => `${l.kind} ${l.from.name.fr} → ${l.to.name.fr}`))}`);
+      const last = j2.legs[k].arr - 55_000;
+      for (const t of [T('08:46'), T('08:46:30'), last]) await goTo(r, NAMUR_PASSED, t, t !== T('08:46'));
+      const s = await moment(r, 'Descends au prochain arrêt (IC gardé jusqu’à Bruxelles-Central)', 'Descends au prochain arrêt');
+      expectLines(s, O.alightLines(j2, k), '« Descends au prochain arrêt » de l’IC gardé (§ 3.6)');
+      momentCommon(s, title);
+      return { screen: s, shot: { kind: 'guide', image: false } };
+    });
+    await gstep(r, 'guide-arret-depasse-a-pied', async () => {
+      // descente à Bruxelles-Central, puis à pied vers la place Fontainas : jamais « Partir maintenant »
+      for (const t of [T('08:48:20'), T('08:49:20'), T('08:50:20')]) await goTo(r, NAMUR_PASSED, t, t !== T('08:48:20'));
+      const seen = r.page.screens().slice(r.mark).filter(isGuide);
+      const bad = seen.find((x) => /^Partir maintenant/.test(O.norm(x.lines[0])));
+      check(!bad, `« Partir maintenant » après l’arrêt dépassé : ${show(bad)}`);
+      return { screen: seen.at(-1) ?? r.page.screens().at(-1) };
     });
   }, VIEWPORT);
 }
