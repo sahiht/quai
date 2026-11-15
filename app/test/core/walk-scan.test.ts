@@ -7,6 +7,8 @@
  * virage à moins de 15 m d'un
  * autre ni dans les 20 derniers mètres, 80 Mo au plus pour toutes les tuiles et 300 ko par tuile. Le bilan est écrit
  * dans le journal (raisons des chemins droits, exemples, détours, temps à chaud et à froid).
+ * 1.3.0 (PRD-1.3.0 § 4, § 11.3) : la raison d'un chemin droit est celle du routeur (outside, nosnap, nopath) ; tout
+ * chemin droit en a une, et outside exactement quand la tuile d'un bout manque à la publication.
  *
  * Lancé seulement avec QUAI_SCAN_DATA (dossier des données de la nuit, ex. ../site/data), par le workflow « Données
  * de nuit » ; sans lui, ignoré. Ne bloque jamais la publication (étape continue-on-error). QUAI_SCAN_WALKS : nombre
@@ -17,9 +19,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { LatLon } from '../../src/core/api';
 import type { WalkRoute } from '../../src/core/guide-types';
-import { isWalkIndex, leafKeysForBox, WALK_UNIT, type WalkIndex } from '../../src/core/walk/format';
+import { isWalkIndex, leafKeyOf, leafKeysForBox, WALK_UNIT, type WalkIndex } from '../../src/core/walk/format';
 import { mergeTiles, prepareTile, type TileGraph } from '../../src/core/walk/graph';
-import { routeOn, snapPoint } from '../../src/core/walk/route';
+import { snapPoint } from '../../src/core/walk/route';
 import { boxAround, MARGIN_M, WalkRouter } from '../../src/core/walk/router';
 import { diskSource, metres, prng } from './walk-helpers';
 
@@ -111,6 +113,8 @@ describe.skipIf(!DIR)('1.2.10 : balayage des chemins à pied (QUAI_SCAN_DATA)', 
     const tooClose: string[] = [];
     const lastMetres: string[] = [];
     const straight: { a: Stop; b: Stop; why: string }[] = [];
+    /** 1.3.0 : chemins droits dont la raison ne correspond pas aux tuiles publiées (outside sans tuile absente, ou l'inverse) */
+    const badReason: string[] = [];
     const ratios: number[] = [];
     for (const [a, b] of pairs) {
       const interior = !edge(a) && !edge(b);
@@ -134,14 +138,18 @@ describe.skipIf(!DIR)('1.2.10 : balayage des chemins à pied (QUAI_SCAN_DATA)', 
           }
         }
         const g = tiles.length ? mergeTiles(tiles) : null;
-        const why = g ? routeOn(g, a, b, 0) : 'aucune tuile';
+        // 1.3.0 (PRD-1.3.0 § 4, § 11.3) : la raison donnée par le routeur (outside : tuile d'un bout absente, hors de
+        // l'extrait de Belgique), vérifiée contre les tuiles publiées
+        const why = r.reason ?? 'sans raison';
+        const endMissing = [a, b].some((p) => !have.has(leafKeyOf(p.lat / WALK_UNIT, p.lon / WALK_UNIT, splitKeys)));
+        if ((why === 'outside') !== endMissing) badReason.push(`${why} : ${a.name} → ${b.name}`);
         // un bout sans voie à 100 m : distance de la voie la plus proche (1 km au plus), pour juger des données
         const near = (p: Stop) => {
           const d = g ? snapPoint(g, p.lat / WALK_UNIT, p.lon / WALK_UNIT, 1000).any?.dist : undefined;
           return d === undefined ? 'plus de 1 km' : `${Math.round(d)} m`;
         };
         const detail = why === 'nosnap' ? ` : voie la plus proche à ${near(a)} et ${near(b)}` : '';
-        straight.push({ a, b, why: `${typeof why === 'string' ? why : 'trouvé au second essai'}${detail}${interior ? '' : ', bord de l\'extrait'}` });
+        straight.push({ a, b, why: `${why}${detail}${interior ? '' : ', bord de l\'extrait'}` });
         continue;
       }
       osm++;
@@ -159,7 +167,7 @@ describe.skipIf(!DIR)('1.2.10 : balayage des chemins à pied (QUAI_SCAN_DATA)', 
     const n = pairs.length;
     const why = new Map<string, number>();
     for (const s of straight) {
-      const k = s.why.split(/[ ,:]/)[0] === 'aucune' ? 'aucune tuile' : s.why.split(/[ ,:]/)[0];
+      const k = s.why.startsWith('sans raison') ? 'sans raison' : s.why.split(/[ ,:]/)[0];
       why.set(k, (why.get(k) ?? 0) + 1);
     }
     log.push(
@@ -171,12 +179,15 @@ describe.skipIf(!DIR)('1.2.10 : balayage des chemins à pied (QUAI_SCAN_DATA)', 
       `Détour (chemin / vol d'oiseau) : médiane ${q(ratios, 0.5).toFixed(2).replace('.', ',')}, p95 ${q(ratios, 0.95).toFixed(2).replace('.', ',')} ; détours de plus de 2,5 fois + 200 m : ${detours}`,
     );
     for (const s of [...straight.filter((x) => !x.why.includes('bord')), ...straight.filter((x) => x.why.includes('bord'))].slice(0, 16)) log.push(`  chemin droit (${s.why}) : ${s.a.name} (${s.a.lat.toFixed(5)}, ${s.a.lon.toFixed(5)}) → ${s.b.name} (${s.b.lat.toFixed(5)}, ${s.b.lon.toFixed(5)})`);
+    if (badReason.length) log.push(`  raison qui ne correspond pas aux tuiles publiées : ${badReason.slice(0, 8).join(' ; ')}`);
     console.log(log.join('\n'));
     expect(n).toBeGreaterThanOrEqual(Math.min(WALKS, 100));
     expect(inner).toBeGreaterThanOrEqual(Math.ceil(0.9 * n));
     expect(innerOsm / Math.max(1, inner)).toBeGreaterThanOrEqual(0.99);
     expect(osm / n).toBeGreaterThanOrEqual(0.98);
     expect(q(warm, 0.95)).toBeLessThan(150);
+    expect(why.get('sans raison') ?? 0, 'chemin droit sans raison').toBe(0);
+    expect(badReason, 'raison outside et tuiles publiées').toEqual([]);
     expect(tooClose).toEqual([]);
     expect(lastMetres).toEqual([]);
     expect(total).toBeLessThanOrEqual(BUDGET_BYTES);
