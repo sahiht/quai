@@ -47,7 +47,8 @@ import { makeFetch, mapPool } from './net';
 import { PersistentCache } from './persist';
 import { inTime, markRain, WeatherClient } from './weather';
 import { planCandidates, type NearArea } from './plan';
-import { RealtimeClient, stibPoint, type AlertItem } from './realtime';
+import { RealtimeClient, stibPoint } from './realtime';
+import { BOARD_BUDGET, namesOf, scopeTexts, stibMessageText, type AlertScope, type ScopeStop } from './alerts';
 import { computeRoute } from './routing/engine';
 import { recalcAlert, repairFollowed, touchFollowed } from './routing/repair';
 import { rankSearch, searchFileKeys } from './search';
@@ -86,12 +87,10 @@ function minimalSummary(id: string): AreaSummary {
   };
 }
 
-function alertActive(a: AlertItem, now: number): boolean {
-  if (!a.active.length) return true;
-  return a.active.some(([s, e]) => (!s || now >= s * 1000) && (!e || now <= e * 1000));
-}
-
-const stopBase = (s: string) => normalizeId(s).replace(/_[^_]+$/, '').replace(/^S(?=\d)/, '');
+/** 1.2.10 : horizon des alertes d'un tableau ou d'une ligne (celui des tableaux complets). */
+const WORKS_HORIZON_MS = 2 * 3_600_000;
+/** Clé d'une ligne (« 039 » et « 39 », « w » et « W »). */
+const worksLineKey = (s: string): string => s.trim().toUpperCase().replace(/^0+(?=\w)/, '');
 
 export function createCore(opts: CoreOptions): Core {
   const now = () => opts.now();
@@ -204,30 +203,68 @@ export function createCore(opts: CoreOptions): Core {
     return r;
   }
 
+  /**
+   * Alertes « travaux » d'une gare, d'un arrêt ou d'une ligne à un arrêt (core.works, PRD-1.2.10 § 6), rédigées pour la
+   * ligne du haut des lunettes après le « ! » des écrans (core/alerts.ts, BOARD_BUDGET). 1.2.10 : les lunettes passent
+   * des numéros de ligne et l'identifiant de la zone (controller.worksOf) : la zone donne ses arrêts (stop_id, pointid
+   * STIB, quais d'une gare) et le route_id de chaque numéro (TEC « B0536-23747 » pour le W, De Lijn « 10170 ») ; un
+   * route_id ou un stop_id passé tel quel est gardé. En 1.2.9, De Lijn et le TEC ne trouvaient ainsi que les alertes
+   * de tout le réseau. Alertes des 2 prochaines heures (horizon des tableaux).
+   */
   async function works(op: Op, routes: string[], stops: string[]): Promise<string[]> {
     const t = now();
+    const wanted = new Set(routes.map(worksLineKey));
+    const lines = new Set<string>();
+    const routeIds = new Set<string>();
+    const scopeStops: ScopeStop[] = [];
+    const names: string[] = [];
+    const matched = new Set<string>();
+    for (const id of stops) {
+      if (!id.startsWith(`${op}:`)) {
+        scopeStops.push({ id: op === 'stib' ? stibPoint(id) : normalizeId(id), name: '', end: true });
+        continue;
+      }
+      const prep = await preparedOrNull(aliasOf.get(id) ?? id);
+      if (!prep) continue;
+      const name = prep.file.n.fr || prep.file.n.nl;
+      names.push(...namesOf(prep.file.n));
+      for (const st of prep.file.stops) scopeStops.push({ id: op === 'stib' ? stibPoint(st.rt || st.id) : st.rt || st.id, name, end: true });
+      for (const p of prep.file.patterns) {
+        const byLine = wanted.has(worksLineKey(p.line));
+        if (!byLine && !routes.includes(p.route)) continue;
+        lines.add(p.line);
+        routeIds.add(op === 'stib' ? p.line : p.route);
+        matched.add(byLine ? worksLineKey(p.line) : p.route);
+      }
+    }
+    // numéro ou route_id inconnu de la zone (ou sans zone) : gardé tel quel, comme numéro et comme route_id
+    for (const r of routes) {
+      if (matched.has(worksLineKey(r)) || matched.has(r)) continue;
+      lines.add(r);
+      routeIds.add(r);
+    }
+    const scope: AlertScope = { op, lines: [...lines], routes: [...routeIds], stops: scopeStops, names: [...new Set(names)], from: t, to: t + WORKS_HORIZON_MS };
     if (op === 'stib') {
-      const pts = [...new Set(stops.map(stibPoint).filter(Boolean))];
+      const pts = [...new Set(scopeStops.map((s) => s.id).filter(Boolean))].slice(0, 30);
       if (!pts.length) return [];
       const res = await rt.stib(pts);
       if (res.error) return [];
+      const keys = new Set([...lines].map(worksLineKey));
       const texts: string[] = [];
-      for (const p of pts) for (const e of res.map.get(p) ?? []) if (e.msg && (!routes.length || routes.includes(e.line))) texts.push(e.msg);
-      return [...new Set(texts)];
+      for (const p of pts)
+        for (const e of res.map.get(p) ?? []) {
+          if (!e.msg || (keys.size && !keys.has(worksLineKey(e.line)))) continue;
+          const text = stibMessageText(e.msg, BOARD_BUDGET);
+          if (text && !texts.includes(text)) texts.push(text);
+        }
+      return texts;
     }
-    const alerts = await rt.alerts(op, routes, stops);
-    if (!alerts) return [];
-    const rs = new Set(routes.map(normalizeId));
-    const ss = new Set(stops.map(stopBase));
-    const texts = alerts
-      .filter((a) => alertActive(a, t))
-      .filter((a) => (!a.routes.length && !a.stops.length) || a.routes.some((r) => rs.has(r)) || a.stops.some((s) => ss.has(stopBase(s))))
-      .map((a) => a.header.fr ?? a.header.nl ?? a.header.en ?? a.header.de ?? '')
-      .filter((x) => x.trim());
-    return [...new Set(texts)];
+    const ids = [...new Set(scopeStops.map((s) => s.id))].slice(0, 200);
+    const alerts = await rt.alerts(op, [...routeIds].slice(0, 200), ids, Math.ceil(scope.to / 300_000) * 300);
+    return scopeTexts(alerts, scope, BOARD_BUDGET);
   }
 
-  const refreshEnv: RefreshEnv = { rt, now, trainDays, area: preparedOrNull, works };
+  const refreshEnv: RefreshEnv = { rt, now, trainDays, area: preparedOrNull };
 
   const core: Core = {
     get meta() {

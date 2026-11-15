@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "dev:web": "vite --config vite.web.config.ts",
+    "dev:web": "node --input-type=module -e \"const { createServer } = await import('vite'); const { pathToFileURL } = await import('node:url'); const entry = '/@fs' + new URL('src/web/main.ts', pathToFileURL(process.cwd() + '/')).pathname; const server = await createServer({ configFile: 'vite.web.config.ts', plugins: [{ name: 'quai-dev-web-entry', transformIndexHtml: { order: 'pre', handler: (html) => html.replace('../src/web/main.ts', entry) } }] }); await server.listen(); server.printUrls(); server.bindCLIShortcuts({ print: true });\"",
     "build": "vite build",
     "build:web": "vite build --config vite.web.config.ts",
     "preview": "vite preview",

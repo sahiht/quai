@@ -217,6 +217,7 @@ describe('travaux STIB (alertes des favoris)', () => {
       { line: '4', dest: { fr: 'STALLE (P)', nl: 'STALLE (P)' }, times: [T('12:15')], msg: 'Dernier passage' },
       { line: '4', dest: { fr: 'STALLE (P)', nl: 'STALLE (P)' }, times: [T('12:23')], msg: 'Travaux : arrêt Yser non desservi' },
     ];
-    expect(await env.core.works('stib', [], ['6357F'])).toEqual(['Travaux : arrêt Yser non desservi']);
+    // 1.2.10 : texte rédigé par core/alerts.ts (espace insécable devant « : »)
+    expect((await env.core.works('stib', [], ['6357F'])).map((t) => t.replace(/\u00A0/g, ' '))).toEqual(['Travaux : arrêt Yser non desservi']);
   });
 });

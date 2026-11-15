@@ -14,7 +14,7 @@ import { geocodeHealth } from './geocode/service.js';
 import type { Ctx } from './context.js';
 import { badRequest, json, jsonWith, requestUrl } from './http.js';
 import { WEATHER_PAUSE_MS, WEATHER_STALE_MS, WEATHER_TTL_MS, cacheWeather, emptyWeather, toWeather, weatherBase, weatherSource } from './weather.js';
-import { decodeFeed, extractAlerts, indexTripUpdates, isActive, sncbStation, type AlertItem, type FeedMessage } from './gtfsrt.js';
+import { decodeFeed, extractAlerts, indexTripUpdates, isActiveWithin, sncbStation, type AlertItem, type FeedMessage } from './gtfsrt.js';
 import { extractRows, groupWaitingTimes, stibQuery, type StibGroup } from './stib.js';
 import { MissingKeyError, UpstreamError, fetchBytes, fetchJson, probe, timeoutError } from './upstream.js';
 import { errorText } from './log.js';
@@ -192,6 +192,24 @@ function alertList(ctx: Ctx, op: RtOp) {
   });
 }
 
+/** 1.2.10 : horizon le plus lointain du paramètre `until` (secondes). */
+const ALERT_AHEAD_MAX_S = 48 * 3600;
+
+/**
+ * Alerte rendue à l'appli (AlertsResponse) ; 1.2.10 : cause, effet et description quand le flux les donne, `global`
+ * pour une alerte de tout le réseau (agence sans ligne ni arrêt), que l'appli ne rattache plus d'office à tout trajet.
+ */
+function alertOut(a: AlertItem): AlertsResponse['alerts'][number] & Pick<AlertItem, 'cause' | 'effect' | 'desc'> & { global?: true } {
+  const { id, routes, stops, header, active } = a;
+  return {
+    id, routes, stops, header, active,
+    ...(a.cause ? { cause: a.cause } : {}),
+    ...(a.effect ? { effect: a.effect } : {}),
+    ...(a.desc ? { desc: a.desc } : {}),
+    ...(a.global ? { global: true as const } : {}),
+  };
+}
+
 function matches(a: AlertItem, routes: Set<string>, stops: Set<string>, stations: Set<string> | null): boolean {
   if (!routes.size && !stops.size) return true;
   if (a.global) return true;
@@ -215,9 +233,13 @@ export async function handleAlerts(req: Request, ctx: Ctx): Promise<Response> {
     if (routes.length > LIMITS.alertFilters || stops.length > LIMITS.alertFilters) {
       return badRequest(`Trop de lignes ou d’arrêts : ${LIMITS.alertFilters} au maximum chacun.`);
     }
+    const untilRaw = url.searchParams.get('until');
+    if (untilRaw !== null && !/^\d{1,12}$/.test(untilRaw.trim())) return badRequest('Paramètre until invalide : heure en secondes epoch attendue.');
     try {
       const { value: all, at } = await alertList(ctx, op);
       const nowSec = Math.floor(ctx.now() / 1000);
+      // 1.2.10 : `until` (facultatif) : aussi les alertes qui commencent avant cette heure (trajet plus tard), 48 h au plus
+      const untilSec = untilRaw === null ? nowSec : Math.min(nowSec + ALERT_AHEAD_MAX_S, Math.max(nowSec, Number(untilRaw.trim())));
       const routeSet = new Set(routes);
       const stopSet = new Set(stops);
       const stations = op === 'sncb' ? new Set(stops.map(sncbStation)) : null;
@@ -225,8 +247,8 @@ export async function handleAlerts(req: Request, ctx: Ctx): Promise<Response> {
         op,
         fetchedAt: iso(at),
         alerts: all
-          .filter((a) => isActive(a, nowSec) && matches(a, routeSet, stopSet, stations))
-          .map(({ id, routes: r, stops: s, header, active }) => ({ id, routes: r, stops: s, header, active })),
+          .filter((a) => isActiveWithin(a, nowSec, untilSec) && matches(a, routeSet, stopSet, stations))
+          .map(alertOut),
       };
       return json(body, 200, true);
     } catch (e) {
