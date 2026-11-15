@@ -287,6 +287,51 @@ export function confirmInPage(opts: { trigger: string; question: string; confirm
   return wrap;
 }
 
+/**
+ * 1.3.0 (PRD-1.3.0 § 6.4) : copie un texte dans le presse-papiers. L'API du presse-papiers d'abord ; absente ou refusée
+ * (page sans droits, vieux navigateur) : la copie d'un champ caché ; sinon le texte de `select` est sélectionné, pour
+ * le menu du téléphone. Vrai si le texte est copié. Le curseur reste où il était. Rien ne quitte le téléphone.
+ */
+export async function copyText(text: string, select?: HTMLElement): Promise<boolean> {
+  const clip = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
+  if (clip && typeof clip.writeText === 'function') {
+    try {
+      await clip.writeText(text);
+      return true;
+    } catch {
+      /* repli */
+    }
+  }
+  const focused = document.activeElement as HTMLElement | null;
+  const area = h('textarea', { class: 'sr-only', readonly: true, 'aria-hidden': 'true', tabindex: '-1' });
+  area.value = text;
+  document.body.appendChild(area);
+  let ok = false;
+  try {
+    area.select();
+    area.setSelectionRange?.(0, text.length);
+    ok = typeof document.execCommand === 'function' && document.execCommand('copy') === true;
+  } catch {
+    ok = false;
+  } finally {
+    area.remove();
+    focused?.focus?.({ preventScroll: true });
+  }
+  if (ok) return true;
+  if (select) {
+    try {
+      const sel = window.getSelection?.();
+      const range = document.createRange();
+      range.selectNodeContents(select);
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    } catch {
+      /* au mieux */
+    }
+  }
+  return false;
+}
+
 /** Raccourcis de nom touchables (« Maison », « Bureau », « École ») qui remplissent un champ. */
 export function nameShortcuts(input: HTMLInputElement, onPick?: (name: string) => void, names: readonly string[] = ['Maison', 'Bureau', 'École']): HTMLElement {
   return h(

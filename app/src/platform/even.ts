@@ -14,6 +14,19 @@
  *  - signaux : menu (menuItemClickEvent), lunettes (onDeviceStatusChanged), doublons du micrologiciel écartés, boîte
  *    de sortie corrigée (son « Non » arrive comme `foreground`, la page est reconstruite) ;
  *  - positions continues : startAppLocationUpdates et onAppLocationChanged (platform/location.ts).
+ *
+ * 1.3.0 (PRD-1.3.0 § 6.2, § 6.3, § 10) :
+ *  - capteur de mouvement : `imu(on, paceMs)` → imuControl(isOpen, ImuReportPace), allure du SDK la plus proche (le SDK
+ *    envoie la valeur telle quelle) ; vrai seulement si l'hôte répond vrai ; jamais d'exception ; fermer est toujours sûr
+ *    (rien n'est envoyé si le capteur est déjà fermé, une fermeture en cours sert aux appels suivants) ; dans la file du
+ *    pont comme l'affichage ;
+ *  - mesures : signal `imu` daté par l'horloge de l'appli, livré tout de suite (ni dédoublonnage, ni boîte de sortie, ni
+ *    file, ni minuterie, ni promesse par mesure) et seulement entre imu(true) et imu(false) : une mesure que personne
+ *    n'attend (page rechargée pendant que le capteur était ouvert, ouverture refusée mais faite) est écartée et le
+ *    capteur refermé ;
+ *  - le SDK écrit chaque événement reçu dans la console, sans réglage : ses lignes qui portent une mesure sont écartées
+ *    (quietImuLogs), toutes les autres passent ;
+ *  - état des lunettes : batterie et charge dans le signal `device` (glasses/gestures.ts : DeviceSignals).
  */
 import {
   AppLocationAccuracy,
@@ -21,6 +34,7 @@ import {
   ImageContainerProperty,
   ImageRawDataUpdate,
   ImageRawDataUpdateResult,
+  ImuReportPace,
   MenuContainerProperty,
   MenuItemProperty,
   RebuildPageContainer,
@@ -29,6 +43,7 @@ import {
   TextContainerUpgrade,
   waitForEvenAppBridge,
   type EvenAppBridge,
+  type EvenHubEvent,
 } from '@evenrealities/even_hub_sdk';
 import type { ContainerSpec, ImageSpec, MenuItem } from '../glasses/types';
 export { menuLabel, pageImages, pageMenu, PAGE_LIMITS } from './page';
@@ -108,7 +123,10 @@ export function imageData(img: ImageSpec): number[] {
 
 const nowMs = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
-/** Le pont, réduit à ce que la plateforme utilise (tests : un faux pont). */
+/**
+ * Le pont, réduit à ce que la plateforme utilise (tests : un faux pont). 1.3.0 : imuControl peut manquer (hôte ou pont
+ * sans capteur de mouvement) : `imu` rend alors faux.
+ */
 export type EvenBridge = Pick<
   EvenAppBridge,
   | 'createStartUpPageContainer'
@@ -118,9 +136,84 @@ export type EvenBridge = Pick<
   | 'onEvenHubEvent'
   | 'onDeviceStatusChanged'
   | 'shutDownPageContainer'
->;
+> &
+  Partial<Pick<EvenAppBridge, 'imuControl'>>;
 
-export function evenGlassesPort(bridge: EvenBridge, queue: SerialQueue, clock: () => number = nowMs): GlassesPort {
+/* ------------------------------ 1.3.0 : capteur de mouvement ------------------------------ */
+
+/** 1.3.0 : allures du capteur de mouvement acceptées par le SDK (ImuReportPace : 100 à 1000 ms, par 100). */
+export const IMU_PACES: readonly ImuReportPace[] = [
+  ImuReportPace.P100,
+  ImuReportPace.P200,
+  ImuReportPace.P300,
+  ImuReportPace.P400,
+  ImuReportPace.P500,
+  ImuReportPace.P600,
+  ImuReportPace.P700,
+  ImuReportPace.P800,
+  ImuReportPace.P900,
+  ImuReportPace.P1000,
+];
+
+/**
+ * 1.3.0 : allure du SDK la plus proche de `paceMs` (imuControl transmet sa valeur sans la vérifier) ; à égale distance,
+ * la plus lente (moins de mesures) ; absente ou invalide : P100, la valeur par défaut du SDK.
+ */
+export function imuPace(paceMs?: number): ImuReportPace {
+  if (typeof paceMs !== 'number' || !Number.isFinite(paceMs)) return ImuReportPace.P100;
+  let best = IMU_PACES[0];
+  for (const p of IMU_PACES) if (Math.abs(p - paceMs) <= Math.abs(best - paceMs)) best = p;
+  return best;
+}
+
+/**
+ * 1.3.0 : après une fermeture du capteur, les mesures encore en vol sont écartées sans renvoyer de fermeture pendant ce
+ * délai ; au-delà, une mesure que personne n'attend fait refermer le capteur (une fois par délai au plus).
+ */
+export const IMU_STRAY_CLOSE_MS = 2000;
+
+/** OsEventTypeList.IMU_DATA_REPORT : événement système qui porte une mesure du capteur. */
+const IMU_EVENT_TYPE = 8;
+
+/**
+ * 1.3.0 (PRD-1.3.0 § 6.2, § 10) : vrai pour une ligne de console du SDK qui porte une mesure du capteur de mouvement
+ * (« [EvenAppBridge] EvenHub event: » suivi de l'événement : le SDK l'écrit pour chaque événement reçu, sans réglage pour
+ * l'éteindre ; capteur ouvert à 100 ms, 10 lignes par seconde, chacune avec sa mesure, gardées par la console).
+ */
+export function isSdkImuLog(args: readonly unknown[]): boolean {
+  if (typeof args[0] !== 'string' || !args[0].startsWith('[EvenAppBridge]')) return false;
+  for (let i = 1; i < args.length; i++) {
+    const a = args[i];
+    const sys = a && typeof a === 'object' ? (a as { sysEvent?: unknown }).sysEvent : undefined;
+    if (!sys || typeof sys !== 'object') continue;
+    const s = sys as { eventType?: unknown; imuData?: unknown };
+    if (s.imuData != null || s.eventType === IMU_EVENT_TYPE) return true;
+  }
+  return false;
+}
+
+const QUIET_IMU = Symbol.for('quai.quietImuLogs');
+
+/**
+ * 1.3.0 : écarte de la console les lignes du SDK qui portent une mesure du capteur (isSdkImuLog) ; toutes les autres
+ * passent telles quelles, dans le même ordre. Une seule fois par console (un second appel ne change rien).
+ */
+export function quietImuLogs(c: Pick<Console, 'log'> = console): void {
+  const current = c.log as Console['log'] & { [QUIET_IMU]?: true };
+  if (current[QUIET_IMU]) return;
+  c.log = Object.assign(
+    (...args: unknown[]): void => {
+      if (!isSdkImuLog(args)) current.apply(c, args);
+    },
+    { [QUIET_IMU]: true as const },
+  );
+}
+
+/**
+ * Port des lunettes de l'appli Even. `clock` : horloge des doublons et des délais (monotone) ; 1.3.0 : `now`, horloge de
+ * l'appli (celle de Fix.at) qui date les mesures du capteur de mouvement.
+ */
+export function evenGlassesPort(bridge: EvenBridge, queue: SerialQueue, clock: () => number = nowMs, now: () => number = Date.now): GlassesPort {
   /** Page demandée en dernier (images créées vides) ; `seq` change à chaque page. */
   let page = { seq: 0, images: new Map<number, ImageSpec>() };
   /** Image envoyée avec succès dans chaque conteneur depuis la dernière page. */
@@ -141,18 +234,101 @@ export function evenGlassesPort(bridge: EvenBridge, queue: SerialQueue, clock: (
     if (page.seq === seq) page.images.clear();
   };
 
+  /** 1.3.0 : une seule trace pour un abonné qui lève sur les mesures (pas 10 par seconde) */
+  let imuErrorLogged = false;
   const dispatch = (s: HubSignal | null): void => {
     if (!s) return;
-    const t = clock();
-    if (!dedup.accept(s, t)) return;
-    const out = dialog.map(s, t);
+    let out = s;
+    // 1.3.0 : les mesures du capteur passent sans dédoublonnage ni boîte de sortie (rien n'est gardé par mesure)
+    if (s.kind !== 'imu') {
+      const t = clock();
+      if (!dedup.accept(s, t)) return;
+      out = dialog.map(s, t);
+    }
     for (const l of [...listeners]) {
       try {
         l(out);
       } catch (e) {
+        if (out.kind === 'imu') {
+          if (imuErrorLogged) continue;
+          imuErrorLogged = true;
+        }
         console.error('[Quai] signal', e);
       }
     }
+  };
+
+  /* ------------------------------ 1.3.0 : capteur de mouvement ------------------------------ */
+
+  /** Numéro de la dernière demande (ouvrir ou fermer). */
+  let imuSeq = 0;
+  /** Le contrôleur attend des mesures (entre imu(true) et imu(false) ; faux après une ouverture refusée). */
+  let imuWanted = false;
+  /** L'hôte a peut-être le capteur ouvert : une fermeture lui sera envoyée. */
+  let imuOpen = false;
+  /** Fermeture en cours ; si rien n'a été demandé depuis, une autre fermeture attend la même réponse. */
+  let imuClosing: { seq: number; p: Promise<boolean> } | null = null;
+  /** Fin de la dernière fermeture (horloge `clock`). */
+  let imuClosedAt = -Infinity;
+
+  const setImu = (on: boolean, paceMs?: number): Promise<boolean> => {
+    if (typeof bridge.imuControl !== 'function') return Promise.resolve(false);
+    if (!on) {
+      imuWanted = false;
+      // déjà fermé : rien à envoyer ; fermeture déjà partie : même réponse
+      if (!imuOpen) return Promise.resolve(true);
+      if (imuClosing && imuClosing.seq === imuSeq) return imuClosing.p;
+    }
+    const seq = ++imuSeq;
+    if (on) {
+      imuWanted = true;
+      imuOpen = true;
+    }
+    const pace = imuPace(paceMs);
+    const p: Promise<boolean> = queue
+      .run(
+        'imuControl',
+        async () => {
+          const ok = (await (on ? bridge.imuControl?.(true, pace) : bridge.imuControl?.(false))) === true;
+          // fermeture confirmée par l'hôte (même après le délai de la file) et rien demandé depuis
+          if (!on && ok && seq === imuSeq) imuOpen = false;
+          return ok;
+        },
+        false,
+      )
+      .then((ok) => {
+        if (on && !ok && seq === imuSeq) {
+          // refusée, sans réponse ou en échec : le contrôleur n'attend aucune mesure ; celles qui viendraient quand même
+          // sont écartées et le capteur refermé
+          imuWanted = false;
+        }
+        if (!on) {
+          imuClosedAt = clock();
+          if (imuClosing?.p === p) imuClosing = null;
+        }
+        return ok;
+      });
+    if (!on) imuClosing = { seq, p };
+    return p;
+  };
+
+  /**
+   * Mesure que personne n'attend : écartée. Le capteur est resté ouvert sans demande (page rechargée pendant qu'il
+   * l'était, ouverture refusée mais faite) : il est refermé, une fois par IMU_STRAY_CLOSE_MS au plus ; les mesures
+   * encore en vol pendant ou juste après une fermeture n'en déclenchent pas d'autre.
+   */
+  const strayImu = (): void => {
+    const t = clock();
+    if (imuClosing || t - imuClosedAt < IMU_STRAY_CLOSE_MS || typeof bridge.imuControl !== 'function') return;
+    imuClosedAt = t;
+    imuOpen = true;
+    void setImu(false);
+  };
+
+  const onHub = (e: EvenHubEvent): void => {
+    const s = readHubEvent(e, now());
+    if (s?.kind === 'imu' && !imuWanted) return strayImu();
+    dispatch(s);
   };
 
   return {
@@ -226,7 +402,7 @@ export function evenGlassesPort(bridge: EvenBridge, queue: SerialQueue, clock: (
     onSignal(cb) {
       listeners.add(cb);
       if (!offBridge) {
-        const offHub = bridge.onEvenHubEvent((e) => dispatch(readHubEvent(e)));
+        const offHub = bridge.onEvenHubEvent(onHub);
         let offDevice: () => void = () => undefined;
         try {
           offDevice = bridge.onDeviceStatusChanged((st) => dispatch(devices.next(st)));
@@ -250,6 +426,7 @@ export function evenGlassesPort(bridge: EvenBridge, queue: SerialQueue, clock: (
       if (mode === 1) dialog.arm(clock());
       await queue.run('shutDownPageContainer', () => bridge.shutDownPageContainer(mode), false);
     },
+    imu: setImu,
   };
 }
 
@@ -296,11 +473,13 @@ export function evenLocationSource(
 }
 
 export async function createEvenPlatform(now: () => number): Promise<Platform> {
+  // 1.3.0 : pas une ligne de console par mesure du capteur (le SDK en écrit une par événement reçu)
+  quietImuLogs();
   const bridge = await waitForEvenAppBridge();
   const queue = new SerialQueue(4000);
   return {
     kind: 'even',
-    glasses: evenGlassesPort(bridge, queue),
+    glasses: evenGlassesPort(bridge, queue, nowMs, now),
     kv: createKV(bridgeStorage(bridge, queue)),
     location: deviceLocation(evenLocationSource(bridge), now),
     closeWebView() {

@@ -7,10 +7,15 @@
  * voie à 100 m, qu'aucun chemin ne relie les deux bouts, ou que la marche dépasse 5 km ; null quand les données
  * manquent (pas de chemins publiés) ; exception quand le réseau ou une tuile fait défaut (l'appelant réessaie plus
  * tard).
+ *
+ * 1.3.0 (PRD-1.3.0 § 4) : un chemin droit dit pourquoi (`reason`) : `outside` quand la tuile d'un des deux bouts est
+ * absente de la publication (hors de l'extrait de Belgique) ; sinon `nosnap` (aucune voie à 100 m d'un bout, ou aucune
+ * tuile utilisable), `nopath` (pas de chemin dans les tuiles, même au second essai) ou `far` (plus de 5 km, rien de
+ * chargé). Les vrais chemins sont exactement ceux de la 1.2.10 : la raison s'ajoute aux chemins droits, rien d'autre.
  */
 import type { LatLon } from '../api';
 import type { WalkRoute } from '../guide-types';
-import { leafKeysForBox, WALK_UNIT, type UnitBox, type WalkIndex, type WalkTileFile } from './format';
+import { leafKeyOf, leafKeysForBox, WALK_UNIT, type UnitBox, type WalkIndex, type WalkTileFile } from './format';
 import { M_PER_U, mergeTiles, prepareTile, unitsM, type RoutingGraph, type TileGraph } from './graph';
 import { routeOn, straightRoute } from './route';
 
@@ -74,7 +79,7 @@ export class WalkRouter {
   async route(from: LatLon, to: LatLon): Promise<WalkRoute | null> {
     if (!valid(from) || !valid(to)) return null;
     const crow = unitsM(from.lat / WALK_UNIT, from.lon / WALK_UNIT, to.lat / WALK_UNIT, to.lon / WALK_UNIT);
-    if (crow > MAX_WALK_M) return straightRoute(from, to, this.now());
+    if (crow > MAX_WALK_M) return this.straight(from, to, 'far');
     const index = await this.src.index();
     if (!index) return null;
     if (index.version !== this.version) {
@@ -84,17 +89,29 @@ export class WalkRouter {
       this.graph = null;
     }
     const split = new Set(index.split);
+    // 1.3.0 : tuiles (feuilles) où tombent les deux bouts ; absente de la publication : hors de l'extrait de Belgique
+    const ends = [leafKeyOf(from.lat / WALK_UNIT, from.lon / WALK_UNIT, split), leafKeyOf(to.lat / WALK_UNIT, to.lon / WALK_UNIT, split)];
+    let outside = false;
+    const why = (r: 'nosnap' | 'nopath') => (outside ? 'outside' : r);
     for (const margin of [MARGIN_M, WIDE_MARGIN_M]) {
       const keys = leafKeysForBox(boxAround(from, to, margin), split);
+      const got = await Promise.all(keys.map((k) => this.tile(k, index.version)));
+      // les bouts sont dans le cadre : leurs tuiles sont parmi celles demandées (null : tuile absente)
+      if (margin === MARGIN_M) outside = ends.some((e) => got[keys.indexOf(e)] === null);
       // contrôle technique du 15/11 : une tuile d'une autre semaine (index encore en cache quand la publication change)
       // n'est jamais mélangée aux autres (ses points de coupe ne se raccordent pas) ; elle sert dès que l'index suit
-      const loaded = (await Promise.all(keys.map((k) => this.tile(k, index.version)))).filter((t): t is TileGraph => t !== null && t.ver === index.version);
-      if (!loaded.length) return straightRoute(from, to, this.now());
+      const loaded = got.filter((t): t is TileGraph => t !== null && t.ver === index.version);
+      if (!loaded.length) return this.straight(from, to, why('nosnap'));
       const r = routeOn(this.graphOf(loaded), from, to, this.now());
       if (typeof r !== 'string') return r;
-      if (r === 'nosnap') return straightRoute(from, to, this.now());
+      if (r === 'nosnap') return this.straight(from, to, why('nosnap'));
     }
-    return straightRoute(from, to, this.now());
+    return this.straight(from, to, why('nopath'));
+  }
+
+  /** Chemin droit (aucun virage) et sa raison (1.3.0). */
+  private straight(from: LatLon, to: LatLon, reason: NonNullable<WalkRoute['reason']>): WalkRoute {
+    return { ...straightRoute(from, to, this.now()), reason };
   }
 
   /** Graphe des tuiles données (le dernier est gardé : un nouveau calcul sur la même marche le reprend). */

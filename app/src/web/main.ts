@@ -9,6 +9,7 @@ import './web.css';
 import { applyTestSettings, loadCore, prefixed, type CoreModule } from '../boot';
 import type { CoreOptions } from '../core/api';
 import { DEFAULT_SETTINGS } from '../core/api';
+import { createJournal } from '../core/journal';
 import { parseEnv } from '../env';
 import { GlassesController } from '../glasses/controller';
 import { layoutPage } from '../glasses/layout';
@@ -50,6 +51,11 @@ async function main(): Promise<void> {
   const loc = createWebLocation(clock.now);
   if (env.mockLat !== undefined && env.mockLon !== undefined) loc.useMock(env.mockLat, env.mockLon);
   const platform: Platform = { kind: 'web', glasses: port, kv, location: loc, closeWebView() {} };
+  // 1.3.0 (PRD-1.3.0 § 6.4) : journal des trajets guidés, dans la page ; s'il ne s'ouvre pas, Quai démarre sans lui.
+  const journalReady = createJournal(platform.kv, { now: clock.now }).catch((e: unknown) => {
+    console.warn('[Quai] journal des trajets indisponible', e);
+    return null;
+  });
 
   // Écran des lunettes dès le départ : jamais d'écran noir.
   const loading = layoutPage(messageView('Quai', ['Chargement…'], { now: clock.now(), settings: DEFAULT_SETTINGS }), { sel: 0, top: 0 });
@@ -84,6 +90,7 @@ async function main(): Promise<void> {
     if (location.hash === hash) window.dispatchEvent(new HashChangeEvent('hashchange'));
     else location.hash = hash;
   };
+  const journal = await journalReady;
   const controller = new GlassesController({
     platform,
     core,
@@ -95,6 +102,7 @@ async function main(): Promise<void> {
     pageStarted: true,
     web: true,
     openPhone,
+    journal: journal ?? undefined,
   });
   const coreReady = () => controller.ensureInit().then(() => core);
   const picker = (id: string) => positionCard({ location: loc, core: coreReady, settings, changed: () => void controller.relocate(), id, now: clock.now });
@@ -117,6 +125,7 @@ async function main(): Promise<void> {
     web: true,
     showGlasses: () => shell.show('lunettes'),
     positionPicker: () => picker(`w-pos-${Math.random().toString(36).slice(2, 7)}`),
+    journal: () => journal,
   });
 
   // Gestes : boutons (1.2.10 : « Appui long » compris), écran (glisser, toucher, double toucher, molette, doigt gardé),
@@ -153,6 +162,10 @@ async function main(): Promise<void> {
   sync();
 
   window.addEventListener('pagehide', () => void settings.flush());
+  // le journal regroupe ses enregistrements (2 s) : tout de suite quand la page se cache ou se ferme
+  const saveJournal = (): void => void journal?.flush();
+  window.addEventListener('pagehide', saveJournal);
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && saveJournal());
   await controller.start();
 }
 

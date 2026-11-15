@@ -10,6 +10,9 @@
  * 1.2.10 (docs/v1.2.10/PRD-1.2.10.md § 4.1) : `display.guide` (« Me guider pendant un trajet ») ; seul `false` est
  * enregistré, l'absence vaut « allumé ». § 6 (constat de l'équipe F) : deux lignes du même numéro gardées en 1.2.5 à des
  * arrêts de régions différentes restent deux lignes suivies (sameFollow).
+ * 1.3.0 (docs/v1.3.0/PRD-1.3.0.md § 6.1 et § 6.2) : `display.alert` (résultat du test de l'écran des lunettes) et
+ * `display.headUp` (mouvement « lever la tête » appris), absents par défaut ; une valeur invalide est retirée. Même
+ * format v4 : les réglages de la 1.2.10 se lisent sans rien perdre.
  */
 import type { Endpoint, Favorite, FavoritePlace, FavoriteStop, FavoriteTrip, KV, LineFilter, LinePick, NameLang, Place, Propose, RecentAddress, Settings, StationPick } from './core/api';
 import { DEFAULT_SETTINGS } from './core/api';
@@ -41,6 +44,10 @@ const OPENING: readonly Settings['display']['opening'][] = ['suggest', 'home', '
 const RADII: readonly Settings['display']['radiusM'][] = [300, 500, 800];
 const FAV_ORDER: readonly Settings['display']['favOrder'][] = ['smart', 'mine'];
 const PLACE_SRC: readonly NonNullable<Place['src']>[] = ['address', 'stop', 'here'];
+/** 1.3.0 : résultats du test de l'écran des lunettes (PRD-1.3.0 § 6.1). */
+const DISPLAY_ALERT: readonly NonNullable<Settings['display']['alert']>[] = ['visible', 'headUp', 'dashboard'];
+type HeadUp = NonNullable<Settings['display']['headUp']>;
+const HEAD_AXES: readonly HeadUp['axis'][] = ['x', 'y', 'z'];
 
 export const LIMITS = {
   favorites: 32, // 1.2 : 20 favoris et 12 lieux de la 1.1, la migration ne perd rien
@@ -89,6 +96,25 @@ function names(x: unknown): Names | undefined {
   const out: Names = { fr: fr ?? nl!, nl: nl ?? fr! };
   if (x.l === 'nl' || x.l === 'fr') out.l = x.l;
   return out;
+}
+
+/**
+ * 1.3.0 (PRD-1.3.0 § 6.1 et § 6.2) : mouvement « lever la tête » appris pendant le test de l'écran : un axe (x, y ou z),
+ * un sens (1 ou -1) et un écart fini et positif. Sinon rien (le champ est retiré) : jamais de mesure brute gardée.
+ */
+function headUpOf(x: unknown): HeadUp | undefined {
+  if (!isObj(x)) return undefined;
+  const axis = HEAD_AXES.find((a) => a === x.axis);
+  const sign = x.sign === 1 || x.sign === -1 ? x.sign : undefined;
+  const delta = typeof x.delta === 'number' && Number.isFinite(x.delta) && x.delta > 0 ? x.delta : undefined;
+  return axis && sign && delta !== undefined ? { axis, sign, delta } : undefined;
+}
+
+/** 1.3.0 : `display.alert` et `display.headUp` valides, sinon absents (les réglages par défaut n'en ont pas). */
+function displayTestFields(disp: Obj): Pick<Settings['display'], 'alert' | 'headUp'> {
+  const alert = DISPLAY_ALERT.find((a) => a === disp.alert);
+  const headUp = headUpOf(disp.headUp);
+  return { ...(alert ? { alert } : {}), ...(headUp ? { headUp } : {}) };
 }
 
 function nearestRadius(x: unknown): Settings['display']['radiusM'] {
@@ -485,6 +511,8 @@ export function validateSettings(input: unknown): Settings {
       opening: oneOf(disp.opening, OPENING, d.display.opening),
       favOrder: oneOf(disp.favOrder, FAV_ORDER, d.display.favOrder),
       ...guide,
+      // 1.3.0 : résultat du test de l'écran et mouvement appris, gardés seulement s'ils sont valides
+      ...displayTestFields(disp),
     },
     alerts: {
       platform: bool(al.platform, d.alerts.platform),

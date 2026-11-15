@@ -3,7 +3,7 @@
  * Gestes : glisser haut/bas = se déplacer ; toucher = ouvrir/agir ; double toucher = retour,
  * et depuis l'écran racine = quitter (boîte de confirmation système, shutDownPageContainer(1)).
  */
-import { clampTop, ensureVisible, maxTop, pageTop, prevPageTop, visibleRange } from './layout';
+import { clampTop, ensureVisible, maxTop, openRow, pageTop, prevPageTop, visibleRange } from './layout';
 import type { GlassesView, Intent, Item, Route } from './types';
 import { selectable, tapIntent } from './views';
 
@@ -33,7 +33,11 @@ export type NavEffect =
   | { kind: 'exit' }
   | { kind: 'back' }
   | { kind: 'intent'; intent: Intent }
-  /** Écran sans curseur déjà au bout de sa liste (étapes : proposition suivante ou précédente). */
+  /**
+   * Écran sans curseur déjà au bout de sa liste (étapes : proposition suivante ou précédente) ; 1.3.0 (PRD-1.3.0 § 2) :
+   * aussi ▲ sur la première rangée d'une liste à curseur dont la vue a `edgeUp` (« Autres trajets » : le contrôleur
+   * revient au trajet proposé).
+   */
   | { kind: 'edge'; dir: 'up' | 'down' };
 
 export function initNav(route: Route): NavState {
@@ -128,9 +132,14 @@ export function replaceAt(s: NavState, route: Route, top: number, fresh = false)
 /**
  * Sélection effective d'une vue : la sélection initiale proposée par la vue tant que
  * l'utilisateur n'a pas bougé, sinon celle de la pile, bornée au nombre d'éléments.
- * Écran sans curseur : seulement le défilement, borné pour que la fin de la liste reste à l'écran.
+ * Écran sans curseur : seulement le défilement, borné pour que la fin de la liste reste à l'écran. 1.3.0 (PRD-1.3.0
+ * § 7) : vue en accordéon : la rangée du curseur ouverte compte entière (elle tient à l'écran).
  */
-export function effectiveFrame(f: NavFrame, v: Pick<GlassesView, 'items' | 'initialSel' | 'initialTop' | 'scroll' | 'mark' | 'paged'>, capacity: number): { sel: number; top: number } {
+export function effectiveFrame(
+  f: NavFrame,
+  v: Pick<GlassesView, 'items' | 'initialSel' | 'initialTop' | 'scroll' | 'mark' | 'paged'> & Partial<Pick<GlassesView, 'accordion'>>,
+  capacity: number,
+): { sel: number; top: number } {
   const n = v.items.length;
   let top = f.fresh && v.initialTop !== undefined ? v.initialTop : f.top;
   if (v.scroll) return { sel: v.mark ?? -1, top: clampTop(v.items as Item[], top, capacity) };
@@ -142,18 +151,19 @@ export function effectiveFrame(f: NavFrame, v: Pick<GlassesView, 'items' | 'init
     if (i >= 0) sel = i;
   }
   sel = n ? Math.min(Math.max(0, sel), n - 1) : 0;
-  top = v.paged ? pageTop(v.items as Item[], sel, top, capacity) : ensureVisible(v.items as Item[], sel, top, capacity);
+  const open = openRow(v, sel);
+  top = v.paged ? pageTop(v.items as Item[], sel, top, capacity, open) : ensureVisible(v.items as Item[], sel, top, capacity, open);
   return { sel, top };
 }
 
 /**
- * Applique un geste. `view` = vue affichée, `capacity` = lignes visibles.
- * Renvoie le nouvel état et l'effet à exécuter par le contrôleur.
+ * Applique un geste. `view` = vue affichée, `capacity` = lignes visibles (geometry : la ligne d'action en a déjà pris
+ * une). Renvoie le nouvel état et l'effet à exécuter par le contrôleur.
  */
 export function handleGesture(
   s: NavState,
   g: Gesture,
-  view: Pick<GlassesView, 'items' | 'layout' | 'tap' | 'initialSel' | 'initialTop' | 'scroll' | 'mark' | 'paged'>,
+  view: Pick<GlassesView, 'items' | 'layout' | 'tap' | 'initialSel' | 'initialTop' | 'scroll' | 'mark' | 'paged'> & Partial<Pick<GlassesView, 'edgeUp' | 'accordion'>>,
   capacity: number,
 ): { state: NavState; effect: NavEffect } {
   const f = current(s);
@@ -186,9 +196,14 @@ export function handleGesture(
         return { state: setSelection(s, f.sel, next), effect: { kind: 'render' } };
       }
       if (!selectable(view as GlassesView) || !view.items.length) return { state: s, effect: { kind: 'none' } };
+      // 1.3.0 (PRD-1.3.0 § 2) : ▲ sur la première rangée d'une liste qui le permet (edgeUp) : l'écran d'avant, que le
+      // contrôleur rouvre (« Autres trajets » : le trajet proposé) ; l'état ne change pas
+      if (g === 'up' && sel === 0 && view.edgeUp) return { state: s, effect: { kind: 'edge', dir: 'up' } };
       const next = Math.min(Math.max(0, sel + (g === 'down' ? 1 : -1)), view.items.length - 1);
-      // 1.2.3 : listes longues (tableaux complets, arrêts d'un départ) : la liste défile par page
-      const nextTop = view.paged ? pageTop(view.items as Item[], next, top, capacity) : ensureVisible(view.items as Item[], next, top, capacity);
+      // 1.2.3 : listes longues (tableaux complets, arrêts d'un départ) : la liste défile par page. 1.3.0 (PRD-1.3.0 § 7) :
+      // accordéon : la rangée qui s'ouvre (celle du curseur d'arrivée) tient entière à l'écran, celle qu'il quitte se ferme
+      const open = openRow(view, next);
+      const nextTop = view.paged ? pageTop(view.items as Item[], next, top, capacity, open) : ensureVisible(view.items as Item[], next, top, capacity, open);
       if (next === sel && nextTop === top && !f.fresh) return { state: s, effect: { kind: 'none' } };
       return { state: setSelection(s, next, nextTop, view.items[next]?.key), effect: next === sel && nextTop === top ? { kind: 'none' } : { kind: 'render' } };
     }
