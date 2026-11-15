@@ -59,7 +59,7 @@ const TOP_BOARD = /^(! |Départs de demain$)/;
 const NOTE_BOARD = /^(~ horaire prévu|Temps réel indisponible|Pas de réseau)/;
 /** 1.2.3 : voyage disparu : message (gabarit des messages), non contrôlé ici. */
 const VANISHED = 'Ce départ n’est plus dans les horaires.';
-const TOP_STEPS = /^(! |Si tu le rates |Le plus court|Le plus simple|Le plus rapide|Moins de marche|Plus tôt|Sans changement|Moins de changements|À pied|Le suivant|Plus tard)/;
+const TOP_STEPS = /^(! |Départ \d\d:\d\d|Si tu le rates |Le plus court|Le plus simple|Le plus rapide|Moins de marche|Plus tôt|Sans changement|Moins de changements|À pied|Le suivant|Plus tard)/;
 const TOP_HOME = /^(Temps réel indisponible|Pas de réseau|Horaires |Près de |! )/;
 const NOTE = /^(~ horaire prévu|\* s’arrête avant le terminus|Temps réel indisponible|Temps réel coupé|Pas de réseau|Horaires |[▼▽] |Fin du trajet\.|[▲△] trajet précédent|Pas d’autre trajet pour l’instant$)/;
 /** 1.2.5 (PRD-1.2.5 § 7) : « Dans le train », tous les véhicules : la ligne de progression en ligne du haut. */
@@ -400,7 +400,11 @@ function bands(s: LoggedScreen): Band[] | null {
     footLines = (note !== undefined ? 1 : 0) + (note !== undefined && hint === undefined ? 0 : 1);
   } else {
     hint = lines.pop();
-    note = lines.length && (board ? NOTE_BOARD : NOTE).test(lines[lines.length - 1]) ? lines.pop() : undefined;
+    // 1.2.10 (PRD-1.2.10 § 2) : « Favoris », la ligne du détail du favori choisi, fixe en bas au-dessus des aides
+    // (journalisée dans `detail`), à la place de la note
+    const detail = (s as LoggedScreen & { detail?: unknown }).detail;
+    if (s.screen === 'favorites' && typeof detail === 'string' && lines[lines.length - 1] === detail) note = lines.pop();
+    else note = lines.length && (board ? NOTE_BOARD : NOTE).test(lines[lines.length - 1]) ? lines.pop() : undefined;
     // ligne de note réservée (layout.ts, reserveNote) : partout sauf « Autres trajets », les menus et « Dans le train »
     const reserve = !['others', 'keepLine', 'followed', 'train', 'follows'].includes(s.screen);
     footLines = (reserve || note ? 1 : 0) + 1;
@@ -422,8 +426,14 @@ function bands(s: LoggedScreen): Band[] | null {
     // 1.2.4 : son heure dans la case, comme celles dessous
     const tp = top.split('   ');
     const st = LAYOUTS.stops;
-    const segs =
-      s.screen === 'stops' && tp.length > 1
+    // 1.2.10 (PRD-1.2.10 § 5) : écran du trajet, « Départ 07:05, dans 3 min » à gauche et « arrivée 08:54 » calé à droite
+    const departTop = s.screen === 'steps' && /^Départ /.test(top) && tp.length > 1;
+    const segs = departTop
+      ? [
+          { from: GEO.X_TEXT, to: GEO.X_TEXT + width(tp.slice(0, -1).join('   ')), text: tp.slice(0, -1).join('   ') },
+          { from: GEO.X_END - GEO.SAFETY - width(tp[tp.length - 1]) - 5, to: GEO.X_END - GEO.SAFETY, text: tp[tp.length - 1] },
+        ]
+      : s.screen === 'stops' && tp.length > 1
         ? [
             leadSeg(GEO.X_TEXT, st.a.lead ?? 0, st.b.x - (st.gap ?? GEO.GAP) - GEO.X_TEXT - GEO.SAFETY, tp[0]),
             { from: st.b.x, to: st.b.x + width(tp[1]), text: tp[1] },

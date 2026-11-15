@@ -12,5 +12,5 @@
     "allowImportingTsExtensions": true,
     "types": ["node"]
   },
-  "include": ["*.ts", "lib/**/*.ts", "sim/**/*.ts"]
+  "include": ["*.ts", "lib/**/*.ts", "sim/**/*.ts", "traces/**/*.ts"]
 }
