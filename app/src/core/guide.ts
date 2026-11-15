@@ -790,11 +790,14 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
       getOff = next.name;
       at = next.est;
     } else if (re.swap?.jid === jid && legs[0]) {
-      // nouveau trajet : il commence là où descendre (ou par le même véhicule, jusqu'à là où descendre)
+      // nouveau trajet : il commence là où descendre (ou par le même véhicule, jusqu'à là où descendre) ; cherché depuis
+      // la position (« Ma position », sans zone), sa marche de départ ne dit pas où descendre : rien plutôt qu'un faux nom
       const l0 = legs[0];
       const same = l0.kind === 'ride' && !!re.tripId && l0.tripId === re.tripId;
-      getOff = same ? l0.to.name : l0.from.name;
-      at = same ? l0.arr : l0.dep;
+      if (same || l0.kind === 'ride' || l0.from.areaId) {
+        getOff = same ? l0.to.name : l0.from.name;
+        at = same ? l0.arr : l0.dep;
+      }
     }
     const passedName = re.passed;
     out.push({
@@ -1208,7 +1211,10 @@ function endedNow(c: Ctx, loc: Loc): boolean {
   if (c.in.kind === 'trip' && r0 >= 0 && c.fix && knownPoint(c.in.origin)) {
     const late = legs[r0].dep + GUIDE.notLeftAfterMs;
     const waiting = m.re && m.re.jid === j.id && !m.re.swap && m.re.none === undefined;
-    if (now >= late && c.fix.at >= late && distanceM(c.fix, c.in.origin) < GUIDE.notLeftM && !waiting && !m.boarded && !m.alighted) return true;
+    // parti du lancement (40 m) et à l'arrêt de montée : on attend un véhicule en retard (sans temps réel, il n'est
+    // « raté » qu'après 10 min, detect), ce n'est pas « pas parti »
+    const atStop = c.started && stillAtStop(c, r0);
+    if (now >= late && c.fix.at >= late && distanceM(c.fix, c.in.origin) < GUIDE.notLeftM && !waiting && !atStop && !m.boarded && !m.alighted) return true;
   }
   return false;
 }

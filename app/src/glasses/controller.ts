@@ -899,6 +899,9 @@ export class GlassesController implements GlassesApi {
         // (glasses/gestures.ts : SignalDedup, ExitDialog).
         this.paused = true;
         this.clearTimers();
+        // la page peut être suspendue (Android) : un enregistrement en attente du trajet suivi (mémoire du guidage, moment
+        // effacé) est fait tout de suite
+        if (this.saveTimer) this.saveFollowed();
         return;
       case 'foreground':
         // 1.2.10 : retour au premier plan, boîte de sortie affichée (page effacée par l'hôte) ou refusée : la page est
@@ -2353,7 +2356,9 @@ export class GlassesController implements GlassesApi {
     const now = this.d.clock.now();
     let at = now + GUIDE_WAKE_MAX_MS;
     if (st && Number.isFinite(st.wakeAt)) at = Math.min(at, st.wakeAt);
-    if (st?.moment && Number.isFinite(st.moment.until)) at = Math.min(at, st.moment.until);
+    // une fin déjà passée (« Descends » tenu par la position, véhicule en retard sans temps réel) ne compte pas : sinon
+    // le moteur serait recalculé chaque seconde jusqu'à la descente ; wakeAt suffit
+    if (st?.moment && Number.isFinite(st.moment.until) && st.moment.until > now) at = Math.min(at, st.moment.until);
     if (this.whereUntil > now) at = Math.min(at, this.whereUntil);
     this.guideTimer = setTimeout(() => void this.onGuideWake(), Math.max(100, this.d.clock.real(Math.max(GUIDE_WAKE_MIN_MS, at - now))));
   }

@@ -180,6 +180,23 @@ describe('PRD-1.2.10 § 3.7 : recalcul à wakeAt et au temps réel', () => {
     expect(h.last()).toMatchObject({ show: 'empty' });
   });
 
+  it('moment tenu au-delà de sa fin (« Descends », bus en retard sans temps réel) : recalcul à wakeAt, pas chaque seconde', async () => {
+    const h = await guided({ pos: null, coreExtra: () => ({ refresh: () => Promise.reject(new Error('relais muet')) }) });
+    await h.settle(16_000);
+    const t0 = h.clock.now();
+    // comme le vrai moteur : « Descends » tenu par la position, sa fin (arrivée + 2 min) déjà passée ; prochain réveil 30 s
+    engine.script = (input) => ({ wakeAt: input.now + 30_000, moment: moment('alight', 'alight:j-bureau:1', t0 - 4 * MIN, t0 - 30_000) });
+    // prochain recalcul (minuterie du guidage, 60 s au plus) : le moment est à l'écran
+    await h.settle(61_000);
+    expect(h.last()).toMatchObject({ show: 'moment' });
+    const n = engine.calls.length;
+    const t1 = engine.last().input.now;
+    await h.settle(t1 + 10_000 - h.clock.now());
+    expect(engine.calls.length).toBe(n);
+    await h.settle(t1 + 31_000 - h.clock.now());
+    expect(engine.calls.length).toBe(n + 1);
+  });
+
   it('le temps réel du trajet suivi rafraîchi recalcule le moteur avec le trajet à jour', async () => {
     let delay = 0;
     const h = await guided({

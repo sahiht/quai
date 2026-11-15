@@ -424,6 +424,26 @@ describe('positions', () => {
     expect(s).toMatchObject({ ended: true, location: 'off', moment: null });
   });
 
+  it('parti attendre à l’arrêt (lancé à 250 m) : un bus sans temps réel en retard ne fait pas « pas parti » ; raté à 10 min', () => {
+    const origin = offset(P.gramme, 250, 0);
+    const r = guide(prdTrip({ bus6Rt: false }), { origin, startedAt: at('07:00') });
+    step(r, at('07:00'), fix(origin, at('07:00')));
+    expect(step(r, at('07:08'), fix(P.gramme, at('07:08'))).phase).toEqual({ kind: 'wait', leg: 1 });
+    for (const hm of ['07:15:30', '07:18', '07:21']) {
+      const s = step(r, at(hm), fix(P.gramme, at(hm)));
+      expect(s.ended, hm).toBe(false);
+      expect(s.phase, hm).toEqual({ kind: 'wait', leg: 1 });
+    }
+    // toujours à l'arrêt 10 min après l'heure (sans temps réel) : « Ton bus 6 de 07:12 est parti », nouveau trajet
+    const s = step(r, at('07:22:30'), fix(P.gramme, at('07:22:30')));
+    expect(s.ended).toBe(false);
+    expect(m(s.moment, 'replan')).toMatchObject({ reason: 'missed' });
+    // revenu au point de lancement : la règle s'applique de nouveau
+    const r2 = guide(prdTrip({ bus6Rt: false }), { origin, startedAt: at('07:00') });
+    step(r2, at('07:08'), fix(P.gramme, at('07:08')));
+    expect(step(r2, at('07:15:30'), fix(origin, at('07:15:30'))).ended).toBe(true);
+  });
+
   it('précision demandée : à bord avant la descente high, sinon medium ; au loin medium', () => {
     const r = guide(prdTrip());
     expect(step(r, at('07:14')).location).toBe('medium');
@@ -484,6 +504,21 @@ describe('arrêt dépassé', () => {
     expect(m(s.moment, 'passed')).toMatchObject({ id: 'passed:jprd:5', getOff: N('Cimetière d’Ixelles'), at: at('08:55'), arr: at('09:06') });
     expect(s.replan).toBeUndefined();
     expect(s.journeyId).toBe('jre1');
+  });
+
+  it('nouveau trajet cherché depuis la position (il commence par une marche depuis « Ma position ») : jamais « Descends à Ma position »', () => {
+    const r = guide(prdTrip());
+    ride71(r);
+    step(r, at('08:49'), fix(beyond(350), at('08:49')));
+    expect(kindOf(step(r, at('08:49:20'), fix(beyond(450), at('08:49:20'))))).toBe('passed');
+    // le cœur part de { type: 'here' } : première étape à pied depuis « Ma position » (sans zone)
+    const here = { name: N('Ma position', 'Mijn positie'), ...beyond(450) };
+    const cim = { name: N('Cimetière d’Ixelles'), ...offset(P.flagey, 300, -900), areaId: 'stib:3520' };
+    const back = rideLeg({ op: 'stib', mode: 'bus', line: '71', head: 'De Brouckère', stops: [{ p: cim, t: at('08:55') }, { p: S.flagey, t: at('09:00') }] });
+    r.j = journeyOf([walkLeg(here, cim, at('08:51'), 4), back, walkLeg(S.flagey, S.etangs, at('09:00'), 6)], 'jre2');
+    const mo = m(step(r, at('08:50'), fix(beyond(700), at('08:50'))).moment, 'passed');
+    expect(mo.getOff).toEqual({ fr: '', nl: '' });
+    expect(mo.arr).toBe(at('09:06'));
   });
 });
 

@@ -221,6 +221,22 @@ describe('PRD-1.2.10 § 3.7 : persistance et reprise', () => {
     expect(Object.keys(parseTrip(kv.tripWrites.at(-1))!.guide!.mem.shown)).toContain('turn:j-bureau:0:2');
   });
 
+  it('premier plan quitté : un enregistrement en attente est fait tout de suite (la page peut être suspendue)', async () => {
+    const kv = countingKV();
+    const h = await guided({ kv });
+    cur = moment('board', 'board:j-bureau:1', NOW, NOW + 60 * MIN);
+    await h.c.refreshCurrent();
+    await h.settle(100);
+    // effacé d'un toucher : la mémoire change, son enregistrement attend (au plus toutes les 5 s)
+    await h.gesture('tap');
+    await h.settle(100);
+    const k = kv.tripWrites.length;
+    await h.emit({ kind: 'background' });
+    await h.settle(10);
+    expect(kv.tripWrites.length).toBe(k + 1);
+    expect(parseTrip(kv.tripWrites.at(-1))!.guide!.mem.dismissed).toContain('board:j-bureau:1');
+  });
+
   it('page rechargée (téléphone verrouillé, Android) : le guidage reprend sur son écran, « Où tu en es » ; un moment effacé ne revient pas', async () => {
     const kv = createKV(memoryBackend());
     cur = moment('board', 'board:j-bureau:1', NOW, NOW + 60 * MIN);
