@@ -60,6 +60,15 @@ describe('tailles et valeurs', () => {
     }
   });
 
+  it('contrôle usager du 15/11 : la ponctuation des voies se dessine (« 10-11 » n’est pas « 1011 », « 1/2 », « 2.1 », « 3+ »)', () => {
+    const sign = (value: string) => px({ kind: 'sign', label: 'voie', value });
+    expect(same(sign('10-11'), sign('1011'))).toBe(false);
+    expect(same(sign('1/2'), sign('12'))).toBe(false);
+    expect(same(sign('2.1'), sign('21'))).toBe(false);
+    expect(same(sign('3+'), sign('3'))).toBe(false);
+    expect(lit(sign('-'))).toBeGreaterThan(0);
+  });
+
   it('taille impossible bornée, sorte ou virage inconnus : image vide (rien de trompeur)', () => {
     expect(renderImage(spec({ kind: 'turn', turn: 'left' }, 0, -3)).length).toBe(1);
     expect(renderImage(spec({ kind: 'turn', turn: 'left' }, Number.NaN, 10)).length).toBe(10);
