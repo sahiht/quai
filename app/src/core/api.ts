@@ -601,5 +601,7 @@ export interface DisplayTestState {
   result?: 'visible' | 'headUp' | 'dashboard';
   /** le mouvement « lever la tête » a été appris */
   learned?: boolean;
+  /** closed : Quai n'est pas ouvert sur les lunettes (ou elles ne sont pas connectées) ; le test ne démarre pas */
+  error?: 'closed';
 }
 

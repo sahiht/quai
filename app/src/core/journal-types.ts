@@ -4,7 +4,38 @@
  * et de gares publics, des nombres (précision, minutes). Gardé sur le téléphone seulement.
  */
 
-/** Une ligne du journal : heure (epoch ms), sorte, détails courts. */
+/**
+ * Sortes d'événements écrites par le contrôleur (C1) et mises en texte par le journal (H). `d` : détails courts, jamais
+ * de coordonnées ni d'adresse.
+ * - start { title, kind } : début du guidage ; battery { level } : batterie des lunettes au départ ou en route
+ * - moment { m, id } : moment affiché (m : leave, turn, board, platform, alight, replan, passed, offMap, check,
+ *   nextStop, arrived) ; clear { m } : effacé d'un toucher ; remind { m, n } : rappel n° n renvoyé ; seen { m } : vu
+ *   (mouvement de la tête)
+ * - boarded { line? } ; alighted { stop? } ; replan { reason } ; passed { stop? } ; arrived
+ * - positions { n, acc, gap } : résumé toutes les 5 min (nombre, précision médiane en m, plus long trou en s)
+ * - fg { on } : Quai au premier plan des lunettes ou non ; glasses { connected } : lunettes connectées ou non
+ * - check { issues } : problèmes signalés (texte de checkLines, séparés par « ; »)
+ * - end { end } : fin (done, stopped, ended, replaced)
+ */
+export type JournalKind =
+  | 'start'
+  | 'battery'
+  | 'moment'
+  | 'clear'
+  | 'remind'
+  | 'seen'
+  | 'boarded'
+  | 'alighted'
+  | 'replan'
+  | 'passed'
+  | 'arrived'
+  | 'positions'
+  | 'fg'
+  | 'glasses'
+  | 'check'
+  | 'end';
+
+/** Une ligne du journal : heure (epoch ms), sorte (JournalKind, ou une autre sorte courte), détails courts. */
 export interface JournalEvent {
   t: number;
   /**

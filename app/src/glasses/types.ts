@@ -173,7 +173,7 @@ export type Route =
   /** 1.2.10 : menu de l'appui long (Quai Web), mêmes choix que le menu système des lunettes. */
   | { screen: 'menu'; items: MenuItem[] }
   /** 1.3.0 (PRD-1.3.0 § 6.1) : test de l'écran : l'étape montrée sur les lunettes */
-  | { screen: 'displayTest'; step: 'wait' | 'sent' | 'ask' | 'done' }
+  | { screen: 'displayTest'; step: 'wait' | 'sent' | 'ask' | 'done'; result?: 'visible' | 'headUp' | 'dashboard' }
   | { screen: 'message'; kind: MessageKind; title: string; lines: string[] };
 
 /** 1.2.10 : un choix du menu de l'appui long (32 octets UTF-8 au plus, 10 choix au plus, SDK 0.0.14+). */

@@ -235,6 +235,11 @@ export interface GuideState {
   /** chemin à pied à calculer (marche en cours ou prochaine), si le contrôleur ne l'a pas encore */
   needRoute?: { leg: number; from: LatLon; to: LatLon };
   location: LocationNeed;
+  /**
+   * 1.3.0 (PRD-1.3.0 § 6.3) : problèmes vrais en ce moment (batterie basse, pas de position, position perdue), même
+   * après la fin du moment `check` ; la carte « En cours » du téléphone les montre (GuideStatus.check, checkLines).
+   */
+  issues?: CheckIssue[];
   /** prochain instant où recalculer sans nouvelle position (epoch ms) */
   wakeAt: number;
   ended: boolean;

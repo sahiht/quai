@@ -138,6 +138,16 @@ export function messageView(
   return v;
 }
 
+/**
+ * 1.3.0 (PRD-1.3.0 § 6.1) : écran des lunettes pendant le test de l'écran (route `displayTest`). Contrat : l'équipe des
+ * écrans écrit les textes définitifs, le contrôleur l'affiche (page entière à l'étape `sent`).
+ */
+export function displayTestView(ctx: ViewCtx, step: 'wait' | 'sent' | 'ask' | 'done', result?: 'visible' | 'headUp' | 'dashboard'): GlassesView {
+  const lines =
+    step === 'wait' ? ['Ne touche à rien.'] : step === 'sent' ? ['Touche une fois les lunettes.'] : step === 'ask' ? ['Réponds sur le téléphone.'] : [result ? 'Test terminé.' : 'Test arrêté.'];
+  return messageView('Test de l’écran', lines, ctx, { screen: 'displayTest' });
+}
+
 export function loadingView(title: string, text: string, ctx: ViewCtx, screen?: GlassesView['screen']): GlassesView {
   return messageView(title, [text], ctx, { hints: HINTS.message, screen });
 }

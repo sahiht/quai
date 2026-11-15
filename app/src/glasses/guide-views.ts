@@ -11,7 +11,7 @@
  * jamais l'action.
  */
 import type { Journey, Leg, Names } from '../core/api';
-import type { GuideState, Moment, Then, VehicleRef, WhereAmI } from '../core/guide-types';
+import type { CheckIssue, GuideState, Moment, Then, VehicleRef, WhereAmI } from '../core/guide-types';
 import { displayName, hhmm } from '../core/util';
 import { textWidth, truncate } from './font';
 import {
@@ -498,4 +498,18 @@ export function menuView(items: MenuItem[], ctx: ViewCtx): GlassesView {
     hints: ctx.settings.display.gestureHints ? HINTS.menu : '',
     log: { menu: items.map((m) => m.id) },
   };
+}
+
+/**
+ * 1.3.0 (PRD-1.3.0 § 6.3) : une ligne par problème de la vérification, deux au plus, pour l'écran du moment `check` et
+ * la carte « En cours » du téléphone (GuideStatus.check). Les lignes pâles d'explication restent propres à l'écran.
+ */
+export function checkLines(issues: readonly CheckIssue[]): string[] {
+  const out: string[] = [];
+  for (const i of issues) {
+    if (i.kind === 'battery') out.push(`Lunettes\u00a0: ${Math.round(i.level)}\u00a0% de batterie`);
+    else if (i.kind === 'noPosition') out.push('Pas de position\u00a0: guidage à l’heure');
+    else out.push(`Position perdue depuis ${Math.max(1, Math.round(i.minutes))}\u00a0min`);
+  }
+  return out.slice(0, 2);
 }
