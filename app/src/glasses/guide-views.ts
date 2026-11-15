@@ -81,6 +81,16 @@ const nameOf = (n: Names | undefined, ctx: ViewCtx): string => (n ? displayName(
 const timeOf = (ms: number, rt: boolean, ctx: ViewCtx): string => `${plannedMark(rt, mp(ctx))}${hhmm(ms)}`;
 const vehicle = (v: VehicleRef): string => rideWords(v);
 
+/**
+ * « descente dans 4 arrêts », « descente au prochain arrêt » ; nombre inconnu (0, moteur) : « descente à Liège-Guillemins »
+ * (jamais « descente dans 0 arrêts »).
+ */
+function alightPhrase(stopsToAlight: number, alight: Names | undefined, ctx: ViewCtx): string {
+  if (stopsToAlight > 0) return alightWords(stopsToAlight);
+  const name = nameOf(alight, ctx);
+  return name ? `descente à ${name}` : '';
+}
+
 /** Le véhicule qui suit une marche (pour « vers l’arrêt du bus 6 », « vers la voie 3 »), d'après le trajet. */
 function nextRide(j: Journey, leg: number): Leg | undefined {
   return j.legs.slice(Math.max(0, leg)).find((l) => l.kind === 'ride');
@@ -138,12 +148,17 @@ function turnMoment(m: Extract<Moment, { kind: 'turn' }>, j: Journey, title: str
 function boardMoment(m: Extract<Moment, { kind: 'board' }>, ctx: ViewCtx): MomentView {
   const train = isTrainRef(m.vehicle);
   const when = train ? `${vehicle(m.vehicle)} à ${timeOf(m.depAt, m.rt, ctx)}` : boardWait(m.depAt, m.rt, ctx.now, mp(ctx));
-  const lines: GLine[] = [MAIN(m.platformChanged ? `${when}, ${GUIDE_TEXT.platformBoard}` : when)];
+  // la voie ne concerne que les trains
+  const lines: GLine[] = [MAIN(train && m.platformChanged ? `${when}, ${GUIDE_TEXT.platformBoard}` : when)];
   const head = headText(m.head, ctx.settings.lang, m.vehicle.op);
   if (head) lines.push(L('pale', `vers ${head}`));
   // correspondance en gare : la marche jusqu'au quai et la marge passent avant le nombre d'arrêts (trois lignes au plus)
+  // (la marge peut être négative : « très juste », jamais « marge -2 min »)
   if (m.walkMin !== undefined) lines.push(L('pale', `${minText(m.walkMin)} à pied jusqu’au quai${m.marginMin !== undefined ? `, ${marginText(m.marginMin)}` : ''}`));
-  else lines.push(L('pale', alightWords(m.stopsToAlight)));
+  else {
+    const d = alightPhrase(m.stopsToAlight, m.alight, ctx);
+    if (d) lines.push(m.stopsToAlight > 0 ? L('pale', d) : L('pale', 'descente à', nameOf(m.alight, ctx)));
+  }
   return { lines, image: vehicleSign(m.vehicle, train ? m.platform : undefined), hints: HINTS.guide };
 }
 
@@ -158,7 +173,9 @@ function platformMoment(m: Extract<Moment, { kind: 'platform' }>, ctx: ViewCtx):
 
 function nextStopMoment(m: Extract<Moment, { kind: 'nextStop' }>, ctx: ViewCtx): MomentView {
   // un nom trop long passe à la ligne après « Prochain arrêt : » (jamais coupé)
-  return { lines: [L('hi', `Prochain arrêt${NB}:`, nameOf(m.stop, ctx)), L('pale', `${alightWords(m.stopsToAlight)}, à`, nameOf(m.alight, ctx))], hints: HINTS.guide };
+  const alight = nameOf(m.alight, ctx);
+  const second = m.stopsToAlight > 0 ? L('pale', `${alightWords(m.stopsToAlight)}, à`, alight) : L('pale', 'descente à', alight);
+  return { lines: alight ? [L('hi', `Prochain arrêt${NB}:`, nameOf(m.stop, ctx)), second] : [L('hi', `Prochain arrêt${NB}:`, nameOf(m.stop, ctx))], hints: HINTS.guide };
 }
 
 /** « ensuite : voie 3, IC à 07:30 », « ensuite : bus 71 à 08:34 », « ensuite : 5 min à pied ». */
@@ -193,7 +210,10 @@ function replanMoment(m: Extract<Moment, { kind: 'replan' }>, ride: boolean, ctx
 }
 
 function passedMoment(m: Extract<Moment, { kind: 'passed' }>, ride: boolean, ctx: ViewCtx): MomentView {
-  const lines: GLine[] = [L('hi', 'Tu as passé', nameOf(m.passed, ctx)), L('norm', 'Descends à', `${nameOf(m.getOff, ctx)}, ${hhmm(m.at)}`)];
+  // arrêt où descendre inconnu (moteur : `getOff` vide) : pas de « Descends à … »
+  const getOff = nameOf(m.getOff, ctx);
+  const lines: GLine[] = [L('hi', 'Tu as passé', nameOf(m.passed, ctx))];
+  if (getOff) lines.push(L('norm', 'Descends à', `${getOff}, ${hhmm(m.at)}`));
   if (!ride && m.arr !== undefined) lines.push(L('pale', `nouveau trajet${NB}: arrivée ${hhmm(m.arr)}`));
   return { lines, hints: HINTS.guide };
 }
@@ -345,8 +365,9 @@ function whereLines(w: WhereAmI, s: GuideState, j: Journey, ctx: ViewCtx, maxPx:
   const ride = phase === 'ride' || (!w.walk && !w.wait) ? w.ride : undefined;
   if (ride) {
     // « ●─◎─○─○   descente dans 3 arrêts » : la progression (1.2.5, progressLine) normale, la phrase pâle
+    // nombre d'arrêts inconnu (0) : pas de progression ni de « descente dans 0 arrêts » (la ligne « descente : … » dit où)
     const prog = progressLine(Math.max(2, ride.total), Math.min(Math.max(0, ride.next), Math.max(2, ride.total) - 1));
-    const head = composeRow([{ t: prog, lv: 'norm' }, { t: alightWords(ride.stopsToAlight), lv: 'pale', gap: 15 }]);
+    const head = ride.stopsToAlight > 0 && ride.total >= 2 ? composeRow([{ t: prog, lv: 'norm' }, { t: alightWords(ride.stopsToAlight), lv: 'pale', gap: 15 }]) : undefined;
     const out: GLine[] = [];
     out.push(L('hi', fitName(`Prochain arrêt${NB}: `, nameOf(ride.nextStop, ctx), `, ${timeOf(ride.nextAt, ride.rt, ctx)}`, maxPx)));
     out.push(L('pale', fitName(`descente${NB}: `, nameOf(ride.alight, ctx), `, ${timeOf(ride.alightAt, ride.rt, ctx)}`, maxPx)));
@@ -360,6 +381,7 @@ function whereLines(w: WhereAmI, s: GuideState, j: Journey, ctx: ViewCtx, maxPx:
     const when = train ? `${vehicle(wait.vehicle)} à ${timeOf(wait.depAt, wait.rt, ctx)}` : `${vehicle(wait.vehicle)} ${boardWait(wait.depAt, wait.rt, ctx.now, mp(ctx))}`;
     const head = headText(wait.head, ctx.settings.lang, wait.vehicle.op);
     out.push(L('norm', head ? fitName(`${when}, vers `, head, '', maxPx) : when));
+    // la voie ne concerne que les trains
     if (train && wait.platform) out.push(L('norm', `voie ${wait.platform}${wait.platformChanged ? `${NB}!` : ''}`));
     out.push(arr);
     return { lines: out };
