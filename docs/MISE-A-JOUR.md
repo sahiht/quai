@@ -143,12 +143,15 @@ Sur le téléphone, ouvre Quai : l'accueil montre « Dans tes lunettes » et, en
 |---|---|
 | Even Hub refuse le fichier | Ce numéro de version est déjà déposé. Vérifie que tu as bien pris le paquet de la dernière release. |
 | « test version expired » sur le téléphone | La version n'est pas en « Beta », ou ton invitation n'est plus « Active » dans « Testing group ». |
-| Les lunettes montrent encore l'ancienne version | Quitte Quai (double toucher à l'accueil), puis rouvre-le. Sur le téléphone, vérifie dans « Beta tester » que la version 1.2.9 est installée. |
+| Les lunettes montrent encore l'ancienne version | Quitte Quai (double toucher à l'accueil), puis rouvre-le. Sur le téléphone, vérifie dans « Beta tester » que la version 1.2.10 est installée. |
 | Un trajet propose plus de marche que ton réglage | Aucun trajet qui marche moins n'arrive assez tôt : au-delà de ta marche maximale, chaque minute à pied compte triple. Au bout des étapes, ▼ ouvre les autres trajets. Tu peux changer « Marche maximale » dans « Réglages », sur le téléphone. |
 | « Gares de train », « Arrêts » ou « Lignes » disent « à choisir » | Ajoute tes gares, tes arrêts et tes lignes sur le téléphone, dans Quai : touche la rubrique du même nom sous « Dans tes lunettes ». |
 | Une ligne dit « introuvable » | Elle n'est plus dans les horaires du jour (ligne renumérotée ou supprimée) : retire-la et ajoute la nouvelle sur le téléphone, rubrique « Lignes de bus, tram, métro ». |
 | Pas de ● sur le trajet d'un train | Le temps réel de ce train manque (ses heures ont un « ~ ») : le ● ne s'affiche que d'après le temps réel, jamais deviné. |
 | Une ligne sans couleur sur le téléphone | Son réseau ne publie pas de couleur pour elle : sa pastille reste neutre, rien d'autre ne change. |
+| Le guidage ne montre rien | C'est voulu : l'écran reste vide tant qu'il n'y a rien à faire. Touche une fois pour voir où tu en es. S'il ne se passe rien du tout, vérifie dans « Réglages », puis « Affichage », que « Me guider pendant un trajet » est allumé. |
+| Le guidage s'arrête quand le téléphone est verrouillé | La position de l'appli Even n'est pas sur « Toujours » (voir plus haut, « Pour que le guidage marche bien »). |
+| Pas de virages à pied | Pas de vrai chemin pour cette marche (hors de Belgique, ou les chemins à pied de la semaine pas encore prêts) : Quai montre le temps restant et la direction de l'arrêt. Sur le téléphone, « Réglages », puis « Données » : la carte « Chemins à pied » dit la date des données OpenStreetMap. |
 | Jamais de « pluie » sur les marches | Il ne pleut pas assez (0,3 mm sur un quart d'heure, probabilité de 60 % ou plus), ou la marche dure moins de 5 minutes. Sur le téléphone, « Réglages » puis « Données » : la carte « Météo » doit dire « Disponible » ; « Coupée dans Affichage » : rallume « Pluie pendant la marche ». |
 | « Adresses indisponibles pour l'instant » | Le service d'adresses ne répond pas. Les gares et les arrêts restent utilisables ; réessaie plus tard. |
 | La première recherche de trajet est lente | Normal : Quai télécharge une fois les lignes utiles (environ 0,5 à 1 Mo), puis les garde sur le téléphone. |
