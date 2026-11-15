@@ -134,9 +134,15 @@ export interface GuideInput {
   missed?: { arr: number; laterMin: number };
   /**
    * Facultatif : arrêts du véhicule en cours après la descente (DepartureStops du départ), pour « Descends à … »
-   * quand l'arrêt est dépassé (genre `ride` surtout). Sans eux : l'arrêt où commence le nouveau trajet.
+   * quand l'arrêt est dépassé, et (genre trip) pour chercher le nouveau trajet depuis cet arrêt, à son heure. Sans eux :
+   * l'arrêt où commence le nouveau trajet.
    */
   beyond?: Stopover[];
+  /**
+   * Genre trip : arrêts suivants du véhicule, par rang d'étape en véhicule (lus au début de chaque étape à bord) ; donnés,
+   * ils remplacent `beyond` (genre ride : la seule étape).
+   */
+  beyondByLeg?: Record<number, Stopover[]>;
 }
 
 /* ------------------------------ Mémoire ------------------------------ */
@@ -159,6 +165,9 @@ interface Pending {
   oldArr: number;
   /** arrêt dépassé, et le voyage du véhicule (« Descends à » : il continue dans le nouveau trajet) */
   passed?: Names;
+  /** arrêt dépassé : l'arrêt suivant du véhicule, où descendre, et son heure (arrêts suivants connus) */
+  getOff?: Names;
+  getOffAt?: number;
   tripId?: string;
   /** genre ride, arrêt dépassé : aucun recalcul demandé */
   local?: boolean;
@@ -397,6 +406,12 @@ function prevRide(legs: Leg[], k: number): number {
 function nextRide(legs: Leg[], from: number): number {
   for (let i = Math.max(0, from); i < legs.length; i++) if (legs[i].kind === 'ride') return i;
   return -1;
+}
+
+/** Arrêts du véhicule de l'étape `k` après sa descente (GuideInput.beyondByLeg, sinon beyond), s'ils sont connus. */
+function beyondOf(c: Ctx, k: number): Stopover[] {
+  if (c.in.beyondByLeg) return c.in.beyondByLeg[k] ?? [];
+  return c.in.beyond ?? [];
 }
 
 /** Une position récente (depuis `since`) à l'arrêt de montée de l'étape (60 m), ou rien si l'arrêt n'a pas de position. */
@@ -671,8 +686,20 @@ function detect(c: Ctx, loc: Loc): void {
     const k = passedAt(c, loc);
     if (k >= 0) {
       found = pending(c, loc, 'passed', k);
-      found.from = { lat: c.fix!.lat, lon: c.fix!.lon };
-      found.at = now;
+      // l'arrêt suivant du véhicule (arrêts suivants connus) : où descendre, et d'où chercher le nouveau trajet, à son
+      // heure ; sans lui, depuis la position (jamais mieux que l'arrêt : elle est dans le véhicule)
+      const nx = beyondOf(c, k).find((s) => s.est >= now - 30 * SEC);
+      if (nx) {
+        found.getOff = nx.name;
+        found.getOffAt = nx.est;
+      }
+      if (nx && knownPoint(nx)) {
+        found.from = { lat: nx.lat, lon: nx.lon, ...(nx.areaId ? { areaId: nx.areaId } : {}), name: nx.name };
+        found.at = Math.max(now, nx.est);
+      } else {
+        found.from = { lat: c.fix!.lat, lon: c.fix!.lon };
+        found.at = now;
+      }
       found.passed = legs[k].to.name;
       if (legs[k].tripId) found.tripId = legs[k].tripId;
       if (kind === 'ride') found.local = true;
@@ -814,8 +841,12 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
     const until = since0 + GUIDE.passedMs;
     let getOff: Names = { fr: '', nl: '' };
     let at = 0;
-    const next = (c.in.beyond ?? []).find((s) => s.est >= now - 30 * SEC);
-    if (next) {
+    const next = re.swap ? undefined : beyondOf(c, re.leg).find((s) => s.est >= now - 30 * SEC);
+    if (re.getOff) {
+      // l'arrêt suivant noté à la détection (arrêts suivants du véhicule) : le même, avant et après le nouveau trajet
+      getOff = re.getOff;
+      at = re.getOffAt ?? 0;
+    } else if (next) {
       getOff = next.name;
       at = next.est;
     } else if (re.swap?.jid === jid && legs[0]) {
