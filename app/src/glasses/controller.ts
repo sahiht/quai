@@ -628,6 +628,7 @@ export class GlassesController implements GlassesApi {
       const h = setTimeout(fn, Math.max(100, this.d.clock.real(ms)));
       return () => clearTimeout(h);
     },
+    now: () => performanceNow(),
     display: () => this.settings().display,
     imu: (on, pace) => (this.d.platform.glasses.imu ? this.d.platform.glasses.imu(on, pace) : null),
     resend: (m, n) => this.remindResend(m, n),

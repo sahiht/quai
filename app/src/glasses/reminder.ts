@@ -121,6 +121,8 @@ export type ReminderNote = { k: 'remind'; m: ShownMoment; n: number } | { k: 'se
 export interface ReminderDeps {
   /** Minuterie (délai en ms de l'horloge du guidage) ; renvoie l'annulation. */
   later(fn: () => void, ms: number): () => void;
+  /** Temps réel (ms) pour une mesure du capteur qui n'a pas d'instant lisible. */
+  now?(): number;
   /** Réglages lus à chaque nouveau message : résultat du test de l'écran, mouvement appris. */
   display(): Pick<Settings['display'], 'alert' | 'headUp'>;
   /**
@@ -213,7 +215,8 @@ export class MomentReminder {
   sample(s: ImuSample): void {
     const w = this.wait;
     if (!w || w.suspended || !w.watch || !this.imuOn) return;
-    if (!w.watch.feed(s)) return;
+    const at = Number.isFinite(s.at) ? s.at : this.deps.now?.();
+    if (at === undefined || !w.watch.feed(at === s.at ? s : { ...s, at })) return;
     this.deps.note?.({ k: 'seen', m: w.m });
     this.finish();
   }
@@ -229,8 +232,9 @@ export class MomentReminder {
     const w = this.wait;
     if (!w || w.suspended) return;
     w.cancel = null;
-    // 45 s après le dernier rappel : l'attente est finie (le capteur se ferme)
-    if (w.n >= REMIND.max) {
+    // 45 s après le dernier rappel : l'attente est finie ; test de l'écran refait entre-temps (headUp, dashboard) : plus
+    // de rappel
+    if (w.n >= REMIND.max || !remindPlan(this.deps.display()).remind) {
       this.finish();
       return;
     }
