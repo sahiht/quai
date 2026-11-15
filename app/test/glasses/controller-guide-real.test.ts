@@ -112,6 +112,11 @@ describe('vrai moteur : horloge simulée du mode test (window.__quaiClock.set)',
       target.dispatchEvent(new CustomEvent(CLOCK_EVENT, { detail: { now: at('07:05:05') } }));
       await h.settle(50);
       expect(shown(h)).toBe('leave');
+      // le flux de position n'est pas relancé par le saut (une seule demande, celle du lancement ou aucune)
+      const watches = h.watches.length;
+      target.dispatchEvent(new CustomEvent(CLOCK_EVENT, { detail: { now: at('07:05:10') } }));
+      await h.settle(50);
+      expect(h.watches.length).toBe(watches);
       h.c.stop();
       target.dispatchEvent(new CustomEvent(CLOCK_EVENT, { detail: { now: at('07:06') } }));
     } finally {

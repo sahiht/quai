@@ -863,8 +863,9 @@ export class GlassesController implements GlassesApi {
     if (!this.d.e2e || typeof w.addEventListener !== 'function') return;
     const on = (): void => {
       if (this.stopped || !this.ready || this.paused) return;
-      this.startTimers();
-      if (this.trip?.guide) this.stepGuide();
+      // le flux de position n'est pas touché ici : un flux relancé redonnerait la dernière position simulée, d'avant le
+      // saut, comme si elle était de maintenant (les positions de la nouvelle heure arrivent juste après)
+      if (this.trip?.guide) this.stepGuide({ keepWatch: true });
       else void this.render();
     };
     w.addEventListener(CLOCK_EVENT, on);
@@ -2337,7 +2338,7 @@ export class GlassesController implements GlassesApi {
    * positions continues selon le besoin du moteur, chemin à pied et nouveau trajet demandés, prochain recalcul, carte
    * « En cours » du téléphone, écran du guidage s'il est affiché (`render` faux : pas de rendu).
    */
-  private stepGuide(o: { render?: boolean } = {}): GuideState | null {
+  private stepGuide(o: { render?: boolean; keepWatch?: boolean } = {}): GuideState | null {
     const t = this.trip;
     const g = t?.guide;
     if (!t || !g || this.stopped) return null;
@@ -2366,7 +2367,7 @@ export class GlassesController implements GlassesApi {
       this.endGuide('ended');
       return null;
     }
-    this.applyLocation(st.location);
+    if (!o.keepWatch) this.applyLocation(st.location);
     if (st.needRoute) this.askRoute(st.needRoute);
     this.maybeReplan(st);
     this.scheduleGuideWake(st);
