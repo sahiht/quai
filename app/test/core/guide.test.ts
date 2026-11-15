@@ -658,6 +658,17 @@ describe('temps réel : retards, correspondance, suppression, voie', () => {
     expect(step(r, at('07:23:30')).moment).toBeNull();
   });
 
+  it('quai d’un bus : jamais de « voie » ni de « Voie modifiée »', () => {
+    const b6 = { ...BUS6(), platform: 'A', newPlatform: 'B' };
+    const j = prdTrip();
+    const r = guide(journeyOf([j.legs[0], b6, ...j.legs.slice(2)], 'jquai', at('07:05')));
+    expect(step(r, at('07:06')).moment?.kind).toBe('leave');
+    const b = m(step(r, at('07:10')).moment, 'board');
+    expect(b.platform).toBeUndefined();
+    expect(b.platformChanged).toBeUndefined();
+    expect(b.id).toBe('board:jquai:1:B');
+  });
+
   it('un seul moment à la fois : « recalcul » passe devant « Monter »', () => {
     const r = guide(prdTrip({ icCancelled: true }));
     const s = step(r, at('07:10'));

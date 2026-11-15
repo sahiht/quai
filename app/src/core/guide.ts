@@ -857,8 +857,9 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
       id, kind: 'board', trig, end,
       make: (since) => {
         const mo: Moment = { kind: 'board', id, since, until: l.dep + GUIDE.boardAfterMs, leg: k, vehicle: vehicleRef(l), head: l.head ?? l.to.name, depAt: l.dep, rt: !!l.rt, alight: l.to.name, stopsToAlight: stops };
-        if (plat) mo.platform = plat;
-        if (platformChanged(l)) mo.platformChanged = true;
+        // voie : trains seulement (panneau « voie » ; un quai de bus n'en est pas une)
+        if (plat && isTrain(l)) mo.platform = plat;
+        if (platformChanged(l) && isTrain(l)) mo.platformChanged = true;
         if (p >= 0) {
           const w = legs[k - 1].kind === 'walk' && k - 1 > p ? legs[k - 1] : undefined;
           const walkMin = w && now < w.arr ? walkMinOf(w) : undefined;
@@ -870,7 +871,7 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
     };
     out.push(board);
     const boardLive = !board.end && (board.trig || shown(id));
-    if (k === toBoard && platformChanged(l) && !boardLive && !m.dismissed.includes(id) && !boardedOn(m, k) && now < l.dep) {
+    if (k === toBoard && isTrain(l) && platformChanged(l) && !boardLive && !m.dismissed.includes(id) && !boardedOn(m, k) && now < l.dep) {
       const pid = `platform:${jid}:${k}:${l.newPlatform}`;
       const since0 = m.shown[pid] ?? now;
       out.push({
