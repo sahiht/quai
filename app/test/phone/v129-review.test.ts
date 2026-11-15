@@ -36,11 +36,12 @@ describe('1.2.9 : champ d’adresse quitté', () => {
 describe('1.2.9, 1.2.10 et 1.3.0 : bannière « Nouveau » de Quai Web', () => {
   it('l’onglet Réglages, jamais « le téléphone » ; l’appli Even : le téléphone', async () => {
     const { newsState, NEWS_SINCE } = await import('../../src/phone/app');
-    // 1.3.0 seule (depuis la 1.2.10) : ses 4 lignes ; Quai Web : pas de test de l'écran, le journal dans l'onglet Réglages
+    // 1.3.0 seule (depuis la 1.2.10) : ses 4 lignes ; Quai Web : 3, ni test de l'écran ni rappel des messages (décision),
+    // le journal dans l'onglet Réglages
     const web130 = newsState('1.2.10', NEWS_SINCE, '1.3.0', true).lines;
-    expect(web130).toHaveLength(4);
-    expect(web130[3]).toMatch(/^Dans l’onglet Réglages, bouton « Réglages », puis Données : le journal/);
-    expect(web130.some((l) => /téléphone|Tester l’écran/.test(l))).toBe(false);
+    expect(web130).toHaveLength(3);
+    expect(web130[2]).toMatch(/^Dans l’onglet Réglages, bouton « Réglages », puis Données : le journal/);
+    expect(web130.some((l) => /téléphone|Tester l’écran|message important/.test(l))).toBe(false);
     const phone130 = newsState('1.2.10', NEWS_SINCE, '1.3.0').lines;
     expect(phone130).toHaveLength(4);
     expect(phone130[2]).toMatch(/« Tester l’écran des lunettes »/);
@@ -48,18 +49,18 @@ describe('1.2.9, 1.2.10 et 1.3.0 : bannière « Nouveau » de Quai Web', () => {
     // depuis la 1.2.9 : celles de la 1.2.10 suivent (sans le détail des favoris « en bas de l’écran », plus vrai), et
     // l'appui long de l'onglet Lunettes
     const web = newsState('1.2.9', NEWS_SINCE, '1.3.0', true).lines;
-    expect(web).toHaveLength(8);
-    expect(web[6]).toMatch(/^Dans l’onglet Réglages : « Y aller » sur chaque favori/);
-    expect(web[7]).toMatch(/^Dans l’onglet Lunettes, le bouton « Appui long »/);
+    expect(web).toHaveLength(7);
+    expect(web[5]).toMatch(/^Dans l’onglet Réglages : « Y aller » sur chaque favori/);
+    expect(web[6]).toMatch(/^Dans l’onglet Lunettes, le bouton « Appui long »/);
     const phone = newsState('1.2.9', NEWS_SINCE, '1.3.0').lines;
     expect(phone).toHaveLength(7);
     expect(phone[6]).toMatch(/^Sur l’accueil du téléphone : « Y aller » sur chaque favori/);
     expect(phone.some((l) => /Appui long|onglet/.test(l))).toBe(false);
     // depuis la 1.2.8 : celles de la 1.2.9 suivent, chacune dans sa variante
     const web128 = newsState('1.2.8', NEWS_SINCE, '1.3.0', true).lines;
-    expect(web128).toHaveLength(11);
+    expect(web128).toHaveLength(10);
     expect(web128.some((l) => /téléphone/.test(l))).toBe(false);
-    expect(web128[9]).toMatch(/^L’onglet Réglages reprend l’accueil des lunettes/);
+    expect(web128[8]).toMatch(/^L’onglet Réglages reprend l’accueil des lunettes/);
     expect(newsState('1.2.8', NEWS_SINCE, '1.3.0').lines[8]).toMatch(/^L’accueil du téléphone/);
   });
 });
