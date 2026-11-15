@@ -33,8 +33,8 @@ import { textWidth } from '../../src/glasses/font';
 import { WIDTHS } from '../../src/glasses/layout';
 import { APP_DIR } from './support/network';
 
-const NB = ' ';
-const nb = (s: string | null | undefined) => (s ?? '').replace(/ /g, ' ');
+const NB = '\u00A0';
+const nb = (s: string | null | undefined) => (s ?? '').replace(/\u00A0/g, ' ');
 const at = (local: string) => Date.parse(`${local}:00+01:00`);
 const sec = (local: string) => Math.floor(at(local) / 1000);
 const T0 = at('2026-11-16T07:30');
@@ -311,7 +311,7 @@ describe('rédaction : « Travaux : … » court et utile, 48 caractères, au pi
       const texts = scopeTexts([a], s);
       expect(texts.length, a.id).toBe(1);
       for (const t of texts) {
-        expect(t).not.toMatch(/[|–—]/);
+        expect(t).not.toMatch(/[|\u2013\u2014]/);
         expect(t).not.toMatch(/ :/);
         expect(t).toContain(`${NB}:`);
         expect([...t].length).toBeLessThanOrEqual(ALERT_MAX_CHARS);
@@ -358,7 +358,7 @@ describe('rédaction : « Travaux : … » court et utile, 48 caractères, au pi
 
   it('messages STIB : la phrase de l’opérateur, nettoyée, coupée à une fin de mot', () => {
     expect(stibMessageText('Travaux : arrêt Botanique non desservi')).toBe(`Travaux${NB}: arrêt Botanique non desservi`);
-    expect(stibMessageText('travaux  –  arrêt   Yser‎ déplacé')).toBe('Travaux, arrêt Yser déplacé');
+    expect(stibMessageText('travaux  \u2013  arrêt   Yser\u200E déplacé')).toBe('Travaux, arrêt Yser déplacé');
     expect(stibMessageText('Suite à des travaux, les trams 3 et 4 ne desservent pas les arrêts Rogier et Gare du Nord')).toBe('Suite à des travaux, les trams 3 et 4…');
     expect(stibMessageText('   ')).toBeNull();
   });
@@ -419,7 +419,7 @@ describe.skipIf(!realEnabled)('données réelles : tous les noms d’arrêts tie
           expect(t, `${op} ${name}`).toBeTruthy();
           expect([...t!].length, t!).toBeLessThanOrEqual(b.maxChars);
           expect(textWidth(t!), t!).toBeLessThanOrEqual(b.maxPx);
-          expect(t!).not.toMatch(/[|–—]/);
+          expect(t!).not.toMatch(/[|\u2013\u2014]/);
           expect(t!.endsWith('…'), t!).toBe(false);
           // le nom entier, ou la forme courte : jamais un morceau de nom
           if (nb(t).includes(nb(frenchText(name)))) named++;

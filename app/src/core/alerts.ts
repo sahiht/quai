@@ -81,7 +81,7 @@ export interface TextBudget {
 export const TRIP_BUDGET: TextBudget = { maxChars: ALERT_MAX_CHARS, maxPx: ALERT_MAX_PX };
 export const BOARD_BUDGET: TextBudget = { maxChars: ALERT_MAX_CHARS - BOARD_PREFIX.length, maxPx: ALERT_MAX_PX - textWidth(BOARD_PREFIX) };
 
-const NB = ' ';
+const NB = '\u00A0';
 
 /* ------------------------------ Mots et noms ------------------------------ */
 
@@ -326,10 +326,10 @@ const EFFECT_WORDS: [RegExp, string][] = [
 /** Texte sans « | », sans tiret long ni moyen, sans caractères invisibles, espaces resserrées. */
 export function clean(text: string): string {
   return String(text ?? '')
-    .replace(/[​-‏‪-‮⁦-⁩﻿­]/g, '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF\u00AD]/g, '')
     .replace(/[\r\n\t]+/g, ' ')
-    .replace(/\s+[–—―]\s+/g, ', ')
-    .replace(/[–—―]/g, '-')
+    .replace(/\s+[\u2013\u2014\u2015]\s+/g, ', ')
+    .replace(/[\u2013\u2014\u2015]/g, '-')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -337,7 +337,7 @@ export function clean(text: string): string {
 /** Typographie française : espace insécable devant « : ; ! ? », entre un nombre et son unité ; guillemets « ». */
 export function frenchText(text: string): string {
   return text
-    .replace(/[   ]*([:;!?])(?=\s|$)/g, `${NB}$1`)
+    .replace(/[ \u202F\u00A0]*([:;!?])(?=\s|$)/g, `${NB}$1`)
     .replace(/(\d) (min|h|s|m|km)\b/g, `$1${NB}$2`)
     .replace(/"([^"]+)"/g, `«${NB}$1${NB}»`)
     .replace(/«\s*/g, `«${NB}`)
@@ -365,7 +365,7 @@ export function fitWords(text: string, b: TextBudget = TRIP_BUDGET): string {
   for (let n = words.length - 1; n > 0; n--) {
     const head = words.slice(0, n);
     while (head.length > 1 && TAIL_WORDS.has(fold(head[head.length - 1]) || head[head.length - 1])) head.pop();
-    const cand = `${head.join(' ').replace(/[\s,;:. -]+$/, '')}…`;
+    const cand = `${head.join(' ').replace(/[\s,;:.\u00A0-]+$/, '')}…`;
     if (fits(cand, b)) return cand;
   }
   return '';

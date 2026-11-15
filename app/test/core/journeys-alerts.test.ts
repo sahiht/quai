@@ -13,7 +13,7 @@ import { legScope } from '../../src/core/journeys';
 import { CORE_DATA_DIR } from './support/network';
 import { makeEnv, type TestEnv } from './support/env';
 
-const nb = (s: string | undefined) => (s ?? '').replace(/ /g, ' ');
+const nb = (s: string | undefined) => (s ?? '').replace(/\u00A0/g, ' ');
 const N = (fr: string, nl = fr) => ({ fr, nl });
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
 const sec = (ms: number) => Math.floor(ms / 1000);
@@ -108,7 +108,7 @@ describe('trajet Waterloo → Bruxelles (le W) : seulement ses alertes, mises en
     expect(Number(q.get('until'))).toBeGreaterThanOrEqual(sec(env.clock.t + 50 * 60_000));
     for (const a of j.alerts) {
       expect(a.text.length).toBeLessThanOrEqual(48);
-      expect(a.text).not.toMatch(/[|–—]/);
+      expect(a.text).not.toMatch(/[|\u2013\u2014]/);
     }
   });
 
