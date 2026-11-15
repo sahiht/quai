@@ -1136,15 +1136,6 @@ export class GlassesController implements GlassesApi {
           await this.onRouteChanged();
           return;
         }
-        // 1.3.0 (PRD-1.3.0 § 1) : écran du trajet suivi pas encore guidé (bouton « Lunettes » du téléphone, trajet de la
-        // 1.2.9), réglage allumé : le toucher le guide (avant : son écran du trajet rouvert par-dessus lui-même)
-        const t = this.trip;
-        const top = current(this.nav).route;
-        if (t && !t.guide && this.guideOn() && top.screen === 'steps') {
-          this.startGuide('trip', this.journeyOf(t.journey), { key: t.key, title: t.title, journeys: t.journeys, from: t.from, to: t.to, favoriteId: t.favoriteId });
-          await this.openGuide();
-          return;
-        }
         const nav = this.resumeNav(this.nav, false);
         if (nav) {
           this.nav = nav;

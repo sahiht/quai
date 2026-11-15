@@ -545,25 +545,26 @@ describe('§ 1 : le toucher de l’écran du trajet fait ce que dit sa ligne d�
 
   it('« ▶ Y aller » (pas encore guidé) : le guidage ; « ▶ Retour au guidage » (guidé) : l’écran du guidage', async () => {
     const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { plan } });
-    await open(k);
+    expect((await open(k)).lines.map(nb)).toContain('▶ Y aller');
     await k.gesture('tap');
     expect(k.last().screen).toBe('guide');
     expect(k.c.followed?.guide?.kind).toBe('trip');
     // « Voir tout le trajet » : l'écran du trajet guidé ; toucher : retour au guidage
     k.c.onSignal({ kind: 'menu', id: MENU_IDS.allSteps });
-    await k.until((s) => s.screen === 'steps');
+    expect((await k.until((s) => s.screen === 'steps')).lines.map(nb)).toContain('▶ Retour au guidage');
     await k.gesture('tap');
     expect(k.last().screen).toBe('guide');
   });
 
-  it('trajet suivi pas encore guidé (bouton « Lunettes »), réglage allumé : le toucher le guide', async () => {
+  it('trajet suivi pas encore guidé (bouton « Lunettes »), réglage allumé : « ▶ Y aller » le guide', async () => {
     const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { plan } });
     await open(k);
     const r = current(k.c.state.nav).route as StepsRoute;
     await k.c.showTrip({ title: r.title!, from: r.from!, to: r.to!, favoriteId: 'fav-bureau', result: { journeys: r.journeys! }, index: 0 });
     await k.until((s) => s.screen === 'steps' && s.followed === true);
     expect(k.c.followed?.guide).toBeUndefined();
-    // avant : son écran du trajet rouvert par-dessus lui-même, jamais de guidage
+    // 1.2.10 : « toucher : guidage » rouvrait son écran du trajet par-dessus lui-même, sans jamais guider
+    expect(nb(k.last().lines.join('\n'))).toContain('▶ Y aller');
     await k.gesture('tap');
     expect(k.last().screen).toBe('guide');
     expect(k.c.followed?.guide?.kind).toBe('trip');
@@ -574,11 +575,11 @@ describe('§ 1 : le toucher de l’écran du trajet fait ce que dit sa ligne d�
     const off = settingsWith([PLACES.bureau], { seenVersion: '1.3.0' });
     off.display.guide = false;
     const k = await kit({ settings: off, stub: { plan } });
-    await open(k);
+    expect((await open(k)).lines.map(nb)).toContain('▶ Suivre ce trajet');
     await k.gesture('tap');
     expect(k.c.followed?.journey.id).toBe('j1');
     expect(k.last().screen).toBe('steps');
-    expect(nb(k.last().lines.join('\n'))).toContain('Trajet suivi');
+    expect(k.last().lines.map(nb)).toContain('▶ Trajet suivi');
     await k.gesture('tap');
     expect(k.last().screen).toBe('followed');
   });
