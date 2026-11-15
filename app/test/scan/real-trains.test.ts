@@ -8,7 +8,8 @@
  * Erreurs (le test échoue) : la gare de montée absente ou mal placée, des heures qui reculent, une rangée qui dépasse,
  * une rangée qui ne dit pas la gare, le curseur hors de l'écran, un ● faux ou absent avec le temps réel, une exception.
  * Mesuré et écrit dans le journal : voyages, gares par voyage, gares d'avant, voies connues, rangées coupées (« … »),
- * noms les plus longs.
+ * noms les plus longs. 1.3.0 (PRD-1.3.0 § 5) : les rangées coupées au milieu d'un mot (cuts.ts) : 0 exigé ; un premier
+ * mot seul trop long (coupé au caractère faute d'autre issue) est compté à part ; la voie n'est jamais coupée.
  *
  * Lancé seulement avec QUAI_SCAN_DATA (dossier des données de la nuit, ex. ../site/data), par le workflow « Données
  * de nuit » ; sans lui, ignoré.
@@ -26,6 +27,7 @@ import { geometry, layoutPage } from '../../src/glasses/layout';
 import type { GlassesView, PageSpec } from '../../src/glasses/types';
 import { trainRunView, type ViewCtx } from '../../src/glasses/views';
 import { overflowing, settingsWith } from '../glasses/helpers';
+import { newTally, pageCuts, tally } from './cuts';
 
 const DIR = process.env.QUAI_SCAN_DATA;
 const MIN = 60_000;
@@ -71,6 +73,9 @@ describe.skipIf(!DIR)('1.2.8 : balayage des trains (QUAI_SCAN_DATA)', () => {
     let live = 0;
     const cutEx: string[] = [];
     const longest: { name: string; w: number }[] = [];
+    // 1.3.0 (PRD-1.3.0 § 5) : rangées coupées au milieu d'un mot ; voies coupées
+    const words = newTally();
+    let platformCut = 0;
     const err = (msg: string): void => {
       if (errors.length < 40) errors.push(msg);
     };
@@ -107,7 +112,9 @@ describe.skipIf(!DIR)('1.2.8 : balayage des trains (QUAI_SCAN_DATA)', () => {
           for (const p of pagesOf(v)) {
             const bad = overflowing(p);
             if (bad.length) err(`${label} : ${bad[0]}`);
+            tally(words, pageCuts(v, p), label);
             const list = p.lines.filter((l) => /^[○●] /.test(l));
+            for (const l of list) if (/ v(oie|\.)\S*…/.test(l.replace(/ /g, ' '))) platformCut++;
             rows += list.length;
             for (const l of list) {
               if (l.includes('…')) {
@@ -153,6 +160,7 @@ describe.skipIf(!DIR)('1.2.8 : balayage des trains (QUAI_SCAN_DATA)', () => {
       `Balayage des trains (${date}, sans temps réel, 5 min avant le départ) : ${file.trips.length} voyages, ${views} trajets vus de leur première gare, d'une gare du milieu et de la dernière, ${Math.round((Date.now() - t0) / 1000)} s.`,
       `Gares par voyage : de ${Math.min(...lengths)} à ${Math.max(...lengths)} (médiane ${median(lengths)}) ; trajets avec des gares d'avant : ${withBefore} sur ${views} ; voies connues : ${pct(platforms, calls)} des arrêts.`,
       `Rangées coupées (« … ») : ${cut}/${rows} (${pct(cut, rows)}).${cutEx.length ? ` Ex. : ${cutEx.join(' | ')}` : ''}`,
+      `Rangées coupées au milieu d'un mot (1.3.0, 0 exigé) : ${words.mid} sur ${words.cut} rangées coupées ; premier mot seul trop long (coupé au caractère) : ${words.first} ; coupes introuvables : ${words.unknown} ; voies coupées : ${platformCut}.${words.samples.length ? ` Ex. : ${words.samples.join(' | ')}` : ''}`,
       `Noms les plus longs : ${longest.map((x) => `${x.name} (${x.w} px)`).join(', ')}.`,
       `Temps réel simulé (+3 min, le train entre deux gares, vu de 3 gares plus loin) : ${live} voyages, un seul ●, sur la gare où il arrive, à l'écran avec le curseur.`,
       errors.length ? `Erreurs :\n  ${errors.join('\n  ')}` : 'Aucune erreur.',
@@ -160,5 +168,9 @@ describe.skipIf(!DIR)('1.2.8 : balayage des trains (QUAI_SCAN_DATA)', () => {
     process.stdout.write(`\n${lines.join('\n')}\n`);
     if (errors.length) process.stdout.write(`::warning title=Balayage des trains::${errors.length} erreur(s) : ${errors.slice(0, 5).join(' | ')}\n`);
     expect(errors).toEqual([]);
+    // 1.3.0 (PRD-1.3.0 § 5) : aucune rangée coupée au milieu d'un mot, chaque coupe comprise, aucune voie coupée
+    expect(words.mid).toBe(0);
+    expect(words.unknown).toBe(0);
+    expect(platformCut).toBe(0);
   }, 600_000);
 });

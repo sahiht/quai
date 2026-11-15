@@ -11,7 +11,9 @@
  * sens géographique, un sens introuvable ou de moins de 2 arrêts, une rangée qui dépasse, une exception. Le reste est
  * mesuré et écrit dans le journal : rangées par ligne (lignes en morceaux), motifs dont l'ordre n'est pas respecté par
  * la liste, arrêts de variante (◇), sens sans « autre sens », longueur des lignes, rangées coupées (« … »), sens sans
- * passage à 08:00, couleurs publiées et contraste des pastilles.
+ * passage à 08:00, couleurs publiées et contraste des pastilles. 1.3.0 (PRD-1.3.0 § 5) : les rangées coupées au milieu
+ * d'un mot (cuts.ts), « Lignes » et toute la ligne : 0 exigé ; un premier mot seul trop long (coupé au caractère faute
+ * d'autre issue) est compté à part.
  *
  * Lancé seulement avec QUAI_SCAN_DATA (dossier des données de la nuit, ex. ../site/data), par le workflow « Données
  * de nuit » ; sans lui, ignoré. QUAI_SCAN_DETAIL (« stib:3, tec:W ») : ces lignes détaillées dans le bilan.
@@ -30,6 +32,7 @@ import type { GlassesView, PageSpec } from '../../src/glasses/types';
 import { followsView, lineRunView, type ViewCtx } from '../../src/glasses/views';
 import { BADGE_CONTRAST, badgeColors, contrastRatio } from '../../src/phone/badges';
 import { overflowing, rowsOf, settingsWith } from '../glasses/helpers';
+import { newTally, pageCuts, tally } from './cuts';
 
 const DIR = process.env.QUAI_SCAN_DATA;
 /** Lignes détaillées dans le bilan (« stib:3, tec:W ») : sens, terminus, arrêts, arrêts de variante, autre sens. */
@@ -196,6 +199,8 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
     let replaced = 0;
     const detail: string[] = [];
     const cutSamples: string[] = [];
+    // 1.3.0 (PRD-1.3.0 § 5) : rangées coupées au milieu d'un mot
+    const words = newTally();
     for (const m of matches) {
       const name = `${m.op} ${m.line} (${m.ends.map(fr).join(' ↔ ')})`;
       byOp.set(m.op, (byOp.get(m.op) ?? 0) + 1);
@@ -222,6 +227,7 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
         // liste « Lignes » : un sens par rangée
         const fv = followsView([{ follow: f, mode: m.mode, heads }], ctx);
         for (const p of pagesOf(fv)) {
+          tally(words, pageCuts(fv, p), `${name}, Lignes`);
           const bad = [...overflowing(p), ...wordsOverlap(p)];
           if (bad.length) errors.push(`${name}, Lignes : ${bad.join(' ; ')}`);
           for (const l of p.lines.slice(0, p.visible)) {
@@ -315,6 +321,7 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
           if (wanted) detail.push(`  vers ${fr(heads[dir])} à 08:00 : ${run.stops.filter((x) => x.next.length).length}/${run.stops.length} arrêts avec un passage à venir`);
           const v = lineRunView({ screen: 'lineRun', follow: f.id, dir }, f, run, ctx);
           for (const p of pagesOf(v)) {
+            tally(words, pageCuts(v, p), `${name}, vers ${fr(heads[dir])}`);
             const bad = [...overflowing(p), ...wordsOverlap(p)];
             if (bad.length) errors.push(`${name}, vers ${fr(heads[dir])} : ${bad.join(' ; ')}`);
             for (const l of p.lines) {
@@ -343,6 +350,7 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
       `Arrêts des motifs : ${hiddenDirs} sens sur ${dirsAll} avec un arrêt absent de la liste ; ${disorderedPats} motif(s) sur ${patsAll} hors de l'ordre de la liste, ${pct(disorderedTrips, tripsAll)} des voyages${disorderedSamples.length ? ` (${disorderedSamples.join(' | ')})` : ''}.`,
       `Arrêts de variante (◇) : ${branchDirs} sens sur ${dirsAll}, ${branchStops} arrêts sur ${shownStops} montrés (${pct(branchStops, shownStops)}).${branchSamples.length ? ` Ex. : ${branchSamples.join(' | ')}` : ''}`,
       `Rangées coupées (« … ») : Lignes ${cutF}/${rowsF} (${pct(cutF, rowsF)}), toute la ligne ${cutR}/${rowsR} (${pct(cutR, rowsR)}).${cutSamples.length ? ` Ex. : ${cutSamples.join(' | ')}` : ''}`,
+      `Rangées coupées au milieu d'un mot (1.3.0, 0 exigé) : ${words.mid} sur ${words.cut} rangées coupées ; premier mot seul trop long (coupé au caractère) : ${words.first} ; coupes introuvables : ${words.unknown}.${words.samples.length ? ` Ex. : ${words.samples.join(' | ')}` : ''}`,
       `Couleurs publiées : ${colored}/${matches.length} lignes (${pct(colored, matches.length)}) ; ${[...palette]
         .map(([op, per]) => `${op} ${per.size} pastille(s) différente(s), surtout ${[...per].sort((x, y) => y[1] - x[1]).slice(0, 4).map(([c, n]) => `${c} ×${n}`).join(', ')}`)
         .join(' ; ')}. Texte de l'opérateur remplacé (contraste sous 3:1) : ${replaced} ; contraste du numéro encore sous 3:1 : ${weak.length}${weak.length ? ` (${weak.slice(0, 8).join(', ')})` : ''}.`,
@@ -353,6 +361,9 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
     if (errors.length) process.stdout.write(`::warning title=Balayage des lignes::${errors.length} erreur(s) : ${errors.slice(0, 5).join(' | ')}\n`);
     expect(matches.length).toBeGreaterThan(0);
     expect(errors).toEqual([]);
+    // 1.3.0 (PRD-1.3.0 § 5) : aucune rangée coupée au milieu d'un mot, chaque coupe comprise
+    expect(words.mid).toBe(0);
+    expect(words.unknown).toBe(0);
   }, 1_800_000);
 });
 
