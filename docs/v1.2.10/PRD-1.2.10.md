@@ -215,12 +215,16 @@ Quai Web (canvas) et le simulateur. Si une image ne part pas (échec de `updateI
 
 - Titre : le nom du trajet (« Bureau »), l'heure à droite.
 - Ligne du haut : « Départ 07:05, dans 3 min » et, à droite, « arrivée 08:54 » (« ~ » sans temps réel). Une alerte du
-  trajet (§ 6) prend cette ligne, au plus clair.
+  trajet (§ 6) prend cette ligne, au plus clair. Arbitré le 15/11 : « Si tu le rates » de la 1.2.5 garde sa place dans
+  sa fenêtre (5 min avant de partir, jusqu'au départ du premier véhicule) : alerte, puis « Si tu le rates », puis le
+  départ et l'arrivée.
 - Une rangée par étape : l'heure au début ; véhicule au plus clair (« Bus 6 », « IC voie 3 », « Tram 3 »,
   « voie 6 ! » si modifiée) puis « → Gare des Guillemins » pâle ; à droite l'heure d'arrivée pâle, ou la marge d'une
   correspondance de 5 min ou moins (« marge 2 min », « très juste », règle 1.2.5) ; marche : « à pied 5 min » pâle
   (« , pluie » si 1.2.5). Supprimé : « SUPPRIMÉ ».
-- Aides : « △▽ étapes   toucher : y aller   double : retour » ; trajet déjà guidé : « △▽ étapes   double : retour ».
+- Aides : « △▽ étapes   toucher : y aller   double : retour » ; trajet déjà guidé (arbitré le 15/11) : « △▽ étapes
+  toucher : guidage   double : retour », toucher = retour au guidage ; trajet suivi, réglage éteint : toucher = écran
+  du trajet suivi (« toucher : ne plus suivre »).
 - Le reste (autres trajets, « Fin du trajet. ▽ … ») inchangé.
 
 ## 6. Alertes et vérifications
