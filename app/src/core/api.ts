@@ -601,7 +601,10 @@ export interface DisplayTestState {
   result?: 'visible' | 'headUp' | 'dashboard';
   /** le mouvement « lever la tête » a été appris */
   learned?: boolean;
-  /** closed : Quai n'est pas ouvert sur les lunettes (ou elles ne sont pas connectées) ; le test ne démarre pas */
-  error?: 'closed';
+  /**
+   * closed : Quai n'est pas ouvert sur les lunettes (ou elles ne sont pas connectées) ; guiding : un guidage est en
+   * cours (le test et le guidage ne vont jamais ensemble : un guidage qui démarre arrête le test). Le test ne démarre pas.
+   */
+  error?: 'closed' | 'guiding';
 }
 
