@@ -22,7 +22,7 @@ import {
   utf8Bytes,
 } from '../../src/core/journal';
 import type { JournalTrip } from '../../src/core/journal-types';
-import { GUIDE_TEXT } from '../../src/glasses/guide-views';
+import { checkLines, GUIDE_TEXT } from '../../src/glasses/guide-views';
 import { APP_VERSION } from '../../src/version';
 
 const NB = '\u00a0';
@@ -629,7 +629,7 @@ describe('texte à copier', () => {
         `08:00:00 Début du guidage «${NB}j’y descends${NB}»`,
         `08:00:01 Recalcul du trajet${NB}: ${['véhicule parti', 'véhicule supprimé', 'correspondance ratée', 'autre'][i]}`,
         '08:00:02 Batterie des lunettes',
-        `08:00:03 Positions${NB}: ${i === 0 ? 'aucune reçue' : '1 reçue'}`,
+        `08:00:03 Positions${NB}: ${i === 0 ? 'aucune reçue' : '1 reçue, précision inconnue'}`,
         '08:00:04 Descente constatée',
         '08:00:05 Vérification',
         `08:00:10 Fin du guidage${NB}: ${words[i]}`,
@@ -637,6 +637,73 @@ describe('texte à copier', () => {
     });
     const noName = j.begin({ title: '', kind: 'trip', at: T0 });
     expect(j.text(noName).split('\n')[0]).toBe(`Journal Quai ${APP_VERSION}, trajet sans nom, 15/11/2026`);
+  });
+
+  it('ce qu’écrit le contrôleur du guidage : start et end en plus de begin() et end(), boarded.mode, replan.found, positions sans précision, problèmes joints par « ; », « Vers une adresse »', async () => {
+    const m = memKV();
+    const j = await createJournal(m.kv);
+    // comme GuideTrail (glasses/reminder.ts) : checkLines joints par « ; » (insécable devant)
+    const issues = checkLines([{ kind: 'battery', level: 12 }, { kind: 'noPosition' }]).join(`${NB}; `);
+    // GuideTrail.begin : begin(), puis l'événement start
+    const id = j.begin({ title: 'Vers une adresse', kind: 'trip', at: T0 });
+    j.add(id, { t: T0, k: 'start', d: { title: 'Vers une adresse', kind: 'trip' } });
+    j.add(id, { t: at(1), k: 'battery', d: { level: 12 } });
+    j.add(id, { t: at(2), k: 'check', d: { issues } });
+    j.add(id, { t: at(130), k: 'moment', d: { m: 'leave', id: 'leave:j1a2b3' } });
+    j.add(id, { t: at(300), k: 'positions', d: { n: 0, gap: 300 } });
+    j.add(id, { t: at(600), k: 'positions', d: { n: 25, gap: 40 } });
+    j.add(id, { t: at(660), k: 'boarded', d: { line: '71', mode: 'bus' } });
+    j.add(id, { t: at(900), k: 'replan', d: { reason: 'cancelled', found: true } });
+    j.add(id, { t: at(960), k: 'boarded', d: { line: 'IC', mode: 'train' } });
+    j.add(id, { t: at(1200), k: 'replan', d: { reason: 'missed', found: false } });
+    j.add(id, { t: at(1260), k: 'boarded' });
+    j.add(id, { t: at(1500), k: 'arrived' });
+    j.add(id, { t: at(1510), k: 'positions', d: { n: 3, acc: 8, gap: 12 } });
+    // GuideTrail.end : l'événement end, puis end()
+    j.add(id, { t: at(1511), k: 'end', d: { end: 'done' } });
+    j.end(id, 'done', at(1512));
+    expect(j.text(id).split('\n')).toEqual([
+      `Journal Quai ${APP_VERSION}, trajet «${NB}Vers une adresse${NB}», 15/11/2026`,
+      '08:00:00 Début du guidage',
+      `08:00:01 Batterie des lunettes${NB}: 12${NB}%`,
+      `08:00:02 Vérification${NB}: ${issues}`,
+      '08:02:10 Partir maintenant affiché',
+      `08:05:00 Positions${NB}: aucune reçue, plus long trou 5${NB}min`,
+      `08:10:00 Positions${NB}: 25 reçues, précision inconnue, plus long trou 40${NB}s`,
+      `08:11:00 Montée constatée${NB}: bus 71`,
+      `08:15:00 Recalcul du trajet${NB}: véhicule supprimé, nouveau trajet trouvé`,
+      `08:16:00 Montée constatée${NB}: IC`,
+      `08:20:00 Recalcul du trajet${NB}: véhicule parti, pas d’autre trajet trouvé`,
+      '08:21:00 Montée constatée',
+      '08:25:00 Arrivée constatée',
+      `08:25:10 Positions${NB}: 3 reçues, précision médiane 8${NB}m, plus long trou 12${NB}s`,
+      `08:25:11 Fin du guidage${NB}: tu y es`,
+    ]);
+    expect(issues).toContain(`batterie${NB}; Pas de position`);
+    expect(j.list()[0]).toMatchObject({ title: 'Vers une adresse', end: 'done', endedAt: at(1511) });
+    expect(j.list()[0].events.filter((e) => e.k === 'start' || e.k === 'end')).toHaveLength(2);
+    await j.flush();
+    expect(JSON.parse(m.stored()!).trips[0].title).toBe('Vers une adresse');
+  });
+
+  it('le véhicule monté comme sur les lunettes : bus, tram, métro, train (sa catégorie), bus de remplacement, mode inconnu', async () => {
+    const j = await createJournal(memKV().kv);
+    const id = j.begin({ title: 'Bureau', kind: 'trip', at: T0 });
+    const cases: [Record<string, string>, string][] = [
+      [{ line: '71', mode: 'bus' }, 'bus 71'],
+      [{ line: '92', mode: 'tram' }, 'tram 92'],
+      [{ line: '2', mode: 'metro' }, 'métro 2'],
+      [{ line: 'IC', mode: 'train' }, 'IC'],
+      [{ line: 'S1', mode: 'train' }, 'S1'],
+      [{ mode: 'train' }, 'train'],
+      [{ line: 'BUS', mode: 'bus' }, 'bus'],
+      [{ mode: 'tram' }, 'tram'],
+      [{ line: 'bus 71', mode: 'bus' }, 'bus 71'],
+      [{ line: 'W' }, 'W'],
+      [{ line: '3', mode: 'bateau' }, 'bateau 3'],
+    ];
+    cases.forEach(([d], i) => j.add(id, { t: at(i + 1), k: 'boarded', d }));
+    expect(j.text(id).split('\n').slice(2)).toEqual(cases.map(([, v], i) => `08:00:${String(i + 1).padStart(2, '0')} Montée constatée${NB}: ${v}`));
   });
 
   it('typographie : insécables, jamais de tiret long ni moyen, une ligne par événement', async () => {

@@ -56,6 +56,8 @@ export const JOURNAL_MOMENT_WORDS: Readonly<Record<string, string>> = {
 
 const END_WORDS: Readonly<Record<string, string>> = { done: 'tu y es', stopped: 'arrêté', ended: 'trajet terminé', replaced: 'nouveau guidage' };
 const REPLAN_WORDS: Readonly<Record<string, string>> = { missed: 'véhicule parti', cancelled: 'véhicule supprimé', late: 'correspondance ratée', passed: 'arrêt dépassé' };
+/** Mode d'un véhicule (`boarded.mode`) dans une phrase, comme rideName du cœur (« bus W », « tram 92 », « métro 2 »). */
+const MODE_WORDS: Readonly<Record<string, string>> = { bus: 'bus', tram: 'tram', metro: 'métro' };
 
 /** Le journal de l'appli : le contrat, et l'enregistrement immédiat de ce qui attend (fermeture de la page). */
 export interface JournalStore extends TripJournal {
@@ -556,6 +558,20 @@ function momentName(m: unknown): string {
   return has(JOURNAL_MOMENT_WORDS, m) ?? (typeof m === 'string' && m ? m : 'Message');
 }
 
+/**
+ * Le véhicule monté (`boarded` : line, mode) : « bus 71 », « tram 92 », « métro 2 » ; un train : sa catégorie (« IC ») ;
+ * ligne « BUS » d'un bus de remplacement : « bus » ; mode inconnu : écrit tel quel devant la ligne.
+ */
+function vehicleText(line: string, mode: unknown): string {
+  const l = line.trim();
+  if (mode === 'train') return l || 'train';
+  const word = has(MODE_WORDS, mode) ?? (typeof mode === 'string' ? mode.trim() : '');
+  if (!word) return l;
+  const low = l.toLowerCase();
+  if (!l || low === word.toLowerCase() || low === String(mode).toLowerCase()) return word;
+  return low.startsWith(`${word.toLowerCase()} `) ? l : `${word} ${l}`;
+}
+
 /** « 40 s », « 3 min 20 s ». */
 function duration(sec: number): string {
   const s = Math.max(0, Math.round(sec));
@@ -583,13 +599,17 @@ function eventText(e: JournalEvent, trip: JournalTrip): string {
     }
     case 'seen':
       return `${momentName(d.m)} vu (tête levée)`;
-    case 'boarded':
-      return `Montée constatée${str(d.line) ? `${NB}: ${str(d.line)}` : ''}`;
+    case 'boarded': {
+      const v = vehicleText(str(d.line), d.mode);
+      return `Montée constatée${v ? `${NB}: ${v}` : ''}`;
+    }
     case 'alighted':
       return `Descente constatée${str(d.stop) ? ` à ${str(d.stop)}` : ''}`;
     case 'replan': {
       const r = str(d.reason);
-      return `Recalcul du trajet${r ? `${NB}: ${has(REPLAN_WORDS, r) ?? r}` : ''}`;
+      const found = d.found === true ? 'nouveau trajet trouvé' : d.found === false ? 'pas d’autre trajet trouvé' : '';
+      const parts = [r ? (has(REPLAN_WORDS, r) ?? r) : '', found].filter(Boolean);
+      return `Recalcul du trajet${parts.length ? `${NB}: ${parts.join(', ')}` : ''}`;
     }
     case 'passed':
       return `Arrêt dépassé${str(d.stop) ? `${NB}: ${str(d.stop)}` : ''}`;
@@ -601,6 +621,7 @@ function eventText(e: JournalEvent, trip: JournalTrip): string {
       if (n !== undefined) parts.push(n === 0 ? 'aucune reçue' : `${numText(n)} reçue${n > 1 ? 's' : ''}`);
       const acc = num(d.acc);
       if (acc !== undefined) parts.push(`précision médiane ${numText(acc)}${NB}m`);
+      else if (n !== undefined && n > 0) parts.push('précision inconnue');
       const gap = num(d.gap);
       if (gap !== undefined) parts.push(`plus long trou ${duration(gap)}`);
       return `Positions${parts.length ? `${NB}: ${parts.join(', ')}` : ''}`;
