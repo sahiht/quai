@@ -1,8 +1,9 @@
 /**
  * 1.2.10 (PRD-1.2.10 § 3.8) : calcul d'un chemin à pied sur un graphe fusionné (graph.ts), sans réseau ni attente.
  *
- * - Accroche : départ et arrivée posés sur la voie la plus proche, à 100 m au plus. Deux points de réseaux séparés
- *   (petite composante isolée) : on reprend la voie la plus proche du grand réseau.
+ * - Accroche : départ et arrivée posés sur la voie la plus proche, à 100 m au plus (une voie sous terre ou à
+ *   l'intérieur compte 25 m de plus). Deux points de réseaux séparés (petite composante isolée) : on reprend la voie la
+ *   plus proche du grand réseau.
  * - A* (heuristique : distance à vol d'oiseau), départ et arrivée au milieu d'un tronçon, sens uniques respectés.
  * - Virages seulement aux carrefours (3 voies ou plus) : direction d'arrivée et de départ mesurées sur 10 m le long du
  *   chemin ; moins de 30° : rien ; 30 à 60° : légèrement ; 60 à 135° : à gauche ou à droite ; 135 à 170° : en
@@ -12,10 +13,16 @@
  */
 import type { LatLon } from '../api';
 import type { Maneuver, TurnKind, WalkRoute } from '../guide-types';
-import { F_BWD, F_FWD, F_RING, F_STEPS, WALK_UNIT } from './format';
+import { F_BWD, F_FWD, F_RING, F_STEPS, F_UNDER, WALK_UNIT } from './format';
 import { degree, edgeName, edgePolyline, M_PER_U, STEPS_COST, unitsM, type RoutingGraph } from './graph';
 
 export const SNAP_MAX_M = 100;
+/**
+ * Accroche : une voie sous terre ou à l'intérieur (couloir du prémétro, tunnel piéton) compte 25 m de plus qu'une rue ;
+ * un arrêt posé au-dessus d'un couloir s'accroche à la rue, un quai sans rue proche à son couloir. Le calcul du
+ * chemin, lui, emprunte ces voies normalement.
+ */
+export const UNDER_SNAP_M = 25;
 /** Distance le long du chemin sur laquelle se mesure une direction, de part et d'autre d'un carrefour. */
 export const BEARING_M = 10;
 export const MERGE_M = 15;
@@ -37,6 +44,8 @@ export interface Snap {
   along: number;
   /** distance du point demandé à la voie (m) */
   dist: number;
+  /** distance comparée entre voies (sous terre : + UNDER_SNAP_M) */
+  score: number;
 }
 
 /** Voie la plus proche (toutes) et la plus proche du grand réseau, à maxM au plus. */
@@ -55,6 +64,7 @@ export function snapPoint(g: RoutingGraph, latU: number, lonU: number, maxM = SN
       if (latU < bb[4 * k] - dLat || latU > bb[4 * k + 1] + dLat || lonU < bb[4 * k + 2] - dLon || lonU > bb[4 * k + 3] + dLon) continue;
       const e = g.edgeBase[ti] + k;
       const comp = t.edgeComp[k];
+      const pen = t.edgeFlags[k] & F_UNDER ? UNDER_SNAP_M : 0;
       let ax = (t.nodeLon[t.edgeFrom[k]] - lonU) * kx;
       let ay = (t.nodeLat[t.edgeFrom[k]] - latU) * M_PER_U;
       let along = 0;
@@ -74,10 +84,11 @@ export function snapPoint(g: RoutingGraph, latU: number, lonU: number, maxM = SN
         const d = Math.sqrt(px * px + py * py);
         const segLen = Math.sqrt(l2);
         if (d <= maxM) {
-          const betterAny = !any || d < any.dist;
-          const betterGiant = comp === 0 && (!giant || d < giant.dist);
+          const score = d + pen;
+          const betterAny = !any || score < any.score;
+          const betterGiant = comp === 0 && (!giant || score < giant.score);
           if (betterAny || betterGiant) {
-            const s: Snap = { e, seg: i - start, t: u, lat: latU + py / M_PER_U, lon: lonU + px / kx, along: along + u * segLen, dist: d };
+            const s: Snap = { e, seg: i - start, t: u, lat: latU + py / M_PER_U, lon: lonU + px / kx, along: along + u * segLen, dist: d, score };
             if (betterAny) any = s;
             if (betterGiant) giant = s;
           }

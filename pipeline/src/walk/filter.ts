@@ -4,12 +4,13 @@
  * Gardées : highway = footway, pedestrian, path, steps, living_street, residential, service, unclassified,
  * tertiary(_link), secondary(_link), primary(_link), track, cycleway, corridor ; trunk(_link) seulement avec un trottoir
  * (sidewalk) ou un accès piéton explicite ; quais (railway=platform, public_transport=platform, highway=platform).
- * Exclues : motorway(_link), foot=no (ou use_sidepath : le trottoir séparé sert), access=private|no sans accès piéton
- * explicite, escalier mécanique réversible (sens inconnu).
+ * Exclues : motorway(_link), voie rapide (motorroad=yes : interdite aux piétons), foot=no (ou use_sidepath : le
+ * trottoir séparé sert), access=private|no sans accès piéton explicite, escalier mécanique réversible (sens inconnu).
  * Attributs : nom (name:fr, sinon name ; « Rue X - Straat Y » bilingue de Bruxelles : la partie française), marches,
- * sens unique à pied (oneway:foot, foot:forward/backward=no, escalier mécanique), anneau de rond-point.
+ * sens unique à pied (oneway:foot, foot:forward/backward=no, escalier mécanique), anneau de rond-point, sous terre ou
+ * à l'intérieur (tunnel, couloir, niveau ou couche négatifs : le téléphone préfère accrocher la rue au-dessus).
  */
-import { F_BWD, F_FWD, F_RING, F_STEPS } from '../../../app/src/core/walk/format.ts';
+import { F_BWD, F_FWD, F_RING, F_STEPS, F_UNDER } from '../../../app/src/core/walk/format.ts';
 import type { Tags } from './pbf.ts';
 
 const HIGHWAYS = new Set([
@@ -50,6 +51,7 @@ export function walkable(t: Tags): boolean {
   if (!kept) return false;
   const access = t.get('access');
   if (access && ACCESS_NO.has(access) && !footOk) return false;
+  if (t.get('motorroad') === 'yes' && !footOk) return false;
   if (t.get('conveying') === 'reversible') return false;
   return true;
 }
@@ -69,12 +71,27 @@ export function footOneway(t: Tags): number {
   return 0;
 }
 
-/** Attributs de chaîne (marches, sens unique, anneau). */
+const INDOOR = new Set(['yes', 'corridor', 'room', 'area']);
+/** Premier nombre d'une valeur de niveau ou de couche (« -1 », « -1;0 », « -0.5 ») ; NaN sinon. */
+const firstNumber = (v: string | undefined) => (v === undefined ? NaN : Number.parseFloat(v.split(';')[0]));
+
+/** Sous terre ou à l'intérieur : tunnel (pas un passage sous un bâtiment), couloir, couche ou niveau négatifs. */
+export function underground(t: Tags): boolean {
+  const tunnel = t.get('tunnel');
+  if (tunnel && tunnel !== 'no' && tunnel !== 'building_passage') return true;
+  if (t.get('highway') === 'corridor') return true;
+  const indoor = t.get('indoor');
+  if (indoor && INDOOR.has(indoor)) return true;
+  return firstNumber(t.get('layer')) < 0 || firstNumber(t.get('level')) < 0;
+}
+
+/** Attributs de chaîne (marches, sens unique, anneau, sous terre). */
 export function wayFlags(t: Tags): number {
   let f = footOneway(t);
   if (t.get('highway') === 'steps') f |= F_STEPS;
   const j = t.get('junction');
   if (j === 'roundabout' || j === 'circular') f |= F_RING;
+  if (underground(t)) f |= F_UNDER;
   return f;
 }
 

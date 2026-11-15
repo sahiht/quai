@@ -3,8 +3,8 @@
  * tuiles et raccord par les nœuds partagés, tuiles trop lourdes coupées en 4. Extraits OSM XML écrits à la main.
  */
 import { afterAll, describe, expect, it } from 'vitest';
-import { boxOf, decodeTile, F_BWD, F_FWD, F_RING, F_STEPS, type DecodedTile, type WalkTileFile } from '../../app/src/core/walk/format.ts';
-import { footOneway, tagsOf, walkable, wayFlags, wayName } from '../src/walk/filter.ts';
+import { boxOf, decodeTile, F_BWD, F_FWD, F_RING, F_STEPS, F_UNDER, type DecodedTile, type WalkTileFile } from '../../app/src/core/walk/format.ts';
+import { footOneway, tagsOf, underground, walkable, wayFlags, wayName } from '../src/walk/filter.ts';
 import { buildGraph } from '../src/walk/graph.ts';
 import { loadWalkData } from '../src/walk/load.ts';
 import { xmlSource } from '../src/walk/source.ts';
@@ -46,6 +46,8 @@ describe('voies gardées (PRD § 3.8)', () => {
     { highway: 'service', access: 'no', foot: 'designated' },
     { highway: 'track', access: 'agricultural' },
     { highway: 'steps', conveying: 'forward' },
+    { highway: 'footway', tunnel: 'yes', layer: '-1' },
+    { highway: 'primary', motorroad: 'yes', foot: 'yes' },
   ];
   const dropped: Record<string, string>[] = [
     { highway: 'motorway' },
@@ -58,6 +60,8 @@ describe('voies gardées (PRD § 3.8)', () => {
     { highway: 'service', access: 'private' },
     { highway: 'track', access: 'no' },
     { highway: 'steps', conveying: 'reversible' },
+    { highway: 'primary', motorroad: 'yes' },
+    { highway: 'secondary', tunnel: 'yes', motorroad: 'yes' },
     { highway: 'construction' },
     { highway: 'bridleway' },
     { highway: 'proposed' },
@@ -78,6 +82,12 @@ describe('voies gardées (PRD § 3.8)', () => {
     expect(footOneway(tagsOf({ highway: 'residential', oneway: 'yes' }))).toBe(0);
     expect(wayFlags(tagsOf({ highway: 'steps', conveying: 'forward' }))).toBe(F_STEPS | F_FWD);
     expect(wayFlags(tagsOf({ highway: 'primary', junction: 'roundabout', oneway: 'yes' }))).toBe(F_RING);
+    expect(wayFlags(tagsOf({ highway: 'steps', tunnel: 'yes' }))).toBe(F_STEPS | F_UNDER);
+  });
+
+  it('sous terre ou à l’intérieur : tunnel, couloir, niveau ou couche négatifs ; pas un passage sous un bâtiment', () => {
+    for (const t of [{ tunnel: 'yes' }, { highway: 'corridor' }, { indoor: 'yes' }, { layer: '-1' }, { level: '-1;0' }, { level: '-0.5' }]) expect(underground(tagsOf({ highway: 'footway', ...t }))).toBe(true);
+    for (const t of [{ tunnel: 'building_passage' }, { tunnel: 'no' }, { layer: '1' }, { level: '0' }, { bridge: 'yes' }, {}]) expect(underground(tagsOf({ highway: 'footway', ...t }))).toBe(false);
   });
 
   it('noms : français d’abord, moitié française d’un nom bilingue bruxellois', () => {

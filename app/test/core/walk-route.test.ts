@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Maneuver, WalkRoute } from '../../src/core/guide-types';
-import { F_FWD, F_RING, F_STEPS } from '../../src/core/walk/format';
+import { F_FWD, F_RING, F_STEPS, F_UNDER } from '../../src/core/walk/format';
 import { cleanManeuvers, turnOf } from '../../src/core/walk/route';
 import { WalkRouter } from '../../src/core/walk/router';
 import { at, memorySource, metres, tileOf, toward, type GraphDef } from './walk-helpers';
@@ -265,6 +265,33 @@ describe('départ et arrivée hors des voies', () => {
     expect(r.coords).toHaveLength(2);
     expect(r.lengthM).toBeGreaterThan(198);
     expect(r.lengthM).toBeLessThan(202);
+  });
+});
+
+describe('accroche : la rue plutôt que le couloir souterrain', () => {
+  // couloir du prémétro sous le boulevard (x = 0) ; rue parallèle à 10 m (x = 10) ; liaison par un escalier au nord
+  const P: GraphDef = {
+    nodes: { T1: [0, -300], T2: [0, 300], S1: [10, -300], S2: [10, 300], E: [10, 320] },
+    ways: [
+      { nodes: ['T1', 'T2'], name: 'Couloir de la station', flags: F_UNDER },
+      { nodes: ['S1', 'S2', 'E'], name: 'Boulevard' },
+      { nodes: ['T2', 'E'], flags: F_STEPS },
+    ],
+  };
+
+  it('arrêt posé au-dessus du couloir : accroché à la rue à 10 m (le couloir compte 25 m de plus)', async () => {
+    const r = await route(P, [0, -100], [10, 200]);
+    expect(metres(r.coords[1], at(10, -100))).toBeLessThan(1.5);
+    expect(r.lengthM).toBeGreaterThan(306);
+    expect(r.lengthM).toBeLessThan(314);
+  });
+
+  it('sans rue assez proche : le couloir (quai d’une station souterraine)', async () => {
+    const far: GraphDef = { ...P, nodes: { ...P.nodes, S1: [60, -300], S2: [60, 300], E: [60, 320] } };
+    const r = await route(far, [0, -100], [0, 250]);
+    expect(r.coords.length).toBe(2);
+    expect(r.lengthM).toBeGreaterThan(348);
+    expect(r.lengthM).toBeLessThan(352);
   });
 });
 

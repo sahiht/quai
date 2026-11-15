@@ -39,6 +39,8 @@ export const F_BWD = 4;
 export const F_RING = 8;
 /** La chaîne n'appartient pas au grand réseau connexe : son numéro de composante suit. */
 export const F_COMP = 16;
+/** Sous terre ou à l'intérieur (tunnel, couloir, niveau négatif) : accroche seulement si aucune rue n'est plus proche. */
+export const F_UNDER = 32;
 
 /** data/walk/index.json */
 export interface WalkIndex {
@@ -431,7 +433,7 @@ export function decodeTile(f: WalkTileFile): DecodedTile {
     const name = r.uint() - 1;
     if (name >= f.names.length) throw new TileFormatError('nom inconnu');
     const flags = r.uint();
-    if (flags > 31) throw new TileFormatError('attributs inconnus');
+    if (flags > 63) throw new TileFormatError('attributs inconnus');
     const comp = flags & F_COMP ? r.uint() : 0;
     const n = r.uint();
     if (n < 1) throw new TileFormatError('chaîne vide');
