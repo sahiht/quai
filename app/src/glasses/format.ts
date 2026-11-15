@@ -681,9 +681,10 @@ export interface ExpandLine {
 
 /**
  * 1.3.0 (PRD-1.3.0 § 7) : largeur d'une ligne de l'accordéon, en retrait sous la rangée du favori comme les favoris sous
- * « Favoris » sur l'accueil (WIDTHS.homeRow, retrait HOME_INDENT) : chaque ligne y tient, coupée au mot.
+ * « Favoris » sur l'accueil (retrait HOME_INDENT) : chaque ligne y tient, coupée au mot. La mesure même de la mise en
+ * page (WIDTHS.expand) : ce qui est coupé ici n'est jamais recoupé à l'écran.
  */
-export const EXPAND_PX = WIDTHS.homeRow;
+export const EXPAND_PX = WIDTHS.expand;
 
 /** Minutes de marche avant le premier véhicule (0 : le trajet commence à bord, ou à pied seulement). */
 function walkBeforeRide(j: Journey): number {

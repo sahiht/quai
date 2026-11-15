@@ -215,10 +215,11 @@ export const NEWS_LINES_130: readonly string[] = [
 ];
 
 /**
- * 1.3.0 : les mêmes sur Quai Web, où la page du téléphone est l'onglet Réglages et où le test de l'écran n'existe pas
- * (pas de lunettes, PRD-1.3.0 § 6.1) : le rappel des messages, et le journal des trajets de l'onglet Réglages (§ 6.4).
+ * 1.3.0 : les mêmes sur Quai Web, où la page du téléphone est l'onglet Réglages, où le test de l'écran n'existe pas (pas
+ * de lunettes, PRD-1.3.0 § 6.1) ni le rappel des messages (décision : aucun rappel dans Quai Web) : le journal des
+ * trajets guidés seulement, dans l'onglet Réglages, « Données » (§ 6.4).
  */
-export const NEWS_LINES_130_WEB: readonly string[] = [NEWS_LINES_130[0], NEWS_LINES_130[1], 'Messages rappelés, journal des trajets dans l’onglet Réglages.'];
+export const NEWS_LINES_130_WEB: readonly string[] = [NEWS_LINES_130[0], NEWS_LINES_130[1], `Journal de tes trajets guidés${NB}: onglet Réglages, Données.`];
 
 /**
  * 1.2.10 : lignes du message « Quai 1.2.10 » (PRD-1.2.10 § 7) ; chacune tient sur une ligne des lunettes. Aucun mot ne

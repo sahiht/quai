@@ -218,6 +218,11 @@ export const WIDTHS = {
   wideLeft: right(WIDE_W) - TIGHT - X_TEXT - GEO.SAFETY,
   /** 1.2.1 : ligne d'un favori en retrait sur l'accueil (colonne b : nom, puis réponse alignée à droite). */
   homeRow: X_END - (X_TEXT + HOME_INDENT) - GEO.SAFETY,
+  /**
+   * 1.3.0 (PRD-1.3.0 § 7) : une ligne de l'accordéon de « Favoris », en retrait de HOME_INDENT depuis la marge : la place
+   * que lui donne la mise en page (layoutPage) et celle où son texte est coupé (format.ts, EXPAND_PX), une seule mesure.
+   */
+  expand: X_END - (X_TEXT + HOME_INDENT) - GEO.SAFETY,
   /** 1.2.1 : colonne de droite de l'accueil et de « Autres trajets ». */
   wideRight: WIDE_W - GEO.SAFETY,
   /** 1.2.2 : un passage du détail d'une ligne (heure, terminus s'il diffère), à côté de l'attente. */
@@ -719,9 +724,10 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     }
     if (open && open.at === i) {
       // 1.3.0 (PRD-1.3.0 § 7) : accordéon : sous la rangée du curseur, ses lignes (1 ou 2), pâles (colonne b) et en
-      // retrait, coupées au mot ; les autres rangées restent fermées
-      const pad = ' '.repeat(Math.round(HOME_INDENT / SPACE_W));
-      const w = X_END - def.b.x - HOME_INDENT - GEO.SAFETY;
+      // retrait de HOME_INDENT depuis la marge, coupées au mot dans WIDTHS.expand, la largeur où l'équipe des écrans a
+      // déjà coupé leur texte (EXPAND_PX) : jamais coupées deux fois ; les autres rangées restent fermées
+      const pad = ' '.repeat(Math.max(0, Math.round((X_TEXT + HOME_INDENT - def.b.x) / SPACE_W)));
+      const w = Math.min(WIDTHS.expand, X_END - def.b.x - textWidth(pad) - GEO.SAFETY);
       for (const e of expandLines(it)) {
         const t = truncateWords(e.text, w);
         bOnly(t ? pad + t : '', t);

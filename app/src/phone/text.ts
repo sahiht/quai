@@ -412,13 +412,12 @@ export const NEWS_130: readonly string[] = [
 ];
 
 /**
- * 1.3.0 : les mêmes sur Quai Web : pas de test de l'écran (pas de vraies lunettes) ; la page du téléphone est l'onglet
- * Réglages.
+ * 1.3.0 : les mêmes sur Quai Web : pas de test de l'écran (pas de vraies lunettes) ni de rappel des messages (décision :
+ * aucun rappel dans Quai Web) ; la page du téléphone est l'onglet Réglages.
  */
 export const NEWS_130_WEB: readonly string[] = [
   NEWS_130[0],
   NEWS_130[1],
-  'Pendant un trajet, un message important que tu n’as pas vu revient, deux fois au plus.',
   'Dans l’onglet Réglages, bouton « Réglages », puis Données : le journal de tes 10 derniers trajets guidés, à lire et à copier.',
 ];
 

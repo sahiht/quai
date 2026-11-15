@@ -156,6 +156,8 @@ describe('PRD-1.2.10 § 5 : l’écran du trajet, plus facile à lire', () => {
       '07:56 IC voie 3 → Bruxelles-Central   marge 4 min',
       '08:48 à pied 6 min',
       'Fin du trajet. Pas d’autre trajet pour l’instant',
+      // 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action, entre la note et les aides
+      '▶ Y aller',
       '△▽ étapes   double : retour',
     ]);
     expect(v.tap).toEqual({ kind: 'goGuide' });

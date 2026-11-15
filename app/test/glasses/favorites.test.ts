@@ -129,7 +129,8 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'favorites' });
     const s = await h.until((x) => listReady(x) && x.lines.some((l) => l.startsWith('Rue Neuve 1')));
-    expect(s.lines.slice(1, 4)).toEqual(['ADRESSES RÉCENTES', 'Rue Neuve 1   tu y es', 'Autre adresse   dans Réglages']);
+    // 1.3.0 (PRD-1.3.0 § 7) : le curseur est sur « Bureau » : son accordéon ouvert dessous, puis les adresses récentes
+    expect(s.lines.slice(1, 6)).toEqual(['à pied 5 min, puis bus W 07:40', 'direct', 'ADRESSES RÉCENTES', 'Rue Neuve 1   tu y es', 'Autre adresse   dans Réglages']);
     await h.gesture('down', 'down', 'tap');
     expect(opened).toEqual(['#/recherche']);
     h.c.stop();

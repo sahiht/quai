@@ -425,6 +425,8 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
       '~08:44 Tram 3 → Bourse   très juste',
       '08:49 à pied 9 min',
       'Fin du trajet. ▽ 2 autres trajets',
+      // 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action, entre la note et les aides
+      '▶ Y aller',
       HINT_GO,
     ]);
     expect(c.followed).toBeNull();
@@ -463,7 +465,7 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     // dans 1 min) ; toutes les étapes tiennent : « Fin du trajet »
     expect(p1).toMatchObject({ page: 1, title: 'Bureau', followed: true });
     expect(p1.lines[0]).toMatch(/^Si tu le rates\s: arrivée \d\d:\d\d, /);
-    expect(p1.lines.slice(-2)).toEqual(['Fin du trajet. ▽ 2 autres trajets', HINT_GUIDED]);
+    expect(p1.lines.slice(-3)).toEqual(['Fin du trajet. ▽ 2 autres trajets', '▶ Y aller', HINT_GUIDED]);
     // ▼ au bout : « Autres trajets », jamais un autre trajet directement
     await gesture('down');
     const list = await until((s) => s.screen === 'others');
@@ -480,7 +482,8 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     expect(last()).toMatchObject({ screen: 'others', sel: 1 });
     await gesture('double');
     expect(last()).toMatchObject({ screen: 'steps', page: 1, followed: true });
-    expect(last().lines.at(-2)).toBe('Fin du trajet. ▽ 2 autres trajets');
+    // la note, au-dessus de la ligne d'action (1.3.0)
+    expect(last().lines.slice(-3, -1)).toEqual(['Fin du trajet. ▽ 2 autres trajets', '▶ Y aller']);
     expect(c.followed?.journey.legs.find((l) => l.kind === 'ride')?.schedDep).toBe(at(7, 42));
     c.stop();
   });
@@ -1023,7 +1026,7 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
     // moment « Partir maintenant » du guidage, § 3.2) ; la raison est gardée
     expect(nb(p1.lines[0])).toBe('Si tu le rates : arrivée 09:57, 1 h plus tard');
     expect(h.c.followed?.journey.reason).toBe(`Le plus court${NB}: direct, à pied 7 + 11${NB}min`);
-    expect(p1.lines.slice(-2)).toEqual(['Fin du trajet. ▽ 2 autres trajets', HINT_GUIDED]);
+    expect(p1.lines.slice(-3)).toEqual(['Fin du trajet. ▽ 2 autres trajets', '▶ Y aller', HINT_GUIDED]);
     fits(p1);
     // ▼ au bout : « Autres trajets » ; en 2e ligne, les moyens, puis le pourquoi (comparé à la proposition 1) ou les marches
     await h.gesture('down');
@@ -1044,6 +1047,8 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
       '~08:44 Tram 3 → Bourse   marge 2 min',
       '08:49 à pied 4 min',
       'Fin du trajet. ▽ autres trajets',
+      // 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action, entre la note et les aides
+      '▶ Y aller',
       HINT_GO,
     ]);
     fits(p2);
@@ -1390,7 +1395,8 @@ describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-
     expect(st.title).toBe('Bureau');
     expect(nb(d.c.followed?.journey.reason ?? '')).toBe('Le plus court : 1 changement, à pied 7 + 2 + 9 min');
     expect(d.c.followed?.journeys.map((j) => j.label)).toEqual(['short', 'next', 'later']);
-    expect(st.lines.at(-2)).toBe('Fin du trajet. ▽ 2 autres trajets');
+    // la note, au-dessus de la ligne d'action (1.3.0)
+    expect(st.lines.slice(-3, -1)).toEqual(['Fin du trajet. ▽ 2 autres trajets', '▶ Y aller']);
     expect(st.lines.join('\n')).not.toMatch(/simple|undefined/);
     d.c.stop();
   });

@@ -32,7 +32,8 @@ import { PLACES, at, lines, nb, settingsWith, setup, stubCore } from './helpers'
 
 const NOW = at('2026-11-15', 7, 31);
 const NEWS_130 = ['Trajet : ligne « ▶ Y aller », ▲ revient des autres trajets.', 'Favoris : le détail s’ouvre sous le favori choisi.', 'Test de l’écran sur le téléphone, messages rappelés.'];
-const NEWS_130_WEB = [NEWS_130[0], NEWS_130[1], 'Messages rappelés, journal des trajets dans l’onglet Réglages.'];
+/** Quai Web : ni test de l'écran ni rappel des messages (décision), le journal des trajets guidés seulement. */
+const NEWS_130_WEB = [NEWS_130[0], NEWS_130[1], 'Journal de tes trajets guidés : onglet Réglages, Données.'];
 const NEWS_1210 = ['Y aller : guidé de porte à porte, écran calme.', 'Train ou bus déjà pris : « j’y descends ».', 'Favoris : une ligne chacun, le détail en bas.'];
 const NEWS_1210_KEPT = NEWS_1210.slice(0, 2);
 const NEWS_129 = ['« imminent » : seulement d’après le temps réel.', 'Téléphone : l’accueil reprend celui des lunettes.', 'Réglages : tout derrière un seul bouton.'];
@@ -118,8 +119,9 @@ describe('PRD-1.3.0 § 9 : message « Quai 1.3.0 »', () => {
     expect(NEWS_LINES_130[0]).toBe('Trajet : ligne « ▶ Y aller », ▲ revient des autres trajets.');
     // la ligne « le détail en bas » de la 1.2.10 n'est plus jamais dite (accordéon, PRD-1.3.0 § 7)
     for (const seen of ['1.2.9', '1.2.8', '1.0.3']) for (const web of [false, true]) expect(newsLines(seen, web)).not.toContain(NEWS_LINES_1210[2]);
-    // Quai Web : le test de l'écran n'y existe pas (pas de lunettes, PRD-1.3.0 § 6.1) ; le téléphone n'y est jamais nommé
-    for (const l of newsLines('1.0.3', true)) expect(l).not.toMatch(/[Tt]éléphone|[Tt]est de l’écran/);
+    // Quai Web : le test de l'écran n'y existe pas (pas de lunettes, PRD-1.3.0 § 6.1), ni le rappel des messages
+    // (décision) ; le téléphone n'y est jamais nommé
+    for (const l of newsLines('1.0.3', true)) expect(l).not.toMatch(/[Tt]éléphone|[Tt]est de l’écran|[Rr]appel/);
     for (const l of [...NEWS_LINES_130, ...NEWS_LINES_130_WEB, ...NEWS_LINES_1210, ...NEWS_LINES_129, ...newsLines('1.2.8', true), ...NEWS_LINES_128, ...NEWS_LINES, ...NEWS_LINES_125]) {
       expect(l).not.toMatch(/ :|[–—]|vous\b/i);
       // une ligne des lunettes chacune : jamais coupée en deux
