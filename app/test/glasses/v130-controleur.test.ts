@@ -266,6 +266,16 @@ describe('§ 8 : chaque favori reçoit sa réponse, « … » seulement pendant 
 
 /** Mesure du capteur (repos : la tête droite, un peu de bruit ; `dy` : la tête levée). */
 const imu = (i: number, dy = 0) => ({ kind: 'imu' as const, x: 0.1 + (i % 2) * 0.02, y: 9.7 + ((i * 7) % 5) * 0.01 + dy, z: 0.3 - (i % 3) * 0.01, at: NOW + i * TEST_IMU_MS });
+/**
+ * Mesures de la question, une toutes les 100 ms, la dernière à `end` (l'heure de la réponse) : segments [écart sur y,
+ * nombre de mesures], par exemple la tête levée (+2,5) puis baissée vers le téléphone (-4) pour toucher le bouton.
+ */
+const moves = (end: number, segs: [number, number][]) => {
+  const n = segs.reduce((t, [, c]) => t + c, 0);
+  const out: ReturnType<typeof imu>[] = [];
+  for (const [dy, c] of segs) for (let j = 0; j < c; j++) out.push({ ...imu(out.length, dy), at: end - (n - 1 - out.length) * TEST_IMU_MS });
+  return out;
+};
 const pageText = (cs: ContainerSpec[]) => cs.map((c) => nb(c.content)).join('\n');
 /** Lignes de l'écran du test à l'étape ask, telles que les écrit l'équipe des écrans (displayTestView). */
 const askLines = (k: { clock: { now(): number }; settings: { get(): Settings } }) => lines(displayTestView({ now: k.clock.now(), settings: k.settings.get() }, 'ask'));
@@ -318,10 +328,11 @@ describe('§ 6.1 : test de l’écran des lunettes', () => {
     await k.settle(TEST_WAIT_MS + TEST_SENT_MS);
     expect(k.states.at(-1)).toEqual({ step: 'ask' });
     expect(k.last().lines).toEqual(askLines(k));
-    // la tête levée : y monte de 2,5 et reste ; x bouge un peu ; aucune mesure ne fait de rendu ni de journal
+    // la tête levée (y : +2,5), puis baissée vers le téléphone pour répondre (-4) ; aucune mesure ne fait de rendu ni de
+    // journal
     const calls = k.calls.length;
     const logs = k.logs.length;
-    for (let i = 0; i < 20; i++) k.c.onSignal({ ...imu(i, i < 5 ? 0 : 2.5), x: 0.3 });
+    for (const m of moves(k.clock.now(), [[0, 5], [2.5, 10], [0, 5], [-4, 12]])) k.c.onSignal(m);
     expect(k.calls.length).toBe(calls);
     expect(k.logs.length).toBe(logs);
     const done = await k.c.displayTest({ kind: 'answer', answer: 'quai' });
@@ -342,8 +353,8 @@ describe('§ 6.1 : test de l’écran des lunettes', () => {
     await k.settle(10);
     for (let i = 0; i < 40; i++) k.c.onSignal(imu(i));
     await k.settle(TEST_WAIT_MS + TEST_SENT_MS);
-    // un écart à peine plus grand que le bruit : pas appris
-    for (let i = 0; i < 20; i++) k.c.onSignal(imu(i, 0.02));
+    // posture à peine différente du repos : pas appris
+    for (const m of moves(k.clock.now(), [[0.02, 20]])) k.c.onSignal(m);
     expect(await k.c.displayTest({ kind: 'answer', answer: 'dashboard' })).toEqual({ step: 'done', result: 'dashboard', learned: false });
     expect(k.saved.at(-1)?.alert).toBe('dashboard');
     expect(k.saved.at(-1)?.headUp).toEqual(headUp0);
@@ -475,7 +486,7 @@ describe('§ 6.1 : le test de l’écran et le guidage ne vont jamais ensemble ;
     // l'écran du test reconstruit (page entière)
     expect(k.since(from).map((c) => c.op)).toEqual(['rebuild']);
     expect(k.last().lines).toEqual(askLines(k));
-    for (let i = 0; i < 10; i++) k.c.onSignal(imu(i, 2));
+    for (const m of moves(k.clock.now(), [[2, 10], [-4, 12]])) k.c.onSignal(m);
     const done = await k.c.displayTest({ kind: 'answer', answer: 'quai' });
     expect(done).toEqual({ step: 'done', result: 'headUp', learned: true });
     expect(k.saved.at(-1)?.headUp).toMatchObject({ axis: 'y', sign: 1 });
@@ -497,33 +508,63 @@ describe('§ 6.1 : le test de l’écran et le guidage ne vont jamais ensemble ;
   });
 });
 
-describe('§ 6.1 : headup.ts, le mouvement « lever la tête »', () => {
-  const rest = (l: HeadUpLearner, n = 30) => {
-    for (let i = 0; i < n; i++) l.rest({ x: 0.1 + (i % 2) * 0.02, y: 9.7 + ((i * 7) % 5) * 0.01, z: 0.3 - (i % 3) * 0.01 });
-  };
-  it('l’axe qui change le plus, son sens et son écart, tenu sur 3 mesures', () => {
+describe('§ 6.1 : headup.ts, le mouvement « lever la tête », sûr', () => {
+  /** Repos de l'attente : la tête droite, un peu de bruit (accéléromètre : y porte la pesanteur). */
+  const learner = (n = 30, base: (i: number) => { x: number; y: number; z: number } = (i) => imu(i)) => {
     const l = new HeadUpLearner();
-    rest(l);
-    for (let i = 0; i < 6; i++) l.move({ x: 0.11, y: 9.72, z: 0.3 - 1.2 });
-    expect(l.result()).toMatchObject({ axis: 'z', sign: -1 });
-    expect(l.result()!.delta).toBeCloseTo(1.2, 1);
+    for (let i = 0; i < n; i++) l.rest(base(i));
+    return l;
+  };
+  const END = NOW + 120_000;
+  const learn = (l: HeadUpLearner, ms: { x: number; y: number; z: number; at: number }[], end = END) => {
+    for (const m of ms) l.move(m);
+    return l.result(end);
+  };
+
+  it('cas normal : la tête levée, puis baissée vers le téléphone pour répondre : la tête levée est apprise', () => {
+    const r = learn(learner(), moves(END, [[0, 5], [2.5, 10], [0, 5], [-4, 12]]));
+    expect(r).toMatchObject({ axis: 'y', sign: 1 });
+    expect(r!.delta).toBeCloseTo(2.5, 1);
   });
-  it('un pic isolé, un écart sous trois fois le bruit, un repos trop court : rien d’appris', () => {
-    const spike = new HeadUpLearner();
-    rest(spike);
-    spike.move({ x: 0.1, y: 14, z: 0.3 });
-    spike.move({ x: 0.1, y: 9.72, z: 0.3 });
-    spike.move({ x: 0.1, y: 14, z: 0.3 });
-    expect(spike.result()).toBeNull();
-    const small = new HeadUpLearner();
-    rest(small);
-    const noise = small.noise('y');
-    for (let i = 0; i < 5; i++) small.move({ x: 0.11, y: 9.72 + 2.5 * noise, z: 0.29 });
-    expect(small.result()).toBeNull();
-    const short = new HeadUpLearner();
-    rest(short, HEADUP_REST_MIN - 1);
-    for (let i = 0; i < 5; i++) short.move({ x: 0.1, y: 12, z: 0.3 });
-    expect(short.result()).toBeNull();
+
+  it('grande tête baissée vers le téléphone, petite tête levée : c’est la tête levée qui est apprise', () => {
+    const r = learn(learner(), moves(END, [[0.8, 8], [0, 3], [-6, 12]]));
+    expect(r).toMatchObject({ axis: 'y', sign: 1 });
+    expect(r!.delta).toBeCloseTo(0.8, 1);
+  });
+
+  it('accélérations sur deux axes : l’axe où la posture téléphone change le plus, la tête levée dans l’autre sens', () => {
+    // pesanteur 9,8 : tête baissée de 40° (y 7,5 ; z +6,3), levée de 20° (y 9,2 ; z -3,4)
+    const g = (deg: number, i: number) => ({ x: 0.1 + (i % 2) * 0.02, y: 9.8 * Math.cos((deg * Math.PI) / 180) + (i % 3) * 0.01, z: -9.8 * Math.sin((deg * Math.PI) / 180) + (i % 2) * 0.01 });
+    const l = learner(30, (i) => ({ ...g(0, i), at: NOW + i * TEST_IMU_MS }));
+    const seq = [...Array.from({ length: 10 }, () => 20), ...Array.from({ length: 12 }, () => -40)];
+    const r = learn(l, seq.map((deg, i) => ({ ...g(deg, i), at: END - (seq.length - 1 - i) * TEST_IMU_MS })));
+    expect(r).toMatchObject({ axis: 'z', sign: -1 });
+    expect(r!.delta).toBeCloseTo(3.35, 1);
+  });
+
+  it('mesures sans décalage de posture (des vitesses, qui reviennent à zéro) : rien d’appris', () => {
+    const v = (i: number, w = 0) => ({ x: (i % 2) * 0.01, y: ((i * 7) % 5) * 0.004 + w, z: -(i % 3) * 0.005, at: NOW + i * TEST_IMU_MS });
+    const l = learner(30, (i) => v(i));
+    // la tête monte (+3), redescend (-3), puis reste immobile devant le téléphone (0)
+    const seq = [...Array.from({ length: 5 }, () => 3), ...Array.from({ length: 5 }, () => -3), ...Array.from({ length: 12 }, () => 0)];
+    expect(learn(l, seq.map((w, i) => ({ ...v(i, w), at: END - (seq.length - 1 - i) * TEST_IMU_MS })))).toBeNull();
+  });
+
+  it('pas de posture téléphone (réponse à hauteur des yeux), tête levée seulement dans la dernière seconde : rien d’appris', () => {
+    expect(learn(learner(), moves(END, [[2.5, 10], [0, 12]]))).toBeNull();
+    expect(learn(learner(), moves(END, [[0, 10], [3, 4], [-4, 6]]))).toBeNull();
+  });
+
+  it('un pic isolé, un écart sous trois fois le bruit, un repos trop court, trop peu de mesures à la réponse : rien d’appris', () => {
+    const spike = moves(END, [[0, 5], [3, 1], [0, 1], [3, 1], [0, 3], [-4, 12]]);
+    expect(learn(learner(), spike)).toBeNull();
+    const l = learner();
+    const tiny = 2.5 * l.noise('y');
+    expect(learn(l, moves(END, [[tiny, 10], [-4, 12]]))).toBeNull();
+    expect(learn(learner(HEADUP_REST_MIN - 1), moves(END, [[2.5, 10], [-4, 12]]))).toBeNull();
+    // la réponse arrive bien après les dernières mesures (capteur coupé) : pas de posture téléphone connue
+    expect(learn(learner(), moves(END, [[2.5, 10], [-4, 12]]), END + 2_000)).toBeNull();
   });
 });
 

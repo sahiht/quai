@@ -2315,9 +2315,10 @@ export class GlassesController implements GlassesApi {
     if (cmd.kind === 'cancel') return this.dtest ? this.endDisplayTest({ step: 'idle' }) : this.setTestState({ step: 'idle' });
     const t = this.dtest;
     if (!t || t.step !== 'ask') return this.dtestState;
-    // « Le test de Quai » : visible en levant la tête ; « Le Dashboard » ; « Rien » : pas de résultat
+    // « Le test de Quai » : visible en levant la tête ; « Le Dashboard » ; « Rien » : pas de résultat. Le mouvement est
+    // appris d'après la posture « téléphone » de la réponse (headup.ts) : jamais la tête baissée vers le téléphone
     const result = cmd.answer === 'quai' ? 'headUp' : cmd.answer === 'dashboard' ? 'dashboard' : undefined;
-    return this.finishDisplayTest(result, result ? t.learner.result() : null);
+    return this.finishDisplayTest(result, result ? t.learner.result(this.d.clock.now()) : null);
   }
 
   /** Abonnement du téléphone à l'état du test : chaque étape, et les secondes restantes chaque seconde. */
