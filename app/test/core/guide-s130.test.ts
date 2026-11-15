@@ -14,7 +14,8 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { CheckIssue, GuideState, Moment, WalkRoute } from '../../src/core/guide-types';
-import { dismissMoment, GUIDE, guideStep, type GuideInput } from '../../src/core/guide';
+import type { Departure, DepartureStops } from '../../src/core/api';
+import { dismissMoment, GUIDE, guideStep, rideJourney, type GuideInput } from '../../src/core/guide';
 import { MAX_WALK_M, WalkRouter } from '../../src/core/walk/router';
 import { distanceM } from '../../src/core/util';
 import { at, fix, guide, journeyOf, kindOf, lerp, MIN, N, offset, P, prdTrip, rideLeg, route, S, SEC, settings, step, stop, toward, walkLeg } from './guide-fixtures';
@@ -241,7 +242,7 @@ describe('1.3.0 moteur : marche hors de Belgique (PRD-1.3.0 § 4)', () => {
     const p = offset(toward(LILLE, FLANDRES, 150), 0, 30);
     const s = step(r, at('07:50'), fix(p, at('07:50'), { heading: 90 }));
     const crow = distanceM(p, FLANDRES);
-    expect(s.where.walk).toMatchObject({ offMap: true, crowM: Math.round(crow), remainingMin: Math.ceil((crow * 1.3) / 80) });
+    expect(s.where.walk).toMatchObject({ offMap: true, crowM: Math.round(crow), remainingM: Math.round(crow), remainingMin: Math.ceil((crow * 1.3) / 80) });
     expect(s.where.walk?.next).toBeUndefined();
     expect(typeof s.where.walk?.bearingDeg).toBe('number');
     // marge du train comptée avec ces minutes
@@ -407,6 +408,24 @@ describe('1.3.0 moteur : vérification au départ et en route (PRD-1.3.0 § 6.3)
     r.mem = dismissMoment(r.mem, m(s.moment, 'check').id, at('06:40:35'));
     expect(step(r, at('06:40:40')).moment).toBeNull();
     expect(step(r, at('06:45')).moment).toBeNull();
+  });
+
+  it('« J’y descends » lancé à l’arrêt sans position : « Pas de position » 30 s après, avant « Monter »', () => {
+    const call = (areaId: string, name: string, hm: string) => ({ areaId, name: N(name), sched: at(hm), est: at(hm), rt: true, delayMin: 0 });
+    const dep: Departure = { op: 'tec', mode: 'bus', line: '6', head: N('Gare des Guillemins'), sched: at('07:12'), est: at('07:12'), rt: true, delayMin: 0, cancelled: false, tripId: 'T6-07:12', stopId: 'LGgram1', stopSeq: 4 };
+    const ds: DepartureStops = {
+      op: 'tec', mode: 'bus', line: '6', head: N('Gare des Guillemins'), anyPlanned: false, state: 'ok',
+      stops: [call('tec:LGgram', 'Monument Gramme', '07:12'), call('tec:LGlema', 'Place Général Leman', '07:16'), call('tec:LGguil', 'Gare des Guillemins', '07:20')],
+    };
+    const j = rideJourney(dep, ds, 0, 2, [P.gramme, P.leman, P.guilleminsBus]);
+    const r = guide(j, { kind: 'ride', title: 'Vers Gare des Guillemins', origin: P.gramme, startedAt: at('06:50') });
+    const s0 = step(r, at('06:50'));
+    expect(s0.phase).toEqual({ kind: 'wait', leg: 0 });
+    expect(s0.moment).toBeNull();
+    expect(m(step(r, at('06:50:30')).moment, 'check').issues).toEqual([{ kind: 'noPosition' }]);
+    expect(step(r, at('06:50:50')).moment).toBeNull();
+    for (let t = at('06:51'); t < at('06:57'); t += MIN) expect(step(r, t).moment).toBeNull();
+    expect(kindOf(step(r, at('06:57')))).toBe('board');
   });
 
   it('suivi sans messages (réglage éteint) : ni moment ni problème, comme en 1.2.10', () => {

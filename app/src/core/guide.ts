@@ -1307,8 +1307,8 @@ function whereOf(c: Ctx, loc: Loc): WhereAmI {
     const outside = outsideRoute(c, i);
     const crowM = outside ? (c.fix && knownPoint(wl.to) ? distanceM(c.fix, wl.to) : ph.kind === 'before' ? outside.lengthM : undefined) : undefined;
     if (c.fix && ph.kind === 'walk' && pr) {
-      remainingM = pr.remainingM;
-      remainingMin = outside && crowM !== undefined ? minutesFor(crowM, true) : minutesFor(pr.remainingM, pr.route.source === 'straight');
+      remainingM = outside && crowM !== undefined ? crowM : pr.remainingM;
+      remainingMin = minutesFor(remainingM, pr.route.source === 'straight');
     } else if (c.fix && ph.kind === 'walk' && knownPoint(wl.to)) {
       remainingM = distanceM(c.fix, wl.to);
       remainingMin = minutesFor(remainingM, true);
