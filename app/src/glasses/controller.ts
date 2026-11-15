@@ -2304,6 +2304,8 @@ export class GlassesController implements GlassesApi {
     if (this.d.web) return this.setTestState({ step: 'idle' });
     if (this.dtest) return this.dtestState;
     if (this.stopped || !this.ready || this.paused || this.linked === false) return this.setTestState({ step: 'idle', error: 'closed' });
+    // le test et le guidage ne vont jamais ensemble (un seul capteur de mouvement)
+    if (this.trip?.guide) return this.setTestState({ step: 'idle', error: 'guiding' });
     const run: DisplayTestRun = { step: 'wait', until: this.d.clock.now() + TEST_WAIT_MS, learner: new HeadUpLearner(), imu: false };
     this.dtest = run;
     run.timer = setTimeout(() => void this.testStep(run, 'sent'), this.d.clock.real(TEST_WAIT_MS));
@@ -2360,10 +2362,12 @@ export class GlassesController implements GlassesApi {
 
   /**
    * Signaux pendant le test (vrai : consommé). Mesures du capteur : le repos pendant l'attente, le mouvement pendant la
-   * question (jamais de rendu ni de journal par mesure). Arrière-plan ou lunettes déconnectées : pendant l'attente ou la
-   * page envoyée, le test s'arrête (`closed`) ; pendant la question, le capteur se ferme et la question reste.
+   * question (jamais de rendu ni de journal par mesure). Arrière-plan ou lunettes déconnectées (`connected` qui passe à
+   * faux : un signal de batterie seule ne compte pas) : pendant l'attente ou la page envoyée, le test s'arrête (`closed`) ;
+   * pendant la question, le capteur se ferme et la question reste ; au retour, l'écran du test et le capteur reviennent.
    */
   private testSignal(s: HubSignal): boolean {
+    const was = this.linked;
     if (s.kind === 'device') this.linked = s.connected;
     const t = this.dtest;
     if (!t) return false;
@@ -2372,12 +2376,17 @@ export class GlassesController implements GlassesApi {
       else if (t.step === 'ask' && t.imu) t.learner.move(s);
       return true;
     }
-    const lost = s.kind === 'background' || (s.kind === 'device' && !s.connected);
+    const lost = s.kind === 'background' || (s.kind === 'device' && was !== false && !s.connected);
+    const back = s.kind === 'foreground' || (s.kind === 'device' && was === false && s.connected);
     if (lost && t.step !== 'ask') this.endDisplayTest({ step: 'idle', error: 'closed' });
-    else if (lost && t.imu) {
+    else if (lost) {
       t.imu = false;
       void this.testImu(false);
-    } else if (s.kind === 'foreground' || s.kind === 'device') this.dtestPaint = true; // l'écran du test reconstruit
+    } else if (back && t.step === 'ask') {
+      this.dtestPaint = true;
+      t.imu = true;
+      void this.testImu(true);
+    }
     return false;
   }
 
@@ -2399,14 +2408,14 @@ export class GlassesController implements GlassesApi {
     return this.setTestState(s);
   }
 
-  /** Test fini ou arrêté : minuteries arrêtées, capteur refermé (toujours), l'écran d'avant reconstruit. */
+  /** Test fini ou arrêté : minuteries arrêtées, capteur refermé (toujours : sans frais s'il l'est déjà), l'écran d'avant. */
   private closeDisplayTest(): void {
     const t = this.dtest;
     if (!t) return;
     this.dtest = null;
     clearTimeout(t.timer);
     clearInterval(t.tick);
-    if (t.imu) void this.testImu(false);
+    void this.testImu(false);
     void this.render(true);
   }
 
@@ -2475,6 +2484,8 @@ export class GlassesController implements GlassesApi {
    * remplace le précédent. Réglage allumé : « Où tu en es » d'abord (15 s).
    */
   private startGuide(kind: GuideKind, j: Journey, s: TripSession, beyond?: Stopover[]): void {
+    // 1.3.0 (PRD-1.3.0 § 6.1, équipe C2) : un guidage qui démarre arrête d'abord le test de l'écran (capteur refermé)
+    if (this.dtest) this.endDisplayTest({ step: 'idle', error: 'guiding' });
     this.resetGuideRun();
     if (this.guideOn()) this.showWhere(WHERE_LAUNCH_MS);
     this.follow(j, s, kind, beyond);

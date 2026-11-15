@@ -42,9 +42,12 @@ async function kit(o: KitOptions & { imu?: boolean | null }) {
   const k = await guideSetup(o);
   const port = (k.c as unknown as { d: ControllerDeps }).d.platform.glasses;
   const imuCalls: [boolean, number | undefined][] = [];
+  /** Pour chaque appel du capteur : un guidage était-il déjà lancé ? */
+  const imuGuided: boolean[] = [];
   if (o.imu !== null) {
     port.imu = async (on, pace) => {
       imuCalls.push([on, pace]);
+      imuGuided.push(!!k.c.followed?.guide);
       return o.imu ?? true;
     };
   }
@@ -56,8 +59,8 @@ async function kit(o: KitOptions & { imu?: boolean | null }) {
     return set(next);
   };
   const states: DisplayTestState[] = [];
-  k.c.onDisplayTest((s) => states.push(s));
-  return { ...k, imuCalls, saved, states };
+  k.c.onDisplayTest?.((s) => states.push(s));
+  return { ...k, imuCalls, imuGuided, saved, states };
 }
 
 const T = (hh: number, mm: number) => at(DAY, hh, mm);
@@ -162,10 +165,11 @@ describe('§ 8 : chaque favori reçoit sa réponse, « … » seulement pendant 
     await k.settle(60_000);
     // la position choisie à la main : le lieu du favori « Maison » ; puis « Favoris »
     k.location.set(MAISON);
+    const since = core.o.calls.length;
     await k.c.relocate();
     await k.c.replaceRoute({ screen: 'favorites' });
     await k.settle(2_000);
-    expect(lineOf(k.last().lines, 'Maison')).toBe('Maison   tu y es');
+    const early = lineOf(k.last().lines, 'Maison');
     // avant : « Bureau … », « École … », « Parc … » pour toujours (calculs abandonnés au bout de 20 s, demandes empilées)
     await k.settle(58_000);
     for (let t = 60; t <= 240; t += 5) {
@@ -175,8 +179,11 @@ describe('§ 8 : chaque favori reçoit sa réponse, « … » seulement pendant 
       expect(lineOf(s.lines, 'Maison')).toBe('Maison   tu y es');
       await k.settle(5_000);
     }
-    // jamais plus de 3 calculs à la fois, et jamais un calcul pour « tu y es »
+    // « tu y es » dès que la position est choisie (avant : l'ancienne réponse, jusqu'à 1 min) ; jamais plus de 3
+    // calculs à la fois, et aucun pour « tu y es »
+    expect(early).toBe('Maison   tu y es');
     expect(core.o.max).toBeLessThanOrEqual(3);
+    expect(core.o.calls.slice(since)).not.toContain('fav-maison');
   });
 
   it('à l’ouverture de « Favoris » : dans l’ordre de l’écran, 3 calculs à la fois au plus', async () => {
@@ -428,6 +435,80 @@ describe('§ 6.1 : test de l’écran des lunettes', () => {
     await n.settle(TEST_WAIT_MS + 10);
     await n.gesture('double');
     expect(n.states.at(-1)).toEqual({ step: 'done', result: 'visible', learned: false });
+  });
+});
+
+describe('§ 6.1 : le test de l’écran et le guidage ne vont jamais ensemble ; connexion des lunettes', () => {
+  const plan = (now: number) => [door('j1', now + 4 * MIN, now + 70 * MIN)];
+
+  it('pendant un guidage, le test ne démarre pas (« guiding ») et le capteur n’est pas touché', async () => {
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { plan } });
+    await k.until((s) => s.screen === 'home' && s.lines.some((l) => nb(l).startsWith('Bureau')));
+    await k.gesture('tap');
+    await k.until((s) => s.screen === 'steps' && s.page === 1);
+    await k.gesture('tap');
+    expect(k.c.followed?.guide).toBeDefined();
+    expect(await k.c.displayTest({ kind: 'start' })).toEqual({ step: 'idle', error: 'guiding' });
+    expect(k.imuCalls).toEqual([]);
+    expect(k.last().screen).toBe('guide');
+  });
+
+  it('« Y aller » du téléphone pendant le test : le test s’arrête d’abord (capteur refermé), puis le guidage commence', async () => {
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { plan } });
+    await k.until((s) => s.screen === 'home' && s.lines.some((l) => nb(l).startsWith('Bureau')));
+    await k.c.displayTest({ kind: 'start' });
+    await k.settle(5_000);
+    await k.c.goFavorite('fav-bureau');
+    await k.settle(50);
+    expect(k.states.at(-1)).toEqual({ step: 'idle', error: 'guiding' });
+    expect(k.imuCalls.at(-1)).toEqual([false, undefined]);
+    // refermé avant que le guidage soit lancé
+    expect(k.imuGuided.at(-1)).toBe(false);
+    expect(k.c.followed?.guide?.kind).toBe('trip');
+    expect(k.last().screen).toBe('guide');
+    // plus aucune étape du test ensuite
+    await k.settle(TEST_WAIT_MS);
+    expect(k.states.at(-1)).toEqual({ step: 'idle', error: 'guiding' });
+  });
+
+  it('lunettes déconnectées pendant la question : capteur refermé, la question reste ; reconnectées : capteur rouvert', async () => {
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }) });
+    await k.until((s) => s.screen === 'home');
+    await k.c.displayTest({ kind: 'start' });
+    await k.settle(10);
+    for (let i = 0; i < 30; i++) k.c.onSignal(imu(i));
+    await k.settle(TEST_WAIT_MS + TEST_SENT_MS);
+    expect(k.states.at(-1)).toEqual({ step: 'ask' });
+    await k.emit({ kind: 'device', connected: false });
+    expect(k.imuCalls.at(-1)).toEqual([false, undefined]);
+    expect(k.states.at(-1)).toEqual({ step: 'ask' });
+    // mesures pendant la coupure : ignorées
+    for (let i = 0; i < 10; i++) k.c.onSignal(imu(i, -6));
+    const from = k.calls.length;
+    await k.emit({ kind: 'device', connected: true, wearing: true });
+    expect(k.imuCalls.at(-1)).toEqual([true, TEST_IMU_MS]);
+    // l'écran du test reconstruit (page entière)
+    expect(k.since(from).map((c) => c.op)).toEqual(['rebuild']);
+    expect(pageText(k.sent())).toContain('Réponds sur le téléphone');
+    for (let i = 0; i < 10; i++) k.c.onSignal(imu(i, 2));
+    const done = await k.c.displayTest({ kind: 'answer', answer: 'quai' });
+    expect(done).toEqual({ step: 'done', result: 'headUp', learned: true });
+    expect(k.saved.at(-1)?.headUp).toMatchObject({ axis: 'y', sign: 1 });
+    expect(k.imuCalls.at(-1)).toEqual([false, undefined]);
+  });
+
+  it('signal des lunettes avec seulement la batterie : le test continue, rien n’est envoyé pendant l’attente', async () => {
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }) });
+    await k.until((s) => s.screen === 'home');
+    await k.c.displayTest({ kind: 'start' });
+    await k.settle(10);
+    const from = k.calls.length;
+    await k.emit({ kind: 'device', connected: true, wearing: true, battery: 55 });
+    await k.emit({ kind: 'device', connected: true, wearing: true, battery: 54 });
+    await k.settle(10_000);
+    expect(k.states.at(-1)?.step).toBe('wait');
+    expect(k.since(from)).toEqual([]);
+    expect(k.imuCalls).toEqual([[true, TEST_IMU_MS]]);
   });
 });
 
