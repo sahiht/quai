@@ -225,6 +225,11 @@ export type Intent =
 export interface Seg {
   t: string;
   hi?: boolean;
+  /**
+   * 1.3.0 (PRD-1.3.0 § 5) : jamais coupé (la voie d'une gare) : les mots d'avant sont coupés au mot pour lui laisser sa
+   * place ; s'il ne tient pas du tout, il n'est pas dit.
+   */
+  keep?: boolean;
 }
 
 /**

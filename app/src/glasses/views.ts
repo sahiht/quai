@@ -1172,7 +1172,7 @@ export function trainRunView(ds: DepartureStops, ctx: ViewCtx): GlassesView {
     ];
     // voie modifiée au plus clair, aussi à la gare de la montée (pâle et sans action) : l'information la plus utile de
     // l'écran pour qui monte là (contrôle usager du 15/11) ; jamais aux gares que le train a quittées
-    if (plat) segs.push({ t: plat, hi: !!c.newPlatform && !passed[i] && i >= at });
+    if (plat) segs.push({ t: plat, hi: !!c.newPlatform && !passed[i] && i >= at, keep: true });
     const right = c.cancelled ? 'SUPPRIMÉ' : passed[i] ? `${plannedMark(c.rt, m)}${hhmm(c.est)}` : nextPassageText({ est: c.est, rt: c.rt }, ctx.now, m);
     const item: Item = { a: '', segs, bRight: right, key: `${c.areaId ?? ''}#${i}` };
     if (gone) item.rightPale = true;
