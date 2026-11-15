@@ -184,6 +184,8 @@ export const T = {
   /** 1.2.10 (PRD-1.2.10 § 3.8 et § 4.5) : carte « Chemins à pied » de l'écran Données. */
   walkTitle: 'Chemins à pied',
   walkText: 'OpenStreetMap : les vrais chemins à pied, avec les escaliers, les parcs et les passages des gares. Le chemin se calcule sur ton téléphone : ta position n’est jamais envoyée.',
+  /** Quai Web : le chemin se calcule dans le navigateur. */
+  walkTextWeb: 'OpenStreetMap : les vrais chemins à pied, avec les escaliers, les parcs et les passages des gares. Le chemin se calcule dans ton navigateur : ta position n’est jamais envoyée.',
   walkCredit: '© les contributeurs d’OpenStreetMap, licence ODbL',
 } as const;
 

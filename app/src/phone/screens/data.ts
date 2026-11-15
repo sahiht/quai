@@ -227,7 +227,7 @@ export function dataScreen(ctx: PhoneCtx): HTMLElement {
       'section',
       { class: 'box', style: 'padding:14px 16px;display:flex;flex-direction:column;gap:6px' },
       h('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;gap:12px' }, h('h2', null, T.walkTitle), walkState),
-      h('p', { class: 'small' }, typo(T.walkText)),
+      h('p', { class: 'small' }, typo(ctx.web ? T.walkTextWeb : T.walkText)),
       h('p', { class: 'small muted' }, T.walkCredit),
     ),
     h('section', { class: 'box pad-tight' }, h('h2', { style: 'margin:0 0 4px' }, 'Mises à jour'), updates),

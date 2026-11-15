@@ -82,4 +82,10 @@ describe('1.2.10 : carte « Chemins à pied » (PRD-1.2.10 § 3.8 et § 4.5)', (
     await until(() => textOf(walkCard(el2).querySelector('.status')) !== '…');
     expect(textOf(walkCard(el2).querySelector('.status'))).toBe('Indisponible');
   });
+
+  it('Quai Web : le chemin se calcule dans le navigateur, pas « sur ton téléphone »', () => {
+    const el = mount(dataScreen(harness({ settings: defaults(), web: true }).ctx));
+    expect(textOf(walkCard(el).querySelector('p'))).toBe('OpenStreetMap : les vrais chemins à pied, avec les escaliers, les parcs et les passages des gares. Le chemin se calcule dans ton navigateur : ta position n’est jamais envoyée.');
+    expect(textOf(walkCard(el))).not.toMatch(/téléphone/);
+  });
 });
