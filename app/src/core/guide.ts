@@ -29,7 +29,7 @@ import type {
 } from './guide-types';
 import { journeyId } from './journeys';
 import { isSncbBus, rideName } from './means';
-import { headName } from './text';
+import { headName, placeNoun, vers } from './text';
 import { displayName, distanceM, hhmm } from './util';
 import { bearingDeg, cumulative, knownPoint, projectOn, relativeDeg, routePoints, turnsOf, walkProgress } from './guide-walk';
 
@@ -399,6 +399,12 @@ function nextRide(legs: Leg[], from: number): number {
   return -1;
 }
 
+/** Une position récente (depuis `since`) à l'arrêt de montée de l'étape (60 m), ou rien si l'arrêt n'a pas de position. */
+function seenAtStop(c: Ctx, l: Leg, since: number): boolean {
+  if (!knownPoint(l.from)) return false;
+  return fixesOf(c.in).some((f) => f.at >= since && distanceM(f, l.from) <= GUIDE.stopM);
+}
+
 /** Montée et descente constatées par la position (vitesse le long du trajet), gardées dans la mémoire. */
 function observe(c: Ctx): void {
   const { legs, now, m } = c;
@@ -411,6 +417,10 @@ function observe(c: Ctx): void {
     if (now < l.dep - 3 * MIN) break;
     const p = prevRide(legs, k);
     if (p >= 0 && !alightedFrom(m, p) && now < legs[p].arr) break;
+    // correspondance : monté seulement après être passé à l'arrêt de montée depuis l'arrivée du véhicule d'avant ; sinon
+    // une position encore prise dans ce véhicule (en retard, traitée en retard, ou qui continue au-delà de l'arrêt), qui
+    // roule près de la ligne suivante, passait pour la montée (descente jamais constatée, arrêt dépassé jamais vu)
+    if (p >= 0 && !seenAtStop(c, l, legs[p].arr - GUIDE.alightFromMs)) break;
     if (fast(c) && distTo(c, l.from) >= GUIDE.boardLeftM) {
       const pr = rideProj(c, l);
       const ok = pr ? pr.offM <= GUIDE.onLineM && pr.alongM >= GUIDE.boardAlongM : knownPoint(l.from);
@@ -464,13 +474,16 @@ function arrivedNow(c: Ctx): { yes: boolean; byFix: boolean } {
   return { yes: false, byFix: false };
 }
 
-/** La marche `w` n'est pas finie d'après la position : encore loin de son arrivée. */
+/**
+ * La marche `w` n'est pas finie d'après la position : encore loin de son arrivée (à vol d'oiseau). Jamais d'après le
+ * chemin gardé : le contrôleur n'en garde qu'un ; si la phase en dépendait, deux marches se le disputaient (avec le
+ * chemin de l'une, on se croit arrivé et on demande celui de la suivante ; sans lui, on se croit encore en marche).
+ */
 function walkingStill(c: Ctx, w: number): boolean {
   const l = c.legs[w];
   if (!c.fix || !knownPoint(l.to)) return false;
   const next = c.legs[w + 1];
-  const r = c.walkPr?.leg === w ? c.walkPr.remainingM : distanceM(c.fix, l.to);
-  return r > (next ? atStopM(next) : GUIDE.arrivedM);
+  return distanceM(c.fix, l.to) > (next ? atStopM(next) : GUIDE.arrivedM);
 }
 
 /** Prochain arrêt à bord (le premier non passé) : par la position si les arrêts ont tous une position, sinon l'heure. */
@@ -508,8 +521,8 @@ function locate(c: Ctx): Loc {
   if (l.kind === 'walk') {
     const k = legs[i + 1]?.kind === 'ride' ? i + 1 : -1;
     if (i === 0 && kind === 'trip' && now < j.leaveAt && !c.started) return { phase: { kind: 'before', leg: 0 }, leg: 0 };
-    // déjà à l'arrêt d'après la position : on attend
-    if (k >= 0 && c.fix && !walkingStill(c, i) && (distTo(c, l.to) <= GUIDE.stopM || (c.walkPr?.leg === i && c.walkPr.remainingM <= GUIDE.stopM) || now >= l.arr)) {
+    // déjà à l'arrêt d'après la position (à vol d'oiseau, jamais d'après le chemin gardé : voir walkingStill) : on attend
+    if (k >= 0 && c.fix && !walkingStill(c, i) && (distTo(c, l.to) <= GUIDE.stopM || now >= l.arr)) {
       return { phase: { kind: 'wait', leg: k }, leg: k };
     }
     return { phase: { kind: 'walk', leg: i }, leg: i };
@@ -576,16 +589,25 @@ function pending(c: Ctx, loc: Loc, reason: ReplanReason, k: number): Pending {
 
 /** Arrêt de descente dépassé (à bord, plus de 300 m au-delà, en s'éloignant, après son heure). */
 function passedAt(c: Ctx, loc: Loc): number {
-  const { legs, now, m } = c;
+  const { m } = c;
   if (!c.fix) return -1;
-  let k = -1;
-  if (loc.phase.kind === 'ride') k = loc.phase.leg;
-  else if (m.alighted && !boardedOn(m, m.alighted.leg + 1) && fast(c)) k = m.alighted.leg;
-  if (k < 0) return -1;
+  const cands: number[] = [];
+  if (loc.phase.kind === 'ride') cands.push(loc.phase.leg);
+  // descente constatée (immobile à quai), puis on roule : peut-être resté dans ce véhicule, même quand l'heure dit déjà
+  // le véhicule suivant (pas encore monté dedans)
+  if (m.alighted && fast(c) && !cands.includes(m.alighted.leg) && !(loc.phase.kind === 'ride' && boardedOn(m, loc.phase.leg))) cands.push(m.alighted.leg);
+  for (const k of cands) if (passedLeg(c, k)) return k;
+  return -1;
+}
+
+/** L'arrêt de descente de l'étape `k` est-il dépassé (voir passedAt) ? */
+function passedLeg(c: Ctx, k: number): boolean {
+  const { legs, now, m } = c;
+  const fix = c.fix as GuideFix;
   const l = legs[k];
-  if (!knownPoint(l.to) || now < l.arr) return -1;
-  const d = distanceM(c.fix, l.to);
-  if (d <= GUIDE.passedM) return -1;
+  if (!knownPoint(l.to) || now < l.arr) return false;
+  const d = distanceM(fix, l.to);
+  if (d <= GUIDE.passedM) return false;
   // au-delà : de l'autre côté de l'arrêt, dans le sens de la marche du véhicule
   const stops = stopsOf(l);
   const pts = stopPoints(l, stops);
@@ -595,17 +617,22 @@ function passedAt(c: Ctx, loc: Loc): number {
     const kx = Math.cos(l.to.lat * (Math.PI / 180));
     const vx = (l.to.lon - before.lon) * kx;
     const vy = l.to.lat - before.lat;
-    const wx = (c.fix.lon - l.to.lon) * kx;
-    const wy = c.fix.lat - l.to.lat;
-    if (vx * wx + vy * wy <= 0) return -1;
+    const wx = (fix.lon - l.to.lon) * kx;
+    const wy = fix.lat - l.to.lat;
+    if (vx * wx + vy * wy <= 0) {
+      // pas dans le sens d'arrivée : encore le long de la ligne avant l'arrêt (véhicule en retard), ou bien le véhicule
+      // a tourné après l'arrêt (Schuman → Bruxelles-Nord, puis Bruxelles-Central) : au-delà s'il est loin de la ligne
+      const pr = rideProj(c, l);
+      if (!pr || pr.offM <= GUIDE.passedM) return false;
+    }
   }
   // en s'éloignant
   const away = c.prev ? distanceM(c.prev, l.to) < d - 5 : fast(c);
-  if (!away) return -1;
+  if (!away) return false;
   // pas monté dans le véhicule suivant (il s'éloigne aussi)
   const nk = nextRide(legs, k + 1);
-  if (nk >= 0 && boardedOn(m, nk)) return -1;
-  return k;
+  if (nk >= 0 && boardedOn(m, nk)) return false;
+  return true;
 }
 
 /** Causes d'un nouveau trajet, dans l'ordre : supprimé, correspondance ratée, raté, arrêt dépassé. */
@@ -839,7 +866,9 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
         const gapOk = m.lastNextStopAt === undefined || now - m.lastNextStopAt >= GUIDE.nextStopGapMs;
         out.push({
           id: sid, kind: 'nextStop', trig: now >= from && now < until && gapOk && now < quietFrom, end: now >= until,
-          make: (since) => ({ kind: 'nextStop', id: sid, since, until, leg: k, stop: st.name, at: st.est, rt: !!l.rt, stopsToAlight: n - 1 - s, alight: l.to.name }),
+          // arrêts jusqu'à la descente, le prochain compris (comme « Où tu en es » et l'exemple du PRD : « Prochain
+          // arrêt : Louvain », « descente dans 3 arrêts, à Bruxelles-Central »)
+          make: (since) => ({ kind: 'nextStop', id: sid, since, until, leg: k, stop: st.name, at: st.est, rt: !!l.rt, stopsToAlight: n - s, alight: l.to.name }),
         });
       }
     }
@@ -886,9 +915,11 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
     }
   }
 
-  // virages de la marche en cours
-  if (ph.kind === 'walk' && c.fix && c.walkPr && c.walkPr.leg === ph.leg && c.walkPr.offM <= GUIDE.offRouteM) {
-    const w = ph.leg;
+  // virages de la marche en cours ; en attente (à 60 m de l'arrêt à vol d'oiseau), ceux qui restent sur le chemin de la
+  // marche d'avant, derrière « monter » (priorité inchangée)
+  const tw = ph.kind === 'walk' ? ph.leg : ph.kind === 'wait' && ph.leg > 0 && legs[ph.leg - 1].kind === 'walk' ? ph.leg - 1 : -1;
+  if (tw >= 0 && c.fix && c.walkPr && c.walkPr.leg === tw && c.walkPr.offM <= GUIDE.offRouteM) {
+    const w = tw;
     const wl = legs[w];
     const route = c.walkPr.route;
     const along = c.walkPr.alongM;
@@ -918,12 +949,15 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
         const walkMin = walkMinOf(w);
         const mo: Moment = { kind: 'leave', id, since, until: at + GUIDE.leaveMs, leg: 0, walkMin, toward: w.to.name };
         if (r) {
-          const margin = Math.floor((r.dep - now) / MIN) - walkMin;
+          // marge exacte (en minutes, avec les secondes) : 2 min de marge ne deviennent pas « très juste » une seconde
+          // après l'apparition (1,98 arrondi à 1) ; très juste : 60 s au plus
+          const exact = (r.dep - now) / MIN - walkMin;
+          const margin = Math.floor(exact);
           mo.vehicle = vehicleRef(r);
           mo.depAt = r.dep;
           mo.rt = !!r.rt;
           mo.marginMin = margin;
-          if (margin <= GUIDE.tightMin) {
+          if (exact <= GUIDE.tightMin) {
             mo.tight = true;
             if (c.in.missed) mo.missed = { ...c.in.missed };
           }
@@ -1028,6 +1062,7 @@ function whereOf(c: Ctx, loc: Loc): WhereAmI {
     if (r) {
       walk.vehicle = vehicleRef(r);
       walk.depAt = r.dep;
+      walk.rt = !!r.rt;
       walk.marginMin = Math.floor((r.dep - now) / MIN) - remainingMin;
     }
     if (pr && pr.route.source === 'osm' && c.fix) {
@@ -1090,6 +1125,9 @@ function needRouteOf(c: Ctx, loc: Loc): GuideState['needRoute'] {
   const { legs } = c;
   const ph = loc.phase;
   if (ph.kind === 'arrived' || ph.kind === 'ended') return undefined;
+  // en attente, encore sur le chemin de la marche d'avant avec un virage devant : ce chemin reste (ses virages derrière
+  // « monter ») ; celui de la marche suivante attendra
+  if (ph.kind === 'wait' && ph.leg > 0 && legs[ph.leg - 1].kind === 'walk' && turnAhead(c, ph.leg - 1)) return undefined;
   const from = ph.kind === 'ride' ? ph.leg + 1 : loc.leg;
   let w = -1;
   for (let i = Math.max(0, from); i < legs.length; i++) {
@@ -1110,6 +1148,13 @@ function needRouteOf(c: Ctx, loc: Loc): GuideState['needRoute'] {
   if (haveIt && walking && offRouteLong(c, have!.route)) return { leg: w, from: start, to: { lat: wl.to.lat, lon: wl.to.lon } };
   if (haveIt) return undefined;
   return { leg: w, from: start, to: { lat: wl.to.lat, lon: wl.to.lon } };
+}
+
+/** Sur le chemin gardé de la marche `w` (30 m au plus), avec un virage encore devant (pas fini). */
+function turnAhead(c: Ctx, w: number): boolean {
+  const pr = c.walkPr;
+  if (!c.fix || !pr || pr.leg !== w || pr.offM > GUIDE.offRouteM) return false;
+  return turnsOf(pr.route, cumulative(routePoints(pr.route))).some((t) => t.alongM + GUIDE.turnAfterM > pr.alongM);
 }
 
 /** Hors du chemin de plus de 30 m pendant 10 s (toutes les positions de ces 10 s, la plus ancienne il y a 10 s ou plus). */
@@ -1370,7 +1415,7 @@ export function rideJourney(dep: Departure, stops: DepartureStops, board: number
  * « Maintenant : … » de la carte « En cours » du téléphone : « bus 6 vers Gare des Guillemins », « à pied vers l’arrêt
  * du bus 6 », « IC vers Courtrai, voie 3 », « partir à 07:05 », « à pied, arrivée 08:54 », « tu y es ».
  */
-export function guideNowText(state: GuideState, journey: Journey, lang: NameLang): string {
+export function guideNowText(state: GuideState, journey: Journey, lang: NameLang, title?: string): string {
   const legs = journey.legs;
   const ph = state.phase;
   const toward = (l: Leg): string => `${rideName(l)} vers ${headName({ op: l.op, head: l.head ?? l.to.name }, lang)}`;
@@ -1383,7 +1428,8 @@ export function guideNowText(state: GuideState, journey: Journey, lang: NameLang
     }
     case 'walk': {
       const r = legs[ph.leg + 1];
-      if (!r || r.kind !== 'ride') return `à pied, arrivée ${hhmm(journey.arr)}`;
+      // dernière marche : vers où (la ligne du dessus de la carte dit déjà l'arrivée) ; sans titre, l'arrivée
+      if (!r || r.kind !== 'ride') return title?.trim() ? `à pied ${towardText(title)}` : `à pied, arrivée ${hhmm(journey.arr)}`;
       if (isTrain(r)) {
         const p = platformOf(r);
         if (ph.leg > 0 && legs[ph.leg - 1].kind === 'ride' && p) return `à pied vers la voie ${p}`;
@@ -1410,5 +1456,12 @@ export function guideNowText(state: GuideState, journey: Journey, lang: NameLang
 
 /** Carte « En cours » du téléphone (PRD § 4.3). `guided` : réglage « Me guider pendant un trajet ». */
 export function guideStatusOf(state: GuideState, journey: Journey, title: string, guided: boolean, lang: NameLang): GuideStatus {
-  return { kind: state.kind, title, arr: journey.arr, now: guideNowText(state, journey, lang), guided };
+  return { kind: state.kind, title, arr: journey.arr, now: guideNowText(state, journey, lang, title), guided };
+}
+
+/** « vers le bureau », « vers Gand-Saint-Pierre », « vers chez Karim » (titre du trajet, « Vers … » gardé). */
+function towardText(title: string): string {
+  const t = title.trim();
+  const v = /^Vers\s/.test(t) ? t : vers(placeNoun(t));
+  return v.charAt(0).toLowerCase() + v.slice(1);
 }

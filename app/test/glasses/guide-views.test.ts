@@ -213,6 +213,8 @@ describe('PRD § 3.2 : les moments', () => {
     expect(shown(board({ vehicle: IC, depAt: T(7, 30), head: N('Ostende') })).lines[0]).toBe('IC à 07:30');
     const corr = shown(board({ vehicle: IC, depAt: T(7, 30), platform: '3', head: N('Ostende'), walkMin: 3, marginMin: 6 }));
     expect(corr.lines.slice(0, 3)).toEqual(['IC à 07:30, voie 3', 'vers Ostende', '3 min à pied jusqu’au quai, marge 6 min']);
+    // bus, tram, métro : « jusqu'à l'arrêt » (pas de quai)
+    expect(shown(board({ vehicle: TRAM3, depAt: T(8, 44), head: N('Churchill'), walkMin: 2, marginMin: 1 })).lines[2]).toBe('2 min à pied jusqu’à l’arrêt, marge 1 min');
   });
 
   it('platform : « Voie modifiée » ; « IC à 07:30, voie 6 au lieu de 4 » ; panneau « voie / 6 »', () => {
@@ -312,6 +314,16 @@ describe('règles d’affichage du moteur (équipe A)', () => {
     const w = shown(null, 'where', { phase: { kind: 'ride', leg: 1, next: 0 }, where: { ...WHERE, walk: undefined, ride } }).lines;
     expect(w.slice(1)).toEqual(['Prochain arrêt : Place Général Leman, 07:16', 'descente : Gare des Guillemins, 07:20', 'arrivée 08:54', HINT]);
     for (const l of w) expect(l).not.toMatch(/dans 0 arrêt/);
+  });
+
+  it('« Où tu en es » à pied : l’heure du véhicule visé suit son temps réel, pas celui du trajet entier', () => {
+    // IC en temps réel, tram de la correspondance sans : « IC à 07:44 » (comme « Partir maintenant »), arrivée « ~ »
+    const walk = { ...WHERE.walk!, vehicle: IC, depAt: T(7, 44), rt: true };
+    const w = shown(null, 'where', { where: { ...WHERE, rt: false, walk } }).lines;
+    expect(w[3]).toBe('IC à 07:44, marge 2 min');
+    expect(w[4]).toBe('arrivée ~08:54');
+    // véhicule sans temps réel dans un trajet qui en a : « ~ »
+    expect(shown(null, 'where', { where: { ...WHERE, rt: true, walk: { ...walk, rt: false } } }).lines[3]).toBe('IC à ~07:44, marge 2 min');
   });
 
   it('marge négative : « très juste », jamais « marge -2 min » ; la voie ne concerne que les trains', () => {

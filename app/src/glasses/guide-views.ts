@@ -178,7 +178,8 @@ function boardMoment(m: Extract<Moment, { kind: 'board' }>, ctx: ViewCtx): Momen
   if (head) lines.push(F('pale', (w) => fitName('vers ', head, '', w)));
   // correspondance en gare : la marche jusqu'au quai et la marge passent avant le nombre d'arrêts (trois lignes au plus)
   // (la marge peut être négative : « très juste », jamais « marge -2 min »)
-  if (m.walkMin !== undefined) lines.push(L('pale', `${minText(m.walkMin)} à pied jusqu’au quai${m.marginMin !== undefined ? `, ${marginText(m.marginMin)}` : ''}`));
+  // « jusqu'au quai » pour un train, « jusqu'à l'arrêt » pour un bus, un tram, un métro (contrôle technique du 15/11)
+  if (m.walkMin !== undefined) lines.push(L('pale', `${minText(m.walkMin)} à pied jusqu’${train ? 'au quai' : 'à l’arrêt'}${m.marginMin !== undefined ? `, ${marginText(m.marginMin)}` : ''}`));
   else {
     const d = alightPhrase(m.stopsToAlight, m.alight, ctx);
     if (d) lines.push(m.stopsToAlight > 0 ? L('pale', d) : F('pale', (w) => fitName('descente à ', nameOf(m.alight, ctx), '', w)));
@@ -408,7 +409,8 @@ function whereLines(w: WhereAmI, s: GuideState, j: Journey, ctx: ViewCtx, maxPx:
     out.push(L('hi', truncateWords(`À pied ${to}`, maxPx)));
     out.push(L('norm', walk.remainingM !== undefined ? `${metersText(walk.remainingM)}, ${minText(Math.max(1, walk.remainingMin))}` : minText(Math.max(1, walk.remainingMin))));
     if (walk.vehicle && walk.depAt !== undefined) {
-      out.push(L('norm', `${vehicle(walk.vehicle)} à ${timeOf(walk.depAt, w.rt, ctx)}${walk.marginMin !== undefined ? `, ${marginText(walk.marginMin)}` : ''}`));
+      // l'heure du véhicule visé, avec son temps réel (pas celui du trajet entier) : comme « Partir maintenant »
+      out.push(L('norm', `${vehicle(walk.vehicle)} à ${timeOf(walk.depAt, walk.rt ?? w.rt, ctx)}${walk.marginMin !== undefined ? `, ${marginText(walk.marginMin)}` : ''}`));
     }
     out.push(arr);
     return { lines: out };
