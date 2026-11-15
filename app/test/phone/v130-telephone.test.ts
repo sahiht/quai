@@ -837,14 +837,15 @@ describe('1.3.0 : bannière « Nouveau dans Quai 1.3.0 » du téléphone (PRD-1.
     expect(NEWS_130[3]).toMatch(/^Dans Réglages, puis Données : le journal/);
   });
 
-  it('Quai Web : pas de test de l’écran (pas de lunettes), « l’onglet Réglages » là où le téléphone dit « Réglages »', () => {
+  it('Quai Web : ni test de l’écran (pas de lunettes) ni rappel des messages (décision), « l’onglet Réglages » là où le téléphone dit « Réglages »', () => {
     const web = newsState('1.2.10', NEWS_SINCE, '1.3.0', true).lines;
     expect(web).toEqual([...NEWS_130_WEB]);
+    expect(web).toHaveLength(3);
     expect(web[0]).toBe(NEWS_130[0]);
     expect(web[1]).toBe(NEWS_130[1]);
     expect(web.some((l) => /Tester l’écran|téléphone/.test(l))).toBe(false);
-    expect(web[2]).toMatch(/message important que tu n’as pas vu revient/);
-    expect(web[3]).toMatch(/^Dans l’onglet Réglages, bouton « Réglages », puis Données : le journal/);
+    expect(web.some((l) => /message important|revient, deux fois/.test(l))).toBe(false);
+    expect(web[2]).toMatch(/^Dans l’onglet Réglages, bouton « Réglages », puis Données : le journal/);
     expect(newsState('1.2.10', NEWS_SINCE, '1.3.0').lines).toEqual([...NEWS_130]);
   });
 
