@@ -424,6 +424,26 @@ describe('positions', () => {
     expect(s).toMatchObject({ ended: true, location: 'off', moment: null });
   });
 
+  it('parti attendre à l’arrêt (lancé à 250 m) : un bus sans temps réel en retard ne fait pas « pas parti » ; raté à 10 min', () => {
+    const origin = offset(P.gramme, 250, 0);
+    const r = guide(prdTrip({ bus6Rt: false }), { origin, startedAt: at('07:00') });
+    step(r, at('07:00'), fix(origin, at('07:00')));
+    expect(step(r, at('07:08'), fix(P.gramme, at('07:08'))).phase).toEqual({ kind: 'wait', leg: 1 });
+    for (const hm of ['07:15:30', '07:18', '07:21']) {
+      const s = step(r, at(hm), fix(P.gramme, at(hm)));
+      expect(s.ended, hm).toBe(false);
+      expect(s.phase, hm).toEqual({ kind: 'wait', leg: 1 });
+    }
+    // toujours à l'arrêt 10 min après l'heure (sans temps réel) : « Ton bus 6 de 07:12 est parti », nouveau trajet
+    const s = step(r, at('07:22:30'), fix(P.gramme, at('07:22:30')));
+    expect(s.ended).toBe(false);
+    expect(m(s.moment, 'replan')).toMatchObject({ reason: 'missed' });
+    // revenu au point de lancement : la règle s'applique de nouveau
+    const r2 = guide(prdTrip({ bus6Rt: false }), { origin, startedAt: at('07:00') });
+    step(r2, at('07:08'), fix(P.gramme, at('07:08')));
+    expect(step(r2, at('07:15:30'), fix(origin, at('07:15:30'))).ended).toBe(true);
+  });
+
   it('précision demandée : à bord avant la descente high, sinon medium ; au loin medium', () => {
     const r = guide(prdTrip());
     expect(step(r, at('07:14')).location).toBe('medium');

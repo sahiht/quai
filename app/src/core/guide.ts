@@ -1211,7 +1211,10 @@ function endedNow(c: Ctx, loc: Loc): boolean {
   if (c.in.kind === 'trip' && r0 >= 0 && c.fix && knownPoint(c.in.origin)) {
     const late = legs[r0].dep + GUIDE.notLeftAfterMs;
     const waiting = m.re && m.re.jid === j.id && !m.re.swap && m.re.none === undefined;
-    if (now >= late && c.fix.at >= late && distanceM(c.fix, c.in.origin) < GUIDE.notLeftM && !waiting && !m.boarded && !m.alighted) return true;
+    // parti du lancement (40 m) et à l'arrêt de montée : on attend un véhicule en retard (sans temps réel, il n'est
+    // « raté » qu'après 10 min, detect), ce n'est pas « pas parti »
+    const atStop = c.started && stillAtStop(c, r0);
+    if (now >= late && c.fix.at >= late && distanceM(c.fix, c.in.origin) < GUIDE.notLeftM && !waiting && !atStop && !m.boarded && !m.alighted) return true;
   }
   return false;
 }
