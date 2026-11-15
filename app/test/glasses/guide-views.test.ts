@@ -113,16 +113,18 @@ describe('PRD § 3.2 : les moments', () => {
     expect(container(p, 'title').level).toBe(2);
     expect(container(p, 'clock').level).toBe(2);
     expect(container(p, 'clock').content.trim()).toBe('07:00');
-    // 408 px : trop long pour les 374 px à côté de l'image, la ligne passe à la ligne avant « jusqu’à »
-    expect(lines).toEqual(['Partir maintenant', '5 min à pied', 'jusqu’à l’arrêt Monument Gramme', 'bus 6 à 07:12', HINT]);
+    // une idée par rangée : « … jusqu’à l’arrêt Monument Gramme » (408 px) ne tient pas dans les 374 px à côté de
+    // l'image : sans « l’arrêt »
+    expect(lines).toEqual(['Partir maintenant', '5 min à pied jusqu’à Monument Gramme', 'bus 6 à 07:12', HINT]);
     expect(levels(p).hi[0]).toBe('Partir maintenant');
-    expect(levels(p).norm.slice(1, 4)).toEqual(['5 min à pied', 'jusqu’à l’arrêt Monument Gramme', 'bus 6 à 07:12']);
+    expect(levels(p).norm.slice(1, 3)).toEqual(['5 min à pied jusqu’à Monument Gramme', 'bus 6 à 07:12']);
     expect(v.images).toEqual([{ id: 9, name: 'guide-image', x: 28, y: 60, w: 144, h: 144, image: { kind: 'sign', label: 'à pied', value: '5', foot: 'min' } }]);
     expect(p.images).toEqual(v.images);
     for (const n of ['colA', 'colB', 'colC'] as const) expect(container(p, n)).toMatchObject({ x: GUIDE.TEXT_X, w: 376 });
-    // quatre lignes centrées sur l'image (60 à 204 : centre 132)
+    // les rangées centrées sur l'image (60 à 204 : centre 132)
     const a = container(p, 'colA');
-    expect(a.y + a.h / 2).toBeCloseTo(132, 0);
+    // (± 1 px : un nombre impair de demi-rangées s'arrondit au pixel)
+    expect(Math.abs(a.y + a.h / 2 - 132)).toBeLessThanOrEqual(1);
     expect(container(p, 'colA').level).toBe(4);
     expect(container(p, 'colB').level).toBe(3);
     expect(container(p, 'colC').level).toBe(2);
@@ -134,12 +136,19 @@ describe('PRD § 3.2 : les moments', () => {
 
   it('leave : train « jusqu’à la gare de Namur », sans temps réel « ~07:12 », très juste et « Si tu le rates » (règle 1.2.5)', () => {
     expect(shown(leave({ toward: N('Namur'), vehicle: IC, depAt: T(7, 30) })).lines.slice(0, 3)).toEqual(['Partir maintenant', '5 min à pied jusqu’à la gare de Namur', 'IC à 07:30']);
-    expect(shown(leave({ rt: false })).lines[3]).toBe('bus 6 à ~07:12');
+    expect(shown(leave({ rt: false })).lines[2]).toBe('bus 6 à ~07:12');
+    // très juste : quatre rangées au plus, dans la hauteur de l'image ; « Si tu le rates » sans l'écart s'il ne tient pas
     const tight = shown(leave({ marginMin: 1, tight: true, missed: { arr: T(9, 34), laterMin: 30 } }));
-    expect(tight.lines).toEqual(['Partir maintenant', '5 min à pied', 'jusqu’à l’arrêt Monument Gramme', 'bus 6 à 07:12, très juste', 'Si tu le rates : arrivée 09:34,', '30 min plus tard', HINT]);
-    expect(levels(tight.p).pale.slice(4)).toEqual(['Si tu le rates : arrivée 09:34,', '30 min plus tard']);
+    expect(tight.lines).toEqual(['Partir maintenant', '5 min à pied jusqu’à Monument Gramme', 'bus 6 à 07:12, très juste', 'Si tu le rates : arrivée 09:34', HINT]);
+    expect(levels(tight.p).pale[3]).toBe('Si tu le rates : arrivée 09:34');
+    const a = container(tight.p, 'colA');
+    expect(a.h).toBe(4 * 27);
+    expect(a.y).toBeGreaterThanOrEqual(GUIDE.IMG_Y);
+    expect(a.y + a.h).toBeLessThanOrEqual(GUIDE.IMG_Y + GUIDE.IMG_H);
+    // « Si tu le rates » qui tient (même heure d'arrivée) : entier
+    expect(shown(leave({ tight: true, missed: { arr: T(8, 54), laterMin: 0 } })).lines[3]).toBe('Si tu le rates : même heure d’arrivée');
     // marge d'une minute sans `tight` : très juste quand même
-    expect(shown(leave({ marginMin: 1 })).lines[3]).toBe('bus 6 à 07:12, très juste');
+    expect(shown(leave({ marginMin: 1 })).lines[2]).toBe('bus 6 à 07:12, très juste');
   });
 
   it('leave : dernière marche, « jusqu’au bureau » (le titre du trajet), sans véhicule', () => {
@@ -300,7 +309,7 @@ describe('règles d’affichage du moteur (équipe A)', () => {
   it('marge négative : « très juste », jamais « marge -2 min » ; la voie ne concerne que les trains', () => {
     expect(shown(board({ vehicle: IC, depAt: T(7, 30), platform: '3', head: N('Ostende'), walkMin: 4, marginMin: -2 })).lines[2]).toBe('4 min à pied jusqu’au quai, très juste');
     expect(shown(null, 'where', { where: { ...WHERE, walk: { ...WHERE.walk!, marginMin: -2 } } }).lines[3]).toBe('bus 6 à 07:12, très juste');
-    expect(shown(leave({ marginMin: -3 })).lines[3]).toBe('bus 6 à 07:12, très juste');
+    expect(shown(leave({ marginMin: -3 })).lines[2]).toBe('bus 6 à 07:12, très juste');
     // un bus avec une « voie modifiée » (donnée incohérente) : rien sur la voie
     const bus = shown(board({ platform: '6', platformChanged: true }));
     expect(bus.lines[0]).toBe('dans 1 min');
@@ -438,12 +447,19 @@ const LONG = {
 };
 const LONG_BUS: VehicleRef = { op: 'tec', mode: 'bus', line: '163b4' };
 
-/** Chaque ligne tient ; une ligne coupée finit par « … » après un mot entier du texte d'origine. */
+/**
+ * Chaque ligne tient ; une ligne coupée finit par « … » après un mot entier du texte d'origine, ou après un trait
+ * d'union, une barre ou une apostrophe d'un nom composé (« Bruxelles-Aéroport-… », règle de truncateWords).
+ */
 function checkWords(lines: string[], sources: string[]): void {
   const all = sources.map(nb).join(' ');
   for (const l of lines) {
     if (!l.endsWith('…')) continue;
     const head = l.slice(0, -1);
+    if (/[-/’']$/.test(head)) {
+      expect(all, `« ${l} » coupe un mot`).toContain(head.split(' ').pop()!);
+      continue;
+    }
     const lastWord = head.split(' ').pop()!;
     // le dernier mot gardé est un mot entier des textes d'origine (suivi d'une espace, d'une virgule ou de la fin)
     expect(all, `« ${l} » coupe un mot`).toMatch(new RegExp(`${lastWord.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}(\\s|,|$)`));
@@ -470,12 +486,16 @@ describe('PRD § 9.4 : chaque texte au pixel, avec les noms les plus longs des v
         { ...base, id: 'e', kind: 'arrived', title: name, at: T(8, 54), diffMin: -12 },
       ];
       for (const m of moments) {
-        const { lines } = shown(m);
+        const { v, p, lines } = shown(m);
         const action = { leave: GUIDE_TEXT.leave, alight: GUIDE_TEXT.alight, platform: GUIDE_TEXT.platform, arrived: GUIDE_TEXT.arrived } as Record<string, string>;
         if (action[m.kind]) expect(lines[0], m.kind).toBe(action[m.kind]);
-        // l'action (1re ligne) n'est jamais coupée
-        expect(lines[0], `${m.kind} ${name}`).not.toMatch(/…$/);
+        // l'action (1re ligne d'un moment qui dit quoi faire) n'est jamais coupée ; un nom l'est au mot, en dernier recours
+        if (!['nextStop', 'passed'].includes(m.kind)) expect(lines[0], `${m.kind} ${name}`).not.toMatch(/…$/);
         checkWords(lines, [name, 'Si tu le rates : arrivée 23:59, 7 h 32 plus tard', 'vers Gare des Guillemins']);
+        // une idée par rangée : quatre au plus, dans la hauteur de l'image
+        expect(v.items.length, m.kind).toBeLessThanOrEqual(4);
+        const c = container(p, 'colA');
+        if (v.images?.length) expect(c.y >= GUIDE.IMG_Y && c.y + c.h <= GUIDE.IMG_Y + GUIDE.IMG_H, m.kind).toBe(true);
       }
     }
   });

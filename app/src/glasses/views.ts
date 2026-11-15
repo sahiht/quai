@@ -1357,9 +1357,11 @@ export function stepsTopLine(j: Journey, start: number, now: number, markPlanned
 /**
  * « Trajet proposé » (L3) : une proposition, sans curseur ; ▲▼ font défiler ses étapes ; au bout, ▼ ouvre « Autres
  * trajets » (contrôleur). 1.2.10 (PRD-1.2.10 § 5), plus facile à lire : le nom du trajet en titre (« Bureau »), l'heure
- * à droite ; ligne du haut « Départ 07:05, dans 3 min » et « arrivée 08:54 », ou l'alerte du trajet au plus clair ; une
- * rangée par étape (stepRows). Toucher : « y aller », le guidage de la proposition affichée (intention goGuide) ; trajet
- * déjà guidé (ctx.guidedJourneyId, ou suivi : d.followedId) : rien à lancer, « ▶ » sur l'étape en cours ou la prochaine.
+ * à droite ; ligne du haut : l'alerte du trajet au plus clair, sinon « Si tu le rates » (1.2.5, 5 min avant de partir et
+ * jusqu'au départ du premier véhicule), sinon « Départ 07:05, dans 3 min » et « arrivée 08:54 » ; une rangée par étape
+ * (stepRows). Toucher : « y aller », le guidage de la proposition affichée (goGuide). Le trajet guidé
+ * (ctx.guidedJourneyId, ou suivi : d.followedId) porte « ▶ » ; écran calme allumé : toucher revient au guidage
+ * (resume) ; éteint (suivi sans messages, § 3.5) : « Ne plus suivre » (écran `followed`, aides de la 1.2.9).
  */
 export function stepsPage(route: Pick<StepsRoute, 'title' | 'label'>, d: StepsData, ctx: ViewCtx): GlassesView {
   const j = d.journeys[d.index];
@@ -1370,7 +1372,9 @@ export function stepsPage(route: Pick<StepsRoute, 'title' | 'label'>, d: StepsDa
   const rows = stepRows(j, leave, ctx);
   for (const r of rows) v.items.push(r.item);
   const alert = j.alerts[0];
-  v.top = alert ? { text: alert.text, strong: true } : stepsTopLine(j, start, ctx.now, mp(ctx));
+  // l'alerte d'abord, puis « Si tu le rates » quand le départ approche (marge et prix du raté), sinon départ et arrivée
+  const miss = alert ? null : missLine(j, d.journeys, leave, ctx.now);
+  v.top = alert ? { text: alert.text, strong: true } : miss ? { text: miss } : stepsTopLine(j, start, ctx.now, mp(ctx));
   v.reserveNote = true;
   v.scroll = true;
   let mark = -1;
@@ -1386,8 +1390,15 @@ export function stepsPage(route: Pick<StepsRoute, 'title' | 'label'>, d: StepsDa
   const wanted = d.fresh && v.initialTop !== undefined ? v.initialTop : d.top ?? 0;
   const shownTop = Math.min(Math.max(0, wanted), max);
   v.note = stepsBottom(Math.max(0, v.items.length - visibleRange(v.items, shownTop, capacity).to), d);
-  if (guided) v.hints = hints(ctx, HINTS.stepsGuided);
-  else {
+  if (guided && ctx.settings.display.guide === false) {
+    // suivi sans guidage (réglage « Me guider pendant un trajet » éteint) : « Ne plus suivre », comme en 1.2.9
+    v.hints = hints(ctx, HINTS.steps);
+    v.tap = { kind: 'open', route: { screen: 'followed' } };
+  } else if (guided) {
+    // guidé : toucher revient à l'écran du guidage
+    v.hints = hints(ctx, HINTS.stepsGuided);
+    v.tap = { kind: 'resume' };
+  } else {
     v.hints = hints(ctx, HINTS.stepsGo);
     v.tap = { kind: 'goGuide' };
   }

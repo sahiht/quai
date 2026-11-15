@@ -58,7 +58,7 @@ const tramFrom = (id: string, d: number, a: number, then: Parameters<typeof jour
 const withRain = (j: Journey, ...walks: number[]): Journey => ({ ...j, legs: j.legs.map((l, i) => (walks.includes(i) ? { ...l, rain: true } : l)) });
 
 describe('PRD-1.2.5 § 1 : « Si tu le rates »', () => {
-  it('5 min au plus avant de partir, et jusqu’au départ du premier véhicule ; 1.2.10 : dit par le moment « Partir maintenant », plus par l’écran du trajet', () => {
+  it('5 min au plus avant de partir, et jusqu’au départ du premier véhicule ; sinon (1.2.10) le départ et l’arrivée', () => {
     expect(MISS_WINDOW_MIN).toBe(5);
     // départ à pied à 07:38 : à 07:32, rien ; à 07:33, « Si tu le rates » (missLine, que le moteur reprend)
     expect(missLine(j1, ALL, j1.leaveAt, T(7, 32))).toBeNull();
@@ -66,9 +66,12 @@ describe('PRD-1.2.5 § 1 : « Si tu le rates »', () => {
     // en marchant vers l'arrêt, avant le bus : encore ; le bus est parti : plus rien
     expect(nb(missLine(j1, ALL, j1.leaveAt, T(7, 42))!)).toBe('Si tu le rates : arrivée 08:56, 30 min plus tard');
     expect(missLine(j1, ALL, j1.leaveAt, T(7, 43))).toBeNull();
-    // 1.2.10 (PRD-1.2.10 § 5) : la ligne du haut de l'écran du trajet dit le départ et l'arrivée
-    expect(top(j1, ALL, T(7, 33))).toBe('Départ 07:38, dans 5 min   arrivée 08:26');
-    expect(top(j1, ALL, T(7, 42))).toBe('Départ 07:38   arrivée 08:26');
+    // la ligne du haut de l'écran du trajet : « Si tu le rates » dans la fenêtre ; avant et après, 1.2.10 (PRD-1.2.10
+    // § 5) : le départ et l'arrivée
+    expect(top(j1, ALL, T(7, 32))).toBe('Départ 07:38, dans 6 min   arrivée 08:26');
+    expect(top(j1, ALL, T(7, 33))).toBe('Si tu le rates : arrivée 08:56, 30 min plus tard');
+    expect(top(j1, ALL, T(7, 42))).toBe('Si tu le rates : arrivée 08:56, 30 min plus tard');
+    expect(top(j1, ALL, T(7, 43))).toBe('Départ 07:38   arrivée 08:26');
   });
 
   it('raté à l’arrêt : les trajets qui repartent du même arrêt plus tard, jamais d’un autre ; un autre trajet peut y passer', () => {

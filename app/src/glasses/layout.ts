@@ -176,11 +176,10 @@ export const GUIDE = {
   TEXT_W: X_END - 196 - GEO.SAFETY,
   FULL_W: X_END - X_TEXT - GEO.SAFETY,
   /**
-   * Lignes au plus d'un moment, passages à la ligne compris : quatre lignes de texte (« Si tu le rates ») dont deux trop
-   * longues pour les 374 px à côté de l'image font six lignes (162 px, centrées sur l'image de 144 px : 9 px au-dessus
-   * et au-dessous, entre le titre et les aides).
+   * Rangées au plus d'un moment : quatre (« Si tu le rates »), une idée chacune, jamais de passage à la ligne : 108 px,
+   * dans la hauteur de l'image (144 px).
    */
-  MAX_LINES: 6,
+  MAX_LINES: 4,
 } as const;
 
 /**

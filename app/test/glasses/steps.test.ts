@@ -55,7 +55,8 @@ const j3 = journey(
 );
 const ALL = [j1, j2, j3];
 
-const HINT_FOLLOWED = '△▽ étapes   double : retour';
+/** 1.2.10 : trajet guidé (écran calme allumé) : toucher revient au guidage. */
+const HINT_FOLLOWED = '△▽ étapes   toucher : guidage   double : retour';
 const HINT_OTHER = '△▽ étapes   toucher : y aller   double : retour';
 /** Les six rangées du trajet 1 (1.2.10 § 5) : marges des correspondances de 5 min ou moins, sinon l'arrivée. */
 const J1_ROWS = [
@@ -98,7 +99,7 @@ describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
   it('six étapes sur une page : « Fin du trajet. ▽ 2 autres trajets » ; jamais un autre trajet sans ▼ au bout', async () => {
     const h = await shown(ALL);
     const first = h.last();
-    // le trajet suivi (bouton « Lunettes ») est guidé : rien à lancer, « ▶ » sur la 1re étape
+    // le trajet suivi (bouton « Lunettes ») est guidé : toucher revient au guidage, « ▶ » sur la 1re étape
     expect(first).toMatchObject({ screen: 'steps', page: 1, pages: 3, followed: true, sel: 0 });
     expect(nb(first.title)).toBe('Bureau');
     expect(first.lines).toEqual(['Départ 07:38, dans 7 min   arrivée 08:33', ...J1_ROWS, 'Fin du trajet. ▽ 2 autres trajets', HINT_FOLLOWED]);
@@ -120,7 +121,9 @@ describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
     const other = await h.until(steps);
     expect(other).toMatchObject({ page: 2, label: 'earlier', followed: false, sel: -1 });
     expect(nb(other.title)).toBe('Bureau');
-    expect(other.lines).toEqual(['Départ 07:36, dans 5 min   arrivée 08:20', '07:36 à pied 19 min', '07:55 IC voie 1 → Bruxelles-Central   08:17', '08:17 à pied 3 min', 'Fin du trajet. ▽ autres trajets', HINT_OTHER]);
+    // 1.2.5 (gardé en 1.2.10) : départ à pied dans 5 min (07:36) : « Si tu le rates » en haut ; raté à Braine-l'Alleud,
+    // l'IC de 08:01 du 1er trajet
+    expect(other.lines).toEqual(['Si tu le rates : arrivée 08:33, 13 min plus tard', '07:36 à pied 19 min', '07:55 IC voie 1 → Bruxelles-Central   08:17', '08:17 à pied 3 min', 'Fin du trajet. ▽ autres trajets', HINT_OTHER]);
     // double toucher : la liste, curseur sur la même entrée
     await h.gesture('double');
     expect(h.last()).toMatchObject({ screen: 'others', sel: 0 });
@@ -140,7 +143,7 @@ describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
     h.c.stop();
   });
 
-  it('sur un autre trajet, toucher : « y aller » (goGuide) ; le trajet guidé (ViewCtx.guidedJourneyId) n’a rien à lancer et porte « ▶ »', () => {
+  it('sur un autre trajet, toucher : « y aller » (goGuide) ; le trajet guidé (ViewCtx.guidedJourneyId) : « ▶ », toucher revient au guidage', () => {
     const c = { now: NOW, settings: settingsWith([PLACES.bureau]) };
     const other = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: ALL, index: 1, followedId: 'j1', fromList: true }, c);
     expect(other.tap).toEqual({ kind: 'goGuide' });
@@ -148,9 +151,17 @@ describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
     expect(other.hints).toBe(HINT_OTHER.replace(/ : /g, '\u00a0: '));
     // le contrôleur dit quel trajet est guidé : il l'emporte sur le trajet suivi
     const guided = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: ALL, index: 1, followedId: 'j1', fromList: true }, { ...c, guidedJourneyId: 'j2' });
-    expect(guided.tap).toBeUndefined();
+    expect(guided.tap).toEqual({ kind: 'resume' });
     expect(guided.mark).toBe(0);
     expect(lines(guided).at(-1)).toBe(HINT_FOLLOWED);
+    // suivi sans guidage (réglage éteint) : « Ne plus suivre », comme en 1.2.9
+    const off = { ...c, settings: { ...c.settings, display: { ...c.settings.display, guide: false } }, guidedJourneyId: 'j2' };
+    const followed = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: ALL, index: 1, fromList: true }, off);
+    expect(followed.tap).toEqual({ kind: 'open', route: { screen: 'followed' } });
+    expect(followed.mark).toBe(0);
+    expect(lines(followed).at(-1)).toBe('△▽ étapes   toucher : ne plus suivre   double : retour');
+    // un autre trajet, réglage éteint : « y aller » quand même (il fera suivre sans messages)
+    expect(stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: ALL, index: 0 }, off).tap).toEqual({ kind: 'goGuide' });
     expect(stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: ALL, index: 0, followedId: 'j1' }, { ...c, guidedJourneyId: 'j2' }).tap).toEqual({ kind: 'goGuide' });
   });
 
@@ -209,7 +220,8 @@ describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
     const st = await b.until(steps);
     expect(st).toMatchObject({ page: 1, followed: true, sel: 0 });
     expect(nb(st.lines.at(-1)!)).toBe('Trajet en cours : vers le bureau');
-    expect(st.lines.slice(0, 2)).toEqual(['Départ 07:38   arrivée 08:33', '07:38 à pied 5 min']);
+    // 07:40, en marchant vers l'arrêt, avant le bus : « Si tu le rates » (1.2.5, gardé en 1.2.10)
+    expect(st.lines.slice(0, 2)).toEqual(['Si tu le rates : arrivée 09:03, 30 min plus tard', '07:38 à pied 5 min']);
     await b.gesture('down');
     expect((await b.until((s) => s.screen === 'others')).lines).toEqual(LIST);
     b.c.stop();
@@ -259,7 +271,7 @@ describe('§ 3 : textes et largeurs', () => {
     walk.legs[0] = { ...walk.legs[0], dep: NOW, arr: NOW + 9 * MIN, schedDep: NOW, schedArr: NOW + 9 * MIN };
     // à pied seulement : une rangée ; guidé : rien à lancer ; sinon « y aller » (le guidage mène aussi à pied)
     const w = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [walk], index: 0, followedId: 'w', fresh: true }, ctx());
-    expect(lines(w)).toEqual(['Départ 07:31   arrivée 07:40', '07:31 à pied 9 min', 'Fin du trajet. Pas d’autre trajet pour l’instant', '△▽ étapes   double : retour']);
+    expect(lines(w)).toEqual(['Départ 07:31   arrivée 07:40', '07:31 à pied 9 min', 'Fin du trajet. Pas d’autre trajet pour l’instant', HINT_FOLLOWED]);
     expect(stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [walk], index: 0, fresh: true }, ctx()).tap).toEqual({ kind: 'goGuide' });
   });
 

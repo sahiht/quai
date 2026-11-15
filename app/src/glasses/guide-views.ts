@@ -64,17 +64,20 @@ export const GUIDE_TEXT = {
 type Lv = 'hi' | 'norm' | 'pale';
 
 /**
- * Une ligne de texte du guidage. `parts` : les morceaux entre lesquels elle passe à la ligne de préférence (« 5 min à
- * pied » | « jusqu’à l’arrêt Monument Gramme ») ; `main` : l'action, jamais coupée.
+ * Une ligne de texte du guidage : une idée par rangée, jamais de passage à la ligne. `alts` : le texte, puis ses formes
+ * plus courtes, essayées dans l'ordre (« jusqu’à l’arrêt Monument Gramme », puis « jusqu’à Monument Gramme ») ; `fit` :
+ * la forme qui tient dans la largeur donnée (un nom coupé au mot en dernier recours) ; `main` : l'action, jamais coupée.
  */
 interface GLine {
-  parts: string[];
+  alts: string[];
   lv: Lv;
   main?: boolean;
+  fit?: (maxPx: number) => string;
 }
 
-const L = (lv: Lv, ...parts: string[]): GLine => ({ parts: parts.filter(Boolean), lv });
-const MAIN = (text: string): GLine => ({ parts: [text], lv: 'hi', main: true });
+const L = (lv: Lv, ...alts: string[]): GLine => ({ alts: alts.filter(Boolean), lv });
+const F = (lv: Lv, fit: (maxPx: number) => string): GLine => ({ alts: [], lv, fit });
+const MAIN = (text: string): GLine => ({ alts: [text], lv: 'hi', main: true });
 
 const mp = (ctx: ViewCtx): boolean => ctx.settings.display.markPlanned;
 const nameOf = (n: Names | undefined, ctx: ViewCtx): string => (n ? displayName(n, ctx.settings.lang) : '');
@@ -122,18 +125,35 @@ export function vehicleSign(v: VehicleRef, platform?: string): ImageKind {
   return { kind: 'sign', label, value: v.line || label };
 }
 
+/**
+ * « 5 min à pied jusqu’à l’arrêt Monument Gramme » sur une rangée : sans « l’arrêt » (« la gare de ») si elle ne tient
+ * pas, puis le nom coupé au mot en dernier recours.
+ */
+export function leaveWalkText(walkMin: number, toward: string, kind: 'stop' | 'station' | 'dest', title: string, maxPx: number): string {
+  const walk = `${minText(walkMin)} à pied`;
+  if (kind === 'dest') return truncateWords(`${walk} ${untilTitle(title)}`, maxPx);
+  const full = `${walk} jusqu’à ${kind === 'station' ? 'la gare de' : 'l’arrêt'} ${toward}`;
+  if (textWidth(full) <= maxPx) return full;
+  return fitName(`${walk} jusqu’à `, toward, '', maxPx);
+}
+
+/** « Si tu le rates : arrivée 09:34, 30 min plus tard » sur une rangée, sinon sans l'écart : « Si tu le rates : arrivée 09:34 ». */
+export function missFit(miss: string, maxPx: number): string {
+  if (textWidth(miss) <= maxPx) return miss;
+  const cut = miss.lastIndexOf(', ');
+  return truncateWords(cut > 0 ? miss.slice(0, cut) : miss, maxPx);
+}
+
 function leaveMoment(m: Extract<Moment, { kind: 'leave' }>, title: string, ctx: ViewCtx): MomentView {
-  const walk = `${minText(m.walkMin)} à pied`;
   const toward = nameOf(m.toward, ctx);
-  const dest = !m.vehicle ? untilTitle(title) : isTrainRef(m.vehicle) ? `jusqu’à la gare de ${toward}` : `jusqu’à l’arrêt ${toward}`;
+  const kind = !m.vehicle ? 'dest' : isTrainRef(m.vehicle) ? 'station' : 'stop';
+  // la marge peut être négative (moteur) : très juste aussi
   const tight = m.tight ?? (m.marginMin !== undefined && m.marginMin <= 1);
-  const lines: GLine[] = [MAIN(GUIDE_TEXT.leave), L('norm', walk, dest)];
+  const lines: GLine[] = [MAIN(GUIDE_TEXT.leave), F('norm', (w) => leaveWalkText(m.walkMin, toward, kind, title, w))];
   if (m.vehicle && m.depAt !== undefined) lines.push(L('norm', `${vehicle(m.vehicle)} à ${timeOf(m.depAt, m.rt ?? false, ctx)}${tight ? `, ${GUIDE_TEXT.tight}` : ''}`));
   if (tight && m.missed) {
     const miss = missText(m.missed.arr, m.missed.laterMin, ctx.now);
-    // « Si tu le rates : arrivée 09:34, » | « 30 min plus tard »
-    const cut = miss.lastIndexOf(', ');
-    lines.push(cut > 0 ? L('pale', miss.slice(0, cut + 1), miss.slice(cut + 2)) : L('pale', miss));
+    lines.push(F('pale', (w) => missFit(miss, w)));
   }
   return { lines, image: { kind: 'sign', label: 'à pied', value: String(m.walkMin), foot: 'min' }, hints: HINTS.guide };
 }
@@ -151,13 +171,13 @@ function boardMoment(m: Extract<Moment, { kind: 'board' }>, ctx: ViewCtx): Momen
   // la voie ne concerne que les trains
   const lines: GLine[] = [MAIN(train && m.platformChanged ? `${when}, ${GUIDE_TEXT.platformBoard}` : when)];
   const head = headText(m.head, ctx.settings.lang, m.vehicle.op);
-  if (head) lines.push(L('pale', `vers ${head}`));
+  if (head) lines.push(F('pale', (w) => fitName('vers ', head, '', w)));
   // correspondance en gare : la marche jusqu'au quai et la marge passent avant le nombre d'arrêts (trois lignes au plus)
   // (la marge peut être négative : « très juste », jamais « marge -2 min »)
   if (m.walkMin !== undefined) lines.push(L('pale', `${minText(m.walkMin)} à pied jusqu’au quai${m.marginMin !== undefined ? `, ${marginText(m.marginMin)}` : ''}`));
   else {
     const d = alightPhrase(m.stopsToAlight, m.alight, ctx);
-    if (d) lines.push(m.stopsToAlight > 0 ? L('pale', d) : L('pale', 'descente à', nameOf(m.alight, ctx)));
+    if (d) lines.push(m.stopsToAlight > 0 ? L('pale', d) : F('pale', (w) => fitName('descente à ', nameOf(m.alight, ctx), '', w)));
   }
   return { lines, image: vehicleSign(m.vehicle, train ? m.platform : undefined), hints: HINTS.guide };
 }
@@ -173,9 +193,11 @@ function platformMoment(m: Extract<Moment, { kind: 'platform' }>, ctx: ViewCtx):
 
 function nextStopMoment(m: Extract<Moment, { kind: 'nextStop' }>, ctx: ViewCtx): MomentView {
   // un nom trop long passe à la ligne après « Prochain arrêt : » (jamais coupé)
+  // une rangée chacune ; un nom trop long coupé au mot en dernier recours
   const alight = nameOf(m.alight, ctx);
-  const second = m.stopsToAlight > 0 ? L('pale', `${alightWords(m.stopsToAlight)}, à`, alight) : L('pale', 'descente à', alight);
-  return { lines: alight ? [L('hi', `Prochain arrêt${NB}:`, nameOf(m.stop, ctx)), second] : [L('hi', `Prochain arrêt${NB}:`, nameOf(m.stop, ctx))], hints: HINTS.guide };
+  const first = F('hi', (w) => fitName(`Prochain arrêt${NB}: `, nameOf(m.stop, ctx), '', w));
+  const second = F('pale', (w) => fitName(m.stopsToAlight > 0 ? `${alightWords(m.stopsToAlight)}, à ` : 'descente à ', alight, '', w));
+  return { lines: alight ? [first, second] : [first], hints: HINTS.guide };
 }
 
 /** « ensuite : voie 3, IC à 07:30 », « ensuite : bus 71 à 08:34 », « ensuite : 5 min à pied ». */
@@ -186,7 +208,7 @@ export function thenText(t: Then, ctx: ViewCtx): string {
 }
 
 function alightMoment(m: Extract<Moment, { kind: 'alight' }>, ctx: ViewCtx): MomentView {
-  const lines: GLine[] = [MAIN(GUIDE_TEXT.alight), L('norm', fitName('', nameOf(m.stop, ctx), `, ${timeOf(m.at, m.rt, ctx)}`, GUIDE.FULL_W))];
+  const lines: GLine[] = [MAIN(GUIDE_TEXT.alight), F('norm', (w) => fitName('', nameOf(m.stop, ctx), `, ${timeOf(m.at, m.rt, ctx)}`, w))];
   const then = thenText(m.then, ctx);
   if (then) lines.push(L('pale', then));
   return { lines, hints: HINTS.guide };
@@ -212,14 +234,14 @@ function replanMoment(m: Extract<Moment, { kind: 'replan' }>, ride: boolean, ctx
 function passedMoment(m: Extract<Moment, { kind: 'passed' }>, ride: boolean, ctx: ViewCtx): MomentView {
   // arrêt où descendre inconnu (moteur : `getOff` vide) : pas de « Descends à … »
   const getOff = nameOf(m.getOff, ctx);
-  const lines: GLine[] = [L('hi', 'Tu as passé', nameOf(m.passed, ctx))];
-  if (getOff) lines.push(L('norm', 'Descends à', `${getOff}, ${hhmm(m.at)}`));
+  const lines: GLine[] = [F('hi', (w) => fitName('Tu as passé ', nameOf(m.passed, ctx), '', w))];
+  if (getOff) lines.push(F('norm', (w) => fitName('Descends à ', getOff, `, ${hhmm(m.at)}`, w)));
   if (!ride && m.arr !== undefined) lines.push(L('pale', `nouveau trajet${NB}: arrivée ${hhmm(m.arr)}`));
   return { lines, hints: HINTS.guide };
 }
 
 function arrivedMoment(m: Extract<Moment, { kind: 'arrived' }>): MomentView {
-  return { lines: [MAIN(GUIDE_TEXT.arrived), L('pale', fitName('', tripName(m.title), `, ${hhmm(m.at)}, ${diffText(m.diffMin)}`, GUIDE.FULL_W))], hints: HINTS.guideEnd };
+  return { lines: [MAIN(GUIDE_TEXT.arrived), F('pale', (w) => fitName('', tripName(m.title), `, ${hhmm(m.at)}, ${diffText(m.diffMin)}`, w))], hints: HINTS.guideEnd };
 }
 
 function momentView(m: Moment, s: GuideState, j: Journey, ctx: ViewCtx): MomentView {
@@ -249,48 +271,24 @@ function momentView(m: Moment, s: GuideState, j: Journey, ctx: ViewCtx): MomentV
 
 /* ------------------------------ Mise en lignes ------------------------------ */
 
-/** Une ligne en lignes physiques de `maxPx` : d'abord entre ses morceaux, puis entre deux mots ; un nom trop long au mot. */
-function wrapLine(l: GLine, maxPx: number): string[] {
-  const out: string[] = [];
-  let cur = '';
-  const push = (s: string): void => {
-    if (cur) out.push(cur);
-    cur = s;
-  };
-  for (const part of l.parts) {
-    const cand = cur ? `${cur} ${part}` : part;
-    if (textWidth(cand) <= maxPx) {
-      cur = cand;
-      continue;
-    }
-    if (textWidth(part) <= maxPx) {
-      push(part);
-      continue;
-    }
-    // morceau plus large que la ligne : mot à mot (l'espace insécable lie ses deux mots)
-    for (const w of part.split(' ')) {
-      const c2 = cur ? `${cur} ${w}` : w;
-      if (textWidth(c2) <= maxPx) cur = c2;
-      else push(textWidth(w) <= maxPx ? w : truncate(w, maxPx));
-    }
-  }
-  if (cur) out.push(cur);
-  return out;
+/** Le texte d'une ligne dans `maxPx` : sa forme qui tient, sinon coupé au mot (jamais l'action). */
+function fitLine(l: GLine, maxPx: number): string {
+  if (l.fit) return l.fit(maxPx);
+  const ok = l.alts.find((t) => textWidth(t) <= maxPx);
+  if (ok !== undefined) return ok;
+  const last = l.alts[l.alts.length - 1] ?? '';
+  return l.main ? last : truncateWords(last, maxPx);
 }
 
 /**
- * Lignes physiques d'un moment, `maxLines` au plus : chaque ligne passe à la ligne si besoin ; trop de lignes, celles du
- * bas se resserrent sur une seule (coupées au mot), puis les dernières tombent. L'action n'est jamais coupée.
+ * Rangées d'un écran du guidage : une idée par rangée (jamais de passage à la ligne), `maxLines` au plus. Les moments
+ * en ont quatre au plus : 108 px, dans la hauteur de l'image (144 px).
  */
 function layoutLines(lines: GLine[], maxPx: number, maxLines: number): { t: string; lv: Lv }[] {
-  const wrapped = lines.map((l) => ({ l, rows: l.main ? [l.parts.join(' ')] : wrapLine(l, maxPx) }));
-  const count = (): number => wrapped.reduce((n, w) => n + w.rows.length, 0);
-  for (let i = wrapped.length - 1; i >= 0 && count() > maxLines; i--) {
-    const w = wrapped[i];
-    if (!w.l.main && w.rows.length > 1) w.rows = [truncateWords(w.l.parts.join(' '), maxPx)];
-  }
-  while (count() > maxLines && wrapped.length > 1) wrapped.pop();
-  return wrapped.flatMap((w) => w.rows.map((t) => ({ t, lv: w.l.lv })));
+  return lines
+    .slice(0, Math.max(0, maxLines))
+    .map((l) => ({ t: fitLine(l, maxPx), lv: l.lv }))
+    .filter((r) => r.t);
 }
 
 /** Une rangée d'un seul texte, dans le conteneur de sa luminosité. */

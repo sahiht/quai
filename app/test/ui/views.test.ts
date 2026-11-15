@@ -151,8 +151,8 @@ async function followRow(core: ReturnType<typeof fakeCore>, f: LineFollow) {
   return { follow, mode: follow.mode, heads: m ? await core.lineHeads!(follow) : [] };
 }
 /** 1.2.2 (PRD-1.2.2 § 6) : sur le trajet suivi, toucher propose « Ne plus suivre ». */
-/** 1.2.10 (PRD-1.2.10 § 5) : trajet guidé (ou suivi) : rien à lancer ; un autre : « y aller ». */
-const HINT_STEPS = '△▽ étapes   double : retour';
+/** 1.2.10 (PRD-1.2.10 § 5) : trajet guidé : toucher revient au guidage ; un autre : « y aller ». */
+const HINT_STEPS = '△▽ étapes   toucher : guidage   double : retour';
 const HINT_OTHER = '△▽ étapes   toucher : y aller   double : retour';
 
 const ctxOf = (now: number, s: Settings, patch: Partial<ViewCtx> = {}): ViewCtx => ({ now, settings: s, ...patch });
@@ -256,8 +256,8 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
       HINT_STEPS,
     ]);
     expect(page(v).sel).toBe(0);
-    // 1.2.10 : le trajet guidé n'a rien à lancer au toucher (arrêter : appui long, « Arrêter le guidage »)
-    expect(v.tap).toBeUndefined();
+    // 1.2.10 : le trajet guidé : toucher revient à l'écran du guidage (arrêter : appui long, « Arrêter le guidage »)
+    expect(v.tap).toEqual({ kind: 'resume' });
     const f = followedView({ title: 'Vers le bureau', journey: journeys[0] }, ctxOf(now, s));
     expect(nb(f.title)).toBe('Vers le bureau : trajet suivi');
     expect(check(f)).toEqual(['Ne plus suivre', 'Arrêts : IC vers Bruxelles-Midi, +2 min', '△▽ choisir   toucher : valider   double : retour']);
@@ -274,8 +274,10 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     const ctx = ctxOf(now, s);
     const p1 = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: 0, followedId: journeys[0].id, fresh: true }, ctx);
     const l1 = check(p1);
-    // la ligne du haut : le départ à pied (dans 2 min) et l'arrivée prévue
-    expect(l1[0]).toBe('Départ 07:33, dans 2 min   arrivée ~08:58');
+    // 1.2.5 (PRD-1.2.5 § 1, gardé en 1.2.10) : départ à pied à 07:33, dans 2 min : « Si tu le rates » (l'IC suivant de
+    // Namur) en haut ; 6 min avant, le départ et l'arrivée prévue
+    expect(l1[0]).toBe('Si tu le rates : arrivée 09:57, 59 min plus tard');
+    expect(check(stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: 0, followedId: journeys[0].id, fresh: true }, ctxOf(at(7, 27), s)))[0]).toBe('Départ 07:33, dans 6 min   arrivée ~08:58');
     expect(l1.slice(-2)).toEqual(['Fin du trajet. ▽ 2 autres trajets', HINT_STEPS]);
     // ▼ au bout : « Autres trajets », la raison ou les moyens en 2e ligne
     const list = othersView({ screen: 'others', key: 'k', title: 'Vers le bureau', journeys, index: 0 }, journeys, ctx);
@@ -652,9 +654,9 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     const v = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: res.journeys, index: 0, followedId: j.id, fresh: true }, ctxOf(now, s));
     expect(v.titleRight).toBeUndefined();
     const lines = check(v);
-    // 1.2.10 (PRD-1.2.10 § 5) : une rangée, la marche ; suivi (guidé) : rien à lancer
-    expect(lines).toEqual(['Départ 10:00   arrivée 10:09', '10:00 à pied 9 min', 'Fin du trajet. Pas d’autre trajet pour l’instant', '△▽ étapes   double : retour']);
-    expect(v.tap).toBeUndefined();
+    // 1.2.10 (PRD-1.2.10 § 5) : une rangée, la marche ; suivi (guidé) : toucher revient au guidage
+    expect(lines).toEqual(['Départ 10:00   arrivée 10:09', '10:00 à pied 9 min', 'Fin du trajet. Pas d’autre trajet pour l’instant', HINT_STEPS]);
+    expect(v.tap).toEqual({ kind: 'resume' });
     expect(lines.join(' ')).not.toMatch(/direct/);
     // pas encore guidé : « y aller » (le guidage mène aussi à pied)
     expect(stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: res.journeys, index: 0, fresh: true }, ctxOf(now, s)).tap).toEqual({ kind: 'goGuide' });

@@ -34,8 +34,8 @@ export const HINTS = {
   trainRun: `△▽ arrêts   toucher${NB}: j’y descends   double${NB}: retour`,
   /** 1.2.10 (PRD-1.2.10 § 5) : écran du trajet : toucher lance le guidage de la proposition affichée. */
   stepsGo: `△▽ étapes   toucher${NB}: y aller   double${NB}: retour`,
-  /** 1.2.10 : trajet déjà guidé (ou suivi sans messages, § 3.5) : rien à lancer. */
-  stepsGuided: `△▽ étapes   double${NB}: retour`,
+  /** 1.2.10 : trajet guidé (écran calme allumé) : toucher revient à l'écran du guidage. */
+  stepsGuided: `△▽ étapes   toucher${NB}: guidage   double${NB}: retour`,
   /** 1.2.10 (§ 3.2, § 3.3) : un moment du guidage ou « Où tu en es ». */
   guide: `toucher${NB}: effacer   appui long${NB}: arrêter`,
   /** 1.2.10 : « Tu y es ». */

@@ -52,16 +52,20 @@ describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
     h.c.stop();
   });
 
-  it('toucher sur l’écran du trajet : « y aller » (goGuide) ; sur le trajet guidé, aucune action (arrêter : appui long)', () => {
+  it('toucher sur l’écran du trajet : « y aller » (goGuide) ; trajet guidé : retour au guidage ; suivi sans guidage : « Ne plus suivre »', () => {
     const j = door('j-bureau', NOW + 2 * MIN, NOW + 75 * MIN);
     const c = { now: NOW, settings: settingsWith([PLACES.bureau]) };
     const open1 = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0, fresh: true }, c);
     expect(tapIntent(open1, 0)).toEqual({ kind: 'goGuide' });
     expect(open1.titleRight).toBeUndefined();
     const guided = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0, fresh: true }, { ...c, guidedJourneyId: 'j-bureau' });
-    expect(tapIntent(guided, 0)).toBeUndefined();
+    expect(tapIntent(guided, 0)).toEqual({ kind: 'resume' });
     expect(guided.mark).toBe(0);
     expect(guided.log).toMatchObject({ followed: true });
+    const off = { ...c, guidedJourneyId: 'j-bureau', settings: settingsWith([PLACES.bureau], { display: { ...settingsWith([]).display, guide: false } }) };
+    const followed = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0, fresh: true }, off);
+    expect(tapIntent(followed, 0)).toEqual({ kind: 'open', route: { screen: 'followed' } });
+    expect(nb(followed.hints)).toBe('△▽ étapes   toucher : ne plus suivre   double : retour');
   });
 
   it('sans aide des gestes (réglage) : aucune aide, le toucher lance toujours le guidage', async () => {
@@ -114,10 +118,10 @@ describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
     const j = door('j-phone', NOW + 2 * MIN, NOW + 75 * MIN);
     expect(nb(await h.c.showTrip({ title: 'Vers le bureau', from: { type: 'here' }, to: { type: 'place', placeId: 'fav-bureau' }, favoriteId: 'fav-bureau', result: { journeys: [j] }, index: 0 }))).toBe('Affiché dans les lunettes : Bus W 07:38.');
     const s = await h.until(steps);
-    // suivi (et guidé quand le contrôleur le dira) : rien à lancer au toucher
+    // suivi (guidé, écran calme allumé par défaut) : toucher revient au guidage
     expect(s).toMatchObject({ followed: true, sel: 0 });
     expect(nb(s.title)).toBe('Bureau');
-    expect(s.lines.at(-1)).toBe('△▽ étapes   double : retour');
+    expect(s.lines.at(-1)).toBe('△▽ étapes   toucher : guidage   double : retour');
     await h.settle();
     expect(JSON.parse((await h.kv.get(TRIP_KEY))!).explicit).toBe(true);
     h.c.stop();

@@ -54,7 +54,7 @@ describe('écrans du guidage sur les états du moteur', () => {
     }
     // à l'heure seule : partir, monter, prochain arrêt, descendre, arriver
     expect([...seen.keys()]).toEqual(expect.arrayContaining(['leave', 'board', 'alight', 'arrived']));
-    expect(seen.get('leave')?.slice(0, 2)).toEqual(['Partir maintenant', '5 min à pied']);
+    expect(seen.get('leave')?.slice(0, 3)).toEqual(['Partir maintenant', '5 min à pied jusqu’à Monument Gramme', 'bus 6 à 07:12']);
     expect(seen.get('arrived')?.[0]).toBe('Tu y es');
   });
 
