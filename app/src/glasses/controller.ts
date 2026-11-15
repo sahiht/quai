@@ -617,10 +617,12 @@ export class GlassesController implements GlassesApi {
 
   /** Moment montré au dernier rendu de l'écran du guidage (null : aucun). */
   private momentShown: GuideState['moment'] = null;
-  /** Dernière batterie des lunettes connue (signal `device`), donnée au moteur (GuideInput.battery). */
+  /** Batterie des lunettes au dernier signal `device` (absente : inconnue), donnée au moteur (GuideInput.battery). */
   private battery: number | undefined;
   /** Lunettes connectées au dernier signal `device` (journal) ; null : aucun signal encore. */
   private glassesOn: boolean | null = null;
+  /** Lunettes connectées et portées au dernier signal `device` ; faux : rien n'est affiché (rappel suspendu). */
+  private glassesUp: boolean | null = null;
   /** Journal du guidage en cours (null : pas de journal, ou pas de guidage). */
   private trail: GuideTrail | null = null;
   private reminder = new MomentReminder({
@@ -628,7 +630,7 @@ export class GlassesController implements GlassesApi {
       const h = setTimeout(fn, Math.max(100, this.d.clock.real(ms)));
       return () => clearTimeout(h);
     },
-    now: () => performanceNow(),
+    now: () => this.d.clock.now(),
     display: () => this.settings().display,
     imu: (on, pace) => (this.d.platform.glasses.imu ? this.d.platform.glasses.imu(on, pace) : null),
     resend: (m, n) => this.remindResend(m, n),
@@ -2812,9 +2814,15 @@ export class GlassesController implements GlassesApi {
    * messages (un nouveau message important attend d'être vu) et le journal (moment affiché, au premier affichage).
    */
   private noteShown(view: GlassesView): void {
+    // lunettes déconnectées ou ôtées : rien n'est affiché ; l'attente reprend à leur retour (page reconstruite)
+    if (this.glassesUp === false) {
+      this.reminder.suspend();
+      return;
+    }
     const m = view.screen === 'guide' && current(this.nav).route.screen === 'guide' ? this.momentShown : null;
     if (m) this.trail?.shown(m);
-    this.reminder.shown(m ? { kind: m.kind, id: m.id } : null);
+    // Quai Web : pas de lunettes, l'écran dessiné est toujours visible : aucun rappel (ni capteur)
+    this.reminder.shown(m && !this.d.web ? { kind: m.kind, id: m.id } : null);
   }
 
   /**
@@ -2862,13 +2870,15 @@ export class GlassesController implements GlassesApi {
         this.trail?.add('fg', { on: true });
         return;
       case 'device': {
-        if (!s.connected || s.wearing === false) this.reminder.suspend();
+        this.glassesUp = s.connected && s.wearing !== false;
+        if (!this.glassesUp) this.reminder.suspend();
         if (s.connected !== this.glassesOn) {
           if (this.glassesOn !== null) this.trail?.add('glasses', { connected: s.connected });
           this.glassesOn = s.connected;
         }
-        const level = typeof s.battery === 'number' && Number.isFinite(s.battery) ? Math.min(100, Math.max(0, s.battery)) : undefined;
-        if (level === undefined || level === this.battery) return;
+        // batterie de 1 à 100 ; absente (ou 0 du SDK) : inconnue, l'ancienne valeur n'est pas gardée
+        const level = typeof s.battery === 'number' && Number.isFinite(s.battery) && s.battery >= 1 ? Math.min(100, Math.round(s.battery)) : undefined;
+        if (level === this.battery) return;
         this.battery = level;
         this.trail?.battery(level);
         // le moteur la reçoit tout de suite (vérification au départ)

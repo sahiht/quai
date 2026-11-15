@@ -13,7 +13,11 @@
  * suivent chaque envoi (premier affichage, puis chaque rappel). Référence : la médiane des mesures des 0,4 premières
  * secondes ; un écart de plus de 60 % de l'écart appris, sur l'axe appris et dans son sens, tenu 0,6 s : vu. Le capteur
  * est fermé dès que c'est vu, touché, fini, remplacé, en arrière-plan, lunettes ôtées, à la fin du guidage : toujours.
- * Les mesures ne sont jamais gardées (seule la référence, un nombre, le temps de l'attente) ni écrites nulle part.
+ * Le rappel ne referme que le capteur qu'il a ouvert et n'envoie rien au capteur hors de cette attente (un seul capteur,
+ * la dernière demande gagne : le test de l'écran a le sien, jamais pendant un guidage). Après une reconnexion des
+ * lunettes, la page reconstruite rouvre le capteur si le message attend encore. Les mesures ne sont jamais gardées
+ * (seule la référence, un nombre, le temps de l'attente) ni écrites nulle part. Quai Web : aucun rappel (le contrôleur
+ * ne lui signale aucun message).
  */
 import type { Journey, NameLang, Settings } from '../core/api';
 import type { GuideMemory, GuideState, Moment } from '../core/guide-types';
@@ -121,7 +125,7 @@ export type ReminderNote = { k: 'remind'; m: ShownMoment; n: number } | { k: 'se
 export interface ReminderDeps {
   /** Minuterie (délai en ms de l'horloge du guidage) ; renvoie l'annulation. */
   later(fn: () => void, ms: number): () => void;
-  /** Temps réel (ms) pour une mesure du capteur qui n'a pas d'instant lisible. */
+  /** Horloge de l'appli (celle des instants `at` des mesures, accélérée en mode test), pour une mesure sans instant lisible. */
   now?(): number;
   /** Réglages lus à chaque nouveau message : résultat du test de l'écran, mouvement appris. */
   display(): Pick<Settings['display'], 'alert' | 'headUp'>;
@@ -155,8 +159,12 @@ interface Wait {
 export class MomentReminder {
   private wait: Wait | null = null;
   private done = new Set<string>();
-  /** capteur demandé (ouvert ou en cours d'ouverture) ; chaque ouverture demandée est suivie d'une fermeture */
-  private imuOn = false;
+  /**
+   * Capteur ouvert par ce rappel (ouverture demandée, acceptée ou non). Lui seul est refermé par lui, une fois : hors de
+   * l'attente d'un message important, le rappel n'envoie rien au capteur (il n'y a qu'un capteur, la dernière demande
+   * gagne : le test de l'écran a le sien, jamais pendant un guidage).
+   */
+  private imuMine = false;
   private imuGen = 0;
 
   constructor(private readonly deps: ReminderDeps) {}
@@ -164,7 +172,7 @@ export class MomentReminder {
   /** Moment en attente d'être vu (tests, mode test). */
   get waiting(): (ShownMoment & { n: number; suspended: boolean; imu: boolean }) | null {
     const w = this.wait;
-    return w ? { ...w.m, n: w.n, suspended: w.suspended, imu: this.imuOn } : null;
+    return w ? { ...w.m, n: w.n, suspended: w.suspended, imu: this.imuMine } : null;
   }
 
   /** Après chaque rendu des lunettes : le moment affiché sur l'écran du guidage (null : aucun, ou un autre écran). */
@@ -214,7 +222,7 @@ export class MomentReminder {
   /** Une mesure du capteur ; ignorée hors de l'attente (le test de l'écran a les siennes). */
   sample(s: ImuSample): void {
     const w = this.wait;
-    if (!w || w.suspended || !w.watch || !this.imuOn) return;
+    if (!w || w.suspended || !w.watch || !this.imuMine) return;
     const at = Number.isFinite(s.at) ? s.at : this.deps.now?.();
     if (at === undefined || !w.watch.feed(at === s.at ? s : { ...s, at })) return;
     this.deps.note?.({ k: 'seen', m: w.m });
@@ -260,7 +268,7 @@ export class MomentReminder {
 
   private openImu(w: Wait, h: HeadUp): void {
     const imu = this.deps.imu;
-    if (!imu || this.imuOn) return;
+    if (!imu || this.imuMine) return;
     let req: Promise<boolean> | null;
     try {
       req = imu(true, REMIND.imuPaceMs);
@@ -268,7 +276,7 @@ export class MomentReminder {
       req = Promise.resolve(false);
     }
     if (req === null) return;
-    this.imuOn = true;
+    this.imuMine = true;
     const gen = ++this.imuGen;
     w.watch = new HeadUpWatch(h);
     this.deps.note?.({ k: 'imu', on: true });
@@ -284,8 +292,8 @@ export class MomentReminder {
   }
 
   private closeImu(): void {
-    if (!this.imuOn) return;
-    this.imuOn = false;
+    if (!this.imuMine) return;
+    this.imuMine = false;
     this.imuGen++;
     if (this.wait) this.wait.watch = null;
     this.deps.note?.({ k: 'imu', on: false });

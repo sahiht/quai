@@ -20,6 +20,7 @@ import type { Core, Endpoint, Favorite, FavoriteAnswer, Journey, LatLon, Setting
 import type { GuideMemory, GuideState, GuideStatus, Moment } from '../../src/core/guide-types';
 import type { JournalEvent, TripJournal } from '../../src/core/journal-types';
 import { TRIP_KEY, parseTrip, type ControllerDeps } from '../../src/glasses/controller';
+import type { Route } from '../../src/glasses/types';
 import {
   ADDRESS_TITLE,
   HeadUpWatch,
@@ -269,7 +270,26 @@ describe('reminder.ts : capteur de mouvement', () => {
     expect(k.imu).toHaveLength(2);
   });
 
-  it('mesure sans instant lisible : l’heure de réception (temps réel) la remplace', () => {
+  it('sans attente d’un message important : rien n’est envoyé au capteur (ni ouverture, ni fermeture)', () => {
+    const k = reminderKit({ headUp: HEAD });
+    k.r.shown(null);
+    k.r.touch();
+    k.r.suspend();
+    k.r.sample({ x: 0, y: -1, z: 0, at: 0 });
+    k.r.end();
+    k.r.shown({ kind: 'turn', id: 'turn:j1:0:1' });
+    k.r.shown(null);
+    k.r.end();
+    expect(k.imu).toEqual([]);
+    // ouvert par lui : fermé une seule fois, même si on le lui redemande
+    k.r.shown(BOARD);
+    k.r.touch();
+    k.r.end();
+    k.r.suspend();
+    expect(k.imu.map((c) => c.on)).toEqual([true, false]);
+  });
+
+  it('mesure sans instant lisible : l’horloge de l’appli la remplace', () => {
     let clock = 0;
     const seen: ReminderNote[] = [];
     const r = new MomentReminder({ later: () => () => undefined, now: () => clock, display: () => ({ headUp: HEAD }), imu: async () => true, resend: () => true, note: (e) => seen.push(e) });
@@ -585,6 +605,85 @@ describe('PRD-1.3.0 § 6.2 : « vu » par le capteur de mouvement', () => {
     });
   }
 
+  it('hors d’un guidage : aucun appel au capteur, quels que soient les écrans rendus', async () => {
+    const h = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { answers } });
+    withDisplay(h, { headUp: HEAD });
+    const imu: boolean[] = [];
+    depsOf(h).platform.glasses.imu = async (on) => {
+      imu.push(on);
+      return true;
+    };
+    await h.until(homeReady);
+    const routes: Route[] = [{ screen: 'favorites' }, { screen: 'stations' }, { screen: 'message', kind: 'info', title: 'Quai', lines: ['Test'] }, { screen: 'home' }];
+    for (const route of routes) {
+      await h.c.show(route);
+      await h.settle(2_000);
+    }
+    await h.emit({ kind: 'background' });
+    await h.emit({ kind: 'foreground' });
+    await h.emit({ kind: 'device', connected: false });
+    await h.emit({ kind: 'device', connected: true, wearing: true });
+    await h.emit({ kind: 'imu', x: 0, y: -1, z: 0, at: 1 });
+    await h.settle(3 * MIN);
+    h.c.stop();
+    expect(imu).toEqual([]);
+  });
+
+  it('pendant un guidage : seuls les messages importants ouvrent le capteur ; les autres écrans n’envoient rien', async () => {
+    const { h, imu } = await guided({ display: { headUp: HEAD }, imu: true });
+    await says(h, { moment: moment('turn', 'turn:j-bureau:0:1', NOW, NOW + 60 * MIN, { turn: 'left', distM: 40 }) });
+    await h.gesture('double');
+    await h.c.show({ screen: 'favorites' });
+    await h.settle(2_000);
+    expect(imu).toEqual([]);
+    // de retour sur le guidage, un message important : une ouverture ; l'accueil : une fermeture, puis plus rien
+    await h.c.show({ screen: 'guide' });
+    await says(h, { moment: boardM() });
+    expect(imuOn(imu)).toEqual([true]);
+    await h.gesture('double');
+    expect(imuOn(imu)).toEqual([true, false]);
+    await h.c.show({ screen: 'stations' });
+    await h.settle(2 * MIN);
+    await h.emit({ kind: 'background' });
+    await h.emit({ kind: 'foreground' });
+    await h.c.stopGuide();
+    h.c.stop();
+    expect(imuOn(imu)).toEqual([true, false]);
+  });
+
+  it('lunettes reconnectées : capteur rouvert si le message attend encore, l’attente reprend', async () => {
+    const { h, imu } = await guided({ display: { headUp: HEAD }, imu: true, before: (k) => k.emit({ kind: 'device', connected: true, wearing: true, battery: 80 }) });
+    await says(h, { moment: boardM() });
+    await h.settle(10_000);
+    await h.emit({ kind: 'device', connected: false });
+    expect(imuOn(imu)).toEqual([true, false]);
+    await h.settle(2 * MIN);
+    expect(reminds(h)).toEqual([]);
+    await h.emit({ kind: 'device', connected: true, wearing: true, battery: 80 });
+    expect(imuOn(imu)).toEqual([true, false, true]);
+    await h.settle(46_000);
+    expect(reminds(h)).toEqual(['QUAI_REMIND board 1']);
+    // le message n'attend plus (vu) : une nouvelle reconnexion ne rouvre rien
+    await lift(h, 400_000);
+    await h.emit({ kind: 'device', connected: false });
+    await h.emit({ kind: 'device', connected: true, wearing: true, battery: 80 });
+    expect(imuOn(imu)).toEqual([true, false, true, false]);
+  });
+
+  it('Quai Web : aucun rappel, aucun capteur (l’écran dessiné est toujours visible) ; le journal note le message', async () => {
+    const jr = memoryJournal();
+    const { h, imu } = await guided({ kit: { web: true }, display: { alert: 'visible', headUp: HEAD }, imu: true, journal: jr });
+    await says(h, { moment: boardM() });
+    expect(h.last()).toMatchObject({ screen: 'guide', moment: 'board:j-bureau:1' });
+    const n0 = h.calls.length;
+    await h.settle(5 * MIN);
+    expect(reminds(h)).toEqual([]);
+    expect(h.since(n0).filter((c) => c.op === 'rebuild')).toHaveLength(0);
+    expect(imu).toEqual([]);
+    expect(jr.of('moment').map((e) => e.d)).toEqual([{ m: 'board', id: 'board:j-bureau:1' }]);
+    expect(jr.of('remind')).toEqual([]);
+  });
+
   it('premier plan quitté puis revenu : capteur rouvert, l’attente reprend 45 s après le retour', async () => {
     const { h, imu } = await guided({ display: { headUp: HEAD }, imu: true });
     await says(h, { moment: boardM() });
@@ -610,12 +709,34 @@ describe('PRD-1.3.0 § 6.3 : batterie des lunettes et vérification', () => {
     await h.emit({ kind: 'device', connected: true, wearing: true, battery: 15 });
     expect(engine.calls.length).toBeGreaterThan(n);
     expect(engine.last().input.battery).toBe(15);
-    // un signal sans batterie la garde
-    await h.emit({ kind: 'device', connected: true, wearing: true });
-    await says(h, {});
-    expect(engine.last().input.battery).toBe(15);
     await h.emit({ kind: 'device', connected: true, wearing: true, battery: 40 });
     expect(engine.last().input.battery).toBe(40);
+    // absente : inconnue, l'ancienne valeur n'est pas gardée (le moteur recalculé tout de suite)
+    const m = engine.calls.length;
+    await h.emit({ kind: 'device', connected: true, wearing: true });
+    expect(engine.calls.length).toBeGreaterThan(m);
+    expect(engine.last().input.battery).toBeUndefined();
+    await says(h, {});
+    expect('battery' in engine.last().input).toBe(false);
+    // 0 du SDK : inconnue aussi ; une valeur entière de 1 à 100
+    await h.emit({ kind: 'device', connected: true, wearing: true, battery: 37.6 });
+    expect(engine.last().input.battery).toBe(38);
+    await h.emit({ kind: 'device', connected: true, wearing: true, battery: 0 });
+    expect(engine.last().input.battery).toBeUndefined();
+  });
+
+  it('signal `device` avec seulement la batterie changée : ni page reconstruite, ni « lunettes » dans le journal', async () => {
+    const jr = memoryJournal();
+    const { h } = await guided({ journal: jr, before: (k) => k.emit({ kind: 'device', connected: true, wearing: true, battery: 50 }) });
+    await says(h, { moment: boardM() });
+    const n0 = h.calls.length;
+    await h.emit({ kind: 'device', connected: true, wearing: true, battery: 49 });
+    await h.emit({ kind: 'device', connected: true, wearing: true, battery: 48 });
+    expect(engine.last().input.battery).toBe(48);
+    expect(h.since(n0).filter((c) => c.op === 'rebuild')).toHaveLength(0);
+    expect(jr.of('glasses')).toEqual([]);
+    // la batterie du journal reste celle du départ
+    expect(jr.of('battery').map((e) => e.d)).toEqual([{ level: 50 }]);
   });
 
   it('connue avant le lancement : le moteur l’a dès le premier calcul', async () => {
