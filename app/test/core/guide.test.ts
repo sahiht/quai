@@ -68,6 +68,17 @@ describe('heure seule (sans position), trajet complet', () => {
     expect(s.where).toMatchObject({ title: 'Bureau', arr: at('08:54'), rt: true });
   });
 
+  it('« où tu en es » à pied : temps réel du véhicule visé (bus 6), pas celui du trajet entier', () => {
+    const j = prdTrip();
+    j.legs[5] = { ...j.legs[5], rt: false };
+    j.rt = false;
+    const s = step(guide(j), at('07:00'));
+    expect(s.where.rt).toBe(false);
+    expect(s.where.walk).toMatchObject({ vehicle: { op: 'tec', mode: 'bus', line: '6' }, depAt: at('07:12'), rt: true });
+    const s2 = step(guide(prdTrip({ bus6Rt: false })), at('07:00'));
+    expect(s2.where.walk?.rt).toBe(false);
+  });
+
   it('10 min avant de partir : position moyenne', () => {
     const r = guide(prdTrip());
     expect(step(r, at('06:54')).location).toBe('off');

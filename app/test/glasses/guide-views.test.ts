@@ -311,6 +311,16 @@ describe('règles d’affichage du moteur (équipe A)', () => {
     for (const l of w) expect(l).not.toMatch(/dans 0 arrêt/);
   });
 
+  it('« Où tu en es » à pied : l’heure du véhicule visé suit son temps réel, pas celui du trajet entier', () => {
+    // IC en temps réel, tram de la correspondance sans : « IC à 07:44 » (comme « Partir maintenant »), arrivée « ~ »
+    const walk = { ...WHERE.walk!, vehicle: IC, depAt: T(7, 44), rt: true };
+    const w = shown(null, 'where', { where: { ...WHERE, rt: false, walk } }).lines;
+    expect(w[3]).toBe('IC à 07:44, marge 2 min');
+    expect(w[4]).toBe('arrivée ~08:54');
+    // véhicule sans temps réel dans un trajet qui en a : « ~ »
+    expect(shown(null, 'where', { where: { ...WHERE, rt: true, walk: { ...walk, rt: false } } }).lines[3]).toBe('IC à ~07:44, marge 2 min');
+  });
+
   it('marge négative : « très juste », jamais « marge -2 min » ; la voie ne concerne que les trains', () => {
     expect(shown(board({ vehicle: IC, depAt: T(7, 30), platform: '3', head: N('Ostende'), walkMin: 4, marginMin: -2 })).lines[2]).toBe('4 min à pied jusqu’au quai, très juste');
     expect(shown(null, 'where', { where: { ...WHERE, walk: { ...WHERE.walk!, marginMin: -2 } } }).lines[3]).toBe('bus 6 à 07:12, très juste');

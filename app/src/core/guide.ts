@@ -1030,6 +1030,7 @@ function whereOf(c: Ctx, loc: Loc): WhereAmI {
     if (r) {
       walk.vehicle = vehicleRef(r);
       walk.depAt = r.dep;
+      walk.rt = !!r.rt;
       walk.marginMin = Math.floor((r.dep - now) / MIN) - remainingMin;
     }
     if (pr && pr.route.source === 'osm' && c.fix) {
