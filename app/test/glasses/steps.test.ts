@@ -282,7 +282,8 @@ describe('§ 3 : textes et largeurs', () => {
     expect(title('Vers Gand-Saint-Pierre')).toBe('Gand-Saint-Pierre');
     expect(title('Vers Rue Neuve 1')).toBe('Rue Neuve 1');
     const long = title('Vers Comines/komen Chaussée de Wervicq/Werviksesteenweg 1, 7780 Comines-Warneton, Belgique');
-    expect(long).toMatch(/^Comines\/komen .*[a-z0-9,]…$/);
+    // coupé au mot, ou après un trait d'union ou une barre d'un nom composé (« Wervicq/… » : le français entier)
+    expect(long).toMatch(/^Comines\/komen .*[a-z0-9,/-]…$/);
     expect(long).not.toMatch(/ …$/);
     expect(textWidth(long)).toBeLessThanOrEqual(WIDTHS.title);
     // l'heure à sa place, aucun état sur la ligne du titre

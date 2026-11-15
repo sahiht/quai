@@ -523,7 +523,7 @@ export const MENU_RIGHT_PX = 190;
  */
 export function departText(ms: number, now: number, planned: boolean, delay: string, maxPx = MENU_RIGHT_PX): string {
   const tries = [`départ ${timeText(ms, now, planned)}${delay}`, `départ ${timeText(ms, now)}${delay}`, `départ ${timeText(ms, now)}`];
-  return tries.find((t) => textWidth(t) <= maxPx) ?? truncate(tries[tries.length - 1], maxPx);
+  return tries.find((t) => textWidth(t) <= maxPx) ?? truncateWords(tries[tries.length - 1], maxPx);
 }
 
 /** Réponse d'un trajet favori (L1) : « partir dans 4 min » et sa 2e ligne, ou l'état (« tu y es », « … »). */
@@ -674,7 +674,7 @@ export function favoriteDetail(a: FavoriteAnswer | undefined, now: number, setti
   const r = firstRide(j);
   if (!r) return { text: `à pied, ${minText(journeyMinutes(j))}`, planned: false };
   if (!catchable(j, now)) return null;
-  const fit = (t: string): string => (textWidth(t) <= maxPx ? t : truncate(t, maxPx));
+  const fit = (t: string): string => (textWidth(t) <= maxPx ? t : truncateWords(t, maxPx));
   if (a?.fromStation) {
     const plat = r.mode === 'train' ? platformText(r.platform, r.newPlatform) : '';
     return { text: fit(`${rideWords(r)}${plat ? ' ' + plat : ''} à ${displayName(r.from.name, settings.lang)}`), planned: false };

@@ -235,6 +235,14 @@ type GlyphDef = { s: Pt[][]; d?: Pt[] };
 function defs(): Record<string, GlyphDef> {
   return {
     ' ': { s: [] },
+    // ponctuation des voies et des lignes (« voie 10-11 », « 1/2 », « T2.1 », « 3+ ») : contrôle usager du 15/11
+    '-': { s: [P(0.3, 4.4, 3.7, 4.4)] },
+    '/': { s: [P(0, 0, 4, 10)] },
+    '.': { s: [], d: P(0.7, 0.7) },
+    ',': { s: [P(1, 0.9, 0.2, -1.6)] },
+    '+': { s: [P(0, 4.4, 5, 4.4), P(2.5, 1.9, 2.5, 6.9)] },
+    "'": { s: [P(0.8, 10, 0.6, 7.2)] },
+    '’': { s: [P(1, 10, 0.4, 7.2)] },
     '~': { s: [Array.from({ length: 13 }, (_, i): Pt => [i / 2, 5 + 0.9 * sinCosDeg(30 * i)[0]])] },
     '0': { s: [ring(3, 5, 3, 5)] },
     '1': { s: [P(0, 8.4, 2.4, 10, 2.4, 0)] },
