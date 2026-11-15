@@ -149,9 +149,10 @@ l'accueil montre « En cours », son toucher ouvre l'écran du trajet. La carte 
 
 ### 3.7 Position, batterie, cycle de vie
 
-- Positions continues seulement pendant un guidage (`LocationPort.watch`) : `high` (5 m, 2 s) en marchant, en
-  approchant de l'arrêt (300 m), à bord quand le prochain arrêt est la descente ; `medium` (50 m, 30 s) à bord
-  autrement et 10 min avant l'heure de partir ; `off` sinon et dès la fin. Appli Even : `startAppLocationUpdates` ;
+- Positions continues seulement pendant un guidage (`LocationPort.watch`) : `high` (5 m, 2 s) en marchant (approche
+  de l'arrêt comprise), à l'arrêt dans les 15 min avant le départ, à bord quand le prochain arrêt est la descente ;
+  `medium` (50 m, 30 s) à bord autrement et 10 min avant l'heure de partir ; `off` sinon et dès la fin (contrôle
+  technique du 15/11 : texte aligné sur le moteur). Appli Even : `startAppLocationUpdates` ;
   Quai Web et navigateur : `watchPosition`. Positions ignorées si précision > 75 m pour les décisions de distance.
 - Le moteur se recalcule à chaque position, à `wakeAt` (au plus toutes les 60 s) et à chaque rafraîchissement du temps
   réel du trajet suivi (règle 1.2.x : à l'approche du départ).

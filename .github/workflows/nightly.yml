@@ -198,6 +198,7 @@ jobs:
       - name: Balayer les lignes de bus, tram et métro
         if: ${{ steps.webapp.outcome == 'success' }}
         continue-on-error: true
+        timeout-minutes: 20
         working-directory: app
         env:
           QUAI_SCAN_DATA: ../site/data
@@ -210,6 +211,7 @@ jobs:
       - name: Balayer les chemins à pied
         if: ${{ steps.webapp.outcome == 'success' }}
         continue-on-error: true
+        timeout-minutes: 20
         working-directory: app
         env:
           QUAI_SCAN_DATA: ../site/data

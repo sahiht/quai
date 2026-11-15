@@ -82,8 +82,12 @@ export function fixOf(l: SdkFix | null | undefined, now: number, source: Fix['so
 
 /** Une position au moins toutes les 20 s pendant un flux, même immobile (le moteur oublie une position de plus de 60 s). */
 export const WATCH_REFRESH_MS = 20_000;
-/** Tolérance sur l'intervalle (l'hôte pousse à 2 s, parfois 1,9 s). */
-const INTERVAL_SLACK_MS = 250;
+/**
+ * Tolérance sur l'intervalle : une position est gardée dès les trois quarts de l'intervalle demandé (l'hôte pousse à
+ * 2 s, parfois 1,9 s ; à 30 s, parfois un peu avant : contrôle technique du 15/11, une position écartée de peu
+ * doublait l'écart, près de la limite de 60 s du moteur).
+ */
+const INTERVAL_SHARE = 0.75;
 
 /** Distance approchée en mètres (petites distances). */
 export function metersBetween(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
@@ -94,13 +98,14 @@ export function metersBetween(a: { lat: number; lon: number }, b: { lat: number;
 }
 
 /**
- * Faut-il transmettre `next` après `prev` (la dernière transmise) ? Jamais une plus ancienne, jamais avant `intervalMs` ;
+ * Faut-il transmettre `next` après `prev` (la dernière transmise) ? Jamais une plus ancienne, jamais avant les trois
+ * quarts de `intervalMs` ;
  * puis dès `distanceM` parcourus, dès que la précision double, ou au moins toutes les 20 s.
  */
 export function keepFix(prev: Fix | null, next: Fix, o: WatchOptions): boolean {
   if (!prev) return true;
   const dt = next.at - prev.at;
-  if (dt < 0 || dt + INTERVAL_SLACK_MS < o.intervalMs) return false;
+  if (dt < 0 || dt < o.intervalMs * INTERVAL_SHARE) return false;
   if (dt >= WATCH_REFRESH_MS) return true;
   if (metersBetween(prev, next) >= o.distanceM) return true;
   return next.accuracy !== undefined && (prev.accuracy === undefined || next.accuracy <= prev.accuracy / 2);

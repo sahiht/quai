@@ -87,8 +87,10 @@ export const GUIDE = {
   /** « Où tu en es » : 30 s (15 s au lancement) ; affiché par le contrôleur */
   whereMs: 30 * SEC,
   whereLaunchMs: 15 * SEC,
-  /** précision demandée : high en marchant, à 300 m de l'arrêt, à bord avant la descente ; medium 10 min avant de partir */
-  highNearM: 300,
+  /**
+   * précision demandée : high en marchant (approche de l'arrêt comprise), à l'arrêt dans les 15 min avant le départ
+   * (boardAheadMs), à bord avant la descente ; medium 10 min avant de partir et à bord autrement
+   */
   mediumBeforeMs: 10 * MIN,
   /** recalcul sans position : au plus toutes les 60 s */
   wakeMaxMs: 60 * SEC,

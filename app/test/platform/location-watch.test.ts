@@ -98,8 +98,14 @@ describe('lecture et tri des positions', () => {
     expect(keepFix(at(0), at(WATCH_REFRESH_MS - 1, 1), HIGH)).toBe(false);
     expect(keepFix(at(0), at(WATCH_REFRESH_MS, 1), HIGH)).toBe(true);
     expect(keepFix(at(5000), at(4000, 100), HIGH)).toBe(false);
-    expect(keepFix(at(0), at(25_000, 200), MEDIUM)).toBe(false);
+    expect(keepFix(at(0), at(20_000, 200), MEDIUM)).toBe(false);
     expect(keepFix(at(0), at(30_000, 0), MEDIUM)).toBe(true);
+    // contrôle technique du 15/11 : l'hôte pousse à 30 s, parfois un peu avant ; une position à 29,6 s n'est plus
+    // écartée (sinon la suivante, vers 60 s, arrivait au bord de la limite de fraîcheur du moteur)
+    expect(keepFix(at(0), at(29_600, 0), MEDIUM)).toBe(true);
+    expect(keepFix(at(0), at(22_500, 60), MEDIUM)).toBe(true);
+    expect(keepFix(at(0), at(1_400, 30), HIGH)).toBe(false);
+    expect(keepFix(at(0), at(1_500, 30), HIGH)).toBe(true);
     expect(metersBetween(GUI, { lat: north(100), lon: GUI.lon })).toBeCloseTo(100, 0);
     expect(watchOptions({ accuracy: 'medium', intervalMs: 10, distanceM: -3 })).toEqual({ accuracy: 'medium', intervalMs: 500, distanceM: 0 });
     expect(watchOptions(null)).toEqual(HIGH);

@@ -58,6 +58,15 @@ describe('WalkRouter', () => {
     expect(calls).toEqual(['2026-11-02|2541_145', '2026-11-09|2541_145']);
   });
 
+  it('contrôle technique du 15/11 : index encore en cache, tuile déjà de la semaine suivante : jamais mélangée (chemin droit), puis le vrai chemin dès que l’index suit', async () => {
+    let version = '2026-11-02';
+    const fresh = tileOf(street, { ver: '2026-11-09' });
+    const r = new WalkRouter({ index: async () => indexOf({ version }), tile: async () => fresh });
+    expect(await r.route(at(0, -300), at(300, 0))).toMatchObject({ source: 'straight', maneuvers: [] });
+    version = '2026-11-09';
+    expect((await r.route(at(0, -300), at(300, 0)))?.source).toBe('osm');
+  });
+
   it('tuile en échec (réseau) : exception, rien de gardé ; pas de nouvelle demande avant 30 s, puis la tuile revient', async () => {
     let fail = true;
     let calls = 0;
@@ -179,7 +188,8 @@ describe('Core.walkRoute', () => {
   it('vrai chemin depuis les tuiles publiées ; seules la zone et la version partent', async () => {
     const e = env();
     e.server.overrides.set('/quai/data/walk/index.json', () => new Response(JSON.stringify(indexOf({ version: '2026-11-09' })), { status: 200 }));
-    e.server.overrides.set('/quai/data/walk/2541_145.json', () => new Response(JSON.stringify(TILE), { status: 200 }));
+    // tuile de la même publication que l'index (une tuile d'une autre semaine ne sert pas)
+    e.server.overrides.set('/quai/data/walk/2541_145.json', () => new Response(JSON.stringify(tileOf(street, { ver: '2026-11-09' })), { status: 200 }));
     const r = await e.core.walkRoute!(at(0, -300), at(300, 0));
     expect(r?.source).toBe('osm');
     expect(r?.maneuvers).toEqual([expect.objectContaining({ turn: 'right', street: 'Rue du Bailli' })]);

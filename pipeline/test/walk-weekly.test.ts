@@ -287,6 +287,9 @@ describe('flux « Données de nuit » (nightly.yml)', () => {
       run: 'npx vitest run test/core/walk-scan',
     });
     expect(scan).toBeGreaterThan(i((s) => s.id === 'webapp'));
+    // contrôle technique du 15/11 : les balayages sont bornés (la tâche de nuit garde de quoi publier)
+    expect(steps[scan]['timeout-minutes']).toBe(20);
+    expect(steps[i((s) => s.name === 'Balayer les lignes de bus, tram et métro')]['timeout-minutes']).toBe(20);
     expect(scan).toBeLessThan(i((s) => s.uses === 'actions/upload-pages-artifact@v5'));
     expect(text).not.toMatch(/[\u2013\u2014]/);
   });
