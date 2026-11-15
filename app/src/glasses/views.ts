@@ -1251,9 +1251,10 @@ const stepTime = (t: string): string => padLeftTo(t, STEP_TIME_PX);
 
 /**
  * Place d'une rangée de véhicule pour le véhicule, l'arrêt de descente et la colonne de droite : de x = 108 (après la
- * case de l'heure) au bord sûr, moins les écarts entre conteneurs (10 px de chaque côté) et l'arrondi des espaces.
+ * case de l'heure) au bord sûr, moins les écarts entre conteneurs (10 px de chaque côté), l'arrondi des espaces de
+ * placement (2,5 px à chaque bout) et le crénage : segRow ne coupe alors jamais l'arrêt, déjà coupé au mot ici.
  */
-const STEP_ROW_PX = WIDTHS.full - STEP_TIME_PX - 10 - 10 - 10 - 5;
+const STEP_ROW_PX = WIDTHS.full - STEP_TIME_PX - 10 - 10 - 10 - 12;
 
 /**
  * 1.2.10 (PRD-1.2.10 § 5) : une rangée par étape. L'heure au début ; un véhicule au plus clair (« Bus 6 », « IC voie 3 »,

@@ -9,6 +9,7 @@ import { NB as CORE_NB, dayWord as coreDayWord, placeNoun, timeText, vers } from
 import { OP_NAME, displayName, hhmm, lineLabel, mainMode, minutesUntil } from '../core/util';
 import type { AreaSummary, Mode, Names, Op } from '../../../shared/types';
 import { textWidth, truncate } from './font';
+import { truncateWords } from './layout';
 
 /** Espace insécable : devant « : ; ! ? » et entre un nombre et son unité. */
 export const NB = CORE_NB;
@@ -929,21 +930,8 @@ export function departureWait(d: Departure, now: number, markPlanned: boolean): 
 
 /* ------------------------------ 1.2.10 (PRD-1.2.10) ------------------------------ */
 
-/**
- * 1.2.10 (PRD-1.2.10 § 1, principe 7) : un texte coupé à `maxPx` sans jamais couper un mot : il finit au dernier mot
- * entier qui tient, suivi de « … » ; un premier mot seul trop long est coupé au caractère (aucune autre issue).
- * L'espace insécable lie ses deux mots (« 40 m », « arrêt : ») : jamais séparés.
- */
-export function truncateWords(text: string, maxPx: number): string {
-  const t = truncate(text, Number.MAX_SAFE_INTEGER);
-  if (textWidth(t) <= maxPx) return t;
-  const words = t.split(' ');
-  for (let k = words.length - 1; k >= 1; k--) {
-    const head = words.slice(0, k).join(' ').replace(/[\s,;:·]+$/, '');
-    if (head && textWidth(`${head}…`) <= maxPx) return `${head}…`;
-  }
-  return truncate(t, maxPx);
-}
+/** 1.2.10 : coupe au mot (layout.ts : une seule règle pour les vues et la mise en page). */
+export { truncateWords };
 
 /**
  * 1.2.10 : un texte en trois parties dont seule celle du milieu (un nom) est raccourcie, au mot : « Prochain arrêt : »

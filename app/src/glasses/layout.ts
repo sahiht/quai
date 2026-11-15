@@ -699,8 +699,13 @@ function withExtras(p: PageSpec, v: GlassesView): PageSpec {
   return p;
 }
 
-/** Coupe au mot (layout ne dépend pas de format.ts : même règle que truncateWords). */
-function truncateWordsPx(text: string, maxPx: number): string {
+/**
+ * 1.2.10 (PRD-1.2.10 § 1, principe 7) : un texte coupé à `maxPx` sans jamais couper un mot : il finit au dernier mot
+ * entier qui tient, suivi de « … » ; faute de place pour un seul mot, après le dernier trait d'union, la dernière barre
+ * ou la dernière apostrophe qui tient (« Comines/… », « Bruxelles-… ») ; un premier morceau seul trop long est coupé
+ * au caractère (aucune autre issue). L'espace insécable lie ses deux mots (« 40 m », « arrêt : ») : jamais séparés.
+ */
+export function truncateWords(text: string, maxPx: number): string {
   const t = truncate(text, Number.MAX_SAFE_INTEGER);
   if (textWidth(t) <= maxPx) return t;
   const words = t.split(' ');
@@ -708,8 +713,16 @@ function truncateWordsPx(text: string, maxPx: number): string {
     const head = words.slice(0, k).join(' ').replace(/[\s,;:·]+$/, '');
     if (head && textWidth(`${head}…`) <= maxPx) return `${head}…`;
   }
+  // un seul mot ne tient pas : ses morceaux (« Comines/komen » → « Comines/ », « Bruxelles-Aéroport » → « Bruxelles- »)
+  const first = words[0];
+  for (let i = first.length - 1; i > 0; i--) {
+    if (!/[-/’']/.test(first[i - 1])) continue;
+    const head = first.slice(0, i);
+    if (textWidth(`${head}…`) <= maxPx) return `${head}…`;
+  }
   return truncate(t, maxPx);
 }
+const truncateWordsPx = truncateWords;
 
 /**
  * 1.2.10 (PRD-1.2.10 § 3.2, § 3.9) : page du guidage. Titre et heure pâles ; rangées (Item.a au plus clair, b normal,

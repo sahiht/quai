@@ -468,5 +468,8 @@ describe('PRD § 9.4 : chaque texte au pixel, avec les noms les plus longs des v
     expect(nb(truncateWords('Prochain arrêt : Gare', 140))).toBe('Prochain arrêt…');
     expect(truncateWords('Prochain arrêt', 100)).toBe('Prochain…');
     expect(truncateWords('Bureau', 300)).toBe('Bureau');
+    // faute de place pour un mot entier : après un trait d'union ou une barre du nom composé
+    expect(truncateWords('Comines/komen Chaussée', 90)).toBe('Comines/…');
+    expect(truncateWords('Bruxelles-Aéroport-Zaventem', 200)).toBe('Bruxelles-Aéroport-…');
   });
 });
