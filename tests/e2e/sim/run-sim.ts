@@ -42,6 +42,7 @@ import { APP, buildFixtureData, ROOT, run, startDataServer, startStack, type Pro
 import { litPixels, Sim, startStatic, type Screen } from '../lib/sim';
 import { Chrome, type GlassesScreen, type Page } from './cdp';
 import { alphaIn, checkPixels, HOME_INDENT, levels, lineSegments, SEG_ROW, trainRowAlpha, truncatedLines } from './pixels';
+import { scenarios1210, type Ctx as Ctx1210 } from './s1210';
 
 const E2E = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const SHOTS = join(E2E, 'screens');
@@ -53,6 +54,8 @@ const opt = (name: string) => {
   return i >= 0 ? argv[i + 1] : undefined;
 };
 const ONLY = new Set((opt('only') ?? '').split(',').filter(Boolean));
+/** `--only 's1210*'` : tous les scénarios dont l'identifiant commence par « s1210 ». */
+const only = (id: string): boolean => !ONLY.size || ONLY.has(id) || [...ONLY].some((x) => x.endsWith('*') && id.startsWith(x.slice(0, -1)));
 const PORT = Number(opt('port') ?? 9931);
 const DELIVER = opt('deliver');
 const WITH_TOUR = argv.includes('--tour');
@@ -609,7 +612,7 @@ async function step(name: string, fn: () => Promise<StepOut | void>): Promise<vo
 }
 
 async function runScenario(id: string, label: string, fn: () => Promise<void>): Promise<void> {
-  if (ONLY.size && !ONLY.has(id)) return;
+  if (!only(id)) return;
   scenario = id;
   console.log(`\n• ${id} : ${label}`);
   for (const f of readdirSync(SHOTS)) if (f.startsWith(`${id}-`) && f.endsWith('.png')) rmSync(join(SHOTS, f));
@@ -3989,6 +3992,24 @@ async function s129(): Promise<void> {
 
 /* ------------------------------ Lancement ------------------------------ */
 
+/** Ce que les scénarios 1.2.10 (sim/s1210.ts) empruntent à ce fichier : serveurs, rapport, étapes, Chrome. */
+function ctx1210(): Ctx1210 {
+  return {
+    appVersion: APP_VERSION,
+    shots: SHOTS,
+    notes,
+    scenario: () => scenario,
+    record: (r) => {
+      results.push(r as StepResult);
+    },
+    pageUrl: (params, webApp1210) => pageUrl(params, '', webApp1210 ? { app: webApp.url } : undefined),
+    preset: (file) => ({ reset: '1', preset: `${ipv4(web.url)}/${file}` }),
+    withChrome,
+    sim: () => sim,
+    step,
+  };
+}
+
 const SCENARIOS: [string, string, () => Promise<void>][] = [
   ['s129', '1.2.9 : téléphone en miroir des lunettes (Chrome) : accueil, bannière « Nouveau dans Quai 1.2.9 », Réglages et ses pas-à-pas, Affichage, écran « Lignes » (rangée dépliée, ouvrir d’office, ordre, retrait), ajout « Près de toi », rubriques vides', s129],
   ['s128', '1.2.8 : un train, tout son trajet : de Namur, puis l’IC de 07:42 qui roule, vu de Bruxelles-Nord (gares quittées en pâle, ● où il arrive, curseur sur la gare du tableau)', s128],
@@ -4013,6 +4034,8 @@ const SCENARIOS: [string, string, () => Promise<void>][] = [
   ['web', 'Quai Web (Chrome) : onglet Lunettes (accueil 1.2.2, relief), rubrique « Position » avec une adresse, message et bannière « Quai 1.2.9 » de l’onglet Réglages', webPosition],
   ['reopen', `réouverture de Quai (Chrome) : « ${NEWS_TITLE} » et la bannière une fois, aide des gestes 7 jours, trajet repris, fin du trajet, ligne retirée puis rétablie à l’identique`, reopen],
   ['tour', 'images du téléphone pour app/test/screens (--tour)', tourPhone],
+  // 1.2.10 « Y aller » (sim/s1210.ts) : npm run sim -- --only 's1210*'
+  ...scenarios1210(ctx1210()),
 ];
 
 async function main(): Promise<void> {
@@ -4051,7 +4074,9 @@ async function main(): Promise<void> {
   const p124 = { ...p11, seenVersion: '1.2.4' };
   const p125 = { ...p11, seenVersion: '1.2.5' };
   const p128 = { ...p11, seenVersion: '1.2.8' };
-  const pcur = { ...p11, seenVersion: '1.2.9' };
+  // version vue = version construite : jamais de message de nouveautés pour l'utilisateur courant, même après la montée
+  // de version (1.2.10 : sinon « Quai 1.2.10 » s'ouvrirait en tête de chaque scénario)
+  const pcur = { ...p11, seenVersion: APP_VERSION };
   // Adresses récentes : des lieux publics (PRD-1.2.2 : jamais d'adresse personnelle dans les tests ni les captures).
   const recent = [
     { label: 'Grand-Place, 1000 Bruxelles', lat: 50.8467, lon: 4.3525, at: Date.parse('2026-11-09T18:20:00+01:00') },
@@ -4120,6 +4145,32 @@ async function main(): Promise<void> {
     { id: 'f-stib-4', op: 'stib', mode: 'tram', line: '4', routes: ['stib:4'], ends: [N2('Stalle (P)')] },
     busW,
   ];
+  // 1.2.10 (PRD-1.2.10 § 2, § 3) : 7 favoris, des lieux publics (place Fontainas, Grand-Place) et des trajets entre gares ;
+  // gares et arrêts de la 1.1 gardés (rangés dans « Gares de train » et « Arrêts ») ; une adresse récente publique
+  const area = (areaId: string, fr: string, nl: string, lat: number, lon: number) => ({ type: 'area', areaId, op: 'sncb', name: { fr, nl }, lat, lon });
+  const namurA = area('sncb:8863008', 'Namur', 'Namen', 50.4685, 4.8625);
+  const nordA = area('sncb:8812005', 'Bruxelles-Nord', 'Brussel-Noord', 50.8605, 4.3612);
+  const stops11 = (p11 as unknown as { favorites: { kind: string }[] }).favorites.filter((f) => f.kind === 'stop');
+  const p1210 = {
+    ...pcur,
+    places: [
+      { id: 'fontainas', label: 'Place Fontainas', lat: 50.8443, lon: 4.3466, address: 'Place Fontainas, 1000 Bruxelles', src: 'address' },
+      { id: 'grand-place', label: 'Grand-Place', lat: 50.8467, lon: 4.3525, address: 'Grand-Place, 1000 Bruxelles', src: 'address' },
+    ],
+    favorites: [
+      { kind: 'trip', id: 'fav-fontainas', from: { type: 'here' }, to: { type: 'place', placeId: 'fontainas' }, label: 'Place Fontainas', propose: 'morning' },
+      { kind: 'trip', id: 'fav-grand-place', from: { type: 'here' }, to: { type: 'place', placeId: 'grand-place' }, label: 'Grand-Place', propose: 'never' },
+      gand,
+      { kind: 'trip', id: 'fav-gand-retour', from: gand.to, to: gand.from, propose: 'never' },
+      { kind: 'trip', id: 'fav-central-namur', from: gand.from, to: namurA, propose: 'never' },
+      { kind: 'trip', id: 'fav-namur-central', from: namurA, to: gand.from, propose: 'never' },
+      { kind: 'trip', id: 'fav-nord-gand', from: nordA, to: gand.to, propose: 'never' },
+      ...stops11,
+    ],
+    recent: [recent[1]],
+  };
+  write('1210.json', p1210);
+  write('1210news.json', { ...p1210, seenVersion: '1.2.9' });
   write('p126.json', { ...pcur, follows: [busW] });
   write('p126news.json', { ...pcur, seenVersion: '1.2.5', follows: [busW] });
   write('pwat126.json', { ...(JSON.parse(readFileSync(join(presets, 'waterloo.json'), 'utf8')) as object), follows });

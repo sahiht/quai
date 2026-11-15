@@ -37,6 +37,47 @@ npm run sim -- --only s1,waterloo # scénarios choisis (s129 s128 s126 s1 s1noRT
 npm run sim -- --deliver <dossier> --tour   # captures pour le propriétaire (manifest.json) ; images de app/test/screens/
 ```
 
+### 1.2.10 « Y aller » : la commande de l'intégrateur
+
+Sur la version assemblée (toutes les équipes fusionnées, `app/app.json` en 1.2.10), une seule commande :
+
+```sh
+cd tests/e2e && npm test && npm run typecheck && npm run sim -- --only 's1210*'
+```
+
+`npm test` comprend `guide-traces.test.ts` (traces et oracle, sans serveur) ; `--only 's1210*'` lance les dix
+scénarios s1210 (environ 6 min), puis `npm run sim` sans option pour tout le reste. Rapport : `out/sim-report.json`,
+captures : `screens/s1210-*.png` (contrôlées au pixel ; une capture `s1210-*-ECHEC.png` montre l'écran d'un échec).
+
+Crochets attendus de l'appli en mode test (`?e2e=1`), faute de quoi les scénarios s'arrêtent sur un message
+« crochet manquant : … » :
+
+- `window.__quaiPushFix({ lat, lon, accuracy, speed, heading, at })` : position poussée vers les flux du guidage
+  (`LocationPort.watch`), Quai Web compris (équipe B) ;
+- `window.__quaiClock.set(epochMs)` : horloge simulée réglée à un instant (Quai Web et appli ; à défaut,
+  `window.__restoreState({ clock: { now } })` de l'appli Even) ; le moteur se recalcule à la position poussée juste après ;
+- bouton « Appui long » (`data-g="long"`) dans la barre des gestes de Quai Web (PRD § 4.7) ;
+- journal `QUAI_SCREEN` de l'écran `guide` : champs `moment` (genre du moment, `where` ou `empty`) et `images`
+  (`x`, `y`, `w`, `h` de chaque conteneur d'image) ; de l'écran `favorites` : champ `detail` (la ligne du détail) ;
+- tuiles piétonnes `data/walk/` dans les données des fixtures (moment « virage », équipe D).
+
+Traces (`traces/`) : positions datées avec vitesse, cap et précision, sur des lieux publics seulement. Celles des
+scénarios suivent le mini-réseau des fixtures (place de l'Ange à Namur → place Fontainas à Bruxelles : marche, IC voie 6
+au lieu de 4, tram 3 très juste, marche ; véhicule raté ; arrêt dépassé ; sans position ; « j'y descends » à
+Bruxelles-Central). `LIEGE_FLAGEY` reprend l'exemple du PRD (bus 6, IC par Ans et Louvain, bus 71, Flagey) pour les
+tests du moteur et un passage sur les vraies données. Les textes attendus viennent de `sim/guide-oracle.ts`, écrit
+d'après le PRD seul et calculé sur le trajet guidé (`quai.trip`).
+
+| Scénario | Où | Ce qui est vérifié (PRD-1.2.10) |
+| --- | --- | --- |
+| `s1210sim` | simulateur Even Hub | Favoris d'une ligne chacun, 7 à l'écran, détail du favori choisi en bas (« IC 07:42 +2 voie 6 !, 1 changement »), qui suit le curseur (§ 2) ; écran du trajet (§ 5) ; « Où tu en es » au pixel ; menu système de l'appui long |
+| `s1210go` | Quai Web | « y aller », « Où tu en es » au lancement, effacer (écran vide, aucun pixel), « Partir maintenant » (et effacé : ne revient pas), virage, « board » (voie modifiée), « Où tu en es » à pied, à la gare, à bord, « Prochain arrêt » (au plus un toutes les 10 min, jamais dans les 5 min avant la descente), « Descends au prochain arrêt », correspondance, « Tu y es », terminer |
+| `s1210missed`, `s1210passed`, `s1210nofix` | Quai Web | Véhicule raté (nouveau trajet), arrêt dépassé, positions trop imprécises (à l'heure seule, ni virage ni véhicule raté) |
+| `s1210menu` | Quai Web | Bouton « Appui long », menu « Arrêter le guidage » et « Voir tout le trajet », double toucher et « En cours », toast « Guidage arrêté » |
+| `s1210ride` | Quai Web | « j'y descends » depuis les arrêts de l'IC (aide, arrêt de la montée sans action, genre `ride`), descente, « Tu y es » |
+| `s1210off`, `s1210fg` | Quai Web | Réglage « Me guider » éteint (toast « Trajet suivi », aucun écran qui change seul, « En cours » ouvre le trajet) ; premier plan quitté puis revenu (page du moment présent reconstruite) |
+| `s1210news` | simulateur Even Hub | Message « Quai 1.2.10 » depuis la 1.2.9 (§ 7 ; formulations finales à reporter dans `NEWS_1210` de `sim/s1210.ts`) |
+
 Suites partielles : `npm run test:data` (données et téléchargement), `npm run test:core` (cœur, robustesse, trajets
 et adresses). Données réelles, à la demande : `QUAI_REAL_DATA=/home/claude/real-data-11/data npm run test:real`
 (instantané 1.1 couvrant le 11/11 et le 12/11/2026).
