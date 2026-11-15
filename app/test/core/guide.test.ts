@@ -4,7 +4,7 @@
  * pied, bus 71 jusqu'à Flagey, à pied jusqu'aux étangs d'Ixelles. Heure seule, positions, temps réel, imprévus.
  */
 import { describe, expect, it } from 'vitest';
-import type { Moment } from '../../src/core/guide-types';
+import type { GuideMemory, Moment, WalkRoute } from '../../src/core/guide-types';
 import { dismissMoment, GUIDE, guideStep, newGuideMemory, replanJourney, replanNone, type GuideInput } from '../../src/core/guide';
 import {
   at,
@@ -345,6 +345,25 @@ describe('positions', () => {
     s = step(r, at('07:06:10'), fix(off(10), at('07:06:10')));
     expect(s.needRoute).toEqual({ leg: 0, from: { lat: off(10).lat, lon: off(10).lon }, to: P.gramme });
     expect(s.moment).toBeNull();
+  });
+
+  it('la phase ne dépend pas du chemin gardé : à la correspondance de Bruxelles-Central, pas d’alternance de demandes entre les marches 4 et 6', () => {
+    // à 72 m à vol d'oiseau de l'arrêt du bus 71, 65 m à côté du chemin de la marche 4, dont il reste 30 m
+    const stopP = P.gareCentrale;
+    const r4 = route([P.central, offset(stopP, -40, 0), stopP]);
+    const here = offset(stopP, -30, 65);
+    const r6 = route([P.flagey, offset(P.flagey, 0, -200), P.etangs]);
+    const run = (walk: { leg: number; route: WalkRoute }) => {
+      const r = guide(prdTrip(), { walk });
+      r.mem = { v: 1, dismissed: [], shown: {}, ...{ jid: 'jprd', boarded: { leg: 3, at: at('07:31') }, alighted: { leg: 3, at: at('08:27:30') } } } as GuideMemory;
+      return step(r, at('08:29'), fix(here, at('08:29'), { speed: 1.2 }));
+    };
+    const with4 = run({ leg: 4, route: r4 });
+    const with6 = run({ leg: 6, route: r6 });
+    expect(with4.phase).toEqual(with6.phase);
+    // le chemin demandé est le même, que l'on garde celui de la marche 4 ou celui de la marche 6
+    expect(with6.needRoute?.leg).toBe(4);
+    expect(with4.needRoute).toBeUndefined();
   });
 
   it('chemin de la marche en cours demandé une fois ; à bord, celui de la marche suivante', () => {

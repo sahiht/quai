@@ -474,13 +474,16 @@ function arrivedNow(c: Ctx): { yes: boolean; byFix: boolean } {
   return { yes: false, byFix: false };
 }
 
-/** La marche `w` n'est pas finie d'après la position : encore loin de son arrivée. */
+/**
+ * La marche `w` n'est pas finie d'après la position : encore loin de son arrivée (à vol d'oiseau). Jamais d'après le
+ * chemin gardé : le contrôleur n'en garde qu'un ; si la phase en dépendait, deux marches se le disputaient (avec le
+ * chemin de l'une, on se croit arrivé et on demande celui de la suivante ; sans lui, on se croit encore en marche).
+ */
 function walkingStill(c: Ctx, w: number): boolean {
   const l = c.legs[w];
   if (!c.fix || !knownPoint(l.to)) return false;
   const next = c.legs[w + 1];
-  const r = c.walkPr?.leg === w ? c.walkPr.remainingM : distanceM(c.fix, l.to);
-  return r > (next ? atStopM(next) : GUIDE.arrivedM);
+  return distanceM(c.fix, l.to) > (next ? atStopM(next) : GUIDE.arrivedM);
 }
 
 /** Prochain arrêt à bord (le premier non passé) : par la position si les arrêts ont tous une position, sinon l'heure. */
@@ -518,8 +521,8 @@ function locate(c: Ctx): Loc {
   if (l.kind === 'walk') {
     const k = legs[i + 1]?.kind === 'ride' ? i + 1 : -1;
     if (i === 0 && kind === 'trip' && now < j.leaveAt && !c.started) return { phase: { kind: 'before', leg: 0 }, leg: 0 };
-    // déjà à l'arrêt d'après la position : on attend
-    if (k >= 0 && c.fix && !walkingStill(c, i) && (distTo(c, l.to) <= GUIDE.stopM || (c.walkPr?.leg === i && c.walkPr.remainingM <= GUIDE.stopM) || now >= l.arr)) {
+    // déjà à l'arrêt d'après la position (à vol d'oiseau, jamais d'après le chemin gardé : voir walkingStill) : on attend
+    if (k >= 0 && c.fix && !walkingStill(c, i) && (distTo(c, l.to) <= GUIDE.stopM || now >= l.arr)) {
       return { phase: { kind: 'wait', leg: k }, leg: k };
     }
     return { phase: { kind: 'walk', leg: i }, leg: i };
