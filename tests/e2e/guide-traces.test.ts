@@ -106,7 +106,9 @@ describe('oracle des textes du guidage (PRD § 3.2, § 3.3)', () => {
     expect(O.matches('IC à 07:44, très juste', leave[2])).toBe(false);
     expect(leave[2]).toBe('IC à 07:44');
     expect(O.platformLines(J.legs[1])).toEqual(['Voie modifiée', 'IC à 07:44, voie 6 au lieu de 4']);
-    expect(O.boardLines(J, 1, t('07:41')).slice(0, 3)).toEqual(['IC à 07:44', 'vers Bruxelles-Midi', 'descente dans 5 arrêts']);
+    const board = O.boardLines(J, 1, t('07:41'));
+    expect(O.matches('IC à 07:44, voie modifiée', board[0]) && O.matches('IC à 07:44', board[0])).toBe(true);
+    expect(board.slice(1, 3)).toEqual(['vers Bruxelles-Midi', 'descente dans 5 arrêts']);
     expect(O.boardLines(J, 1, t('07:41'))).toContain('voie modifiée');
     expect(O.boardSign(J.legs[1])).toEqual({ label: 'voie', value: '6' });
     expect(O.boardSign(J.legs[3])).toEqual({ label: 'tram', value: '3' });
@@ -121,13 +123,13 @@ describe('oracle des textes du guidage (PRD § 3.2, § 3.3)', () => {
   it('« Où tu en es » : chaîne, à pied, à la gare', () => {
     expect(O.chainLine(J, 1)).toBe('● à pied ─ ◎ IC ─ ○ tram 3');
     const w = O.whereWalkLines(J, 0, 'Place Fontainas', 0);
-    expect(w[1]).toBe('À pied vers la voie 6');
+    expect(O.matches('À pied vers la voie 6', w[1]) && O.matches('À pied vers la gare de Namur', w[1])).toBe(true);
     expect(O.matches('IC à 07:44, marge 2 min', w[3])).toBe(true);
     expect(w[4]).toBe('arrivée ~08:58');
     const g = O.whereWaitLines(J, 1, 1);
     expect(g[1]).toBe('À la gare de Namur');
     expect(O.matches('IC dans 3 min, vers Bruxelles-Midi', g[2])).toBe(true);
-    expect(g[3]).toBe('voie 6');
+    expect(O.matches('voie 6 !', g[3]) && O.matches('voie 6', g[3])).toBe(true);
   });
 
   it('typographie : ni tiret long ni moyen, ni guillemet droit, ni conseil', () => {

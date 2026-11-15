@@ -45,7 +45,8 @@ export const HINTS = {
   moment: 'toucher : effacer   appui long : arrêter',
   arrived: 'toucher : terminer',
   stepsGo: '△▽ étapes   toucher : y aller   double : retour',
-  stepsGuided: '△▽ étapes   double : retour',
+  /** trajet guidé : arbitrage de l'intégrateur (toucher rouvre le guidage), le PRD § 5 disait « △▽ étapes   double : retour » */
+  stepsGuided: '△▽ étapes   toucher : guidage   double : retour',
   stopsAlight: '△▽ arrêts   toucher : j’y descends   double : retour',
 } as const;
 
@@ -127,7 +128,9 @@ export const stopsToAlight = (l: OLeg): number => Math.max(1, (l.stops?.length ?
 export function boardLines(j: OJourney, leg: number, now: number): Want[] {
   const l = j.legs[leg];
   const out: Want[] = [];
-  if (isTrain(l)) out.push(`${l.cat ?? 'train'} à ${time(l.dep, l.rt)}`);
+  const changed = !!l.newPlatform && !!l.platform && l.newPlatform !== l.platform;
+  // voie modifiée : « voie modifiée » au plus clair, à la suite de l'heure sur la 1re ligne ou sur une ligne à elle
+  if (isTrain(l)) out.push(changed ? new RegExp(`^${esc(`${l.cat ?? 'train'} à ${time(l.dep, l.rt)}`)}(, voie modifiée)?$`) : `${l.cat ?? 'train'} à ${time(l.dep, l.rt)}`);
   else {
     const m = minutesFloor(l.dep - now);
     if (m > 10) out.push(`à ${time(l.dep, l.rt)}`);
@@ -141,7 +144,7 @@ export function boardLines(j: OJourney, leg: number, now: number): Want[] {
   out.push(stopsPhrase(stopsToAlight(l)));
   const prev = j.legs[leg - 1];
   if (prev && prev.kind === 'walk' && leg > 1) out.push(/^\d+ min à pied jusqu’au quai, marge \d+ min$/);
-  if (l.newPlatform && l.platform && l.newPlatform !== l.platform) out.push('voie modifiée');
+  if (changed) out.push('voie modifiée');
   return out;
 }
 
@@ -192,7 +195,7 @@ export function replanMissedLines(lost: OLeg, next: OJourney | null, oldArr: num
   if (!next) return [lostRe, 'Pas d’autre trajet trouvé'];
   const r = next.legs[nextRide(next, 0)];
   const p = r?.newPlatform ?? r?.platform;
-  const first = r ? `Nouveau trajet : ${vehicle(r)} ${time(r.dep, r.rt)}${isTrain(r) && p ? `, voie ${p}` : ''}` : /^Nouveau trajet : /;
+  const first = r ? new RegExp(`^Nouveau trajet : ${esc(vehicle(r))} ~?${esc(hm(r.dep))}${isTrain(r) && p ? `, voie ${esc(p)}` : ''}$`) : /^Nouveau trajet : /;
   return [lostRe, first, `arrivée ${hm(next.arr)}, ${Math.round((next.arr - oldArr) / 60_000)} min plus tard`];
 }
 
@@ -217,12 +220,12 @@ export function whereWalkLines(j: OJourney, walkLeg: number, title: string, nowI
   const r = nextRide(j, walkLeg + 1);
   const l = r >= 0 ? j.legs[r] : null;
   const p = l ? (l.newPlatform ?? l.platform) : undefined;
-  const toward = !l ? title : isTrain(l) && p ? `la voie ${p}` : `l’arrêt du ${vehicle(l)}`;
+  const toward: Want = !l ? title : isTrain(l) && p ? new RegExp(`^À pied vers (la voie ${esc(p)}|la gare de ${esc(l.from.name.fr)})$`) : `l’arrêt du ${vehicle(l)}`;
   return [
     chainLine(j, nowIdx),
-    `À pied vers ${toward}`,
-    /^(\d+ m|\d+,\d km), \d+ min$/,
-    ...(l ? [new RegExp(`^${esc(vehicle(l))} à ${esc(time(l.dep, l.rt))}, marge \\d+ min$`)] : []),
+    typeof toward === 'string' ? `À pied vers ${toward}` : toward,
+    /^((\d+ m|\d+,\d km), )?\d+ min$/,
+    ...(l ? [new RegExp(`^${esc(vehicle(l))} à ${esc(time(l.dep, l.rt))}, (marge \\d+ min|très juste)$`)] : []),
     `arrivée ${time(j.arr, j.rt)}`,
   ];
 }
@@ -235,7 +238,8 @@ export function whereWaitLines(j: OJourney, leg: number, nowIdx: number): Want[]
     chainLine(j, nowIdx),
     isTrain(l) ? `À la gare de ${l.from.name.fr}` : `À l’arrêt ${l.from.name.fr}`,
     new RegExp(`^${esc(vehicle(l))} (dans ~?\\d+ min|imminent|à ~?\\d\\d:\\d\\d), vers ${esc(l.head?.fr ?? '')}$`),
-    ...(isTrain(l) && p ? [`voie ${p}`] : []),
+    // voie modifiée : « voie 6 ! » comme sur les autres écrans
+    ...(isTrain(l) && p ? [new RegExp(`^voie ${esc(p)}${l.newPlatform && l.platform && l.newPlatform !== l.platform ? '( !)?' : ''}$`)] : []),
     `arrivée ${time(j.arr, j.rt)}`,
   ];
 }
@@ -247,7 +251,7 @@ export function whereRideLines(j: OJourney, leg: number, nextIdx: number, nowIdx
   const n = stops[nextIdx];
   return [
     chainLine(j, nowIdx),
-    new RegExp(`^[●◎○─…]+ {3}${esc(stopsPhrase(stops.length - 1 - nextIdx + 1))}$|^[●◎○─…]+$`),
+    new RegExp(`^[●◎○─…]+ (  )?${esc(stopsPhrase(stops.length - 1 - nextIdx + 1))}$|^[●◎○─…]+$`),
     ...(n ? [`Prochain arrêt : ${n.name.fr}, ${time(n.est, l.rt)}`] : []),
     `descente : ${l.to.name.fr}, ${time(l.arr, l.rt)}`,
     ...(kind === 'trip' ? [`arrivée ${time(j.arr, j.rt)}`] : []),

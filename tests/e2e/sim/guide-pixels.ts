@@ -115,7 +115,7 @@ export function checkGuidePixels(png: Buffer, s: GuideShot, opts: { image: boole
     if (n < 40) bad.push(`image attendue à gauche, cadre vide (${n} pixels allumés)`);
   }
   // rangée du titre : le titre à la marge, l'heure calée à droite (mêmes espaces que layout.ts)
-  const explained: { y: number; segs: Seg[] }[] = [];
+  const explained: { y: number; h?: number; segs: Seg[] }[] = [];
   if (s.title || s.clock) {
     const segs: Seg[] = [];
     if (s.title) segs.push({ from: GEO.X_TEXT, to: GEO.X_TEXT + width(s.title), text: s.title });
@@ -136,14 +136,18 @@ export function checkGuidePixels(png: Buffer, s: GuideShot, opts: { image: boole
     if (!line.trim()) continue;
     const lw = width(line);
     let found: { y: number; x0: number } | null = null;
+    const fits = (yy: number, x0: number): boolean => {
+      const e = extent(lit, yy, boxes);
+      return e.n > 0 && Math.abs(e.min - x0) <= TOL + 1 && e.max >= x0 + lw - END_TOL && e.max <= x0 + lw + TOL;
+    };
     for (let yy = y; yy <= H - LINE_H + 4 && !found; yy++) {
       for (const x0 of boxes.length ? [X_IMAGE_TEXT, GEO.X_TEXT] : [GEO.X_TEXT]) {
-        const e = extent(lit, yy, boxes);
-        if (!e.n) break;
-        if (Math.abs(e.min - x0) <= TOL + 1 && e.max >= x0 + lw - END_TOL && e.max <= x0 + lw + TOL) {
-          found = { y: yy, x0 };
-          break;
-        }
+        if (!fits(yy, x0)) continue;
+        // la fenêtre convient sur plusieurs rangées de pixels autour de la ligne : on prend le milieu de cette suite
+        let end = yy;
+        while (end < yy + 14 && fits(end + 1, x0)) end++;
+        found = { y: Math.round((yy + end) / 2), x0 };
+        break;
       }
     }
     if (!found) {
@@ -152,7 +156,8 @@ export function checkGuidePixels(png: Buffer, s: GuideShot, opts: { image: boole
     }
     const overImage = boxes.some((b) => found!.y + 4 < b.y + b.h && found!.y + 23 > b.y && found!.x0 < b.x + b.w);
     if (overImage) bad.push(`« ${line} » écrit sur l’image`);
-    explained.push({ y: found.y, segs: [{ from: found.x0, to: found.x0 + lw, text: line }] });
+    // la fenêtre trouvée peut commencer quelques pixels au-dessus de la rangée : accents et jambages compris
+    explained.push({ y: found.y - 3, h: LINE_H + 8, segs: [{ from: found.x0, to: found.x0 + lw, text: line }] });
     y = found.y + LINE_H - 4;
   }
   // aucun autre pixel allumé : ni texte hors cadre, ni ligne passée à la ligne, ni reste d'une page précédente
@@ -162,7 +167,7 @@ export function checkGuidePixels(png: Buffer, s: GuideShot, opts: { image: boole
       if (!lit(x, yy)) continue;
       if (boxes.some((b) => x >= b.x && x < b.x + b.w && yy >= b.y && yy < b.y + b.h)) continue;
       if (x < GEO.X_TEXT - 2 && s.screen === 'menu') continue; // curseur ▶ du menu
-      const ok = explained.some((e) => yy >= e.y && yy < e.y + LINE_H && e.segs.some((sg) => x >= sg.from - TOL && x <= sg.to + TOL));
+      const ok = explained.some((e) => yy >= e.y && yy < e.y + (e.h ?? LINE_H) && e.segs.some((sg) => x >= sg.from - TOL && x <= sg.to + TOL));
       if (!ok) stray.push(`(${x}, ${yy})`);
     }
   if (stray.length) bad.push(`pixels allumés hors des lignes journalisées et des images : ${stray.join(', ')}…`);

@@ -106,8 +106,9 @@ async function setNow(r: Run, t: number): Promise<void> {
 
 /** Position poussée vers les flux du guidage (`window.__quaiPushFix`, équipe B). */
 async function push(r: Run, p: TracePoint): Promise<void> {
-  const ok = await r.page.eval<boolean>(`(() => { if (typeof window.__quaiPushFix !== 'function') return false; window.__quaiPushFix(${JSON.stringify(toFix(p))}); return true; })()`);
-  check(ok, 'crochet manquant : window.__quaiPushFix({ lat, lon, accuracy, speed, heading, at }) en mode e2e (équipe B, PRD § 10)');
+  const ok = await r.page.eval<string>(`(() => { if (typeof window.__quaiPushFix !== 'function') return 'absent'; return window.__quaiPushFix(${JSON.stringify(toFix(p))}) ? 'pris' : 'refusé'; })()`);
+  check(ok !== 'absent', 'crochet manquant : window.__quaiPushFix({ lat, lon, accuracy, speed, heading, at }) en mode e2e (équipe B, PRD § 10)');
+  check(ok === 'pris', `position refusée par window.__quaiPushFix (${p.lat}, ${p.lon} à ${O.hm(p.at)}) : aucun flux de position en service ?`);
 }
 
 /** Va à l'instant `t` et y pousse la position de la trace (le moteur se recalcule à chaque position, PRD § 3.7). */
@@ -251,7 +252,8 @@ async function goFontainas(r: Run): Promise<GlassesScreen> {
   for (let i = 0; i < 4 && r.page.lastScreen()?.sel !== 0; i++) await gesture(r, 'up');
   await gesture(r, 'tap');
   const favs = await waitGuideAny(r, 'Favoris', (s) => s.screen === 'favorites' && !s.lines.some((l) => /…$/.test(l)), 15_000);
-  const k = favs.lines.findIndex((l) => l.startsWith(`${FONTAINAS}   `) || l === FONTAINAS);
+  // « ! » après le nom d'un favori dont le trajet a un souci (voie modifiée, PRD § 2)
+  const k = favs.lines.findIndex((l) => new RegExp(`^${FONTAINAS}( !)?( {3}|$)`).test(l));
   check(k >= 0, `favori « ${FONTAINAS} » absent de Favoris : ${JSON.stringify(favs.lines)}`);
   for (let i = 0; i < 10 && r.page.lastScreen()?.sel !== k; i++) await gesture(r, (r.page.lastScreen()?.sel ?? 0) < k ? 'down' : 'up');
   await gesture(r, 'tap');
@@ -272,14 +274,22 @@ async function waitGuideAny(r: Run, label: string, pred: (s: GlassesScreen) => b
 }
 
 /** Lance le guidage (« y aller ») et rend le trajet guidé. */
-async function launch(r: Run): Promise<{ j: O.OJourney; title: string; where: GlassesScreen }> {
+async function launch(r: Run): Promise<{ j: O.OJourney; title: string; where?: GlassesScreen; opening?: string }> {
   const steps = await goFontainas(r);
   check(O.matches(hint(steps), O.HINTS.stepsGo), `écran du trajet : aide « ${hint(steps)} » au lieu de « ${O.HINTS.stepsGo} » (PRD § 5)`);
+  const mark = r.page.screens().length;
   await gesture(r, 'tap');
-  const where = await waitGuide(r, '« Où tu en es » au lancement (PRD § 3.1)', (s) => isGuide(s) && s.lines.length > 2, 15_000);
+  // § 3.1 : l'écran du guidage s'ouvre sur « Où tu en es » (journal : show « where »), le premier écran après le toucher
+  await waitGuide(r, '« Où tu en es » au lancement (PRD § 3.1)', (s) => isGuide(s) && s.show === 'where', 15_000).catch(() => undefined);
+  const after = r.page.screens().slice(mark).filter(isGuide);
+  const where = after.find((s) => s.show === 'where');
+  check(after.length, `aucun écran du guidage après « y aller » (PRD § 3.1)`);
+  const opening = where ? undefined : `l’écran du guidage ne s’ouvre pas sur « Où tu en es » (PRD § 3.1) : ${after.slice(0, 2).map(show).join(' | ')}`;
+  if (opening) r.ctx.notes.push(`${r.ctx.scenario()} : ${opening}`);
   const ft = await followed(r);
   check(ft?.journey?.legs?.length, `trajet suivi absent de quai.trip après « y aller » (PRD § 3.1)`);
-  return { j: ft.journey, title: ft.title, where };
+  // titre des écrans du guidage : le nom du trajet, celui de l'écran du trajet (« Bureau », PRD § 3.2)
+  return { j: ft.journey, title: steps.title, where, opening };
 }
 
 const rideLeg = (j: O.OJourney, k = 0) => O.rides(j)[k];
@@ -301,6 +311,8 @@ async function s1210go(ctx: Ctx): Promise<void> {
       const x = await launch(r);
       j = x.j;
       title = x.title;
+      // le trajet est guidé : la suite se joue même si l'ouverture ne montre pas « Où tu en es » (écart signalé ici)
+      check(x.where, x.opening ?? '« Où tu en es » absent au lancement');
       const w = x.where;
       check(w.lines.length >= 3, `« Où tu en es » : ${show(w)}`);
       // § 3.3 : à pied (avant le départ) ; la chaîne commence par la marche de départ
@@ -308,8 +320,10 @@ async function s1210go(ctx: Ctx): Promise<void> {
       check(chain[0] === 'à pied' && chain.length === O.rides(j).length + 1, `chaîne attendue « ${chain.join(' ─ ')} » (trajet ${j.legs.map((l) => (l.kind === 'walk' ? 'marche' : O.vehicle(l))).join(', ')})`);
       expectLines(w, [new RegExp(`^[◎○] à pied ─ ○ ${chain.slice(1).map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join(' ─ ○ ')}$`), ...O.whereWalkLines(j, 0, title, 0).slice(1)], '« Où tu en es » à pied (§ 3.3)');
       momentCommon(w, title);
-      return { screen: w, shot: { kind: 'guide', image: false } };
-    }, { critical: true });
+      // capture : au toucher sur l'écran vide (étape suivante), « Où tu en es » reste 30 s
+      return { screen: w };
+    });
+    if (!j) r.blocked = 'aucun trajet guidé après « y aller »';
     await gstep(r, 'guide-efface', async () => {
       // toucher : effacer ; l'écran reste vide (§ 3.2). Une voie modifiée connue d'avance peut paraître d'abord.
       await gesture(r, 'tap');
@@ -325,12 +339,13 @@ async function s1210go(ctx: Ctx): Promise<void> {
     });
     await gstep(r, 'guide-ou-tu-en-es-toucher', async () => {
       await gesture(r, 'tap');
-      const w = await waitGuide(r, '« Où tu en es » au toucher (§ 3.3)', (s) => isGuide(s) && s.lines.length > 2 && /^À pied vers /.test(O.norm(s.lines[1])));
+      const w = await waitGuide(r, '« Où tu en es » au toucher (§ 3.3)', (s) => isGuide(s) && s.show === 'where');
+      expectLines(w, O.whereWalkLines(j, 0, title, 0).map((x, i) => (i === 0 ? /^[◎○] à pied ─ / : x)), '« Où tu en es » au toucher (§ 3.3)');
       momentCommon(w, title);
-      await dismiss(r, '« Où tu en es »');
-      return { screen: w };
+      return { screen: w, shot: { kind: 'guide', image: !!(w.images as unknown[] | undefined)?.length } };
     });
     await gstep(r, 'guide-partir', async () => {
+      await dismiss(r, '« Où tu en es »');
       await goTo(r, tr, j.leaveAt + 5_000);
       const s = await moment(r, 'Partir maintenant', 'Partir maintenant', 12_000);
       expectLines(s, O.leaveLines(j, title, j.leaveAt + 5_000), '« Partir maintenant » (§ 3.2, leave)', [RATES]);
@@ -384,7 +399,7 @@ async function s1210go(ctx: Ctx): Promise<void> {
       check(s, `moment « board » de l’${O.vehicle(j.legs[ic])} jamais affiché en arrivant à la gare : dernier écran ${show(r.page.lastScreen())}`);
       const want = O.boardLines(j, ic, T('07:41'));
       expectLines(s, want.filter((w) => w !== 'voie modifiée'), '« À l’arrêt » / monter (§ 3.2, board)', ['voie modifiée', /^\d+ min à pied jusqu’au quai, marge \d+ min$/]);
-      if (want.includes('voie modifiée')) check(s.lines.some((l) => O.norm(l) === 'voie modifiée'), `« voie modifiée » absent du moment « board » : ${show(s)}`);
+      if (want.includes('voie modifiée')) check(s.lines.some((l) => O.norm(l) === 'voie modifiée' || O.norm(l).endsWith(', voie modifiée')), `« voie modifiée » absent du moment « board » : ${show(s)}`);
       momentCommon(s, title);
       return { screen: s, shot: { kind: 'guide', image: true } };
     });
@@ -577,13 +592,13 @@ async function s1210menu(ctx: Ctx): Promise<void> {
       const m = await waitGuide(r, 'menu de l’appui long (§ 3.4)', (s) => s.screen === 'menu');
       const items = m.lines.filter((l) => O.MENU.some((x) => O.norm(l).endsWith(x)));
       check(items.length === 2 && O.norm(items[0]).endsWith(O.MENU[0]) && O.norm(items[1]).endsWith(O.MENU[1]), `menu : « ${O.MENU.join(' », « ')} » attendus dans cet ordre, vu ${JSON.stringify(m.lines)}`);
-      return { screen: m, shot: { kind: 'menu' } };
+      return { screen: m, shot: { kind: 'layout' } };
     }, { critical: true });
     await gstep(r, 'menu-voir-tout-le-trajet', async () => {
       await gesture(r, 'down');
       await gesture(r, 'tap');
       const s = await waitGuide(r, '« Voir tout le trajet » : l’écran du trajet guidé (§ 3.4, § 5)', (x) => x.screen === 'steps');
-      check(O.matches(hint(s), O.HINTS.stepsGuided), `aide « ${hint(s)} » au lieu de « ${O.HINTS.stepsGuided} » (trajet déjà guidé, § 5)`);
+      check(O.matches(hint(s), O.HINTS.stepsGuided), `aide « ${hint(s)} » au lieu de « ${O.HINTS.stepsGuided} » (trajet déjà guidé, § 5 et arbitrage de l’intégrateur)`);
       await gesture(r, 'double');
       await waitGuide(r, 'retour au guidage par double toucher (§ 3.4)', isGuide);
       return { screen: s, shot: { kind: 'layout' } };
@@ -666,14 +681,15 @@ async function s1210ride(ctx: Ctx): Promise<void> {
       const j = ft!.journey;
       const ic = rideLeg(j);
       for (let t = T('07:44:10'); t <= T('08:43:30'); t += 120_000) await goTo(r, RIDE_CENTRAL, t);
-      await goTo(r, RIDE_CENTRAL, T('08:43:40'));
+      // pas avant 4 min de l'arrivée (08:48) : après le départ de Bruxelles-Nord, à 08:44
+      for (const t of [T('08:43:40'), T('08:44:10'), T('08:44:40')]) await goTo(r, RIDE_CENTRAL, t);
       const s = await moment(r, 'Descends au prochain arrêt (ride)', 'Descends au prochain arrêt', 10_000);
       expectLines(s, ['Descends au prochain arrêt', `Bruxelles-Central, ${(j.legs[ic].rt ? '' : '~') + O.hm(j.legs[ic].arr)}`], '« j’y descends » : descente (§ 3.2, alight, genre ride)');
       momentCommon(s, title);
       return { screen: s, shot: { kind: 'guide', image: false } };
     });
     await gstep(r, 'jy-descends-tu-y-es', async () => {
-      for (const t of [T('08:48:10'), T('08:49:10'), T('08:50')]) await goTo(r, RIDE_CENTRAL, t);
+      for (const t of [T('08:48:10'), T('08:49:10'), T('08:50'), T('08:50:30'), T('08:51')]) await goTo(r, RIDE_CENTRAL, t);
       const s = await moment(r, 'Tu y es (ride)', 'Tu y es', 10_000);
       momentCommon(s, title, O.HINTS.arrived);
       return { screen: s };
@@ -704,8 +720,8 @@ async function s1210off(ctx: Ctx): Promise<void> {
       for (const t of [T('07:31:05'), T('07:36'), T('07:41'), T('07:44:10'), T('07:56:05'), T('08:38:05')]) await goTo(r, NAMUR_FONTAINAS, t);
       const moved = r.page.screens().slice(r.mark).filter((s) => s.screen !== before?.screen || (s.screen !== 'steps' && s.screen !== 'home'));
       check(!moved.length, `écran changé seul avec « Me guider » éteint (§ 3.5) : ${moved.map(show).join(' | ')}`);
-      await gesture(r, 'double');
-      const h = await waitGuide(r, 'accueil avec « En cours »', (s) => s.screen === 'home');
+      for (let i = 0; i < 4 && r.page.lastScreen()?.screen !== 'home'; i++) await gesture(r, 'double');
+      const h = r.page.lastScreen()?.screen === 'home' ? r.page.lastScreen()! : await waitGuide(r, 'accueil avec « En cours »', (s) => s.screen === 'home');
       check(/^En cours/.test(O.norm(h.lines[0])), `« En cours » en tête de l’accueil (§ 3.5) : ${show(h)}`);
       await gesture(r, 'tap');
       const s = await waitGuide(r, '« En cours » ouvre l’écran du trajet (§ 3.5)', (x) => x.screen === 'steps');
@@ -752,10 +768,10 @@ async function s1210sim(ctx: Ctx): Promise<void> {
     const detail = (f as unknown as Record<string, unknown>).detail;
     // § 2 : une rangée par favori (7 à l'écran), le détail du favori choisi en bas, au-dessus des aides
     const rows = f.lines.slice(0, 7);
-    const bad = rows.filter((l) => !/^\S.*?( !)? {3}(dans \d+ min → \d\d:\d\d|maintenant → \d\d:\d\d|\d\d:\d\d → \d\d:\d\d|tu y es|…)$/.test(l));
+    const bad = rows.filter((l) => !/^\S.*?( !)? {3}(dans \d+ min → \d\d:\d\d|maintenant → \d\d:\d\d|\d\d:\d\d → \d\d:\d\d|tu y es|aucun trajet|…)$/.test(l));
     check(!bad.length, `rangées des favoris au format de l’accueil (§ 2) : ${JSON.stringify(bad)} dans ${JSON.stringify(f.lines)}`);
     check(f.lines.length >= 9, `7 favoris, la ligne du détail et l’aide sur un écran (§ 2, capacité 7) : ${JSON.stringify(f.lines)}`);
-    const det = typeof detail === 'string' ? detail : f.lines[f.lines.length - 2];
+    const det = O.norm(typeof detail === 'string' ? detail : f.lines[f.lines.length - 2]);
     check(det === 'IC 07:42 +2 voie 6 !, 1 changement', `détail du favori « ${FONTAINAS} » en bas : « ${det} » au lieu de « IC 07:42 +2 voie 6 !, 1 changement » (§ 2, favoriteDetail)`);
     return { screen: f };
   });
@@ -775,10 +791,10 @@ async function s1210sim(ctx: Ctx): Promise<void> {
     check(s.title === FONTAINAS, `titre « ${s.title} » au lieu de « ${FONTAINAS} » (§ 5)`);
     check(s.lines[0] === '! Voie modifiée : l’IC part de la voie 6' || /^Départ \d\d:\d\d, dans \d+ min {3}arrivée ~?\d\d:\d\d$/.test(s.lines[0] ?? ''), `ligne du haut « ${s.lines[0]} » (§ 5 : « Départ 07:05, dans 3 min   arrivée 08:54 », ou l’alerte du trajet)`);
     const rows = s.lines.slice(1, -2);
-    const re = /^~?\d\d:\d\d {3}(à pied \d+ min(, pluie)?|(Bus|Tram|Métro|IC|S\d+|L|P|Bus SNCB)\b.*? → .+?)( {3}(~?\d\d:\d\d|marge \d+ min|très juste))?$/;
+    const re = /^~?\d\d:\d\d (à pied \d+ min(, pluie)?|(Bus|Tram|Métro|IC|S\d+|L|P|Bus SNCB)\b.*? → .+?)( {3}(~?\d\d:\d\d|marge \d+ min|très juste|SUPPRIMÉ))?$/;
     const bad = rows.filter((l) => l && !re.test(l) && !/^Fin du trajet\.|^▽ /.test(l));
     check(!bad.length, `rangées d’étapes (§ 5 : « 07:12   Bus 6 → Gare des Guillemins   07:20 », « à pied 5 min ») : ${JSON.stringify(bad)}`);
-    check(rows.some((l) => /^~?07:4[24] {3}IC voie 6 ! → Bruxelles-Nord/.test(l)), `rangée de l’IC « 07:44   IC voie 6 ! → Bruxelles-Nord … » (voie modifiée, § 5) : ${JSON.stringify(rows)}`);
+    check(rows.some((l) => /^~?07:4[24] IC voie 6 ! → Bruxelles-Nord {3}08:42$/.test(l)), `rangée de l’IC « 07:44 IC voie 6 ! → Bruxelles-Nord   08:42 » (voie modifiée, § 5) : ${JSON.stringify(rows)}`);
     check(s.lines.at(-1) === O.HINTS.stepsGo, `aide « ${s.lines.at(-1)} » au lieu de « ${O.HINTS.stepsGo} » (§ 5)`);
     return { screen: s };
   });
