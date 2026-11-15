@@ -86,8 +86,10 @@ describe('voies gardées (PRD § 3.8)', () => {
   });
 
   it('sous terre ou à l’intérieur : tunnel, couloir, niveau ou couche négatifs ; pas un passage sous un bâtiment', () => {
-    for (const t of [{ tunnel: 'yes' }, { highway: 'corridor' }, { indoor: 'yes' }, { layer: '-1' }, { level: '-1;0' }, { level: '-0.5' }]) expect(underground(tagsOf({ highway: 'footway', ...t }))).toBe(true);
-    for (const t of [{ tunnel: 'building_passage' }, { tunnel: 'no' }, { layer: '1' }, { level: '0' }, { bridge: 'yes' }, {}]) expect(underground(tagsOf({ highway: 'footway', ...t }))).toBe(false);
+    const under: Record<string, string>[] = [{ tunnel: 'yes' }, { highway: 'corridor' }, { indoor: 'yes' }, { layer: '-1' }, { level: '-1;0' }, { level: '-0.5' }];
+    const surface: Record<string, string>[] = [{ tunnel: 'building_passage' }, { tunnel: 'no' }, { layer: '1' }, { level: '0' }, { bridge: 'yes' }, {}];
+    for (const t of under) expect(underground(tagsOf({ highway: 'footway', ...t }))).toBe(true);
+    for (const t of surface) expect(underground(tagsOf({ highway: 'footway', ...t }))).toBe(false);
   });
 
   it('noms : français d’abord, moitié française d’un nom bilingue bruxellois', () => {

@@ -39,7 +39,7 @@ function publishedStops(dir: string): Stop[] {
   return [...out.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
 }
 
-/** Paires d'arrêts à 200 m – 1,5 km l'un de l'autre, tirées au hasard (graine fixe). */
+/** Paires d'arrêts de 200 m à 1,5 km l'un de l'autre, tirées au hasard (graine fixe). */
 function pairsOf(stops: Stop[], n: number): [Stop, Stop][] {
   const cell = (p: LatLon) => `${Math.floor(p.lat / 0.01)}_${Math.floor(p.lon / 0.015)}`;
   const grid = new Map<string, Stop[]>();

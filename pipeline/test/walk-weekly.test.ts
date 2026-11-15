@@ -177,7 +177,7 @@ describe('publication dans les données de la nuit', () => {
     expect(lic.match(/Chemins à pied \(dossier walk\/\)/g)).toHaveLength(1);
     expect(lic).toContain('© les contributeurs d’OpenStreetMap, licence ODbL 1.0');
     expect(lic).toContain('données OpenStreetMap du 2025-11-11');
-    expect(lic).not.toMatch(/[–—]/);
+    expect(lic).not.toMatch(/[\u2013\u2014]/);
     expect(logs.join('\n')).toMatch(/Chemins à pied publiés : 1 tuiles, [\d,]+ Mo \(budget 80,0 Mo\)/);
   });
 
@@ -284,6 +284,6 @@ describe('flux « Données de nuit » (nightly.yml)', () => {
     });
     expect(scan).toBeGreaterThan(i((s) => s.id === 'webapp'));
     expect(scan).toBeLessThan(i((s) => s.uses === 'actions/upload-pages-artifact@v5'));
-    expect(text).not.toMatch(/[–—]/);
+    expect(text).not.toMatch(/[\u2013\u2014]/);
   });
 });
