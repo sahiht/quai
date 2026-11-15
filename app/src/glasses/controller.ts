@@ -2353,7 +2353,9 @@ export class GlassesController implements GlassesApi {
     const now = this.d.clock.now();
     let at = now + GUIDE_WAKE_MAX_MS;
     if (st && Number.isFinite(st.wakeAt)) at = Math.min(at, st.wakeAt);
-    if (st?.moment && Number.isFinite(st.moment.until)) at = Math.min(at, st.moment.until);
+    // une fin déjà passée (« Descends » tenu par la position, véhicule en retard sans temps réel) ne compte pas : sinon
+    // le moteur serait recalculé chaque seconde jusqu'à la descente ; wakeAt suffit
+    if (st?.moment && Number.isFinite(st.moment.until) && st.moment.until > now) at = Math.min(at, st.moment.until);
     if (this.whereUntil > now) at = Math.min(at, this.whereUntil);
     this.guideTimer = setTimeout(() => void this.onGuideWake(), Math.max(100, this.d.clock.real(Math.max(GUIDE_WAKE_MIN_MS, at - now))));
   }
