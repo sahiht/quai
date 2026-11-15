@@ -657,7 +657,8 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   const titleW = TITLE_W;
   // 1.2.2 : « Suivi » ou « Suivre ce trajet » aligné à droite sur la ligne du titre (écran d'un trajet, PRD-1.2.2 § 6).
   const titleRow = v.titleRight ? spread(v.title, v.titleRight, titleW - GEO.SAFETY, TIGHT) : null;
-  const title = titleRow ? titleRow.text : truncate(v.title, titleW - GEO.SAFETY) || 'Quai';
+  // 1.2.10 (PRD-1.2.10 § 1, principe 7) : un titre trop long est coupé au mot, jamais au milieu d'un mot
+  const title = titleRow ? titleRow.text : truncateWordsPx(v.title, titleW - GEO.SAFETY) || 'Quai';
   const titleLog = titleRow ? [titleRow.left, titleRow.right].filter(Boolean).join(COL_SEP) : title;
   const rowsH = g.capacity * LINE_H;
   const C = (id: number, name: string, x: number, y: number, w: number, h: number, content: string, level: Brightness): ContainerSpec => ({
@@ -768,7 +769,8 @@ function layoutGuide(v: GlassesView, opts: LayoutOptions): PageSpec {
   }
   const hintText = opts.toast ? truncate(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? truncate(v.hints, X_END - X_TEXT - GEO.SAFETY) : '';
   if (hintText) lines.push(hintText);
-  const title = v.title ? truncate(v.title, TITLE_W - GEO.SAFETY) : '';
+  // titre du trajet guidé (« Vers … » d'un « j'y descends ») coupé au mot, jamais au milieu d'un mot
+  const title = v.title ? truncateWordsPx(v.title, TITLE_W - GEO.SAFETY) : '';
   const C = (id: number, name: string, cx: number, y: number, cw: number, h: number, content: string, level: Brightness): ContainerSpec => ({
     id,
     name,

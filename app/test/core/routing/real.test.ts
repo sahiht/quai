@@ -466,15 +466,15 @@ describe.skipIf(!SNAP11)('classement 1.2.2 sur l’instantané 1.1 (PRD-1.2 CA-1
   it('CA-121.1 et PRD-1.2.2 § 7 : les trois cas réels du PRD-1.2.1 § 1.5 (marche maximale 5 min)', async () => {
     // Arrêts publics seulement (jamais d'adresse personnelle dans le dépôt). Braine-l'Alleud → Schaerbeek, 11/11 19:42 :
     // bus W puis S1 ; les 22 min à pied, IC 20:08, IC 20:33 seulement en « Plus tôt »
-    const mama = await route(BRAINE, pt(50.87755, 4.37966, 'Schaerbeek Gare'), at('2026-11-11', 19, 42), 5);
+    const parc = await route(BRAINE, pt(50.87755, 4.37966, 'Schaerbeek Gare'), at('2026-11-11', 19, 42), 5);
     // « Le suivant » (garde, PRD-1.2.2 § 7.4) : le bus W puis le tram 92 (20:39 → 22:01), qui domine le bus W puis le
     // S1 suivant (20:27 → 22:05)
-    expect(summary(mama)).toEqual(['short 19:57 → 21:05', 'earlier 19:44 → 20:52', 'next 20:39 → 22:01']);
-    expect(lines(mama.journeys[0]).map((x) => x.split(' ')[0])).toEqual(['W', 'S1']);
-    expect(lines(mama.journeys[2]).map((x) => x.split(' ')[0])).toEqual(['W', '92']);
-    expect(mama.journeys[1].legs.filter((l) => l.kind === 'ride').map((l) => `${l.cat} ${hhmm(l.dep)}`)).toEqual(['IC 20:08', 'IC 20:33']);
-    expect(mama.journeys.map(reason).slice(0, 2)).toEqual(['Moins de marche : 1 changement, à pied 8 + 1 + 3 min', 'Plus tôt de 13 min, mais 22 min à pied']);
-    for (const j of mama.journeys) if (j.label !== 'earlier') expect(Math.max(...j.legs.map((l) => (l.kind === 'walk' ? (l.walkMin ?? 0) : 0)))).toBeLessThan(15);
+    expect(summary(parc)).toEqual(['short 19:57 → 21:05', 'earlier 19:44 → 20:52', 'next 20:39 → 22:01']);
+    expect(lines(parc.journeys[0]).map((x) => x.split(' ')[0])).toEqual(['W', 'S1']);
+    expect(lines(parc.journeys[2]).map((x) => x.split(' ')[0])).toEqual(['W', '92']);
+    expect(parc.journeys[1].legs.filter((l) => l.kind === 'ride').map((l) => `${l.cat} ${hhmm(l.dep)}`)).toEqual(['IC 20:08', 'IC 20:33']);
+    expect(parc.journeys.map(reason).slice(0, 2)).toEqual(['Moins de marche : 1 changement, à pied 8 + 1 + 3 min', 'Plus tôt de 13 min, mais 22 min à pied']);
+    for (const j of parc.journeys) if (j.label !== 'earlier') expect(Math.max(...j.legs.map((l) => (l.kind === 'walk' ? (l.walkMin ?? 0) : 0)))).toBeLessThan(15);
     // Braine-l'Alleud → Madou, 12/11 07:31 : bus 36, IC 08:01, métro 2
     const bureau = await route(BRAINE, MADOU, at('2026-11-12', 7, 31), 5);
     expect(summary(bureau)[0]).toBe('short 07:49 → 08:33');
@@ -491,6 +491,6 @@ describe.skipIf(!SNAP11)('classement 1.2.2 sur l’instantané 1.1 (PRD-1.2 CA-1
     expect(braine.journeys[1].legs[0]).toMatchObject({ kind: 'walk', walkMin: 22 });
     expect(reason(braine.journeys[1])).toBe('Plus tôt de 8 min, mais 22 min à pied');
     expect(braine.journeys.some(bus36)).toBe(false);
-    for (const r of [mama, bureau, braine]) for (const j of r.journeys) expect((j.reason ?? '').length).toBeLessThanOrEqual(60);
+    for (const r of [parc, bureau, braine]) for (const j of r.journeys) expect((j.reason ?? '').length).toBeLessThanOrEqual(60);
   });
 });
