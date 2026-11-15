@@ -12,6 +12,7 @@ vi.mock('../../src/glasses/guide-views', async () => (await import('./controller
 import type { Core, Endpoint, Journey, LatLon } from '../../src/core/api';
 import type { WalkRoute } from '../../src/core/guide-types';
 import { TRIP_KEY, parseTrip } from '../../src/glasses/controller';
+import { CLOCK_EVENT } from '../../src/platform/clock';
 import type { ImageSpec, Intent } from '../../src/glasses/types';
 import { P, at, firstWalkRoute, offset, prdTrip } from '../core/guide-fixtures';
 import { views } from './controller-guide-doubles';
@@ -90,6 +91,34 @@ describe('vrai moteur : de l’heure de partir au premier virage', () => {
     expect(built.find((x) => x.op === 'rebuild')?.extra?.images?.[0].image).toEqual({ kind: 'turn', turn: 'right' });
     expect((built.find((x) => x.op === 'paint')?.arg as ImageSpec).image).toEqual({ kind: 'turn', turn: 'right' });
     expect(built.find((x) => x.op === 'rebuild')?.extra?.menu?.map((m) => m.id)).toEqual([1, 2]);
+  });
+});
+
+describe('vrai moteur : horloge simulée du mode test (window.__quaiClock.set)', () => {
+  it('l’horloge réglée plus loin : le guidage est recalculé tout de suite (« Partir maintenant » sans position utilisable, sans attendre la minuterie)', async () => {
+    // l'événement de l'horloge passe par window (ici un EventTarget de Node)
+    const g = globalThis as unknown as { addEventListener?: unknown; removeEventListener?: unknown; dispatchEvent?: unknown };
+    const saved = { add: g.addEventListener, remove: g.removeEventListener, dispatch: g.dispatchEvent };
+    const target = new EventTarget();
+    g.addEventListener = target.addEventListener.bind(target);
+    g.removeEventListener = target.removeEventListener.bind(target);
+    g.dispatchEvent = target.dispatchEvent.bind(target);
+    try {
+      const h = await launched({ now: at('06:50'), pos: null });
+      await h.settle(16_000);
+      expect(shown(h)).toBeNull();
+      // 06:50 → 07:05:05 d'un coup (comme le simulateur) : sans recalcul, rien avant la minuterie (jusqu'à 60 s)
+      h.clock.restore({ now: at('07:05:05') });
+      target.dispatchEvent(new CustomEvent(CLOCK_EVENT, { detail: { now: at('07:05:05') } }));
+      await h.settle(50);
+      expect(shown(h)).toBe('leave');
+      h.c.stop();
+      target.dispatchEvent(new CustomEvent(CLOCK_EVENT, { detail: { now: at('07:06') } }));
+    } finally {
+      g.addEventListener = saved.add;
+      g.removeEventListener = saved.remove;
+      g.dispatchEvent = saved.dispatch;
+    }
   });
 });
 
