@@ -5,6 +5,9 @@
  * longs des vraies données ; jamais un mot coupé. Lieux publics seulement.
  */
 import { describe, expect, it } from 'vitest';
+import { validateEvenHubPageContainer } from '@evenrealities/even_hub_sdk';
+import { toTextProperty } from '../../src/platform/even';
+import { guideView } from '../../src/glasses/guide-views';
 import type { Favorite, FavoriteAnswer, Journey, RecentAddress } from '../../src/core/api';
 import { textWidth } from '../../src/glasses/font';
 import { GEO, WIDTHS, layoutPage, shapeKey, type BorderedContainer } from '../../src/glasses/layout';
@@ -226,5 +229,26 @@ describe('PRD-1.2.10 § 5 : l’écran du trajet, plus facile à lire', () => {
       expect(l[2]).toMatch(/^07:41 Bus 163b4 → .*   07:49$/);
       expect(l[4]).toMatch(/^~07:54 IC voie 11b ! → .*[\p{L}\p{N}/-]…, dernier   marge 2 min$/u);
     }
+  });
+});
+
+describe('pages acceptées par le SDK (validateEvenHubPageContainer)', () => {
+  it('« Favoris » avec son filet de 1 px, et les trois pages du guidage', () => {
+    const sdk = (p: ReturnType<typeof page>) => {
+      const sdkPage = { containerTotalNum: p.containers.length, textObject: p.containers.map(toTextProperty) };
+      return validateEvenHubPageContainer(sdkPage);
+    };
+    expect(sdk(page(favoritesView({}, ctx())))).toEqual({ valid: true });
+    const s = {
+      kind: 'trip' as const,
+      journeyId: 'j1',
+      phase: { kind: 'walk' as const, leg: 0 },
+      moment: { since: NOW, until: NOW + MIN, leg: 0, id: 't', kind: 'turn' as const, turn: 'left' as const, distM: 40, toward: { fr: 'Monument Gramme', nl: 'Monument Gramme' }, final: false },
+      where: { title: 'Bureau', arr: T(8, 54), rt: true, chain: [{ label: 'à pied', state: 'now' as const }] },
+      location: 'high' as const,
+      wakeAt: NOW + MIN,
+      ended: false,
+    };
+    for (const show of ['empty', 'moment', 'where'] as const) expect(sdk(page(guideView(s, show, J, ctx()))), show).toEqual({ valid: true });
   });
 });
