@@ -186,7 +186,18 @@ export interface AlertItem {
   active: [number, number][];
   /** Alerte de tout le réseau (agence ou type de transport sans ligne ni arrêt) : concerne tout filtre. */
   global: boolean;
+  /**
+   * 1.2.10 : cause et effet GTFS-RT (noms de l'énumération : CONSTRUCTION, DETOUR, STOP_MOVED…), seulement si le flux
+   * les donne ; l'appli en tire un texte court (« Travaux : arrêt déplacé »).
+   */
+  cause?: string;
+  effect?: string;
+  /** 1.2.10 : description par langue, DESC_MAX caractères au plus (lieu, lignes nommées, arrêts non desservis). */
+  desc?: Partial<Record<Lang, string>>;
 }
+
+/** 1.2.10 : longueur gardée d'une description (l'appli n'en lit que le début : lignes et arrêts nommés). */
+export const DESC_MAX = 300;
 
 /**
  * 1.2.5 : caractères invisibles de sens d'écriture (U+200E, U+200F, U+202A à U+202E, U+2066 à U+2069), qui peuvent
@@ -228,19 +239,39 @@ export function extractAlerts(msg: FeedMessage, defaultLang: Lang): AlertItem[] 
       if (!route && !stop && !tripId) global = true;
     }
     let header = translations(a.headerText, defaultLang);
-    if (!Object.keys(header).length) header = translations(a.descriptionText, defaultLang);
+    const descAll = translations(a.descriptionText, defaultLang);
+    if (!Object.keys(header).length) header = descAll;
     const active = (a.activePeriod ?? []).map((p): [number, number] => [
       own(p, 'start') ? epochSeconds(p.start) ?? 0 : 0,
       own(p, 'end') ? epochSeconds(p.end) ?? 0 : 0,
     ]);
-    out.push({ id, routes: [...routes], stops: [...stops], header, active, global });
+    const item: AlertItem = { id, routes: [...routes], stops: [...stops], header, active, global };
+    const cause = own(a, 'cause') ? enumName(TR.Alert.Cause, a.cause) : undefined;
+    const effect = own(a, 'effect') ? enumName(TR.Alert.Effect, a.effect) : undefined;
+    if (cause) item.cause = cause;
+    if (effect) item.effect = effect;
+    const desc: Partial<Record<Lang, string>> = {};
+    for (const [k, v] of Object.entries(descAll) as [Lang, string][]) if (v !== header[k]) desc[k] = v.length > DESC_MAX ? v.slice(0, DESC_MAX) : v;
+    if (Object.keys(desc).length) item.desc = desc;
+    out.push(item);
   });
   return out;
 }
 
+/** Nom d'une valeur d'énumération GTFS-RT (« DETOUR »), undefined si la valeur est inconnue. */
+function enumName(e: Record<string | number, string | number>, v: unknown): string | undefined {
+  const name = typeof v === 'number' ? e[v] : typeof v === 'string' ? v : undefined;
+  return typeof name === 'string' && /^[A-Z_]{2,40}$/.test(name) ? name : undefined;
+}
+
 export function isActive(alert: Pick<AlertItem, 'active'>, nowSec: number): boolean {
+  return isActiveWithin(alert, nowSec, nowSec);
+}
+
+/** 1.2.10 : active à un moment de [fromSec, toSec] (bornes comprises) ; sans période : toujours. */
+export function isActiveWithin(alert: Pick<AlertItem, 'active'>, fromSec: number, toSec: number): boolean {
   if (!alert.active.length) return true;
-  return alert.active.some(([s, e]) => (s === 0 || s <= nowSec) && (e === 0 || nowSec <= e));
+  return alert.active.some(([s, e]) => (s === 0 || s <= toSec) && (e === 0 || fromSec <= e));
 }
 
 /** Clé de gare SNCB : '8811601_2', 'S8811601' et '8811601' désignent la même gare. */

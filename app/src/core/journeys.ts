@@ -7,9 +7,10 @@
  * dernière mise à jour qui le précède dans l'horaire) ; STIB par /api/stib sur le seul point de montée. Le temps
  * réel de plusieurs trajets est demandé en un appel par opérateur (refreshJourneys).
  */
-import type { Op } from '../../../shared/types';
+import type { Names, Op } from '../../../shared/types';
 import { normalizeId } from '../../../shared/types';
 import { prettyName } from '../../../shared/names';
+import { namesOf, scopeTexts, stibMessageText, TRIP_BUDGET, type AlertScope, type ScopeStop } from './alerts';
 import type { Alert, Journey, Leg, Settings } from './api';
 import type { PreparedArea } from './areas';
 import { stibPassages, type StibPassage } from './boards';
@@ -18,14 +19,17 @@ import { stibPoint } from './realtime';
 import { delayMinutes, headKey, headScore, platformOfStopId, RT_MAX_SHIFT_MS, rtAtStop, rtAtStopShown, rtOccurrence, sameStop, type TripContext } from './rtmerge';
 import { locateTrip, type DayIndex } from './trains';
 import { hhmm, fit } from './util';
-import { cancelAlert, delayAlert, leaveAlert, platformAlert, vehicleLabel, vehicleLabelStart, worksAlert } from './text';
+import { cancelAlert, delayAlert, leaveAlert, platformAlert, vehicleLabel, vehicleLabelStart } from './text';
 
+/**
+ * 1.2.10 : les alertes des opérateurs se lisent par `rt` (RealtimeClient.alerts, RealtimeClient.stib) et se jugent étape
+ * par étape (core/alerts.ts) ; le champ `works` de la 1.2.9 (textes déjà filtrés, trop largement) n'existe plus.
+ */
 export interface RefreshEnv {
   rt: RealtimeClient;
   now: () => number;
   trainDays: () => Promise<DayIndex[]>;
   area: (id: string) => Promise<PreparedArea | null>;
-  works: (op: Op, routes: string[], stops: string[]) => Promise<string[]>;
 }
 
 /** Passages STIB acceptés autour de l'horaire prévu d'une étape. */
@@ -455,35 +459,108 @@ export function buildAlerts(j: Journey, settings: Settings, now: number, works: 
   if (A.leave && firstWalk && firstRide && !firstRide.cancelled && now >= j.leaveAt && now < firstRide.dep) {
     push('leave', leaveAlert(firstWalk.walkMin ?? 0));
   }
-  if (A.works) for (const w of works) push('works', worksAlert(w));
+  // 1.2.10 : textes déjà rédigés au pixel par core/alerts.ts (worksText) ; fit ne fait que garantir les 48 caractères
+  if (A.works) for (const w of works) push('works', w);
   return out;
+}
+
+/** Clé d'une ligne (« 039 » et « 39 », « w » et « W »). */
+const lineKeyOf = (s: string | undefined): string => (s ?? '').trim().toUpperCase().replace(/^0+(?=\w)/, '');
+const nameOf = (n: Names | undefined): string => n?.fr || n?.nl || '';
+/** Identifiant d'arrêt d'une zone (« sncb:8811601 » → « 8811601 » ; De Lijn, TEC : souvent celui de son arrêt). */
+const areaKey = (areaId: string | undefined): string => (areaId ? areaId.slice(areaId.indexOf(':') + 1) : '');
+/** Filtres d'une demande au relais (LIMITS.alertFilters du relais : 200 chacun). */
+const ALERT_FILTERS_MAX = 200;
+/** Heure de fin des alertes demandées (`until`), arrondie à 5 min pour partager le cache. */
+const UNTIL_STEP_MS = 5 * 60_000;
+
+/**
+ * 1.2.10 (PRD-1.2.10 § 6) : ce qui juge une alerte pour une étape (core/alerts.ts, alertMatch) : sa ligne (route_id des
+ * motifs de ce numéro aux zones de montée et de descente), ses arrêts (montée et descente : l'arrêt physique quand il est
+ * connu, sinon ceux de la zone ; arrêts traversés : la gare, ou l'identifiant de la zone) et ses heures.
+ */
+export async function legScope(l: Leg, env: Pick<RefreshEnv, 'area'>): Promise<AlertScope | null> {
+  if (l.kind !== 'ride' || !l.op) return null;
+  const op = l.op;
+  const stops: ScopeStop[] = [];
+  const names = [...namesOf(l.from.name), ...namesOf(l.to.name)];
+  const routes = new Set<string>();
+  const line = l.op === 'sncb' ? (l.cat ?? l.line ?? '') : (l.line ?? '');
+  if (op === 'sncb') {
+    const list = l.stops?.length ? l.stops : [{ name: l.from.name, areaId: l.from.areaId }, { name: l.to.name, areaId: l.to.areaId }];
+    list.forEach((s, i) => {
+      const id = areaKey(s.areaId);
+      if (id) stops.push({ id, name: nameOf(s.name), end: i === 0 || i === list.length - 1 });
+    });
+  } else {
+    const ends: [string | undefined, Leg['from']][] = [
+      [l.fromStop, l.from],
+      [l.toStop, l.to],
+    ];
+    for (const [stopId, place] of ends) {
+      let prep: PreparedArea | null = null;
+      try {
+        prep = place.areaId ? await env.area(place.areaId) : null;
+      } catch {
+        prep = null;
+      }
+      if (prep) {
+        // STIB : messages WaitingTimes par numéro de ligne (son route_id n'est pas son numéro : métro 2 « 4 », 1.2.9)
+        for (const p of prep.file.patterns) if (lineKeyOf(p.line) === lineKeyOf(line)) routes.add(op === 'stib' ? p.line : p.route);
+        names.push(...namesOf(prep.file.n));
+      }
+      const pid = (id: string) => (op === 'stib' ? stibPoint(id) : id);
+      if (stopId) stops.push({ id: pid(stopId), name: nameOf(place.name), end: true });
+      else for (const st of prep?.file.stops ?? []) stops.push({ id: pid(st.rt || st.id), name: nameOf(place.name), end: true });
+    }
+    for (const s of (l.stops ?? []).slice(1, -1)) {
+      const id = areaKey(s.areaId);
+      if (id) stops.push({ id: op === 'stib' ? stibPoint(id) : id, name: nameOf(s.name), end: false });
+    }
+  }
+  return {
+    op,
+    lines: line ? [line] : [],
+    routes: [...routes],
+    stops,
+    names: [...new Set(names)],
+    from: Math.min(l.dep, l.schedDep),
+    to: Math.max(l.arr, l.schedArr),
+  };
+}
+
+/** Textes des alertes qui concernent une étape (vide si aucune ou source en erreur). */
+async function legWorks(l: Leg, env: RefreshEnv): Promise<string[]> {
+  const scope = await legScope(l, env);
+  if (!scope) return [];
+  if (scope.op === 'stib') {
+    // STIB : messages des passages aux points de montée et de descente, pour la ligne de l'étape
+    const points = [...new Set(scope.stops.filter((s) => s.end).map((s) => s.id).filter(Boolean))].slice(0, 30);
+    if (!points.length) return [];
+    const res = await env.rt.stib(points);
+    if (res.error) return [];
+    const out: string[] = [];
+    for (const p of points)
+      for (const e of res.map.get(p) ?? []) {
+        if (!e.msg || lineKeyOf(e.line) !== lineKeyOf(l.line)) continue;
+        const t = stibMessageText(e.msg, TRIP_BUDGET);
+        if (t && !out.includes(t)) out.push(t);
+      }
+    return out;
+  }
+  const ids = [...new Set(scope.stops.map((s) => s.id))].slice(0, ALERT_FILTERS_MAX);
+  const routes = scope.routes.slice(0, ALERT_FILTERS_MAX);
+  const now = env.now();
+  const until = scope.to > now + 60_000 ? Math.ceil(scope.to / UNTIL_STEP_MS) * (UNTIL_STEP_MS / 1000) : undefined;
+  const alerts = await env.rt.alerts(scope.op, routes, ids, until);
+  return scopeTexts(alerts, scope, TRIP_BUDGET);
 }
 
 async function worksFor(j: Journey, env: RefreshEnv): Promise<string[]> {
   const texts: string[] = [];
   for (const l of j.legs.filter(isRide)) {
-    if (!l.op) continue;
-    let stops: string[] = [];
-    let routes: string[] = [];
-    if (l.op === 'sncb') {
-      stops = (l.stops ?? []).map((s) => s.areaId).filter((x): x is string => !!x).map((id) => id.slice(id.indexOf(':') + 1));
-    } else {
-      for (const id of [l.from.areaId, l.to.areaId]) {
-        if (!id) continue;
-        try {
-          const prep = await env.area(id);
-          if (!prep) continue;
-          stops.push(...prep.file.stops.map((s) => s.rt || s.id));
-          // 1.2.9 : STIB, messages WaitingTimes par numéro de ligne (son route_id n'est pas son numéro : métro 2 « 4 »)
-          routes.push(...prep.file.patterns.filter((p) => p.line === l.line).map((p) => (l.op === 'stib' ? p.line : p.route)));
-        } catch {
-          /* rien */
-        }
-      }
-      routes = [...new Set(routes)];
-    }
     try {
-      texts.push(...(await env.works(l.op, routes, [...new Set(stops)])));
+      texts.push(...(await legWorks(l, env)));
     } catch {
       /* rien */
     }
