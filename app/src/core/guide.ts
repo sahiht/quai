@@ -917,12 +917,12 @@ const lowBattery = (b: unknown): b is number => typeof b === 'number' && Number.
  * Vérification au départ et en route : tient la mémoire `chk` et rend les problèmes vrais maintenant, dans l'ordre
  * batterie, position :
  * - batterie des lunettes sous 20 % (GuideInput.battery), à tout moment ;
- * - pas de position : au lancement, aucune position dans les 30 s alors que le guidage en demande ; tant qu'aucune
- *   n'est venue et que la phase en demande ;
+ * - pas de position : au départ, aucune position dans les 30 s où le guidage en demande (dès le lancement, ou dès que
+ *   la phase en demande si l'on a lancé tôt) ; vrai tant qu'aucune n'est venue et que la phase en demande ;
  * - position perdue : plus aucune position depuis 3 min alors que la phase en demande et qu'il y en avait (l'attente
  *   compte depuis la dernière position, ou depuis que la position est demandée de nouveau, ou depuis le réveil).
- * La vérification du lancement (batterie, pas de position) se fait une fois, 30 s après le lancement, si le moteur a
- * vu le lancement (premier pas dans ces 30 s ; repris plus tard, il ne la fait pas).
+ * Ce qui est vérifié au départ (batterie 30 s après le lancement, pas de position) l'est une fois, si le moteur a vu le
+ * lancement (premier pas dans ses 30 s ; un guidage repris plus tard ne le refait pas).
  */
 function checkOf(c: Ctx, need: LocationNeed): CheckIssue[] {
   const { m, now } = c;
@@ -943,10 +943,8 @@ function checkOf(c: Ctx, need: LocationNeed): CheckIssue[] {
   if (k.bat === undefined && (!launch || now >= due)) k.bat = launch && lowBattery(c.in.battery);
   if (k.noPos === undefined) {
     if (!launch || k.fix !== undefined) k.noPos = false;
-    // position demandée dès le lancement (ou dans ses 30 s) : 30 s pour en recevoir une
-    else if (k.need !== undefined && k.need <= due) {
-      if (now >= k.need + GUIDE.checkAfterMs) k.noPos = true;
-    } else if (now >= due) k.noPos = false;
+    // position demandée sans interruption depuis 30 s, aucune reçue depuis le lancement
+    else if (k.need !== undefined && now >= k.need + GUIDE.checkAfterMs) k.noPos = true;
   }
   const out: CheckIssue[] = [];
   if (lowBattery(c.in.battery)) out.push({ kind: 'battery', level: c.in.battery });
@@ -1479,7 +1477,7 @@ function wakeOf(c: Ctx, moment: Moment | null): number {
   // 1.3.0 (PRD-1.3.0 § 6.3) : vérification du lancement, position perdue (au plus tard 60 s après, sinon)
   const k = c.guided ? m.chk : undefined;
   if (k) {
-    if (k.bat === undefined || k.noPos === undefined) add(c.in.startedAt + GUIDE.checkAfterMs);
+    if (k.bat === undefined) add(c.in.startedAt + GUIDE.checkAfterMs);
     if (k.noPos === undefined && k.need !== undefined) add(k.need + GUIDE.checkAfterMs);
     if (k.fix !== undefined && k.need !== undefined && !k.told.includes('positionLost')) add(Math.max(k.fix, k.need) + GUIDE.lostMs);
   }
