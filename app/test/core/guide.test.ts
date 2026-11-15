@@ -180,12 +180,16 @@ describe('heure seule (sans position), trajet complet', () => {
   it('IC : « Prochain arrêt » 1 min avant Ans et Louvain, jamais dans les 5 min avant « Descends »', () => {
     const r = guide(prdTrip());
     const ans = m(step(r, at('07:36')).moment, 'nextStop');
-    expect(ans).toMatchObject({ id: 'nextStop:jprd:3:1', stop: N('Ans'), at: at('07:37'), stopsToAlight: 3, alight: N('Bruxelles-Central', 'Brussel-Centraal'), until: at('07:39') });
+    expect(ans).toMatchObject({ id: 'nextStop:jprd:3:1', stop: N('Ans'), at: at('07:37'), stopsToAlight: 4, alight: N('Bruxelles-Central', 'Brussel-Centraal'), until: at('07:39') });
     expect(r.mem.lastNextStopAt).toBe(at('07:36'));
     expect(kindOf(step(r, at('07:38')))).toBe('nextStop');
     expect(step(r, at('07:39')).moment).toBeNull();
-    const lou = m(step(r, at('08:04')).moment, 'nextStop');
-    expect(lou).toMatchObject({ stop: N('Louvain', 'Leuven'), stopsToAlight: 2 });
+    // exemple du PRD : « Prochain arrêt : Louvain » ; « descente dans 3 arrêts, à Bruxelles-Central » (Louvain,
+    // Bruxelles-Nord, Bruxelles-Central) ; le même compte que « Où tu en es » au même instant
+    const s4 = step(r, at('08:04'));
+    const lou = m(s4.moment, 'nextStop');
+    expect(lou).toMatchObject({ stop: N('Louvain', 'Leuven'), stopsToAlight: 3 });
+    expect(s4.where.ride).toMatchObject({ nextStop: N('Louvain', 'Leuven'), stopsToAlight: 3 });
     expect(step(r, at('08:07')).moment).toBeNull();
     // Bruxelles-Nord (08:22) : dans les 5 min avant « Descends » (08:23)
     expect(step(r, at('08:21')).moment).toBeNull();

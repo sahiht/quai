@@ -57,7 +57,7 @@ describe('heure d’hiver (25/10/2026)', () => {
     expect(step(r, iso('2026-10-25T02:09:30+02:00')).moment).toBeNull();
     expect(step(r, iso('2026-10-25T02:16:00+02:00')).moment).toBeNull();
     expect(m(step(r, iso('2026-10-25T02:29:00+02:00')).moment, 'nextStop')).toMatchObject({ stop: N('Louvain', 'Leuven') });
-    expect(m(step(r, iso('2026-10-25T02:09:30+01:00')).moment, 'nextStop')).toMatchObject({ stop: N('Bruxelles-Nord', 'Brussel-Noord'), stopsToAlight: 1 });
+    expect(m(step(r, iso('2026-10-25T02:09:30+01:00')).moment, 'nextStop')).toMatchObject({ stop: N('Bruxelles-Nord', 'Brussel-Noord'), stopsToAlight: 2 });
     expect(step(r, iso('2026-10-25T02:15:59+01:00')).moment).toBeNull();
     expect(kindOf(step(r, iso('2026-10-25T02:16:00+01:00')))).toBe('alight');
     expect(m(step(r, iso('2026-10-25T02:22:00+01:00')).moment, 'arrived')).toMatchObject({ diffMin: 0 });

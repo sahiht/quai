@@ -839,7 +839,9 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
         const gapOk = m.lastNextStopAt === undefined || now - m.lastNextStopAt >= GUIDE.nextStopGapMs;
         out.push({
           id: sid, kind: 'nextStop', trig: now >= from && now < until && gapOk && now < quietFrom, end: now >= until,
-          make: (since) => ({ kind: 'nextStop', id: sid, since, until, leg: k, stop: st.name, at: st.est, rt: !!l.rt, stopsToAlight: n - 1 - s, alight: l.to.name }),
+          // arrêts jusqu'à la descente, le prochain compris (comme « Où tu en es » et l'exemple du PRD : « Prochain
+          // arrêt : Louvain », « descente dans 3 arrêts, à Bruxelles-Central »)
+          make: (since) => ({ kind: 'nextStop', id: sid, since, until, leg: k, stop: st.name, at: st.est, rt: !!l.rt, stopsToAlight: n - s, alight: l.to.name }),
         });
       }
     }
