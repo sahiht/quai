@@ -399,6 +399,12 @@ function nextRide(legs: Leg[], from: number): number {
   return -1;
 }
 
+/** Une position récente (depuis `since`) à l'arrêt de montée de l'étape (60 m), ou rien si l'arrêt n'a pas de position. */
+function seenAtStop(c: Ctx, l: Leg, since: number): boolean {
+  if (!knownPoint(l.from)) return false;
+  return fixesOf(c.in).some((f) => f.at >= since && distanceM(f, l.from) <= GUIDE.stopM);
+}
+
 /** Montée et descente constatées par la position (vitesse le long du trajet), gardées dans la mémoire. */
 function observe(c: Ctx): void {
   const { legs, now, m } = c;
@@ -411,6 +417,10 @@ function observe(c: Ctx): void {
     if (now < l.dep - 3 * MIN) break;
     const p = prevRide(legs, k);
     if (p >= 0 && !alightedFrom(m, p) && now < legs[p].arr) break;
+    // correspondance : monté seulement après être passé à l'arrêt de montée depuis l'arrivée du véhicule d'avant ; sinon
+    // une position encore prise dans ce véhicule (en retard, traitée en retard, ou qui continue au-delà de l'arrêt), qui
+    // roule près de la ligne suivante, passait pour la montée (descente jamais constatée, arrêt dépassé jamais vu)
+    if (p >= 0 && !seenAtStop(c, l, legs[p].arr - GUIDE.alightFromMs)) break;
     if (fast(c) && distTo(c, l.from) >= GUIDE.boardLeftM) {
       const pr = rideProj(c, l);
       const ok = pr ? pr.offM <= GUIDE.onLineM && pr.alongM >= GUIDE.boardAlongM : knownPoint(l.from);

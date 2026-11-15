@@ -469,7 +469,11 @@ describe('positions', () => {
 });
 
 describe('arrêt dépassé', () => {
-  const ride71 = (r: ReturnType<typeof guide>) => step(r, at('08:35'), fix(toward(P.gareCentrale, P.porteNamur, 200), at('08:35'), { speed: 8 }));
+  // à l'arrêt Gare Centrale (correspondance), puis dans le bus 71
+  const ride71 = (r: ReturnType<typeof guide>) => {
+    step(r, at('08:33:30'), fix(P.gareCentrale, at('08:33:30'), { speed: 0 }));
+    return step(r, at('08:35'), fix(toward(P.gareCentrale, P.porteNamur, 200), at('08:35'), { speed: 8 }));
+  };
   const beyond = (m2: number) => toward(P.porteNamur, P.flagey, 1389 + m2);
 
   it('plus de 300 m au-delà de Flagey, en s’éloignant, après son heure : « Tu as passé Flagey », nouveau trajet demandé', () => {
