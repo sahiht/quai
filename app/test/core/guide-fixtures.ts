@@ -85,7 +85,7 @@ export interface RideSpec {
   mode: Leg['mode'];
   line: string;
   cat?: string;
-  head: string;
+  head: string | Names;
   /** arrêts : point, heure prévue, retard (min) facultatif, voie facultative */
   stops: { p: Pt; t: number; delay?: number; platform?: string }[];
   rt?: boolean;
@@ -123,7 +123,7 @@ export function rideLeg(r: RideSpec): Leg {
     op: r.op,
     mode: r.mode,
     line: r.line,
-    head: N(r.head),
+    head: typeof r.head === 'string' ? N(r.head) : r.head,
     rt: r.rt ?? true,
     delayMin: r.delayMin ?? 0,
     cancelled: r.cancelled ?? false,

@@ -180,6 +180,9 @@ interface Mem extends GuideMemory {
 
 const MEM_MAX = 400;
 
+/** Minutes entières, sans « -0 ». */
+const roundMin = (ms: number): number => Math.round(ms / MIN) || 0;
+
 /** Mémoire neuve, à chaque nouveau guidage (jamais reprise d'un autre trajet guidé). */
 export function newGuideMemory(): GuideMemory {
   return { v: 1, dismissed: [], shown: {} };
@@ -439,7 +442,9 @@ function arrivedNow(c: Ctx): { yes: boolean; byFix: boolean } {
   const last = legs[L - 1];
   if (last.kind === 'ride') {
     if (alightedFrom(m, L - 1)) return { yes: true, byFix: true };
-    if (now >= last.arr && !(boardedOn(m, L - 1) && riding(c, L - 1))) return { yes: true, byFix: false };
+    // encore à bord d'après la position (véhicule en retard, ou emporté au-delà de l'arrêt) : pas arrivé
+    const aboard = boardedOn(m, L - 1) && (riding(c, L - 1) || (fast(c) && distTo(c, last.to) > GUIDE.alightNearM));
+    if (now >= last.arr && !aboard) return { yes: true, byFix: false };
     return { yes: false, byFix: false };
   }
   if (c.fix && knownPoint(last.to) && distanceM(c.fix, last.to) <= GUIDE.arrivedM) {
@@ -747,7 +752,7 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
         make: (since) => ({
           kind: 'replan', id: `${base}:${jid}`, since, until: swapAt + GUIDE.replanMs, leg: Math.max(0, k), reason, lost,
           ...(r ? { next: { vehicle: vehicleRef(r), depAt: r.dep, ...(isTrain(r) && platformOf(r) ? { platform: platformOf(r) } : {}) } } : {}),
-          arr: j.arr, laterMin: Math.round((j.arr - re.oldArr) / MIN),
+          arr: j.arr, laterMin: roundMin(j.arr - re.oldArr),
         }),
       });
     } else if (re.jid === jid && re.none !== undefined) {
@@ -921,7 +926,7 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
       id, kind: 'arrived', trig: true, end: now >= since0 + GUIDE.arrivedMs,
       make: (since) => {
         const at = m.arrivedByFix ? (m.arrivedAt ?? since) : j.arr;
-        return { kind: 'arrived', id, since, until: since + GUIDE.arrivedMs, leg: legs.length - 1, title: c.in.title, at, diffMin: Math.round((at - lastArr) / MIN) };
+        return { kind: 'arrived', id, since, until: since + GUIDE.arrivedMs, leg: legs.length - 1, title: c.in.title, at, diffMin: roundMin(at - lastArr) };
       },
     });
   }
@@ -1151,6 +1156,7 @@ function wakeOf(c: Ctx, moment: Moment | null): number {
 
 /** Prend en compte un changement de trajet : nouveau trajet adopté après une demande de recalcul, ou autre trajet. */
 function adopt(m: Mem, j: Journey, now: number): void {
+  prune(m, j.id);
   if (m.jid === j.id) return;
   if (m.jid !== undefined) {
     if (m.re && m.re.jid === m.jid && m.re.jid !== j.id && !m.re.swap && m.re.none === undefined) m.re.swap = { jid: j.id, at: now };
@@ -1162,7 +1168,6 @@ function adopt(m: Mem, j: Journey, now: number): void {
     delete m.lastNextStopAt;
   }
   m.jid = j.id;
-  prune(m, j.id);
 }
 
 /** Fin du guidage : « Tu y es » + 2 min, arrivée + 5 min (règle 1.2.x), pas parti (règle 1.2.x). */

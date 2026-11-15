@@ -751,6 +751,16 @@ describe('contrat du moteur', () => {
     expect(s.wakeAt).toBe(at('07:11'));
   });
 
+  it('mémoire bornée : les moments d’autres trajets partent d’abord', () => {
+    const big = newGuideMemory();
+    for (let i = 0; i < 500; i++) big.shown[`turn:jold:0:${i}:1`] = i;
+    big.dismissed = Array.from({ length: 300 }, (_, i) => `turn:jold:0:${i}:1`);
+    const out = guideStep({ kind: 'trip', journey: prdTrip(), title: 'Bureau', now: at('07:05'), fixes: [], settings: settings(), startedAt: at('06:30') }, big);
+    expect(Object.keys(out.mem.shown)).toEqual(['leave:jprd']);
+    expect(out.mem.dismissed).toEqual([]);
+    expect(out.state.moment?.id).toBe('leave:jprd');
+  });
+
   it('positions mal formées ou futures ignorées', () => {
     const r = guide(prdTrip());
     const s = step(r, at('07:06'), [{ lat: Number.NaN, lon: 5.5, at: at('07:06') }, fix(offset(P.avroy, 0, -60), at('07:09'))]);
