@@ -5,29 +5,48 @@
  * 1.2.9 (PRD-1.2.9 § 2.4) : retour à Réglages, l'aperçu en haut, puis deux groupes : « Accueil des lunettes » (rayon de
  * « Autour de moi », ordre des favoris, ouverture de Quai) et « Sur tous les écrans » (aides de gestes, signe « ~ »,
  * pluie). Mêmes réglages, mêmes valeurs enregistrées.
+ * 1.2.10 (PRD-1.2.10 § 4.4, maquette C de la 1.2.9) : tout tient sur un écran de 390 × 844 : « Ordre des favoris » en
+ * deux choix côte à côte, « À l’ouverture de Quai » sur son écran (#/affichage/ouverture), sa valeur sur la ligne qui
+ * l'ouvre ; l'aperçu se lit par son nom (« Aperçu dans les lunettes : … »). Ouvert depuis l'accueil (?retour=accueil),
+ * Affichage y revient, et l'écran de l'ouverture revient à cet Affichage-là.
  */
 import type { Settings } from '../../core/api';
 import { header, type PhoneCtx } from '../app';
 import { h } from '../dom';
 import { homePreview } from '../samples';
-import { T, typo } from '../text';
-import { glassesPreview, group, radios, segmented, switchRow } from '../ui';
+import { OPENING_LABEL, OPENING_ORDER, T, typo } from '../text';
+import { glassesPreview, group, navRow, radios, segmented, switchRow } from '../ui';
+
+/** Nom de l'aperçu (lu par les lecteurs d'écran, avec ce qu'il montre). */
+const PREVIEW_TITLE = 'Aperçu dans les lunettes';
+
+/** Aperçu de l'accueil des lunettes, redessiné à chaque réglage enregistré. */
+function livePreview(ctx: PhoneCtx): { el: HTMLElement; refresh(): void } {
+  const el = h('div', { class: 'preview-top' });
+  const refresh = (): void => {
+    el.replaceChildren(glassesPreview(PREVIEW_TITLE, homePreview(ctx.settings.get()), { hiddenTitle: true }));
+  };
+  refresh();
+  return { el, refresh };
+}
+
+/** Enregistre un réglage d'Affichage, puis `then` (l'aperçu suit). */
+function setDisplay(ctx: PhoneCtx, fn: (d: Settings['display']) => Settings['display'], then: () => void): void {
+  void ctx.settings.update((x) => ({ ...x, display: fn({ ...x.display }) })).then(then);
+}
+
+/** Affichage ouvert depuis l'accueil (?retour=accueil) : le paramètre suit vers l'écran de l'ouverture et en revient. */
+const fromHome = (ctx: PhoneCtx): boolean => ctx.params.get('retour') === 'accueil';
 
 export function displayScreen(ctx: PhoneCtx): HTMLElement {
   const s = ctx.settings.get();
-  const previewSlot = h('div');
-  const refresh = (): void => {
-    previewSlot.replaceChildren(glassesPreview('Aperçu dans les lunettes', homePreview(ctx.settings.get())));
-  };
-  const set = (fn: (d: Settings['display']) => Settings['display']): void => {
-    void ctx.settings.update((x) => ({ ...x, display: fn({ ...x.display }) })).then(refresh);
-  };
-  refresh();
+  const preview = livePreview(ctx);
+  const set = (fn: (d: Settings['display']) => Settings['display']): void => setDisplay(ctx, fn, preview.refresh);
   return h(
     'div',
     { class: 'screen display' },
-    header(ctx, T.display, undefined, ctx.params.get('retour') === 'accueil' ? { label: 'Accueil', hash: '#/' } : { label: T.settings, hash: '#/reglages' }),
-    h('div', { class: 'preview-top' }, previewSlot, h('p', { class: 'small muted' }, typo('Dans les lunettes : l’écran suit ces réglages tout de suite.'))),
+    header(ctx, T.display, undefined, fromHome(ctx) ? { label: 'Accueil', hash: '#/' } : { label: T.settings, hash: '#/reglages' }),
+    preview.el,
     group(
       'af-accueil',
       T.groupHome,
@@ -50,32 +69,20 @@ export function displayScreen(ctx: PhoneCtx): HTMLElement {
         ),
         h(
           'div',
-          { class: 'pad-row tight bordered' },
-          radios<Settings['display']['favOrder']>({
+          { class: 'pad-row bordered' },
+          // 1.2.10 : deux choix côte à côte (maquette C), le nom complet du premier pour les lecteurs d'écran
+          segmented<Settings['display']['favOrder']>({
             legend: 'Ordre des favoris',
             value: s.display.favOrder,
             options: [
-              { value: 'smart', label: 'Automatique, selon l’heure et ta position' },
+              { value: 'smart', label: 'Automatique', aria: 'Automatique, selon l’heure et ta position' },
               { value: 'mine', label: 'Dans mon ordre' },
             ],
             onChange: (v) => set((d) => ({ ...d, favOrder: v })),
           }),
         ),
-        h(
-          'div',
-          { class: 'pad-row tight bordered' },
-          // 1.2.2 (revue d'usage n° 11) : libellés revus, mêmes valeurs enregistrées.
-          radios<Settings['display']['opening']>({
-            legend: 'À l’ouverture de Quai',
-            value: s.display.opening,
-            options: [
-              { value: 'suggest', label: 'L’accueil, avec mes favoris en tête' },
-              { value: 'firstFavorite', label: 'Directement mon premier favori' },
-              { value: 'home', label: 'L’accueil, sans favoris' },
-            ],
-            onChange: (v) => set((d) => ({ ...d, opening: v })),
-          }),
-        ),
+        // 1.2.10 : l'ouverture de Quai sur son écran, sa valeur ici
+        h('ul', { class: 'list bordered opening-link' }, navRow({ href: fromHome(ctx) ? '#/affichage/ouverture?retour=accueil' : '#/affichage/ouverture', icon: null, title: T.opening, sub: OPENING_LABEL[s.display.opening] })),
       ),
     ),
     group(
@@ -85,10 +92,37 @@ export function displayScreen(ctx: PhoneCtx): HTMLElement {
         'div',
         { class: 'box' },
         h('div', null, switchRow({ label: 'Aides de gestes', sub: 'rappel discret en bas de l’écran', checked: s.display.gestureHints, onChange: (v) => set((d) => ({ ...d, gestureHints: v })) })),
-        h('div', { class: 'bordered' }, switchRow({ label: 'Signaler les horaires prévus', sub: 'avec le signe ~ quand il n’y a pas de temps réel', checked: s.display.markPlanned, onChange: (v) => set((d) => ({ ...d, markPlanned: v })) })),
+        // 1.2.10 : sous-titre sur une ligne (tout tient sur un écran), même sens
+        h('div', { class: 'bordered' }, switchRow({ label: 'Signaler les horaires prévus', sub: 'un ~ devant l’heure sans temps réel', checked: s.display.markPlanned, onChange: (v) => set((d) => ({ ...d, markPlanned: v })) })),
         // 1.2.5 : pluie prévue sur les marches de 5 min ou plus (grille fixe de la Belgique : la position n'est pas envoyée)
         h('div', { class: 'bordered' }, switchRow({ label: 'Pluie pendant la marche', sub: 'sur les marches de 5 min ou plus, d’après Open-Meteo', checked: s.display.rain, onChange: (v) => set((d) => ({ ...d, rain: v })) })),
       ),
+    ),
+  );
+}
+
+/**
+ * 1.2.10 (PRD-1.2.10 § 4.4) : « À l’ouverture de Quai » (#/affichage/ouverture), ses trois choix (libellés de la revue
+ * d'usage n° 11, mêmes valeurs enregistrées), enregistrés tout de suite ; l'aperçu au-dessus montre l'effet (« L’accueil,
+ * sans favoris » : aucun favori sous « Favoris »). Retour à Affichage.
+ */
+export function openingScreen(ctx: PhoneCtx): HTMLElement {
+  const preview = livePreview(ctx);
+  return h(
+    'div',
+    { class: 'screen display opening' },
+    header(ctx, T.opening, T.openingLead, { label: T.display, hash: fromHome(ctx) ? '#/affichage?retour=accueil' : '#/affichage' }),
+    preview.el,
+    h(
+      'div',
+      { class: 'box pad-row tight' },
+      radios<Settings['display']['opening']>({
+        legend: T.opening,
+        hiddenLegend: true,
+        value: ctx.settings.get().display.opening,
+        options: OPENING_ORDER.map((v) => ({ value: v, label: OPENING_LABEL[v] })),
+        onChange: (v) => setDisplay(ctx, (d) => ({ ...d, opening: v }), preview.refresh),
+      }),
     ),
   );
 }

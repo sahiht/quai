@@ -17,7 +17,6 @@ import { onDay, trip } from './trips';
 
 afterEach(() => document.body.replaceChildren());
 
-type Hz = ReturnType<typeof harness>;
 const cards = (root: ParentNode) => [...root.querySelectorAll<HTMLElement>('.result')];
 const tags = (root: ParentNode) => cards(root).map((c) => textOf(c.querySelector('.tag')));
 

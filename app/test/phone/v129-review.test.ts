@@ -33,14 +33,24 @@ describe('1.2.9 : champ d’adresse quitté', () => {
   });
 });
 
-describe('1.2.9 : bannière « Nouveau » de Quai Web', () => {
+describe('1.2.9 et 1.2.10 : bannière « Nouveau » de Quai Web', () => {
   it('l’onglet Réglages, jamais « le téléphone » ; l’appli Even : le téléphone', async () => {
     const { newsState, NEWS_SINCE } = await import('../../src/phone/app');
-    const web = newsState('1.2.8', NEWS_SINCE, '1.2.9', true).lines;
-    expect(web).toHaveLength(3);
-    expect(web.some((l) => /téléphone/.test(l))).toBe(false);
-    expect(web[1]).toMatch(/^L’onglet Réglages reprend l’accueil des lunettes/);
-    expect(newsState('1.2.8', NEWS_SINCE, '1.2.9').lines[1]).toMatch(/^L’accueil du téléphone/);
+    // 1.2.10 seule (depuis la 1.2.9) : ses 4 lignes, et l'appui long de l'onglet Lunettes
+    const web = newsState('1.2.9', NEWS_SINCE, '1.2.10', true).lines;
+    expect(web).toHaveLength(5);
+    expect(web[3]).toMatch(/^Dans l’onglet Réglages : « Y aller » sur chaque favori/);
+    expect(web[4]).toMatch(/^Dans l’onglet Lunettes, le bouton « Appui long »/);
+    const phone = newsState('1.2.9', NEWS_SINCE, '1.2.10').lines;
+    expect(phone).toHaveLength(4);
+    expect(phone[3]).toMatch(/^Sur l’accueil du téléphone : « Y aller » sur chaque favori/);
+    expect(phone.some((l) => /Appui long|onglet/.test(l))).toBe(false);
+    // depuis la 1.2.8 : celles de la 1.2.9 suivent, chacune dans sa variante
+    const web128 = newsState('1.2.8', NEWS_SINCE, '1.2.10', true).lines;
+    expect(web128).toHaveLength(8);
+    expect(web128.some((l) => /téléphone/.test(l))).toBe(false);
+    expect(web128[6]).toMatch(/^L’onglet Réglages reprend l’accueil des lunettes/);
+    expect(newsState('1.2.8', NEWS_SINCE, '1.2.10').lines[5]).toMatch(/^L’accueil du téléphone/);
   });
 });
 
