@@ -97,7 +97,7 @@ describe('jour de service pendant l’heure du changement d’heure', () => {
   });
 
   // À passer en it() avec le correctif de core/linepicks.ts décrit en tête de ce fichier (équipe F, PRD-1.2.10 § 6).
-  it.fails('serviceDayIndex pendant l’heure du changement : 25/10 03:30 → le 24/10 ; 28/03 04:30 → le 28/03 (correctif à appliquer)', () => {
+  it('serviceDayIndex pendant l’heure du changement : 25/10 03:30 → le 24/10 ; 28/03 04:30 → le 28/03', () => {
     expect(serviceDayIndex(['2026-10-24', '2026-10-25'], Date.parse('2026-10-25T03:30:00+01:00'))).toBe(0);
     expect(serviceDayIndex(['2027-03-27', '2027-03-28'], Date.parse('2027-03-28T04:30:00+02:00'))).toBe(1);
   });
@@ -122,7 +122,7 @@ describe('deux lignes W de régions différentes gardées en 1.2.5', () => {
   });
 
   // À passer en it() avec le correctif de settings.ts décrit en tête de ce fichier (équipe F, PRD-1.2.10 § 6).
-  it.fails('gardés à Waterloo et à Tournai en 1.2.5 : deux lignes suivies (correctif à appliquer)', () => {
+  it('gardés à Waterloo et à Tournai en 1.2.5 : deux lignes suivies', () => {
     const s = validateSettings({ v: 4, lines: [waterloo, tournai] });
     expect(s.follows?.map((f) => `${f.line} ${f.via?.areaId}`)).toEqual(['W tec:Bwategl1', 'W tec:H4ty265a']);
   });

@@ -405,6 +405,11 @@ export interface ContainerSpec {
   content: string;
   level: Brightness;
   capture: boolean;
+  /**
+   * 1.2.10 : bordure du conteneur (borderWidth et borderColor du SDK), par exemple le filet pâle au-dessus du détail
+   * des favoris : conteneur vide d'un pixel de haut avec une bordure d'un pixel. Absente : aucune bordure.
+   */
+  border?: { width: number; level: Brightness };
 }
 
 /**
