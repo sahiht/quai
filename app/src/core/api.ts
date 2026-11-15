@@ -443,6 +443,12 @@ export interface Core {
    * (données absentes) ; le chemin droit (`source: 'straight'`) quand les extrémités ne s'accrochent à aucune voie.
    */
   walkRoute?(from: LatLon, to: LatLon): Promise<WalkRoute | null>;
+  /**
+   * 1.2.10 : chemins à pied publiés (data/walk/index.json), pour la carte « Chemins à pied » de l'écran Données :
+   * `date` = date des données OpenStreetMap (AAAA-MM-JJ), `tiles` = nombre de tuiles. null : pas de chemins à pied
+   * dans la publication (ou index illisible, serveur injoignable). Jamais d'exception.
+   */
+  walkIndex?(): Promise<{ date: string; tiles?: number } | null>;
   init(): Promise<Meta>;
   /** La publication en vigueur : elle peut changer après init() (copie remplacée par le réseau, relecture de 10 min). */
   readonly meta: Meta | null;

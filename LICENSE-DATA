@@ -1,0 +1,48 @@
+Quai : licences des données
+
+Le code de Quai et les données qu'il publie chaque nuit (GitHub Pages, dossier data/) ont des origines
+différentes. Ce fichier dit, pour chaque jeu de données publié ou conservé dans ce dépôt, sa source, sa licence
+et l'attribution due.
+
+1. Horaires de transport en commun (data/meta.json, tiles/, areas/, search/, trains/, lines/, linetiles/)
+
+   Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company, licence CC BY 4.0
+   (Creative Commons Attribution 4.0 International, https://creativecommons.org/licenses/by/4.0/).
+   Fichiers dérivés des horaires officiels (GTFS) : sélection de deux journées, regroupement des arrêts en
+   zones, mise en forme des noms, conversion au format JSON de l'appli. Le détail de chaque nuit (versions des
+   flux, date de génération) est écrit dans data/LICENSE-DATA.txt.
+
+2. Chemins à pied (data/walk/, depuis Quai 1.2.10)
+
+   © les contributeurs d'OpenStreetMap, licence ODbL 1.0
+   (Open Database License, https://opendatacommons.org/licenses/odbl/1-0/ ;
+   https://www.openstreetmap.org/copyright).
+
+   Ce qui est publié : une base de données dérivée de l'extrait Geofabrik de la Belgique
+   (https://download.geofabrik.de/europe/belgium-latest.osm.pbf), refaite au plus une fois par semaine :
+   - data/walk/index.json : version (date des données OpenStreetMap), date de construction, source, licence,
+     attribution, taille des tuiles ;
+   - data/walk/{tuile}.json : voies praticables à pied (rues, trottoirs, chemins, escaliers, quais), carrefours,
+     géométrie simplifiée (environ 2 m), longueur, noms de rue, marches, sens uniques à pied, découpées en
+     tuiles d'environ 2 km.
+   Cette base dérivée est diffusée sous la même licence (ODbL 1.0) ; toute réutilisation doit citer
+   « © les contributeurs d'OpenStreetMap » et rester sous ODbL. La section « Chemins à pied » est ajoutée
+   chaque nuit à data/LICENSE-DATA.txt quand les tuiles sont publiées. L'appli montre l'attribution dans
+   l'écran Données du téléphone (carte « Chemins à pied »).
+
+   Les tuiles sont lues par le téléphone par zone de 2 km, comme les tuiles d'arrêts : aucune position n'est
+   envoyée pour les obtenir.
+
+3. Données de test conservées dans le dépôt
+
+   - pipeline/test/walk-data/pyrosm-helsinki.osm.pbf et pyrosm-test.osm.pbf : petits extraits
+     OpenStreetMap (centre d'Helsinki et environs de Kotka, Finlande) distribués avec le paquet Python pyrosm ;
+     © les contributeurs d'OpenStreetMap, ODbL 1.0.
+   - app/test/core/walk-data/ : tuiles piétonnes construites par le pipeline à partir de ces extraits ;
+     © les contributeurs d'OpenStreetMap, ODbL 1.0.
+   - fixtures/pipeline/osm/namur-bruxelles.osm et app/test/core/walk-data/fixtures/ : extrait écrit à la main
+     au format OpenStreetMap pour les scénarios de bout en bout (noms de rues publiques autour des gares de
+     Namur, Bruxelles-Nord et Bruxelles-Central, de la Bourse et de la place Fontainas ; tracé simplifié dessiné
+     pour les tests, pas une copie de la base OpenStreetMap).
+   - fixtures/ et app/test/fixtures/ : réseaux et réponses fictifs écrits pour les tests (aucune donnée réelle
+     de voyageur).
