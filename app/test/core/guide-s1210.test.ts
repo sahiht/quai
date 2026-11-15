@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Journey, LatLon, Leg } from '../../src/core/api';
-import { guideStep, newGuideMemory } from '../../src/core/guide';
+import { guideStep, newGuideMemory, type GuideInput } from '../../src/core/guide';
 import type { GuideFix, GuideMemory, GuideState } from '../../src/core/guide-types';
 import { settings } from './guide-fixtures';
 
@@ -62,13 +62,13 @@ export function s1210Journey(): Journey {
 const lerp = (a: LatLon, b: LatLon, f: number): LatLon => ({ lat: a.lat + (b.lat - a.lat) * f, lon: a.lon + (b.lon - a.lon) * f });
 
 /** Guidage rejoué : `at(now, positions)` avance l'horloge puis donne les positions une à une (le moteur à chaque fois). */
-function replay(j = s1210Journey()) {
+function replay(j = s1210Journey(), extra: Partial<GuideInput> = {}) {
   let mem: GuideMemory = newGuideMemory();
   const fixes: GuideFix[] = [];
   let last!: GuideState;
   const at = (now: number, pts: [number, LatLon, number, number?][] = []): GuideState => {
     const one = () => {
-      const r = guideStep({ kind: 'trip', journey: j, title: 'Place Fontainas', now, fixes: fixes.filter((f) => now - f.at <= 300_000 && f.at <= now), settings: settings(), startedAt: T('07:20'), origin: P.ange }, mem);
+      const r = guideStep({ kind: 'trip', journey: j, title: 'Place Fontainas', now, fixes: fixes.filter((f) => now - f.at <= 300_000 && f.at <= now), settings: settings(), startedAt: T('07:20'), origin: P.ange, ...extra }, mem);
       mem = r.mem;
       last = r.state;
     };
@@ -125,6 +125,30 @@ describe('s1210 : arrêt dépassé à Bruxelles-Nord (l’IC repart vers Bruxell
     const s = g.at(T('08:45'), [[T('08:44:30'), lerp(P.nord, P.central, 0.3), 5.6], [T('08:45'), lerp(P.nord, P.central, 0.4), 5.6]]);
     expect(s.moment).toMatchObject({ kind: 'passed', passed: N('Bruxelles-Nord') });
     expect(s.replan).toMatchObject({ reason: 'passed' });
+  });
+
+  it('arrêts suivants de l’IC connus (lus par le contrôleur) : « Descends à Bruxelles-Central, 08:48 », nouveau trajet depuis Bruxelles-Central à 08:48, jamais depuis la position dans le train', () => {
+    const central = { name: N('Bruxelles-Central', 'Brussel-Centraal'), sched: T('08:46'), est: T('08:48'), areaId: 'sncb:8813003', lat: P.central.lat, lon: P.central.lon, platform: '3' };
+    const midi = { name: N('Bruxelles-Midi', 'Brussel-Zuid'), sched: T('08:52'), est: T('08:54'), areaId: 'sncb:8814001' };
+    const g = replay(s1210Journey(), { beyond: [central, midi], beyondLeg: 1 });
+    g.at(T('07:46'), [[T('07:45:30'), lerp(P.namur, P.gembloux, 90 / 780), 19.7], [T('07:46'), lerp(P.namur, P.gembloux, 120 / 780), 19.7]]);
+    g.at(T('08:41:30'), [[T('08:41:30'), lerp(P.schuman, P.nord, 240 / 270), 8.9]]);
+    g.at(T('08:43'), [[T('08:42'), P.nord, 0], [T('08:43'), P.nord, 0]]);
+    g.at(T('08:44'), [[T('08:43:30'), lerp(P.nord, P.central, 0.1), 5.6], [T('08:44'), lerp(P.nord, P.central, 0.2), 5.6]]);
+    const s = g.at(T('08:45'), [[T('08:44:30'), lerp(P.nord, P.central, 0.3), 5.6], [T('08:45'), lerp(P.nord, P.central, 0.4), 5.6]]);
+    expect(s.moment).toMatchObject({ kind: 'passed', passed: N('Bruxelles-Nord'), getOff: N('Bruxelles-Central', 'Brussel-Centraal'), at: T('08:48') });
+    expect(s.replan).toEqual({ from: { lat: P.central.lat, lon: P.central.lon, areaId: 'sncb:8813003', name: N('Bruxelles-Central', 'Brussel-Centraal') }, reason: 'passed', at: T('08:48') });
+  });
+
+  it('arrêts suivants d’une autre étape (beyondLeg) : ignorés', () => {
+    const central = { name: N('Bruxelles-Central'), sched: T('08:46'), est: T('08:48'), areaId: 'sncb:8813003', lat: P.central.lat, lon: P.central.lon };
+    const g = replay(s1210Journey(), { beyond: [central], beyondLeg: 3 });
+    g.at(T('07:46'), [[T('07:45:30'), lerp(P.namur, P.gembloux, 90 / 780), 19.7], [T('07:46'), lerp(P.namur, P.gembloux, 120 / 780), 19.7]]);
+    g.at(T('08:43'), [[T('08:42'), P.nord, 0], [T('08:43'), P.nord, 0]]);
+    g.at(T('08:44'), [[T('08:43:30'), lerp(P.nord, P.central, 0.1), 5.6], [T('08:44'), lerp(P.nord, P.central, 0.2), 5.6]]);
+    const s = g.at(T('08:45'), [[T('08:44:30'), lerp(P.nord, P.central, 0.3), 5.6], [T('08:45'), lerp(P.nord, P.central, 0.4), 5.6]]);
+    expect(s.moment).toMatchObject({ kind: 'passed', getOff: { fr: '', nl: '' } });
+    expect(s.replan?.from.areaId).toBeUndefined();
   });
 
   it('IC en retard encore avant Bruxelles-Nord après son heure, à plus de 300 m : pas « Tu as passé »', () => {
