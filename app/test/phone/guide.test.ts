@@ -290,6 +290,22 @@ describe('carte « En cours » de l’accueil (PRD-1.2.10 § 4.3)', () => {
     expect(cardText(el).slice(0, 3)).toEqual(['En cours', 'Bureau, arrivée 08:54', 'Maintenant : bus 6 vers Gare des Guillemins']);
   });
 
+  it('lunettes en erreur (guideStatus ou onGuide lèvent) : l’accueil s’affiche quand même, sans carte', () => {
+    const hz = harness({ settings: defaults() });
+    Object.assign(hz.glasses, {
+      guideStatus: () => {
+        throw new Error('pas prêt');
+      },
+      onGuide: () => {
+        throw new Error('pas prêt');
+      },
+    });
+    const el = home(hz);
+    expect(textOf(el.querySelector('h1'))).toBe('Bonjour');
+    expect(card(el)).toBeNull();
+    expect(el.querySelector('.mirror-sec')).not.toBeNull();
+  });
+
   it('l’accueil quitté (ou jamais posé) : il ne suit plus le guidage', async () => {
     const hz = harness({ settings: defaults() });
     const guide = withGuide(hz.glasses, STATUS);

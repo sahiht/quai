@@ -309,6 +309,15 @@ function whileShown(el: HTMLElement, stop: () => void): () => boolean {
   };
 }
 
+/** L'état des lunettes ne doit jamais empêcher l'accueil de s'afficher : une erreur vaut `fallback` (rien de suivi). */
+function safe<R>(f: () => R, fallback: R): R {
+  try {
+    return f();
+  } catch {
+    return fallback;
+  }
+}
+
 /**
  * 1.2.10 (PRD-1.2.10 § 4.3) : carte « En cours » en tête de l'accueil pendant un trajet suivi : « En cours » ; « Bureau,
  * arrivée 08:54 » ; « Maintenant : bus 6 vers Gare des Guillemins » (GuideStatus.now, annoncé quand il change) ;
@@ -360,7 +369,7 @@ function nowCard(ctx: PhoneCtx, home: () => HTMLElement | null): HTMLElement {
     const said = guided ? T.guideStopped : T.followStopped;
     try {
       await g.stopGuide!();
-      const st = g.guideStatus?.() ?? null;
+      const st = safe(() => g.guideStatus?.() ?? null, null);
       show(st);
       if (!st) {
         done.textContent = said;
@@ -374,11 +383,15 @@ function nowCard(ctx: PhoneCtx, home: () => HTMLElement | null): HTMLElement {
       stop.disabled = false;
     }
   });
-  show(g.guideStatus?.() ?? null);
+  show(safe(() => g.guideStatus?.() ?? null, null));
   const alive = whileShown(slot, () => off?.());
-  const off = g.onGuide?.((st) => {
-    if (alive()) show(st);
-  });
+  const off = safe(
+    () =>
+      g.onGuide?.((st) => {
+        if (alive()) show(st);
+      }),
+    undefined,
+  );
   return slot;
 }
 
