@@ -3,12 +3,13 @@
  * favoris dans l'ordre réglé, au format de l'accueil ; puis la ligne pâle « Adresses récentes » (jamais sélectionnée) et
  * 3 adresses au plus avec leur réponse au format de l'accueil ; puis « Autre adresse ». « Aller à… » n'existe plus : un
  * état de la 1.2.1 sur cet écran s'ouvre sur « Favoris ». 1.2.10 (docs/v1.2.10/PRD-1.2.10.md § 2) : une ligne par
- * favori, le détail du favori sous le curseur en bas (favorites-1210.test.ts).
+ * favori. 1.3.0 (docs/v1.3.0/PRD-1.3.0.md § 7) : le détail du favori sous le curseur s'ouvre sous lui (accordéon,
+ * DetailItem.expand ; contenu : v130-ecrans.test.ts), plus de ligne du détail en bas.
  */
 import { describe, expect, it } from 'vitest';
 import type { Favorite, FavoriteAnswer, Journey, RecentAddress } from '../../src/core/api';
 import { favoriteDetail, planHomeText } from '../../src/glasses/format';
-import { LAYOUTS, WIDTHS } from '../../src/glasses/layout';
+import { LAYOUTS, WIDTHS, type DetailItem } from '../../src/glasses/layout';
 import { parseNav } from '../../src/glasses/nav';
 import { textWidth } from '../../src/glasses/font';
 import { favoritesView, homeView, RECENT_HEAD, type FavoriteEntry, type ViewCtx } from '../../src/glasses/views';
@@ -41,31 +42,31 @@ const FAVS = [PLACES.maison, PLACES.bureau, PLACES.ecole];
 const listReady = (s: Screen) => s.screen === 'favorites' && !s.lines.some((l) => / …$/.test(l));
 
 describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »', () => {
-  it('titre « Favoris » ; une ligne par favori comme l’accueil ; le détail du favori sous le curseur en bas (PRD-1.2.10 § 2)', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith(FAVS, { seenVersion: '1.2.10' }), core: (now) => stubCore(now, { answers }) });
+  it('titre « Favoris » ; une ligne par favori comme l’accueil ; 1.3.0 : plus de ligne du détail en bas (accordéon, PRD-1.3.0 § 7)', async () => {
+    const h = await setup({ now: NOW, settings: settingsWith(FAVS, { seenVersion: '1.3.0' }), core: (now) => stubCore(now, { answers }) });
     await h.until((x) => x.screen === 'home' && x.shown?.length === 2);
     await h.gesture('up', 'tap');
     const s = await h.until(listReady);
     expect(s.title).toBe('Favoris');
     expect(s.order).toEqual(['fav-bureau', 'fav-ecole', 'fav-maison']);
-    expect(s.lines).toEqual([
-      'Bureau   dans 4 min → 08:46',
-      'École   dans 9 min → 08:51',
-      'Maison   tu y es',
-      'Autre adresse   sur le téléphone',
-      // la ligne du détail : celui du favori sous le curseur (Bureau)
-      'bus W 07:40, direct',
-      '△▽ choisir   toucher : ouvrir   double : retour',
-    ]);
-    // « ~ » au début de l'heure prévue, dans la ligne du détail ; pas de note à part
+    const rows = ['Bureau   dans 4 min → 08:46', 'École   dans 9 min → 08:51', 'Maison   tu y es', 'Autre adresse   sur le téléphone'];
+    // les rangées dans l'ordre (l'accordéon du curseur, rendu par la mise en page, peut s'y glisser) ; en bas, plus de
+    // ligne du détail : « Autre adresse », puis les aides, quel que soit le favori sous le curseur
+    const bottom = ['Autre adresse   sur le téléphone', '△▽ choisir   toucher : ouvrir   double : retour'];
+    expect(s.lines.filter((l) => rows.includes(l))).toEqual(rows);
+    expect(s.lines.slice(-2)).toEqual(bottom);
+    expect(s.lines).not.toContain('bus W 07:40, direct');
     await h.gesture('down');
     const e = await h.until((x) => listReady(x) && x.sel === 1);
-    expect(e.lines.slice(-2)).toEqual(['bus W ~07:45, direct', '△▽ choisir   toucher : ouvrir   double : retour']);
-    // « tu y es » : rien
+    expect(e.lines.slice(-2)).toEqual(bottom);
     await h.gesture('down');
     const m = await h.until((x) => listReady(x) && x.sel === 2);
-    expect(m.lines.slice(-2)).toEqual(['Autre adresse   sur le téléphone', '△▽ choisir   toucher : ouvrir   double : retour']);
+    expect(m.lines.slice(-2)).toEqual(bottom);
     h.c.stop();
+    // l'accordéon de chaque favori (« ~ » au début de l'heure prévue ; « tu y es » : rien ne s'ouvre)
+    const v = favoritesView({ entries: FAVS.map((fav) => ({ fav, answer: answers(fav, NOW) })) }, { now: NOW, settings: settingsWith(FAVS) });
+    expect(v.accordion).toBe(true);
+    expect(v.items.slice(0, 3).map((i) => (i as DetailItem).expand?.map((l) => nb(l.text)))).toEqual([undefined, ['à pied 5 min, puis bus W 07:40', 'direct'], ['à pied 5 min, puis bus W ~07:45', 'direct']]);
   });
 
   it('la ligne 1 de chaque favori est celle de l’accueil (REVUE-USAGE n° 7)', () => {
@@ -84,14 +85,17 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
 
   it('adresses récentes : la ligne pâle « Adresses récentes », 3 au plus, réponse au format de l’accueil, jamais sélectionnée', async () => {
     const plan = (now: number) => [door('j-r', now + 9 * MIN, now + 80 * MIN)];
-    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.10', recent: RECENT }), core: (now) => stubCore(now, { answers, plan }) });
+    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0', recent: RECENT }), core: (now) => stubCore(now, { answers, plan }) });
     await h.until((x) => x.screen === 'home' && x.shown?.length === 1);
     await h.gesture('up', 'tap');
     await h.until(listReady);
-    // du favori vers la 1re adresse : la ligne pâle est sautée, elle reste visible au-dessus ; le détail : l'adresse complète
+    // du favori vers la 1re adresse : la ligne pâle est sautée, elle reste visible au-dessus ; 1.3.0 : l'adresse complète
+    // dans l'accordéon (PRD-1.3.0 § 7), plus en bas
     await h.gesture('down');
     const r = await h.until((x) => listReady(x) && x.sel === 1);
-    expect(r.lines.slice(1, 7)).toEqual(['ADRESSES RÉCENTES', 'Rue Neuve 1   dans 9 min → 08:51', 'Grand-Place 1   dans 9 min → 08:51', 'Place Saint-Lambert 1   dans 9 min → 08:51', 'Autre adresse   sur le téléphone', 'Rue Neuve 1, 1000 Bruxelles']);
+    const rows = ['ADRESSES RÉCENTES', 'Rue Neuve 1   dans 9 min → 08:51', 'Grand-Place 1   dans 9 min → 08:51', 'Place Saint-Lambert 1   dans 9 min → 08:51', 'Autre adresse   sur le téléphone'];
+    expect(r.lines.filter((l) => rows.includes(l))).toEqual(rows);
+    expect(r.lines.at(-2)).toBe('Autre adresse   sur le téléphone');
     await h.gesture('down', 'down', 'down');
     const s = await h.until((x) => listReady(x) && x.sel === 4);
     expect(s.lines.join('\n')).not.toContain('Mons');
@@ -99,10 +103,10 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
     const colB = rowsOf(p.find((c) => c.name === 'colB')!);
     expect(colB).toContain(RECENT_HEAD);
     expect(p.find((c) => c.name === 'colB')!.level).toBe(2);
-    // le curseur est sur « Autre adresse » ; jamais sur la ligne pâle ; la ligne du détail est vide
+    // le curseur est sur « Autre adresse » ; jamais sur la ligne pâle ; 1.3.0 : le pied n'a que les aides
     const cursor = rowsOf(p.find((c) => c.name === 'cursor')!);
     expect(cursor[colB.indexOf(RECENT_HEAD)]).toBe('');
-    expect(rowsOf(p.find((c) => c.name === 'foot')!)[0].trim()).toBe('');
+    expect(rowsOf(p.find((c) => c.name === 'foot')!)).toEqual(['△▽ choisir   toucher : ouvrir   double : retour']);
     // toucher : un message (appli Even)
     await h.gesture('tap');
     expect(h.last().lines.at(-1)).toBe('Tape l’adresse dans Quai, sur le téléphone');
@@ -121,7 +125,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
     expect(planHomeText(undefined, NOW)).toBe('…');
     const here = { lat: RECENT[0].lat, lon: RECENT[0].lon };
     const opened: string[] = [];
-    const h = await setup({ now: NOW, pos: here, web: true, opened, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.10', recent: RECENT.slice(0, 1) }), core: (now) => stubCore(now, { answers }) });
+    const h = await setup({ now: NOW, pos: here, web: true, opened, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0', recent: RECENT.slice(0, 1) }), core: (now) => stubCore(now, { answers }) });
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'favorites' });
     const s = await h.until((x) => listReady(x) && x.lines.some((l) => l.startsWith('Rue Neuve 1')));
@@ -132,7 +136,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
   });
 
   it('sans favori : « Ajouter un favori » en premier ; toucher : comment en ajouter (REVUE-USAGE n° 2)', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.10' }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0' }), core: (now) => stubCore(now) });
     const home = await h.until((x) => x.screen === 'home' && x.lines.includes('Autour de moi   9 arrêts'));
     expect(home.lines.slice(0, 2)).toEqual(['Près de Arrêt 1', 'Ajouter un favori']);
     await h.gesture('tap');
@@ -149,7 +153,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
   it('« Aller à… » n’existe plus : ni sur l’accueil, ni comme écran ; un état de la 1.2.1 sur « Aller à… » ouvre « Favoris »', async () => {
     const snap = { stack: [{ route: { screen: 'home' }, sel: 0, top: 0 }, { route: { screen: 'places' }, sel: 2, top: 0 }] };
     expect(parseNav(snap)?.stack.map((f) => f.route)).toEqual([{ screen: 'home' }, { screen: 'favorites' }]);
-    const h = await setup({ now: NOW, settings: settingsWith(FAVS, { seenVersion: '1.2.10' }), core: (now) => stubCore(now, { answers }) });
+    const h = await setup({ now: NOW, settings: settingsWith(FAVS, { seenVersion: '1.3.0' }), core: (now) => stubCore(now, { answers }) });
     await h.until((x) => x.screen === 'home');
     expect(h.screens().every((x) => !x.lines.some((l) => l.startsWith('Aller à')))).toBe(true);
     h.c.restore(JSON.stringify({ v: 2, nav: snap }));
@@ -161,7 +165,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
 });
 
 describe('§ 1.2 : textes et largeurs', () => {
-  it('2e ligne : véhicule en toutes lettres et son heure, voie, changements, sans l’arrivée', () => {
+  it('accordéon (PRD-1.3.0 § 7) : la marche puis le véhicule en toutes lettres et son heure, la voie ; le souci et les changements', () => {
     const s = settingsWith(FAVS);
     const ic = journey('ic', [{ walk: 7 }, { ride: 'IC', mode: 'train', dep: NOW + 11 * MIN, arr: NOW + 64 * MIN, from: 'Braine-l’Alleud', to: 'Bruxelles-Central', platform: '4' }, { walk: 3 }]);
     const r = ic.legs[1];
@@ -169,22 +173,24 @@ describe('§ 1.2 : textes et largeurs', () => {
       r.delayMin = 2;
       r.newPlatform = '6';
     }
-    expect(nb(favoriteDetail(tripAnswer(PLACES.bureau, ic), NOW, s)!.text)).toBe('IC 07:42 +2 voie 6 !, direct');
-    // gare de départ hors de portée à pied : « IC voie 4 à Bruxelles-Central »
+    const texts = (a: FavoriteAnswer) => favoriteDetail(a, NOW, s).map((l) => nb(l.text));
+    expect(texts(tripAnswer(PLACES.bureau, ic))).toEqual(['à pied 7 min, puis IC 07:42 +2 voie 6 !', 'voie 6 au lieu de 4, direct']);
+    // gare de départ hors de portée à pied : « IC voie 4 à 08:01, à Bruxelles-Central »
     const station = journey('st', [{ ride: 'IC', mode: 'train', dep: NOW + 30 * MIN, arr: NOW + 60 * MIN, from: 'Bruxelles-Central', to: 'Gand-Saint-Pierre', platform: '4' }]);
-    expect(favoriteDetail({ ...tripAnswer(PLACES.bureau, station), fromStation: true }, NOW, s)!.text).toBe('IC voie 4 à Bruxelles-Central');
-    // à pied ; « tu y es » : pas de 2e ligne
+    expect(texts({ ...tripAnswer(PLACES.bureau, station), fromStation: true })).toEqual(['IC voie 4 à 08:01, à Bruxelles-Central', 'direct']);
+    // à pied seulement : une ligne ; « tu y es » : rien ne s'ouvre
     const walk = { ...journey('w', [{ walk: 9 }]), dep: NOW, arr: NOW + 9 * MIN };
-    expect(nb(favoriteDetail(tripAnswer(PLACES.bureau, walk), NOW, s)!.text)).toBe('à pied, 9 min');
-    expect(favoriteDetail({ favoriteId: 'x', kind: 'trip', state: 'here', updatedAt: NOW }, NOW, s)).toBeNull();
+    expect(texts(tripAnswer(PLACES.bureau, walk))).toEqual(['à pied 9 min']);
+    expect(favoriteDetail({ favoriteId: 'x', kind: 'trip', state: 'here', updatedAt: NOW }, NOW, s)).toEqual([]);
   });
 
-  it('en calcul : « … », une ligne, rien dans la ligne du détail ; tout tient au pixel', () => {
+  it('en calcul : « … », une ligne, rien ne s’ouvre ; tout tient au pixel', () => {
     const s = settingsWith(FAVS, { recent: RECENT });
     const v = favoritesView({ entries: FAVS.map((fav) => ({ fav })) }, { now: NOW, settings: s });
     expect(v.items.slice(0, 3).map((i) => [i.a, i.c, i.two])).toEqual([['Maison', '…', undefined], ['Bureau', '…', undefined], ['École', '…', undefined]]);
-    // sept lignes de liste (le séparateur compte), puis la ligne du détail, vide (Maison en calcul), et les aides
-    expect(lines(v).slice(-3)).toEqual(['Grand-Place 1   …', 'Place Saint-Lambert 1   …', '△▽ choisir   toucher : ouvrir   double : retour']);
+    // 1.3.0 : plus de ligne du détail (Maison en calcul : rien ne s'ouvre) : huit lignes de liste, puis les aides
+    expect(lines(v).slice(-3)).toEqual(['Place Saint-Lambert 1   …', 'Autre adresse   sur le téléphone', '△▽ choisir   toucher : ouvrir   double : retour']);
+    expect(v.items.slice(0, 3).every((i) => (i as DetailItem).expand === undefined)).toBe(true);
     for (const it of v.items) {
       expect(textWidth(it.c ?? '')).toBeLessThanOrEqual(WIDTHS.wideRight);
       expect(it.b2).toBeUndefined();

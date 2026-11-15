@@ -59,8 +59,20 @@ export const GUIDE_TEXT = {
   alightHere: 'c’est ta descente',
   /** 1.3.0 (PRD-1.3.0 § 4) : marche hors de l'extrait de Belgique */
   offMap: 'Hors de Belgique',
-  /** 1.3.0 (PRD-1.3.0 § 6.3) : vérification au départ */
+  /** 1.3.0 (§ 4) : moment `offMap`, le cap connu (la flèche le montre) */
+  offMapArrow: `pas de chemin à pied${NB}: suis la flèche`,
+  /** 1.3.0 (§ 4) : moment `offMap` sans cap */
+  offMapNoPath: 'pas de chemin à pied',
+  /** 1.3.0 (§ 4) : « Où tu en es » à pied hors de Belgique, pâle */
+  offMapWhere: 'hors de Belgique, pas de chemin à pied',
+  /** 1.3.0 (§ 4) : distance d'une marche sans chemin (« 450 m à vol d’oiseau, 6 min ») */
+  crow: 'à vol d’oiseau',
+  /** 1.3.0 (PRD-1.3.0 § 6.3) : vérification au départ, titre du moment quand aucun problème n'est donné */
   check: 'À vérifier',
+  /** 1.3.0 (§ 6.3) : pâle sous « Pas de position : guidage à l’heure » */
+  checkNoPosition: `Position «${NB}Toujours${NB}» pour l’appli Even, sur le téléphone`,
+  /** 1.3.0 (§ 6.3) : pâle sous « Position perdue depuis 3 min » */
+  checkLost: 'guidage à l’heure en attendant',
   arrived: 'Tu y es',
   none: 'Pas d’autre trajet trouvé',
   tight: 'très juste',
@@ -133,10 +145,11 @@ export function vehicleSign(v: VehicleRef, platform?: string): ImageKind {
 
 /**
  * « 5 min à pied jusqu’à l’arrêt Monument Gramme » sur une rangée : sans « l’arrêt » (« la gare de ») si elle ne tient
- * pas, puis le nom coupé au mot en dernier recours.
+ * pas, puis le nom coupé au mot en dernier recours. 1.3.0 (PRD-1.3.0 § 4, `foot` faux) : sans « à pied » (« 6 min
+ * jusqu’à l’arrêt X », moment `offMap`).
  */
-export function leaveWalkText(walkMin: number, toward: string, kind: 'stop' | 'station' | 'dest', title: string, maxPx: number): string {
-  const walk = `${minText(walkMin)} à pied`;
+export function leaveWalkText(walkMin: number, toward: string, kind: 'stop' | 'station' | 'dest', title: string, maxPx: number, foot = true): string {
+  const walk = foot ? `${minText(walkMin)} à pied` : minText(walkMin);
   if (kind === 'dest') return truncateWords(`${walk} ${untilTitle(title)}`, maxPx);
   const full = `${walk} jusqu’à ${kind === 'station' ? 'la gare de' : 'l’arrêt'} ${toward}`;
   if (textWidth(full) <= maxPx) return full;
@@ -257,6 +270,46 @@ function arrivedMoment(m: Extract<Moment, { kind: 'arrived' }>): MomentView {
   return { lines: [MAIN(GUIDE_TEXT.arrived), F('pale', (w) => fitName('', tripName(m.title), `, ${hhmm(m.at)}, ${diffText(m.diffMin)}`, w))], hints: HINTS.guideEnd };
 }
 
+/**
+ * 1.3.0 (PRD-1.3.0 § 4) : marche sans chemin à pied (hors de l'extrait de Belgique), sans aucun virage : « Hors de
+ * Belgique » au plus clair ; « pas de chemin à pied : suis la flèche » (sans cap : « pas de chemin à pied ») ; pâle
+ * « 6 min jusqu’à l’arrêt X » (un train : « jusqu’à la gare de X » ; dernière marche : « 6 min jusqu’au bureau »). Image :
+ * la flèche de la direction de la cible si le cap est connu (`bearingDeg`), sinon le panneau « à pied / 6 / min ».
+ */
+function offMapMoment(m: Extract<Moment, { kind: 'offMap' }>, j: Journey, title: string, ctx: ViewCtx): MomentView {
+  const arrow = typeof m.bearingDeg === 'number' && Number.isFinite(m.bearingDeg);
+  const ride = nextRide(j, m.leg);
+  const toward = nameOf(m.toward, ctx) || (ride ? nameOf(ride.from.name, ctx) : '');
+  const kind = !ride ? 'dest' : isTrainRef(ride) ? 'station' : 'stop';
+  const walkMin = Math.max(1, Math.round(m.walkMin));
+  // un arrêt sans nom (données incomplètes) : les minutes seules, jamais « jusqu’à l’arrêt » sans nom
+  const until = kind !== 'dest' && !toward ? () => minText(walkMin) : (w: number) => leaveWalkText(walkMin, toward, kind, title, w, false);
+  return {
+    lines: [MAIN(GUIDE_TEXT.offMap), L('norm', arrow ? GUIDE_TEXT.offMapArrow : GUIDE_TEXT.offMapNoPath), F('pale', until)],
+    image: arrow ? { kind: 'bearing', deg: m.bearingDeg! } : { kind: 'sign', label: 'à pied', value: String(walkMin), foot: 'min' },
+    hints: HINTS.guide,
+  };
+}
+
+/**
+ * 1.3.0 (PRD-1.3.0 § 6.3) : vérification au départ et en route : une ligne par problème au plus clair (checkLines, deux
+ * au plus), chacune suivie de son explication pâle s'il y en a une : « Position « Toujours » pour l’appli Even, sur le
+ * téléphone » sous « Pas de position : guidage à l’heure », « guidage à l’heure en attendant » sous « Position perdue
+ * depuis 3 min ». Quatre rangées au plus, sans image (toute la largeur).
+ */
+function checkMoment(m: Extract<Moment, { kind: 'check' }>): MomentView {
+  const issues = m.issues.slice(0, 2);
+  const texts = checkLines(issues);
+  const lines: GLine[] = [];
+  issues.forEach((i, k) => {
+    if (!texts[k]) return;
+    lines.push(MAIN(texts[k]));
+    if (i.kind === 'noPosition') lines.push(L('pale', GUIDE_TEXT.checkNoPosition));
+    else if (i.kind === 'positionLost') lines.push(L('pale', GUIDE_TEXT.checkLost));
+  });
+  return { lines: lines.length ? lines : [MAIN(GUIDE_TEXT.check)], hints: HINTS.guide };
+}
+
 function momentView(m: Moment, s: GuideState, j: Journey, ctx: ViewCtx): MomentView {
   const title = s.where.title;
   const ride = s.kind === 'ride';
@@ -279,11 +332,10 @@ function momentView(m: Moment, s: GuideState, j: Journey, ctx: ViewCtx): MomentV
       return passedMoment(m, ride, ctx);
     case 'arrived':
       return arrivedMoment(m);
-    // 1.3.0 : vues de l'équipe des écrans (PRD-1.3.0 § 4 et § 6.3) ; en attendant, la première ligne seule
     case 'offMap':
-      return { lines: [MAIN(GUIDE_TEXT.offMap)], hints: HINTS.guide };
+      return offMapMoment(m, j, title, ctx);
     case 'check':
-      return { lines: [MAIN(GUIDE_TEXT.check)], hints: HINTS.guide };
+      return checkMoment(m);
   }
 }
 
@@ -416,7 +468,14 @@ function whereLines(w: WhereAmI, s: GuideState, j: Journey, ctx: ViewCtx, maxPx:
     } else if (walk.toKind === 'station') to = `vers la gare de ${nameOf(walk.toward, ctx)}`;
     else to = walk.vehicle ? `vers l’arrêt du ${vehicle(walk.vehicle)}` : `vers l’arrêt ${nameOf(walk.toward, ctx)}`;
     out.push(L('hi', truncateWords(`À pied ${to}`, maxPx)));
-    out.push(L('norm', walk.remainingM !== undefined ? `${metersText(walk.remainingM)}, ${minText(Math.max(1, walk.remainingMin))}` : minText(Math.max(1, walk.remainingMin))));
+    const min = minText(Math.max(1, walk.remainingMin));
+    if (walk.offMap) {
+      // 1.3.0 (PRD-1.3.0 § 4) : hors de Belgique, pas de chemin : la distance à vol d'oiseau et les minutes, dites
+      // comme telles (« 450 m à vol d’oiseau, 6 min »), puis pâle « hors de Belgique, pas de chemin à pied »
+      const crow = walk.crowM ?? walk.remainingM;
+      out.push(L('norm', crow !== undefined && Number.isFinite(crow) ? `${metersText(crow)} ${GUIDE_TEXT.crow}, ${min}` : min));
+      out.push(L('pale', GUIDE_TEXT.offMapWhere));
+    } else out.push(L('norm', walk.remainingM !== undefined ? `${metersText(walk.remainingM)}, ${min}` : min));
     if (walk.vehicle && walk.depAt !== undefined) {
       // l'heure du véhicule visé, avec son temps réel (pas celui du trajet entier) : comme « Partir maintenant »
       out.push(L('norm', `${vehicle(walk.vehicle)} à ${timeOf(walk.depAt, walk.rt ?? w.rt, ctx)}${walk.marginMin !== undefined ? `, ${marginText(walk.marginMin)}` : ''}`));
@@ -502,14 +561,15 @@ export function menuView(items: MenuItem[], ctx: ViewCtx): GlassesView {
 
 /**
  * 1.3.0 (PRD-1.3.0 § 6.3) : une ligne par problème de la vérification, deux au plus, pour l'écran du moment `check` et
- * la carte « En cours » du téléphone (GuideStatus.check). Les lignes pâles d'explication restent propres à l'écran.
+ * la carte « En cours » du téléphone (GuideStatus.check) : « Lunettes : 12 % de batterie », « Pas de position : guidage
+ * à l’heure », « Position perdue depuis 3 min ». Les lignes pâles d'explication restent propres à l'écran (checkMoment).
  */
 export function checkLines(issues: readonly CheckIssue[]): string[] {
   const out: string[] = [];
   for (const i of issues) {
-    if (i.kind === 'battery') out.push(`Lunettes\u00a0: ${Math.round(i.level)}\u00a0% de batterie`);
-    else if (i.kind === 'noPosition') out.push('Pas de position\u00a0: guidage à l’heure');
-    else out.push(`Position perdue depuis ${Math.max(1, Math.round(i.minutes))}\u00a0min`);
+    if (i.kind === 'battery') out.push(`Lunettes${NB}: ${Math.min(100, Math.max(0, Math.round(i.level)))}${NB}% de batterie`);
+    else if (i.kind === 'noPosition') out.push(`Pas de position${NB}: guidage à l’heure`);
+    else out.push(`Position perdue depuis ${minText(Math.max(1, Math.round(i.minutes)))}`);
   }
   return out.slice(0, 2);
 }

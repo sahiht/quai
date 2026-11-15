@@ -103,7 +103,7 @@ describe('CA-123.1 : tableau complet d’une gare ou d’un arrêt', () => {
     expect(v.initialSel).toBe(1);
     expect(v.paged).toBe(true);
     expect(v.hints).toBe(HINTS.board);
-    expect(nb(HINTS.board)).toBe('△▽ départs   toucher : arrêts   double : retour');
+    expect(nb(HINTS.board)).toBe('△▽ départs   toucher : où descendre   double : retour');
     expect(v.items.slice(1).map((i) => nb(`${i.cLead ?? ''}${i.c ?? ''}`))).toEqual([
       '07:34  voie 5',
       '07:42 +2  voie 6 !',
@@ -129,7 +129,7 @@ describe('CA-123.1 : tableau complet d’une gare ou d’un arrêt', () => {
     const area = { id: 'stib:6357F', op: 'stib' as const, n: { fr: 'Gare du Nord', nl: 'Noordstation' }, lat: 50.86, lon: 4.36, modes: ['tram' as const], lines: ['3', '4'] };
     const tram = dep(NOW, 2, { op: 'stib', mode: 'tram', line: '3', head: N('Churchill') });
     const v = boardView({ area, departures: [tram], anyPlanned: false, rtErrors: [], updatedAt: NOW }, ctx(), { kept: false });
-    expect(lines(v)).toEqual(['★ garder une ligne', 'T3   Churchill   2 min', '△▽ départs   toucher : arrêts   double : retour']);
+    expect(lines(v)).toEqual(['★ garder une ligne', 'T3   Churchill   2 min', '△▽ départs   toucher : où descendre   double : retour']);
     expect(v.items[0].action).toEqual({ kind: 'open', route: { screen: 'keepLine', areaId: 'stib:6357F', op: 'stib', name: area.n, lat: 50.86, lon: 4.36 } });
     expect(lines(boardView({ area, departures: [], anyPlanned: false, rtErrors: [], updatedAt: NOW }, ctx(), { kept: false })).slice(0, 2)).toEqual(['★ garder une ligne', 'aucun départ']);
     expect(lines(boardView(boardOf(STATIONS.namur.areaId, 'Namur', []), ctx(), { kept: true })).slice(0, 2)).toEqual(['★ retirer la gare', 'aucun départ']);
@@ -147,7 +147,7 @@ describe('CA-123.1 : tableau complet d’une gare ou d’un arrêt', () => {
     expect(b.lines[0]).toBe('★ retirer la gare');
     expect(b.lines[1]).toBe('S6   Charleroi-Central   07:34  voie 5');
     expect(b.sel).toBe(1);
-    expect(b.lines.at(-1)).toBe('△▽ départs   toucher : arrêts   double : retour');
+    expect(b.lines.at(-1)).toBe('△▽ départs   toucher : où descendre   double : retour');
     // éléments visibles (la ligne ★ et les départs de la 1re page), sans l'aide ni la note
     const rows = b.lines.filter((l) => !l.startsWith('△▽') && !l.startsWith('~')).length;
     // ▼ jusqu'au bas de la page : la page ne bouge pas ; un ▼ de plus : la page suivante commence au curseur
@@ -342,7 +342,7 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
 
   it('du tableau à tout le trajet de l’IC et retour : le curseur sur la première gare où descendre ; double toucher revient, curseur gardé', async () => {
     const { core: c } = core(() => NOW);
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.10', stations: [STATIONS.namur] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', stations: [STATIONS.namur] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: STATIONS.namur.areaId, name: STATIONS.namur.name });
     await h.until(boardReady);
@@ -391,7 +391,7 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
     const d = await h.until((x) => x.screen === 'line' && x.lines.length > 3);
     expect(d.lines.slice(0, 5)).toEqual(['vers Bruxelles Midi', '07:48 +3   dans 20 min', '08:08   dans 37 min', 'vers Braine-l’Alleud Gare', '07:42   dans 11 min']);
     expect(d.sel).toBe(0);
-    expect(d.lines.at(-1)).toBe('△▽ passages   toucher : arrêts   double : retour');
+    expect(d.lines.at(-1)).toBe('△▽ passages   toucher : où descendre   double : retour');
     await h.gesture('tap');
     const s = await h.until(stopsReady);
     expect(s).toMatchObject({ title: 'Bus W vers Bruxelles Midi' });

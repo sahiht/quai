@@ -123,7 +123,7 @@ describe('étapes : un message ne passe pas d’une page à l’autre (1.2.1 : �
     const st = await t.until((s) => s.screen === 'steps' && s.page === 1);
     expect(st.pages).toBe(1);
     // 1.2.10 (PRD-1.2.10 § 3.1) : un trajet entièrement à pied se guide aussi : « y aller »
-    expect(st.lines.slice(-2).map(nb)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', nb(HINTS.stepsGo)]);
+    expect(st.lines.slice(-2).map(nb)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', nb(HINTS.steps)]);
     await t.gesture('down');
     expect(t.last()).toEqual(st);
     expect(t.screens().some((s) => s.screen === 'others')).toBe(false);
@@ -156,7 +156,7 @@ describe('étapes : un message ne passe pas d’une page à l’autre (1.2.1 : �
     await t.gesture('double');
     const s = await t.until((x) => x.screen === 'steps' && x.page === 1);
     expect(s.followed).toBe(false);
-    expect(nb(s.lines.at(-1)!)).toBe(nb(HINTS.stepsGo));
+    expect(nb(s.lines.at(-1)!)).toBe(nb(HINTS.steps));
     t.c.stop();
   });
 });

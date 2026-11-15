@@ -16,7 +16,7 @@ import { cleanupKit, guideSetup, type Kit } from './controller-guide-kit';
 import { dep, nb, page, settingsWith, stopsOf } from './helpers';
 
 const intent = (h: Kit, i: Intent) => (h.c as unknown as { runIntent(i: Intent): Promise<void> }).runIntent(i);
-const settings = () => settingsWith([], { seenVersion: '1.2.10' });
+const settings = () => settingsWith([], { seenVersion: '1.3.0' });
 const ETANGS: Endpoint = { type: 'address', label: 'Étangs d’Ixelles', lat: P.etangs.lat, lon: P.etangs.lon };
 
 afterEach(() => cleanupKit());
