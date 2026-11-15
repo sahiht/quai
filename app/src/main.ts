@@ -7,6 +7,7 @@ import type { CoreOptions } from './core/api';
 import { applyTestSettings, loadCore, prefixed, type CoreModule } from './boot';
 import { parseEnv } from './env';
 import { CONFIGURED, DATA_BASE, RELAY_BASE } from './generated/config';
+import { createJournal } from './core/journal';
 import { GlassesController } from './glasses/controller';
 import { messageView } from './glasses/views';
 import { layoutPage } from './glasses/layout';
@@ -71,6 +72,11 @@ async function main(): Promise<void> {
   // Réglages (mode test : remise à zéro, réglages de démonstration).
   await applyTestSettings(env, platform.kv);
   const settings = new SettingsStore(platform.kv, await loadSettings(platform.kv));
+  // 1.3.0 (PRD-1.3.0 § 6.4) : journal des trajets guidés, sur le téléphone ; s'il ne s'ouvre pas, Quai démarre sans lui.
+  const journalReady = createJournal(platform.kv, { now: clock.now }).catch((e: unknown) => {
+    console.warn('[Quai] journal des trajets indisponible', e);
+    return null;
+  });
 
   const dataBase = env.data ?? DATA_BASE;
   const relayBase = env.relay ?? RELAY_BASE;
@@ -91,6 +97,7 @@ async function main(): Promise<void> {
   const core = env.fake ? (await import('./dev/fake-core')).createFakeCore(opts, { stale: env.stale, noRt: env.noRt }) : mod.createCore(opts);
 
   await started;
+  const journal = await journalReady;
   const controller = new GlassesController({
     platform,
     core,
@@ -100,6 +107,7 @@ async function main(): Promise<void> {
     freshness: mod.dataFreshness,
     e2e: env.e2e,
     pageStarted: true,
+    journal: journal ?? undefined,
   });
   bg.controller = controller;
   if (bg.pending) controller.restore(bg.pending);
@@ -116,12 +124,17 @@ async function main(): Promise<void> {
     freshness: () => controller.freshness,
     coreError: () => controller.error,
     configured,
+    journal: () => journal,
   });
 
   window.addEventListener('beforeunload', () => {
     void settings.flush();
     controller.stop();
   });
+  // le journal regroupe ses enregistrements (2 s) : tout de suite quand la page se cache ou se ferme
+  const saveJournal = (): void => void journal?.flush();
+  window.addEventListener('pagehide', saveJournal);
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && saveJournal());
   await controller.start();
 }
 
