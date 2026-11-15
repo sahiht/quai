@@ -1499,6 +1499,9 @@ async function s3(): Promise<void> {
     return { screen: s, relief: 'home' };
   });
   await step('steps', async () => {
+    // le favori par son nom : l'ordre « selon l'heure » peut changer d'une seconde à l'autre (le bureau « maintenant »)
+    await sim.drain();
+    await sim.select(homeIndex(sim.last!, /^Vers Gand-Saint-Pierre {3}/));
     await sim.input('click');
     const s = await sim.waitScreen(is('steps', (x) => field(x, 'page') === 1 && loaded(x)), 20_000, 'étapes');
     check(s.title === 'Gand-Saint-Pierre', `titre « ${s.title} » (PRD-1.2.10 § 5 : le nom du trajet)`);
