@@ -138,8 +138,11 @@ export interface GuideInput {
    * l'arrêt où commence le nouveau trajet.
    */
   beyond?: Stopover[];
-  /** Genre trip : rang de l'étape en véhicule dont `beyond` donne les arrêts suivants ; absent : toute étape (genre ride). */
-  beyondLeg?: number;
+  /**
+   * Genre trip : arrêts suivants du véhicule, par rang d'étape en véhicule (lus au début de chaque étape à bord) ; donnés,
+   * ils remplacent `beyond` (genre ride : la seule étape).
+   */
+  beyondByLeg?: Record<number, Stopover[]>;
 }
 
 /* ------------------------------ Mémoire ------------------------------ */
@@ -405,11 +408,10 @@ function nextRide(legs: Leg[], from: number): number {
   return -1;
 }
 
-/** Arrêts du véhicule de l'étape `k` après sa descente (GuideInput.beyond), s'ils sont donnés pour elle. */
+/** Arrêts du véhicule de l'étape `k` après sa descente (GuideInput.beyondByLeg, sinon beyond), s'ils sont connus. */
 function beyondOf(c: Ctx, k: number): Stopover[] {
-  const b = c.in.beyond;
-  if (!b?.length || (c.in.beyondLeg !== undefined && c.in.beyondLeg !== k)) return [];
-  return b;
+  if (c.in.beyondByLeg) return c.in.beyondByLeg[k] ?? [];
+  return c.in.beyond ?? [];
 }
 
 /** Une position récente (depuis `since`) à l'arrêt de montée de l'étape (60 m), ou rien si l'arrêt n'a pas de position. */

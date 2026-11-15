@@ -159,8 +159,8 @@ describe('vrai moteur : arrêts suivants du véhicule (genre trip, arrêt dépas
     expect(asked[0].areaId).toBe('sncb:8841004');
     expect(asked[0].dep).toMatchObject({ op: 'sncb', mode: 'train', line: 'IC', sched: at('07:30') });
     const g = h.c.followed!.guide!;
-    expect(g.beyondFor).toBe('jprd:3');
-    expect(g.beyond?.map((x) => x.name.fr)).toEqual(['Bruxelles-Midi', 'Gand-Saint-Pierre']);
+    expect(g.beyondByLeg?.journeyId).toBe('jprd');
+    expect(g.beyondByLeg?.legs['3'].map((x) => x.name.fr)).toEqual(['Bruxelles-Midi', 'Gand-Saint-Pierre']);
     // positions et minutes qui passent : pas de nouvelle lecture
     for (let i = 0; i < 5; i++) {
       await h.push(offset(P.ans, 2_000 * i, 0), { speed: 30 });
@@ -173,12 +173,29 @@ describe('vrai moteur : arrêts suivants du véhicule (genre trip, arrêt dépas
     const b = await guideSetup({ now: at('07:50'), settings: settings(), kv, pos: null, coreExtra });
     await b.settle(2 * MIN);
     expect(asked).toHaveLength(1);
-    expect(b.c.followed!.guide!.beyond?.[0].name.fr).toBe('Bruxelles-Midi');
+    expect(b.c.followed!.guide!.beyondByLeg?.legs['3'][0].name.fr).toBe('Bruxelles-Midi');
     // l'étape suivante (bus 71) : nouvelle lecture ; échec réseau : rien gardé pour elle, le guidage continue, une seule fois
     fail = true;
     await b.settle(45 * MIN);
     expect(asked.map((x) => x.areaId)).toEqual(['sncb:8841004', 'stib:1180']);
-    expect(b.c.followed?.guide?.beyondFor).toBe('jprd:3');
+    // ceux de l'IC restent (étape d'avant, pas remplacés par l'étape suivante)
+    expect(Object.keys(b.c.followed?.guide?.beyondByLeg?.legs ?? {})).toEqual(['3']);
+  });
+
+  it('l’étape suivante lue (le bus 71) ne remplace pas les arrêts de l’IC : chaque étape garde les siens', async () => {
+    const bus71 = (): DepartureStops => {
+      const c = (areaId: string, name: string, hm: string) => ({ areaId, name: N2(name), sched: at(hm), est: at(hm), rt: true, delayMin: 0 });
+      return { op: 'stib', mode: 'bus', line: '71', head: N2('Delta'), anyPlanned: false, state: 'ok', at: 0, stops: [c('stib:1180', 'Gare Centrale', '08:34'), c('stib:1250', 'Porte de Namur', '08:39'), c('stib:3517', 'Flagey', '08:48'), c('stib:3520', 'Cimetière d’Ixelles', '08:52')] };
+    };
+    const coreExtra = (): Partial<Core> => ({ departureStops: async (areaId: string) => (areaId === 'stib:1180' ? bus71() : icStops()) });
+    const h = await launched({ now: at('07:20'), pos: null, coreExtra });
+    await h.settle(12 * MIN);
+    expect(Object.keys(h.c.followed!.guide!.beyondByLeg?.legs ?? {})).toEqual(['3']);
+    await h.settle(65 * MIN);
+    const legs = h.c.followed!.guide!.beyondByLeg!.legs;
+    expect(Object.keys(legs)).toEqual(['3', '5']);
+    expect(legs['3'][0].name.fr).toBe('Bruxelles-Midi');
+    expect(legs['5'][0].name.fr).toBe('Cimetière d’Ixelles');
   });
 
   it('guidage arrêté pendant la lecture : la réponse est oubliée', async () => {

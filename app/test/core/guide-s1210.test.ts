@@ -130,7 +130,7 @@ describe('s1210 : arrêt dépassé à Bruxelles-Nord (l’IC repart vers Bruxell
   it('arrêts suivants de l’IC connus (lus par le contrôleur) : « Descends à Bruxelles-Central, 08:48 », nouveau trajet depuis Bruxelles-Central à 08:48, jamais depuis la position dans le train', () => {
     const central = { name: N('Bruxelles-Central', 'Brussel-Centraal'), sched: T('08:46'), est: T('08:48'), areaId: 'sncb:8813003', lat: P.central.lat, lon: P.central.lon, platform: '3' };
     const midi = { name: N('Bruxelles-Midi', 'Brussel-Zuid'), sched: T('08:52'), est: T('08:54'), areaId: 'sncb:8814001' };
-    const g = replay(s1210Journey(), { beyond: [central, midi], beyondLeg: 1 });
+    const g = replay(s1210Journey(), { beyondByLeg: { 1: [central, midi], 3: [{ name: N('Lemonnier'), sched: T('08:51'), est: T('08:51'), areaId: 'stib:6364' }] } });
     g.at(T('07:46'), [[T('07:45:30'), lerp(P.namur, P.gembloux, 90 / 780), 19.7], [T('07:46'), lerp(P.namur, P.gembloux, 120 / 780), 19.7]]);
     g.at(T('08:41:30'), [[T('08:41:30'), lerp(P.schuman, P.nord, 240 / 270), 8.9]]);
     g.at(T('08:43'), [[T('08:42'), P.nord, 0], [T('08:43'), P.nord, 0]]);
@@ -140,9 +140,9 @@ describe('s1210 : arrêt dépassé à Bruxelles-Nord (l’IC repart vers Bruxell
     expect(s.replan).toEqual({ from: { lat: P.central.lat, lon: P.central.lon, areaId: 'sncb:8813003', name: N('Bruxelles-Central', 'Brussel-Centraal') }, reason: 'passed', at: T('08:48') });
   });
 
-  it('arrêts suivants d’une autre étape (beyondLeg) : ignorés', () => {
+  it('arrêts suivants d’une autre étape seulement (beyondByLeg) : ignorés', () => {
     const central = { name: N('Bruxelles-Central'), sched: T('08:46'), est: T('08:48'), areaId: 'sncb:8813003', lat: P.central.lat, lon: P.central.lon };
-    const g = replay(s1210Journey(), { beyond: [central], beyondLeg: 3 });
+    const g = replay(s1210Journey(), { beyondByLeg: { 3: [central] } });
     g.at(T('07:46'), [[T('07:45:30'), lerp(P.namur, P.gembloux, 90 / 780), 19.7], [T('07:46'), lerp(P.namur, P.gembloux, 120 / 780), 19.7]]);
     g.at(T('08:43'), [[T('08:42'), P.nord, 0], [T('08:43'), P.nord, 0]]);
     g.at(T('08:44'), [[T('08:43:30'), lerp(P.nord, P.central, 0.1), 5.6], [T('08:44'), lerp(P.nord, P.central, 0.2), 5.6]]);

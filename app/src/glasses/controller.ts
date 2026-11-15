@@ -318,8 +318,12 @@ export interface FollowedGuide {
    * le lancement ; genre trip, lus au début de chaque étape à bord.
    */
   beyond?: Stopover[];
-  /** Genre trip : l'étape dont `beyond` donne les arrêts suivants (« journeyId:leg ») ; absent : « j'y descends ». */
-  beyondFor?: string;
+  /**
+   * Genre trip : arrêts suivants du véhicule de chaque étape à bord du trajet `journeyId` (rang de l'étape → arrêts), lus
+   * au début de l'étape ; les 3 dernières étapes lues sont gardées (un véhicule pas encore quitté n'est pas oublié quand
+   * l'heure dit déjà le suivant).
+   */
+  beyondByLeg?: { journeyId: string; legs: Record<string, Stopover[]> };
 }
 
 /** État d'un trajet suivi : pas encore parti, en cours (M6.3), terminé. */
@@ -404,9 +408,14 @@ function parseGuide(x: unknown): FollowedGuide | null {
     out.walk = { leg: w.leg, journeyId: w.journeyId, route: w.route, at: Number.isFinite(w.at) ? w.at : 0 };
   }
   const b = g.beyond;
-  if (Array.isArray(b) && b.length && b.every((x) => !!x && typeof x === 'object' && !!x.name && typeof x.name.fr === 'string' && Number.isFinite(x.sched) && Number.isFinite(x.est))) {
-    out.beyond = b;
-    if (typeof g.beyondFor === 'string' && /^.+:\d+$/.test(g.beyondFor)) out.beyondFor = g.beyondFor;
+  const stopsOk = (b: unknown): b is Stopover[] =>
+    Array.isArray(b) && b.length > 0 && b.every((x) => !!x && typeof x === 'object' && !!x.name && typeof x.name.fr === 'string' && Number.isFinite(x.sched) && Number.isFinite(x.est));
+  if (stopsOk(b)) out.beyond = b;
+  const bl = g.beyondByLeg;
+  if (bl && typeof bl === 'object' && typeof bl.journeyId === 'string' && bl.legs && typeof bl.legs === 'object') {
+    const legs: Record<string, Stopover[]> = {};
+    for (const [k, v] of Object.entries(bl.legs)) if (/^\d+$/.test(k) && stopsOk(v)) legs[k] = v;
+    if (Object.keys(legs).length) out.beyondByLeg = { journeyId: bl.journeyId, legs };
   }
   return out;
 }
@@ -2333,13 +2342,16 @@ export class GlassesController implements GlassesApi {
     };
   }
 
-  /** Arrêts suivants donnés au moteur : « j'y descends », toujours ; genre trip, ceux de l'étape lue, de ce trajet-là. */
-  private beyondInput(g: FollowedGuide, j: Journey): Pick<GuideInput, 'beyond' | 'beyondLeg'> {
-    if (!g.beyond?.length) return {};
-    if (g.beyondFor === undefined) return { beyond: g.beyond };
-    const i = g.beyondFor.lastIndexOf(':');
-    if (g.beyondFor.slice(0, i) !== j.id) return {};
-    return { beyond: g.beyond, beyondLeg: Number(g.beyondFor.slice(i + 1)) };
+  /** Arrêts suivants donnés au moteur : « j'y descends », `beyond` ; genre trip, ceux des étapes lues de ce trajet-là. */
+  private beyondInput(g: FollowedGuide, j: Journey): Pick<GuideInput, 'beyond' | 'beyondByLeg'> {
+    if (g.kind === 'trip') {
+      const bl = g.beyondByLeg;
+      if (!bl || bl.journeyId !== j.id) return {};
+      const out: Record<number, Stopover[]> = {};
+      for (const [k, v] of Object.entries(bl.legs)) out[Number(k)] = v;
+      return { beyondByLeg: out };
+    }
+    return g.beyond?.length ? { beyond: g.beyond } : {};
   }
 
   /**
@@ -2356,12 +2368,13 @@ export class GlassesController implements GlassesApi {
     const k = st.phase.leg;
     const key = `${j.id}:${k}`;
     const l = j.legs[k];
-    if (g.beyondFor === key || this.beyondAsked.has(key) || l?.kind !== 'ride' || !l.from.areaId || !l.op || !l.mode) return;
+    const kept = g.beyondByLeg?.journeyId === j.id && !!g.beyondByLeg.legs[String(k)];
+    if (kept || this.beyondAsked.has(key) || l?.kind !== 'ride' || !l.from.areaId || !l.op || !l.mode) return;
     this.beyondAsked.add(key);
-    void this.readBeyond(j, k, key).catch((e: unknown) => console.warn('[Quai] arrêts suivants du véhicule', errText(e)));
+    void this.readBeyond(j, k).catch((e: unknown) => console.warn('[Quai] arrêts suivants du véhicule', errText(e)));
   }
 
-  private async readBeyond(j: Journey, k: number, key: string): Promise<void> {
+  private async readBeyond(j: Journey, k: number): Promise<void> {
     const l = j.legs[k];
     const dep: Departure = {
       op: l.op!,
@@ -2390,7 +2403,13 @@ export class GlassesController implements GlassesApi {
     const beyond = beyondOf(ds, alight, coords);
     const cur = this.trip;
     if (!cur?.guide || cur.journey.id !== j.id || cur.guide.kind !== 'trip') return;
-    this.trip = { ...cur, guide: { ...cur.guide, beyond, beyondFor: key } };
+    // les 3 dernières étapes lues de ce trajet (un nouveau trajet repart de rien)
+    const prev = cur.guide.beyondByLeg?.journeyId === j.id ? cur.guide.beyondByLeg.legs : {};
+    const keep = Object.keys(prev).filter((x) => x !== String(k)).sort((a, b) => Number(a) - Number(b)).slice(-2);
+    const legs: Record<string, Stopover[]> = {};
+    for (const x of keep) legs[x] = prev[x];
+    legs[String(k)] = beyond;
+    this.trip = { ...cur, guide: { ...cur.guide, beyondByLeg: { journeyId: j.id, legs } } };
     this.saveFollowed();
     this.stepGuide();
   }
