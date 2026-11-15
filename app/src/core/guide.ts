@@ -915,9 +915,11 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
     }
   }
 
-  // virages de la marche en cours
-  if (ph.kind === 'walk' && c.fix && c.walkPr && c.walkPr.leg === ph.leg && c.walkPr.offM <= GUIDE.offRouteM) {
-    const w = ph.leg;
+  // virages de la marche en cours ; en attente (à 60 m de l'arrêt à vol d'oiseau), ceux qui restent sur le chemin de la
+  // marche d'avant, derrière « monter » (priorité inchangée)
+  const tw = ph.kind === 'walk' ? ph.leg : ph.kind === 'wait' && ph.leg > 0 && legs[ph.leg - 1].kind === 'walk' ? ph.leg - 1 : -1;
+  if (tw >= 0 && c.fix && c.walkPr && c.walkPr.leg === tw && c.walkPr.offM <= GUIDE.offRouteM) {
+    const w = tw;
     const wl = legs[w];
     const route = c.walkPr.route;
     const along = c.walkPr.alongM;
@@ -1123,6 +1125,9 @@ function needRouteOf(c: Ctx, loc: Loc): GuideState['needRoute'] {
   const { legs } = c;
   const ph = loc.phase;
   if (ph.kind === 'arrived' || ph.kind === 'ended') return undefined;
+  // en attente, encore sur le chemin de la marche d'avant avec un virage devant : ce chemin reste (ses virages derrière
+  // « monter ») ; celui de la marche suivante attendra
+  if (ph.kind === 'wait' && ph.leg > 0 && legs[ph.leg - 1].kind === 'walk' && turnAhead(c, ph.leg - 1)) return undefined;
   const from = ph.kind === 'ride' ? ph.leg + 1 : loc.leg;
   let w = -1;
   for (let i = Math.max(0, from); i < legs.length; i++) {
@@ -1143,6 +1148,13 @@ function needRouteOf(c: Ctx, loc: Loc): GuideState['needRoute'] {
   if (haveIt && walking && offRouteLong(c, have!.route)) return { leg: w, from: start, to: { lat: wl.to.lat, lon: wl.to.lon } };
   if (haveIt) return undefined;
   return { leg: w, from: start, to: { lat: wl.to.lat, lon: wl.to.lon } };
+}
+
+/** Sur le chemin gardé de la marche `w` (30 m au plus), avec un virage encore devant (pas fini). */
+function turnAhead(c: Ctx, w: number): boolean {
+  const pr = c.walkPr;
+  if (!c.fix || !pr || pr.leg !== w || pr.offM > GUIDE.offRouteM) return false;
+  return turnsOf(pr.route, cumulative(routePoints(pr.route))).some((t) => t.alongM + GUIDE.turnAfterM > pr.alongM);
 }
 
 /** Hors du chemin de plus de 30 m pendant 10 s (toutes les positions de ces 10 s, la plus ancienne il y a 10 s ou plus). */

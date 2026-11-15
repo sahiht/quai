@@ -347,6 +347,22 @@ describe('positions', () => {
     expect(s.moment).toBeNull();
   });
 
+  it('à 50 m de l’arrêt à vol d’oiseau mais un virage à 38 m sur le chemin : « monter » d’abord, le virage derrière (après l’effacement), le chemin gardé', () => {
+    // le chemin passe à 50 m au sud de l'arrêt Monument Gramme, file vers l'est, tourne à gauche, puis revient à l'arrêt
+    const S0 = P.gramme;
+    const rt = route([offset(S0, -200, -50), offset(S0, 43, -50), offset(S0, 43, 0), S0], [{ at: 1, turn: 'left', street: 'Boulevard Piercot' }, { at: 2, turn: 'left' }]);
+    const r = guide(prdTrip(), { walk: { leg: 0, route: rt } });
+    step(r, at('07:08'), fix(offset(S0, -60, -50), at('07:08'), { speed: 1.4 }));
+    let s = step(r, at('07:09'), fix(offset(S0, 5, -50), at('07:09'), { speed: 1.4 }));
+    expect(s.phase).toEqual({ kind: 'wait', leg: 1 });
+    expect(m(s.moment, 'board').leg).toBe(1);
+    // le chemin de la marche reste gardé tant qu'un virage est devant (pas celui de la marche suivante)
+    expect(s.needRoute).toBeUndefined();
+    r.mem = dismissMoment(r.mem, s.moment!.id, at('07:09:05'));
+    s = step(r, at('07:09:06'), fix(offset(S0, 6, -50), at('07:09:06'), { speed: 1.4 }));
+    expect(m(s.moment, 'turn')).toMatchObject({ turn: 'left', street: 'Boulevard Piercot', distM: 37 });
+  });
+
   it('la phase ne dépend pas du chemin gardé : à la correspondance de Bruxelles-Central, pas d’alternance de demandes entre les marches 4 et 6', () => {
     // à 72 m à vol d'oiseau de l'arrêt du bus 71, 65 m à côté du chemin de la marche 4, dont il reste 30 m
     const stopP = P.gareCentrale;
