@@ -217,3 +217,33 @@ ne touche que ses fichiers (ou le minimum ailleurs, en le disant), commite (aute
 
 Notification par une autre appli ou un service tiers (refusé par le propriétaire) ; radar de la veille ; voix ;
 chemins à pied hors de Belgique (extraits voisins).
+
+## 14. Arbitrages pendant la construction (15/11)
+
+- Test de l'écran et guidage ne vont jamais ensemble : le test refuse de démarrer pendant un guidage (erreur
+  `guiding`, téléphone : « Arrête d'abord le guidage en cours, puis recommence. ») ; un guidage qui démarre arrête
+  d'abord le test. Pendant le test, rien d'autre ne part vers les lunettes (pas même l'heure), pour ne pas fausser la
+  mesure ; la question attend 2 min au plus.
+- Un seul capteur : le rappel ne referme que ce qu'il a ouvert, et ne touche au capteur que pendant l'attente d'un
+  message important d'un guidage.
+- Apprentissage sûr du mouvement « lever la tête » : posture « téléphone » prise à la réponse (0,5 s avant) ; seul
+  le sens opposé est appris, avec un écart net (trois fois le bruit, tenu 0,3 s) ; sinon rien n'est appris et les
+  rappels restent à l'heure. Une tête baissée vers le téléphone ne peut jamais compter comme « vu ».
+- Quai Web : ni rappel ni capteur (pas de lunettes, écran toujours visible) ; les nouveautés de Quai Web ne parlent
+  donc pas du rappel.
+- Rappels suspendus quand Quai passe en arrière-plan ou que les lunettes sont ôtées, repris 45 s après le retour, avec
+  les rappels restants ; une seule attente par moment.
+- Vérification : batterie et absence de position annoncées ensemble 30 s après le lancement (une seule ligne de
+  plus si les deux) ; « Pas de position » vaut aussi pour un guidage lancé tôt (30 s après que la phase demande la
+  position) ; un trou de plus de 2 min entre deux pas du moteur (téléphone en veille) fait repartir l'attente, sans
+  fausse « position perdue ». Batterie 0 du SDK : inconnue.
+- Journal : un trajet vers une adresse s'appelle « Vers une adresse » ; toute clé ou valeur qui ressemble à des
+  coordonnées ou à une adresse est retirée ; un trajet trop long garde son début et sa fin (« n événements oubliés »).
+- Écran du trajet : un trajet suivi sans guidage (bouton « Lunettes » du téléphone), réglage allumé, montre
+  « ▶ Y aller » et lance le guidage (en 1.2.10, son toucher ne menait à rien).
+- Favoris : une seule file de calculs pour tous les écrans, 3 à la fois, l'écran affiché d'abord ; un calcul n'est
+  plus abandonné (sa place est libérée au bout de 60 s, sa réponse sert quand même) ; nouvel essai après 5 s puis
+  15 s en cas d'erreur ; « tu y es » posé tout de suite (300 m).
+- Téléphone : le bandeau des nouveautés a une 4e ligne pour le journal (il n'existe que sur le téléphone).
+- Noms coupés : la voie d'un train n'est jamais coupée (elle l'était dans « tout le trajet d'un train » quand le nom
+  était long) ; un « - » ou un « / » isolé ne finit jamais un nom coupé.
