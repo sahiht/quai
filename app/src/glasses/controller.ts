@@ -899,6 +899,9 @@ export class GlassesController implements GlassesApi {
         // (glasses/gestures.ts : SignalDedup, ExitDialog).
         this.paused = true;
         this.clearTimers();
+        // la page peut être suspendue (Android) : un enregistrement en attente du trajet suivi (mémoire du guidage, moment
+        // effacé) est fait tout de suite
+        if (this.saveTimer) this.saveFollowed();
         return;
       case 'foreground':
         // 1.2.10 : retour au premier plan, boîte de sortie affichée (page effacée par l'hôte) ou refusée : la page est
