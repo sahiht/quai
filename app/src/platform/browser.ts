@@ -5,6 +5,8 @@
  * 1.2.10 : images du guidage dessinées pixel pour pixel (les mêmes que dans les lunettes), bouton « Appui long » et
  * touche L (geste `long` : le menu du guidage est rendu par Quai, il n'y a pas de menu système ici), positions
  * continues par watchPosition.
+ *
+ * 1.3.0 (PRD-1.3.0 § 6) : ni capteur de mouvement (`imu` rend toujours faux) ni état des lunettes (pas de batterie).
  */
 import type { HubSignal } from '../glasses/gestures';
 import type { Gesture } from '../glasses/nav';
@@ -126,6 +128,10 @@ function emulator(mount: HTMLElement): { port: GlassesPort; screen: HTMLElement 
     async exit(mode) {
       if (mode === 1 && !window.confirm('Quitter Quai ?')) return;
       emit({ kind: 'exit', abnormal: false });
+    },
+    async imu() {
+      // 1.3.0 : pas de capteur de mouvement sans lunettes
+      return false;
     },
   };
   return { port, screen };

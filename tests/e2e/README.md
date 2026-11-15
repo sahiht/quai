@@ -78,6 +78,78 @@ d'après le PRD seul et calculé sur le trajet guidé (`quai.trip`).
 | `s1210off`, `s1210fg` | Quai Web | Réglage « Me guider » éteint (toast « Trajet suivi », aucun écran qui change seul, « En cours » ouvre le trajet) ; premier plan quitté puis revenu (page du moment présent reconstruite) |
 | `s1210news` | simulateur Even Hub | Message « Quai 1.2.10 » depuis la 1.2.9 (§ 7 ; formulations finales à reporter dans `NEWS_1210` de `sim/s1210.ts`) |
 
+### 1.3.0 : la commande de l'intégrateur
+
+`app.json` était déjà en 1.3.0 avant la fusion : la version ne distingue pas l'avant de l'après. Les attentes se
+choisissent par l'option `--spec` (ou la variable `QUAI_E2E_SPEC`) ; depuis la fusion de toutes les équipes, 1.3.0 par
+défaut.
+
+```sh
+# 1.3.0 (défaut) : les dix scénarios s130, puis toute la suite (s130 compris)
+cd tests/e2e && npm test && npm run typecheck && npm run sim -- --only 's130*'
+npm run sim
+
+# rejouer les attentes de la 1.2.10 (par exemple sur release-1.2.10) : s130 pas joués
+npm run sim -- --spec 1.2.10
+```
+
+Port d'automatisation occupé : `--port 9971` (9971 à 9979). Avant la fusion, avec les attentes de la 1.2.10, la suite
+complète faisait 279/280 en 1290 s (`s1210news` attendait app.json en 1.2.10), puis 280/280 en 1287 s une fois corrigé.
+
+| Scénario | Où | Ce qui est vérifié (PRD-1.3.0) |
+| --- | --- | --- |
+| `s130action` | simulateur Even Hub | « ▶ Y aller » au plus clair (alpha 255 mesuré) juste au-dessus de « △▽ étapes   double : retour », « Fin du trajet. ▽ 1 autre trajet » gardé, même ligne pour un autre trajet ouvert depuis « Autres trajets », le toucher lance le guidage (§ 1) |
+| `s130actionweb` | Quai Web | « ▶ Retour au guidage » (menu « Voir tout le trajet ») et son toucher ; réglage éteint : « ▶ Suivre ce trajet », puis « ▶ Trajet suivi » sans écran du guidage (§ 1) |
+| `s130up` | simulateur Even Hub | Waterloo, « Bureau » : ▲ sur la 2e rangée de « Autres trajets » monte le curseur ; ▲ sur la 1re : le trajet proposé, à sa dernière page, mêmes lignes qu'avant ▼ (§ 2) |
+| `s130fav` | simulateur Even Hub | Accordéon : sous Place Fontainas « à pied 9 min, puis IC ~07:42 voie 6 ! » et « voie 6 au lieu de 4 … 1 changement : tram 3 », pâles (alpha mesuré) et en retrait ; ▼ jusqu'au bout et ▲ : un seul ouvert, le précédent refermé, toujours entier ; gare hors de portée (« IC voie … à …, à Bruxelles-Central »), à pied seulement, adresse récente, « tu y es » et « Autre adresse » fermés ; plus de champ `detail` (§ 7) |
+| `s130board` | simulateur Even Hub | « △▽ départs   toucher : où descendre   double : retour » (tableau de Gare du Nord), « △▽ passages   toucher : où descendre … » (le tram 3 à son arrêt), le toucher ouvre toujours les arrêts (§ 3) |
+| `s130offmap` | Quai Web | Données des fixtures avec la gare de Luxembourg (IC Luxembourg 07:02 → Namur 08:47) ; de la place de Paris (Luxembourg) vers la place de l'Ange : « Hors de Belgique », « pas de chemin à pied : suis la flèche » (sans cap : « pas de chemin à pied »), « N min jusqu'à la gare de Luxembourg », image flèche (ou panneau), une seule fois ; aucun virage sur toute la marche ; « Où tu en es » : « À pied vers la gare de Luxembourg », « N m à vol d'oiseau, N min », « hors de Belgique, pas de chemin à pied » (§ 4) |
+| `s130screen` | simulateur Even Hub, hôte simulé | Test de l'écran : bouton dans « Pendant un trajet », texte et compte à rebours du téléphone, « Test de l'écran » et « Ne touche à rien » sur les lunettes, capteur ouvert à 100 ms, page entière « Touche une fois les lunettes » après 45 s ; visible ; tête levée apprise (axe y, sens, écart enregistrés) ; Dashboard ; « Rien » (conseil Head-Up) ; « Arrêter le test » ; Quai fermé ; refusé pendant un guidage (décision du 15/11, erreur `guiding`) ; capteur fermé à chaque fin (§ 6.1) |
+| `s130remind` | simulateur Even Hub, hôte simulé | Sans temps réel, « Partir maintenant » ni effacé ni vu : `QUAI_REMIND leave 1` vers 45 s puis `leave 2`, chacun suivi de la même page et d'une page entière (`rebuildPageContainer`), jamais un 3e (142 s) ; noté au journal ; tête levée (réglage `headUp` appris) : `QUAI_IMU on` et capteur à 200 ms, `QUAI_SEEN leave`, `QUAI_IMU off`, aucun rappel ; `dashboard` : aucun rappel, capteur jamais ouvert (§ 6.2) |
+| `s130check` | simulateur Even Hub, hôte simulé | Batterie des lunettes à 12 % : « Lunettes : 12 % de batterie » au lancement, au pixel, carte « En cours » du téléphone, effacé d'un toucher, noté au journal ; lancé à l'heure de partir : « Partir maintenant » d'abord (§ 6.3) |
+| `s130journal` | Quai Web | Trajet guidé puis arrêté : `quai.journal` (60 ko au plus, 10 trajets) sans clé `lat`, `lon`, `latitude`, `longitude`, `address`, sans nombre ni texte qui ressemble à une coordonnée, sans adresse ; carte « Journal des trajets » de « Données » : texte « Journal Quai 1.3.0, trajet « Place Fontainas », 10/11/2026 », « 07:3x:xx Partir maintenant affiché », boutons « Copier » et « Effacer le journal » (§ 6.4) |
+
+Avec les attentes 1.3.0 (défaut), les scénarios existants attendent les textes de la 1.3.0 (mêmes étapes, mêmes
+captures) :
+
+- écran du trajet (`s1`, `s1noRT`, `s1run`, `s3`, `waterloo`, `s1210sim`, `s1210go` et les autres s1210 qui lancent le
+  guidage, `s1210menu`) : aides « △▽ étapes   double : retour » et ligne d'action (« ▶ Y aller », « ▶ Retour au
+  guidage ») juste au-dessus ; « Fin du trajet. ▽ … » lu au-dessus d'elle ; contrôle au pixel avec la ligne d'action ;
+- tableaux et ligne à son arrêt (`s1`, `s2`, `s126`, `s128`, `late`) : « toucher : où descendre » ;
+- « Favoris » (`s1`, `s2`, `news`, `s1210sim`) : accordéon sous le favori du curseur au lieu de la ligne du détail en bas
+  (champ `detail` absent), contrôle au pixel des lignes ouvertes (retrait mesuré) ;
+- guidages accélérés du simulateur (`s1run`, `s3run`) : étape `rappels` en plus, d'après les lignes `QUAI_REMIND` du
+  contrôleur (minuteries sur l'horloge simulée : 45 s simulées font 1,5 s à ×30) : « Descends au prochain arrêt », resté
+  sans geste, rappelé 2 fois (`alight 1`, `alight 2`), jamais plus, chaque rappel suivi de la même page ; Quai Web n'a
+  pas de rappel (rien ne change pour les s1210 de Quai Web) ;
+- message et bannière (`news`, `phone`, `web`, `reopen`, `s129`, `s126`, `s1210news`) : « Quai 1.3.0 » et ses trois
+  lignes (formulations finales de l'équipe des écrans, `NEWS_130` de `sim/run-sim.ts` et de `sim/s1210.ts`), puis pour
+  qui vient d'avant la 1.2.10 les deux premières lignes de la 1.2.10 (« le détail en bas » n'est plus vrai) et les
+  versions d'avant ; bandeau « Nouveau dans Quai 1.3.0 » (lignes de l'équipe du téléphone, `BANNER_130`), sans la ligne
+  de la 1.2.10 sur le détail des favoris en bas de l'écran.
+
+Crochets attendus de l'appli en mode test pour la 1.3.0 :
+
+- journal `QUAI_SCREEN` de l'écran `steps` : la ligne d'action dans `lines`, juste avant l'aide (ordre de l'écran) ;
+- écran `favorites` : les lignes de l'accordéon dans `lines`, juste sous la rangée du curseur ; champ `expand`
+  conseillé (les lignes ouvertes ; sans lui, les lignes sans colonne de réponse) ; plus de champ `detail` ;
+- écran `guide` : `moment.kind` (`offMap`, `check`) et `images` avec `kind` (`bearing` ou `sign`) ; écran `displayTest`
+  journalisé comme les autres ;
+- journal de trajet dans `quai.journal` (localStorage sur Quai Web, `setLocalStorage` dans l'appli Even) ;
+- lignes du rappel (contrôleur du guidage) : `QUAI_REMIND <sorte> <n>` puis la même page QUAI_SCREEN, `QUAI_SEEN <sorte>`,
+  `QUAI_IMU on|off` ;
+- dans le simulateur, `window.__quaiClock.set` et `window.__quaiPushFix` (déjà là en 1.2.10) servent par l'hôte simulé.
+
+**Hôte simulé** (`lib/host.ts`). L'API d'automatisation du simulateur 0.9.5 n'a que les gestes, la console et les
+captures. Le serveur de l'appli (`startStatic(…, host)`) sert donc, pour une page demandée avec `e2eHost=1` seulement,
+un petit script en tête (`/__host/shim.js`) : il répond à `imuControl` comme un vrai hôte et envoie alors les mesures
+(`sysEvent`, eventType 8, `imuData`) à la cadence demandée, avec la pose réglée par le test (`host.imu`) ; il pousse
+l'état des lunettes (`host.device` : `deviceStatusChanged`, batterie, port, connexion) ; il note dans la console
+(`QUAI_HOST`) chaque `imuControl`, chaque page entière (`createStartUpPageContainer`, `rebuildPageContainer`) et
+chaque écriture du stockage ; il exécute les ordres du test (`host.eval` : page du téléphone, horloge, position).
+Formes vérifiées sur le SDK 0.0.16. Rien n'est ajouté à l'appli construite, et les scénarios existants ne le
+chargent pas.
+
 Suites partielles : `npm run test:data` (données et téléchargement), `npm run test:core` (cœur, robustesse, trajets
 et adresses). Données réelles, à la demande : `QUAI_REAL_DATA=/home/claude/real-data-11/data npm run test:real`
 (instantané 1.1 couvrant le 11/11 et le 12/11/2026).

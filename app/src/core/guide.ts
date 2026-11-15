@@ -10,10 +10,15 @@
  * et au temps réel : pas de virage, pas d'arrêt dépassé, pas de véhicule raté.
  *
  * Mémoire (GuideMemory, gardée avec le trajet suivi) : le contrat, plus quelques champs internes (trajet de la mémoire,
- * moment affiché au dernier pas, recalcul demandé, arrivée constatée). Le contrôleur la garde telle quelle (JSON).
+ * moment affiché au dernier pas, recalcul demandé, arrivée constatée, vérification). Le contrôleur la garde telle
+ * quelle (JSON).
+ *
+ * 1.3.0 (PRD-1.3.0 § 4, § 6.3) : marche hors de Belgique (chemin droit de raison `outside` : moment `offMap`, « Où tu en
+ * es » à vol d'oiseau, aucun virage) ; vérification au départ et en route (moment `check`, `GuideState.issues`).
  */
 import type { Departure, DepartureStops, Journey, LatLon, Leg, NameLang, Names, Settings, Stopover } from './api';
 import type {
+  CheckIssue,
   GuideFix,
   GuideKind,
   GuideMemory,
@@ -115,6 +120,18 @@ export const GUIDE = {
   alightFromMs: 2 * MIN,
   /** « très juste » : marge de 1 min ou moins */
   tightMin: 1,
+  /** 1.3.0 (PRD-1.3.0 § 4) : « Hors de Belgique » (marche sans chemin à pied) : 30 s */
+  offMapMs: 30 * SEC,
+  /**
+   * 1.3.0 (PRD-1.3.0 § 6.3) : vérification 30 s après le lancement (batterie des lunettes sous 20 %, aucune position
+   * alors que le guidage en demande) ; en route, plus aucune position depuis 3 min ; moment de 20 s. Plus de 2 min
+   * entre deux pas du moteur (téléphone en veille, appli suspendue) : l'attente de la position repart de zéro.
+   */
+  checkAfterMs: 30 * SEC,
+  checkMs: 20 * SEC,
+  checkBattery: 20,
+  lostMs: 3 * MIN,
+  sleepMs: 2 * MIN,
 } as const;
 
 /** Entrée du moteur, recalculé à chaque position, à `wakeAt` et à chaque rafraîchissement du temps réel. */
@@ -145,6 +162,8 @@ export interface GuideInput {
    * ils remplacent `beyond` (genre ride : la seule étape).
    */
   beyondByLeg?: Record<number, Stopover[]>;
+  /** 1.3.0 (PRD-1.3.0 § 6.3) : batterie des lunettes (0 à 100), si connue (signal `device` de la plateforme) */
+  battery?: number;
 }
 
 /* ------------------------------ Mémoire ------------------------------ */
@@ -181,6 +200,26 @@ interface Pending {
   swap?: { jid: string; at: number };
 }
 
+/**
+ * 1.3.0 (PRD-1.3.0 § 6.3) : mémoire de la vérification, pour tout le guidage (un nouveau trajet adopté la garde).
+ * Epoch ms.
+ */
+interface Chk {
+  /** premier pas du moteur pour ce guidage ; la vérification du lancement suppose qu'il a vu le lancement (30 s) */
+  t0: number;
+  /** pas précédent */
+  at: number;
+  /** position demandée sans interruption depuis (besoin de position, pas de veille) ; absent : pas demandée */
+  need?: number;
+  /** dernière position reçue pendant ce guidage (même imprécise : la position marche) */
+  fix?: number;
+  /** vérification du lancement : batterie sous 20 % ; aucune position alors que le guidage en demande (absent : à faire) */
+  bat?: boolean;
+  noPos?: boolean;
+  /** problèmes déjà dits par un moment `check` (chacun une fois par guidage) */
+  told: CheckIssue['kind'][];
+}
+
 /** La mémoire du moteur : le contrat et ses champs internes. */
 interface Mem extends GuideMemory {
   /** trajet auquel se rapportent boarded, alighted, cur */
@@ -191,6 +230,22 @@ interface Mem extends GuideMemory {
   /** arrivée constatée (epoch ms) et par la position ? */
   arrivedAt?: number;
   arrivedByFix?: boolean;
+  chk?: Chk;
+}
+
+const ISSUE_KINDS: readonly CheckIssue['kind'][] = ['battery', 'noPosition', 'positionLost'];
+
+/** Copie défensive de la mémoire de la vérification. */
+function readChk(x: unknown): Chk | undefined {
+  if (!x || typeof x !== 'object') return undefined;
+  const k = x as Partial<Chk>;
+  if (!Number.isFinite(k.t0) || !Number.isFinite(k.at)) return undefined;
+  const out: Chk = { t0: k.t0 as number, at: k.at as number, told: Array.isArray(k.told) ? k.told.filter((s) => ISSUE_KINDS.includes(s)) : [] };
+  if (Number.isFinite(k.need)) out.need = k.need;
+  if (Number.isFinite(k.fix)) out.fix = k.fix;
+  if (typeof k.bat === 'boolean') out.bat = k.bat;
+  if (typeof k.noPos === 'boolean') out.noPos = k.noPos;
+  return out;
 }
 
 const MEM_MAX = 400;
@@ -223,6 +278,8 @@ function readMem(mem: GuideMemory | null | undefined): Mem {
   }
   if (Number.isFinite(x.arrivedAt)) out.arrivedAt = x.arrivedAt;
   if (x.arrivedByFix) out.arrivedByFix = true;
+  const chk = readChk(x.chk);
+  if (chk) out.chk = chk;
   return out;
 }
 
@@ -325,6 +382,8 @@ interface Ctx {
   started: boolean;
   /** progression sur le chemin à pied fourni, si la position et le chemin sont là */
   walkPr?: { leg: number; alongM: number; offM: number; remainingM: number; route: WalkRoute };
+  /** 1.3.0 : problèmes vrais maintenant (vérification, guidage avec messages seulement) */
+  issues: CheckIssue[];
 }
 
 function fixesOf(input: GuideInput): GuideFix[] {
@@ -348,7 +407,7 @@ function context(input: GuideInput, m: Mem): Ctx {
   const legs = j.legs;
   const start = knownPoint(input.origin) ? input.origin : legs[0] && knownPoint(legs[0].from) ? legs[0].from : undefined;
   const started = !!(fix && start && distanceM(fix, start) >= GUIDE.leaveM);
-  const c: Ctx = { in: input, j, legs, now, m, guided: input.settings?.display?.guide !== false, fix, prev, speed, started };
+  const c: Ctx = { in: input, j, legs, now, m, guided: input.settings?.display?.guide !== false, fix, prev, speed, started, issues: [] };
   const w = input.walk;
   if (fix && w && w.route && legs[w.leg]?.kind === 'walk') {
     const pr = walkProgress(w.route, fix);
@@ -735,7 +794,8 @@ function detect(c: Ctx, loc: Loc): void {
 
 /* ------------------------------ Moments ------------------------------ */
 
-const PRIO: Record<Moment['kind'], number> = { replan: 0, passed: 1, alight: 2, platform: 3, board: 4, turn: 5, leave: 6, nextStop: 7, arrived: 8 };
+// 1.3.0 (PRD-1.3.0 § 4, § 6.3) : offMap après leave (la marche commence), check après eux (jamais devant une action)
+const PRIO: Record<Moment['kind'], number> = { replan: 0, passed: 1, alight: 2, platform: 3, board: 4, turn: 5, leave: 6, offMap: 7, check: 8, nextStop: 9, arrived: 10 };
 
 interface Cand {
   id: string;
@@ -816,6 +876,125 @@ function thenOf(legs: Leg[], k: number): Then {
 function minutesFor(m: number, straight: boolean): number {
   if (m <= 0) return 0;
   return Math.ceil((straight ? m * 1.3 : m) / GUIDE.walkMPerMin);
+}
+
+/* ------------------------------ 1.3.0 : hors de Belgique (PRD-1.3.0 § 4) ------------------------------ */
+
+/**
+ * Chemin de la marche `w` sans chemin à pied parce qu'un de ses bouts est hors de l'extrait de Belgique (chemin droit,
+ * raison `outside`) ; null sinon. Seulement le chemin de cette marche (même arrivée, à 30 m près).
+ */
+function outsideRoute(c: Ctx, w: number): WalkRoute | null {
+  const x = c.in.walk;
+  const wl = c.legs[w];
+  if (!x || x.leg !== w || !x.route || wl?.kind !== 'walk') return null;
+  const r = x.route;
+  if (r.source !== 'straight' || r.reason !== 'outside') return null;
+  if (knownPoint(wl.to) && knownPoint(r.to) && distanceM(r.to, wl.to) > 30) return null;
+  return r;
+}
+
+/**
+ * Contenu du moment `offMap` de la marche `w` : minutes restantes et distance à vol d'oiseau depuis la position (sans
+ * position : les minutes à l'heure), direction de la cible par rapport au cap de la marche si le cap est connu.
+ */
+function offMapOf(c: Ctx, w: number): { walkMin: number; distM?: number; bearingDeg?: number; toward: Names } {
+  const wl = c.legs[w];
+  if (c.fix && knownPoint(wl.to)) {
+    const d = distanceM(c.fix, wl.to);
+    const out: { walkMin: number; distM?: number; bearingDeg?: number; toward: Names } = { walkMin: Math.max(1, minutesFor(d, true)), distM: Math.round(d), toward: wl.to.name };
+    if (Number.isFinite(c.fix.heading)) out.bearingDeg = Math.round(relativeDeg(bearingDeg(c.fix, wl.to), c.fix.heading as number));
+    return out;
+  }
+  return { walkMin: Math.max(1, Math.ceil((wl.arr - c.now) / MIN)), toward: wl.to.name };
+}
+
+/* ------------------------------ 1.3.0 : vérification (PRD-1.3.0 § 6.3) ------------------------------ */
+
+const lowBattery = (b: unknown): b is number => typeof b === 'number' && Number.isFinite(b) && b >= 0 && b < GUIDE.checkBattery;
+
+/**
+ * Vérification au départ et en route : tient la mémoire `chk` et rend les problèmes vrais maintenant, dans l'ordre
+ * batterie, position :
+ * - batterie des lunettes sous 20 % (GuideInput.battery), à tout moment ;
+ * - pas de position : au départ, aucune position dans les 30 s où le guidage en demande (dès le lancement, ou dès que
+ *   la phase en demande si l'on a lancé tôt) ; vrai tant qu'aucune n'est venue et que la phase en demande ;
+ * - position perdue : plus aucune position depuis 3 min alors que la phase en demande et qu'il y en avait (l'attente
+ *   compte depuis la dernière position, ou depuis que la position est demandée de nouveau, ou depuis le réveil).
+ * Ce qui est vérifié au départ (batterie 30 s après le lancement, pas de position) l'est une fois, si le moteur a vu le
+ * lancement (premier pas dans ses 30 s ; un guidage repris plus tard ne le refait pas).
+ */
+function checkOf(c: Ctx, need: LocationNeed): CheckIssue[] {
+  const { m, now } = c;
+  const start = Number.isFinite(c.in.startedAt) ? c.in.startedAt : now;
+  const k: Chk = m.chk ?? { t0: now, at: now, told: [] };
+  m.chk = k;
+  const slept = now - k.at > GUIDE.sleepMs;
+  k.at = now;
+  for (const f of c.in.fixes ?? []) {
+    if (!f || !Number.isFinite(f.lat) || !Number.isFinite(f.lon) || !Number.isFinite(f.at)) continue;
+    if (f.at > now + 5 * SEC || f.at < start - GUIDE.freshMs) continue;
+    if (k.fix === undefined || f.at > k.fix) k.fix = f.at;
+  }
+  if (need === 'off') delete k.need;
+  else if (k.need === undefined || slept) k.need = now;
+  const launch = k.t0 - start <= GUIDE.checkAfterMs;
+  const due = start + GUIDE.checkAfterMs;
+  if (k.bat === undefined && (!launch || now >= due)) k.bat = launch && lowBattery(c.in.battery);
+  if (k.noPos === undefined) {
+    if (!launch || k.fix !== undefined) k.noPos = false;
+    // position demandée sans interruption depuis 30 s, aucune reçue depuis le lancement
+    else if (k.need !== undefined && now >= k.need + GUIDE.checkAfterMs) k.noPos = true;
+  }
+  const out: CheckIssue[] = [];
+  if (lowBattery(c.in.battery)) out.push({ kind: 'battery', level: c.in.battery });
+  if (need !== 'off' && k.need !== undefined) {
+    if (k.noPos && k.fix === undefined) out.push({ kind: 'noPosition' });
+    if (k.fix !== undefined) {
+      const from = Math.max(k.fix, k.need);
+      if (now - from >= GUIDE.lostMs) out.push({ kind: 'positionLost', minutes: Math.floor((now - from) / MIN) });
+    }
+  }
+  return out;
+}
+
+/** Sortes de problèmes d'un moment `check` (id « check:battery+noPosition »). */
+const checkKinds = (id: string): CheckIssue['kind'][] => id.slice('check:'.length).split('+').filter((s): s is CheckIssue['kind'] => ISSUE_KINDS.includes(s as CheckIssue['kind']));
+
+/**
+ * Moments `check` : celui qui est montré (jusqu'à 20 s, plus tôt si ses problèmes sont réglés) ; sinon les problèmes
+ * vrais pas encore dits (deux au plus) : la batterie et l'absence de position seulement s'ils viennent de la
+ * vérification du lancement, la position perdue en route. Chaque problème est dit une fois par guidage ; jamais à
+ * l'arrivée.
+ */
+function checkCands(c: Ctx, loc: Loc): Cand[] {
+  const { m, now } = c;
+  const k = m.chk;
+  if (!k) return [];
+  const leg = Math.max(0, loc.leg);
+  const out: Cand[] = [];
+  const has = (kind: CheckIssue['kind']) => c.issues.some((i) => i.kind === kind);
+  // arrivé : « Tu y es » n'attend pas derrière une vérification
+  const arrived = loc.phase.kind === 'arrived' || loc.phase.kind === 'ended';
+  let live = false;
+  for (const [id, since0] of Object.entries(m.shown)) {
+    if (!id.startsWith('check:') || m.dismissed.includes(id)) continue;
+    const kinds = checkKinds(id);
+    const end = now >= since0 + GUIDE.checkMs || !kinds.some(has) || arrived;
+    live ||= !end;
+    out.push({
+      id, kind: 'check', trig: false, end,
+      make: (since) => ({ kind: 'check', id, since, until: since + GUIDE.checkMs, leg, issues: c.issues.filter((i) => kinds.includes(i.kind)) }),
+    });
+  }
+  if (live || arrived) return out;
+  const said = (i: CheckIssue) => k.told.includes(i.kind) || (i.kind === 'battery' && k.bat !== true) || (i.kind === 'noPosition' && k.noPos !== true);
+  const due = c.issues.filter((i) => !said(i)).slice(0, 2);
+  if (!due.length) return out;
+  const id = `check:${due.map((i) => i.kind).join('+')}`;
+  if (m.shown[id] !== undefined || m.dismissed.includes(id)) return out;
+  out.push({ id, kind: 'check', trig: true, end: false, make: (since) => ({ kind: 'check', id, since, until: since + GUIDE.checkMs, leg, issues: due }) });
+  return out;
 }
 
 function candidates(c: Ctx, loc: Loc): Cand[] {
@@ -1030,6 +1209,22 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
     });
   }
 
+  // 1.3.0 (PRD-1.3.0 § 4) : marche sans chemin à pied (hors de Belgique) : une fois, au début de la marche (ou dès que
+  // son chemin est connu, au lancement si l'on marche déjà), la direction et le temps ; aucun virage (chemin droit).
+  // Fini au bout de 30 s, d'un toucher, ou à la fin de la marche
+  if (ph.kind === 'walk' && legs[ph.leg]?.kind === 'walk' && outsideRoute(c, ph.leg)) {
+    const w = ph.leg;
+    const id = `offMap:${jid}:${w}`;
+    const since0 = m.shown[id] ?? now;
+    out.push({
+      id, kind: 'offMap', trig: true, end: now >= since0 + GUIDE.offMapMs,
+      make: (since) => ({ kind: 'offMap', id, since, until: since + GUIDE.offMapMs, leg: w, ...offMapOf(c, w) }),
+    });
+  }
+
+  // 1.3.0 (PRD-1.3.0 § 6.3) : vérification, derrière toute action (priorité)
+  out.push(...checkCands(c, loc));
+
   // arrivée
   if (ph.kind === 'arrived') {
     const id = `arrived:${jid}`;
@@ -1109,9 +1304,12 @@ function whereOf(c: Ctx, loc: Loc): WhereAmI {
     let remainingM: number | undefined;
     let remainingMin: number;
     const pr = c.walkPr?.leg === i ? c.walkPr : undefined;
+    // 1.3.0 (PRD-1.3.0 § 4) : hors de Belgique, pas de chemin à pied : la distance à vol d'oiseau et ses minutes
+    const outside = outsideRoute(c, i);
+    const crowM = outside ? (c.fix && knownPoint(wl.to) ? distanceM(c.fix, wl.to) : ph.kind === 'before' ? outside.lengthM : undefined) : undefined;
     if (c.fix && ph.kind === 'walk' && pr) {
-      remainingM = pr.remainingM;
-      remainingMin = minutesFor(pr.remainingM, pr.route.source === 'straight');
+      remainingM = outside && crowM !== undefined ? crowM : pr.remainingM;
+      remainingMin = minutesFor(remainingM, pr.route.source === 'straight');
     } else if (c.fix && ph.kind === 'walk' && knownPoint(wl.to)) {
       remainingM = distanceM(c.fix, wl.to);
       remainingMin = minutesFor(remainingM, true);
@@ -1134,6 +1332,10 @@ function whereOf(c: Ctx, loc: Loc): WhereAmI {
     }
     if (c.fix && ph.kind === 'walk' && (!pr || pr.route.source === 'straight') && Number.isFinite(c.fix.heading) && knownPoint(wl.to)) {
       walk.bearingDeg = Math.round(relativeDeg(bearingDeg(c.fix, wl.to), c.fix.heading as number));
+    }
+    if (outside) {
+      walk.offMap = true;
+      if (crowM !== undefined) walk.crowM = Math.round(crowM);
     }
     w.walk = walk;
   } else if (ph.kind === 'before' && legs[ph.leg]?.kind === 'ride') {
@@ -1273,6 +1475,13 @@ function wakeOf(c: Ctx, moment: Moment | null): number {
     add(t + GUIDE.platformMs);
     add(t + GUIDE.arrivedMs);
   }
+  // 1.3.0 (PRD-1.3.0 § 6.3) : vérification du lancement, position perdue (au plus tard 60 s après, sinon)
+  const k = c.guided ? m.chk : undefined;
+  if (k) {
+    if (k.bat === undefined) add(c.in.startedAt + GUIDE.checkAfterMs);
+    if (k.noPos === undefined && k.need !== undefined) add(k.need + GUIDE.checkAfterMs);
+    if (k.fix !== undefined && k.need !== undefined && !k.told.includes('positionLost')) add(Math.max(k.fix, k.need) + GUIDE.lostMs);
+  }
   return Math.max(now + GUIDE.wakeMinMs, best);
 }
 
@@ -1361,23 +1570,28 @@ export function guideStep(input: GuideInput, mem: GuideMemory): { state: GuideSt
   }
   if (endedNow(c, loc)) loc = { phase: { kind: 'ended' }, leg: -1 };
   detect(c, loc);
+  const ended = loc.phase.kind === 'ended';
+  const location = ended ? 'off' : locationOf(c, loc);
+  // 1.3.0 (PRD-1.3.0 § 6.3) : vérification (guidage avec messages seulement ; suivi sans messages : comme en 1.2.10)
+  if (c.guided && !ended) c.issues = checkOf(c, location);
   let moment: Moment | null = null;
-  if (c.guided && loc.phase.kind !== 'ended') moment = pick(c, candidates(c, loc));
+  if (c.guided && !ended) moment = pick(c, candidates(c, loc));
   else if (c.guided && m.cur && !m.dismissed.includes(m.cur)) {
     m.dismissed.push(m.cur);
     delete m.cur;
   }
-  const ended = loc.phase.kind === 'ended';
+  if (moment?.kind === 'check' && m.chk) for (const kind of checkKinds(moment.id)) if (!m.chk.told.includes(kind)) m.chk.told.push(kind);
   const state: GuideState = {
     kind: input.kind,
     journeyId: j.id,
     phase: loc.phase,
     moment,
     where: whereOf(c, loc),
-    location: ended ? 'off' : locationOf(c, loc),
+    location,
     wakeAt: wakeOf(c, moment),
     ended,
   };
+  if (c.issues.length) state.issues = c.issues.map((i) => ({ ...i }));
   const re = m.re;
   if (c.guided && !ended && re && re.jid === j.id && !re.swap && re.none === undefined && !re.local && (input.kind === 'trip' || re.reason !== 'late')) {
     state.replan = { from: { ...re.from }, reason: re.reason === 'late' ? 'missed' : re.reason, at: re.at };

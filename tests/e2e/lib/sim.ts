@@ -3,11 +3,12 @@
  * lancement sous xvfb-run, journal de la console (QUAI_READY, QUAI_SCREEN), gestes, captures des lunettes.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { PNG } from 'pngjs';
+import { HostBridge } from './host';
 
 export const SIM_BIN = process.env.EVENHUB_SIMULATOR ?? '/home/claude/tools/node_modules/@evenrealities/sim-linux-x64/bin/evenhub-simulator';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -35,11 +36,16 @@ const TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml',
 };
 
-/** Serveur statique (appli construite + fichiers en plus, ex. /preset.json), avec CORS. */
-export function startStatic(dir: string, extra: Record<string, string> = {}): Promise<{ url: string; close(): Promise<void> }> {
+/**
+ * Serveur statique (appli construite + fichiers en plus, ex. /preset.json), avec CORS. 1.3.0 : avec `host`, les routes
+ * de l'hôte simulé (`/__host/*`, lib/host.ts) et, pour une page demandée avec `e2eHost=1`, son script en tête ; sans
+ * ce paramètre, la page est servie telle quelle.
+ */
+export function startStatic(dir: string, extra: Record<string, string> = {}, host?: HostBridge): Promise<{ url: string; close(): Promise<void> }> {
   const root = resolve(dir);
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://static');
+    if (host?.handle(req, res, url)) return;
     let path = extra[url.pathname] ?? normalize(join(root, decodeURIComponent(url.pathname)));
     if (!extra[url.pathname] && path !== root && !path.startsWith(root + sep)) {
       res.writeHead(403);
@@ -50,6 +56,11 @@ export function startStatic(dir: string, extra: Record<string, string> = {}): Pr
     if (!existsSync(path)) {
       res.writeHead(404, { 'Access-Control-Allow-Origin': '*' });
       res.end('introuvable');
+      return;
+    }
+    if (host && url.searchParams.get('e2eHost') === '1' && path.endsWith('index.html')) {
+      res.writeHead(200, { 'Content-Type': TYPES['.html'], 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(HostBridge.inject(readFileSync(path, 'utf8')));
       return;
     }
     res.writeHead(200, { 'Content-Type': TYPES[extname(path)] ?? 'application/octet-stream', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache' });

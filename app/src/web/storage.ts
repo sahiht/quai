@@ -36,15 +36,19 @@ export function clearCache(store: StoreLike): number {
 
 export function webStorageBackend(store: StoreLike | null = browserStore()): KVBackend {
   const mem = new Map<string, string>();
+  const get = async (k: string): Promise<string | null> => {
+    if (mem.has(k)) return mem.get(k) ?? null;
+    try {
+      return store?.getItem(k) ?? null;
+    } catch {
+      return null;
+    }
+  };
   return {
-    async get(k) {
-      if (mem.has(k)) return mem.get(k) ?? null;
-      try {
-        return store?.getItem(k) ?? null;
-      } catch {
-        return null;
-      }
-    },
+    get,
+    // 1.3.0 (contrôle technique) : lecture stricte : localStorage répond toujours, tout de suite (stockage interdit : la
+    // mémoire de la visite, où vont aussi les écritures) ; elle ne lève jamais
+    getStrict: get,
     async set(k, v) {
       if (v === '') {
         mem.delete(k);

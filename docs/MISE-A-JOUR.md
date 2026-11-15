@@ -1,6 +1,24 @@
 # Passer Quai à une nouvelle version (bêta)
 
-Ce guide sert à chaque nouvelle version de Quai. La dernière est la 1.2.10. Il faut environ 10 minutes, un ordinateur (ou le téléphone) pour le portail Even Hub, puis le téléphone.
+Ce guide sert à chaque nouvelle version de Quai. La dernière est la 1.3.0. Il faut environ 10 minutes, un ordinateur (ou le téléphone) pour le portail Even Hub, puis le téléphone.
+
+## Ce qui change avec la 1.3.0
+
+- Écran d'un trajet : une ligne « ▶ Y aller » dit ce que fait un toucher (« ▶ Retour au guidage » quand le trajet est déjà guidé). Le toucher marche comme avant.
+- « Autres trajets » : ▲ sur la première ligne te ramène au trajet proposé.
+- Favoris : le détail du favori choisi s'ouvre juste dessous, sur deux lignes (par exemple « à pied 7 min, puis bus W ~11:49 » et « 1 changement : métro 2 »), et se referme quand tu passes au suivant. Les « … » ne restent plus figés.
+- Tableau d'une gare ou d'un arrêt : « toucher : où descendre ». Le toucher ouvre les arrêts du départ, où tu choisis « j'y descends ».
+- Hors de Belgique (Maastricht, Luxembourg…) : Quai le dit (« Hors de Belgique »), puis montre seulement les minutes et la direction, sans faux virages.
+- Les noms trop longs sont coupés entre deux mots, jamais au milieu d'un mot.
+- Pendant un trajet, tout se passe dans Quai, sans autre appli :
+  - Test de l'écran : sur le téléphone, « Réglages », « Pendant un trajet », « Tester l'écran des lunettes ». En une minute, lunettes sur le nez, Quai voit comment ses messages s'affichent chez toi et te dit quoi régler.
+  - Rappel : un message important (partir, monter, voie, descendre, imprévu) que tu n'as pas vu revient, deux fois au plus.
+  - Vérification au départ : si la batterie des lunettes est basse ou si Quai n'a pas ta position, il le dit tout de suite (aussi sur la carte « En cours » du téléphone).
+  - Journal des trajets : « Réglages », « Données », « Journal des trajets » : tes 10 derniers trajets guidés, à lire et à copier. Aucune position ni adresse n'y est gardée, et rien ne quitte le téléphone.
+
+Pour bien démarrer avec la 1.3.0 : fais le test de l'écran une fois, puis garde les conseils de la 1.2.10 ci-dessous (position « Toujours » pour l'appli Even, Quai ouvert sur les lunettes pendant le trajet).
+
+Si tu passes directement de la 1.2.9 (ou d'avant) à la 1.3.0, voici aussi ce qu'apportaient les versions précédentes.
 
 ## Ce qui change avec la 1.2.10
 
@@ -18,8 +36,6 @@ Pour que le guidage marche bien :
 - Laisse l'appli Even se servir de ta position tout le temps. Sur iPhone : Réglages > Even Realities > Position > « Toujours ». Sur Android : Paramètres > Applications > Even Realities > Autorisations > Position > « Toujours autoriser ». Sinon, le guidage s'arrête quand le téléphone se verrouille.
 - Garde Quai ouvert sur les lunettes pendant le trajet.
 - Dans l'appli Even, règle l'angle d'affichage au plus bas : un petit mouvement de tête suffit pour voir le message.
-
-Si tu passes directement de la 1.2.8 (ou d'avant) à la 1.2.10, voici aussi ce qu'apportaient les versions précédentes.
 
 ## Ce qui change avec la 1.2.9
 
@@ -70,7 +86,7 @@ Si tu passes directement de la 1.2.8 (ou d'avant) à la 1.2.10, voici aussi ce q
 - Tableaux complets : une gare ou un arrêt montre tous ses départs des 2 prochaines heures, page par page avec ▲▼. Le réglage « Départs par arrêt » disparaît.
 - Touche un départ : ses arrêts jusqu'au terminus, avec l'heure, la voie et le retard pour un train. Touche un arrêt de la liste pour voir ses départs.
 
-Si tu passes directement de la 1.2.1 à la 1.2.10, voici aussi ce qu'apportait la 1.2.2.
+Si tu passes directement de la 1.2.1 à la 1.3.0, voici aussi ce qu'apportait la 1.2.2.
 
 ## Ce qui change avec la 1.2.2
 
@@ -99,7 +115,7 @@ Quand une nouvelle version est publiée sur GitHub (page « Releases » du dép�
 
 ### 1. Télécharger le paquet
 
-Ouvre https://github.com/sahiht/quai/releases/latest. La page s'appelle « Quai v1.2.10 ». Dans « Assets » (fichiers joints), touche `quai.ehpk` pour le télécharger. L'icône ne change pas : inutile de la reprendre.
+Ouvre https://github.com/sahiht/quai/releases/latest. La page s'appelle « Quai v1.3.0 ». Dans « Assets » (fichiers joints), touche `quai.ehpk` pour le télécharger. L'icône ne change pas : inutile de la reprendre.
 
 ![Télécharger quai.ehpk](img/maj/maj-1-release.png)
 
@@ -111,13 +127,13 @@ Va sur https://hub.evenrealities.com et connecte-toi avec le même compte que da
 
 ### 3. Déposer le nouveau paquet
 
-Onglet « Builds » (paquets). Touche le bouton « + » en haut à droite et choisis le fichier `quai.ehpk` téléchargé. Une ligne « v1.2.10 » apparaît sous « Private builds » (paquets privés), avec une étiquette grise « Private » (privé).
+Onglet « Builds » (paquets). Touche le bouton « + » en haut à droite et choisis le fichier `quai.ehpk` téléchargé. Une ligne « v1.3.0 » apparaît sous « Private builds » (paquets privés), avec une étiquette grise « Private » (privé).
 
 ![Déposer le paquet](img/maj/maj-3-evenhub-builds.png)
 
 ### 4. Passer la version en bêta
 
-Sur la ligne « v1.2.10 », touche l'étiquette grise « Private ». Choisis « Beta » (bêta), puis confirme avec « Promote to Beta » (passer en bêta).
+Sur la ligne « v1.3.0 », touche l'étiquette grise « Private ». Choisis « Beta » (bêta), puis confirme avec « Promote to Beta » (passer en bêta).
 
 ![Passer en bêta](img/maj/maj-4-promote.png)
 
@@ -131,11 +147,11 @@ Dans l'appli Even Realities : onglet « Me » (moi), puis « Beta tester » (tes
 
 ### 6. Ouvrir Quai sur les lunettes
 
-À la première ouverture, les lunettes affichent une fois le message « Quai 1.2.10 » avec les nouveautés (depuis la 1.2.8 ou d'avant, aussi celles de la 1.2.9). Touche pour continuer.
+À la première ouverture, les lunettes affichent une fois le message « Quai 1.3.0 » avec les nouveautés (depuis la 1.2.9 ou d'avant, aussi celles des versions sautées). Touche pour continuer.
 
 ### 7. Vérifier
 
-Sur le téléphone, ouvre Quai : l'accueil montre « Dans tes lunettes » et, en haut à droite, le bouton « Réglages ». Dans « Réglages », puis « Données », la ligne « Version de Quai » doit dire « 1.2.10 ». Pour essayer le guidage : ouvre un favori dans les lunettes, touche « y aller », puis touche une fois pour voir où tu en es.
+Sur le téléphone, ouvre Quai : l'accueil montre « Dans tes lunettes » et, en haut à droite, le bouton « Réglages ». Dans « Réglages », puis « Données », la ligne « Version de Quai » doit dire « 1.3.0 ». Puis, dans « Réglages », touche « Tester l'écran des lunettes » et suis les consignes (une minute, lunettes sur le nez). Pour essayer le guidage : ouvre un favori dans les lunettes, touche « ▶ Y aller », puis touche une fois pour voir où tu en es.
 
 ## En cas de souci
 
@@ -143,7 +159,7 @@ Sur le téléphone, ouvre Quai : l'accueil montre « Dans tes lunettes » et, en
 |---|---|
 | Even Hub refuse le fichier | Ce numéro de version est déjà déposé. Vérifie que tu as bien pris le paquet de la dernière release. |
 | « test version expired » sur le téléphone | La version n'est pas en « Beta », ou ton invitation n'est plus « Active » dans « Testing group ». |
-| Les lunettes montrent encore l'ancienne version | Quitte Quai (double toucher à l'accueil), puis rouvre-le. Sur le téléphone, vérifie dans « Beta tester » que la version 1.2.10 est installée. |
+| Les lunettes montrent encore l'ancienne version | Quitte Quai (double toucher à l'accueil), puis rouvre-le. Sur le téléphone, vérifie dans « Beta tester » que la version 1.3.0 est installée. |
 | Un trajet propose plus de marche que ton réglage | Aucun trajet qui marche moins n'arrive assez tôt : au-delà de ta marche maximale, chaque minute à pied compte triple. Au bout des étapes, ▼ ouvre les autres trajets. Tu peux changer « Marche maximale » dans « Réglages », sur le téléphone. |
 | « Gares de train », « Arrêts » ou « Lignes » disent « à choisir » | Ajoute tes gares, tes arrêts et tes lignes sur le téléphone, dans Quai : touche la rubrique du même nom sous « Dans tes lunettes ». |
 | Une ligne dit « introuvable » | Elle n'est plus dans les horaires du jour (ligne renumérotée ou supprimée) : retire-la et ajoute la nouvelle sur le téléphone, rubrique « Lignes de bus, tram, métro ». |

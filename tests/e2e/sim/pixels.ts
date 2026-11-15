@@ -50,7 +50,12 @@ export interface LoggedScreen {
   sel?: number;
 }
 
-type Seg = { from: number; to: number; text: string };
+/**
+ * Segment attendu : de `from` à `to`. 1.3.0 : `float`, segment dont le début se mesure sur la capture (lignes de
+ * l'accordéon des favoris, « en retrait » sans retrait fixé par le PRD) : il doit commencer entre `from` et `to`, puis
+ * aller jusqu'au bout de sa largeur mesurée.
+ */
+type Seg = { from: number; to: number; text: string; float?: { min: number; max: number } };
 
 /** Écrans en liste à une colonne de droite (gabarit de chacun, layout.ts). */
 const MENU: Record<string, keyof typeof LAYOUTS> = { favorites: 'favorites', stations: 'stations', keepLine: 'menu', followed: 'menu', menu: 'menu' };
@@ -401,6 +406,18 @@ function othersSegments(line: string, second: boolean): Seg[] {
   return [{ from: def.a.x, to: def.a.x + width(a), text: a }, rightSeg(def, parts[parts.length - 1])];
 }
 
+/**
+ * 1.3.0 (PRD-1.3.0 § 7) : lignes de l'accordéon d'un écran « Favoris » journalisé : le champ `expand` s'il existe, sinon
+ * les lignes sans colonne de réponse (une rangée de favori a toujours la sienne, « … » compris), hors de l'intitulé
+ * « ADRESSES RÉCENTES » et de l'aide. Avant la 1.3.0 : aucune (la ligne du détail en bas a son champ `detail`).
+ */
+export function accordionLines(s: LoggedScreen): string[] {
+  const x = s as LoggedScreen & { expand?: unknown; detail?: unknown };
+  if (Array.isArray(x.expand)) return x.expand.map((e) => String(typeof e === 'object' && e && 'text' in e ? (e as { text: unknown }).text : e).replace(/[\u00a0\u202f]/g, ' '));
+  if (typeof x.detail === 'string') return [];
+  return s.lines.slice(0, -1).filter((l) => !!l && !l.includes('   ') && l !== 'ADRESSES RÉCENTES');
+}
+
 interface Band {
   y: number;
   segs: Seg[];
@@ -435,6 +452,7 @@ function bands(s: LoggedScreen): Band[] | null {
   const top = hasTop ? lines.shift()! : undefined;
   let hint: string | undefined;
   let note: string | undefined;
+  let action: string | undefined;
   let footLines: number;
   if (home) {
     // pied compact (1.2.1) : l'aide seulement les 7 premiers jours ; sous le jour férié, pas de ligne d'aide vide
@@ -443,6 +461,8 @@ function bands(s: LoggedScreen): Band[] | null {
     footLines = (note !== undefined ? 1 : 0) + (note !== undefined && hint === undefined ? 0 : 1);
   } else {
     hint = lines.pop();
+    // 1.3.0 (PRD-1.3.0 § 1) : écran du trajet, la ligne d'action (« ▶ Y aller ») juste au-dessus des aides
+    if (s.screen === 'steps' && lines.length && /^▶ /.test(lines[lines.length - 1])) action = lines.pop();
     // 1.2.10 (PRD-1.2.10 § 2) : « Favoris », la ligne du détail du favori choisi, fixe en bas au-dessus des aides
     // (journalisée dans `detail`, espaces insécables comprises, alors que les lignes du journal en sont nettoyées),
     // à la place de la note
@@ -451,10 +471,13 @@ function bands(s: LoggedScreen): Band[] | null {
     else note = lines.length && (board ? NOTE_BOARD : NOTE).test(lines[lines.length - 1]) ? lines.pop() : undefined;
     // ligne de note réservée (layout.ts, reserveNote) : partout sauf « Autres trajets », les menus et « Dans le train »
     const reserve = !['others', 'keepLine', 'followed', 'train', 'follows'].includes(s.screen);
-    footLines = (reserve || note ? 1 : 0) + 1;
+    footLines = (reserve || note ? 1 : 0) + (action !== undefined ? 1 : 0) + 1;
   }
   const footY = SCREEN_H - GEO.BOTTOM_MARGIN - footLines * LINE_H;
-  const rowsY = GEO.TITLE_Y + LINE_H + (hasTop ? LINE_H : 0) + 3;
+  const listY = GEO.TITLE_Y + LINE_H + (hasTop ? LINE_H : 0) + 3;
+  // 1.3.0 (PRD-1.3.0 § 1, layout.ts geometry) : avec la ligne d'action, la liste finit là où commence le pied (elle
+  // descend du reste de la division, 9 px), la ligne d'action prolongeant la colonne a sur la grille du pied
+  const rowsY = action !== undefined ? Math.max(listY, footY - Math.max(1, Math.floor((footY - listY) / LINE_H)) * LINE_H) : listY;
 
   const out: Band[] = [];
   // l'heure du titre, calée à droite de son conteneur par les mêmes espaces que layout.ts
@@ -488,6 +511,8 @@ function bands(s: LoggedScreen): Band[] | null {
   }
   // accueil : les favoris en retrait sont les lignes entre « Favoris » et la ligne vide
   let underFavorites = false;
+  // 1.3.0 : lignes de l'accordéon de « Favoris » (champ `expand` du journal, sinon les lignes sans colonne de réponse)
+  const open = new Set(s.screen === 'favorites' ? accordionLines(s) : []);
   // 1.2.6 : « Lignes » : à la marge, sauf « introuvable » sous la ligne
   const indented = s.screen === 'lines' ? linesIndented(lines) : s.screen === 'follows' ? lines.map((l) => /^introuvable/.test(l)) : [];
   lines.forEach((l, i) => {
@@ -500,6 +525,10 @@ function bands(s: LoggedScreen): Band[] | null {
         segs = homeSegments(l, false);
         underFavorites = false;
       } else segs = homeSegments(l, underFavorites);
+    } else if (s.screen === 'favorites' && open.has(l)) {
+      // 1.3.0 (PRD-1.3.0 § 7) : ligne de l'accordéon, pâle et en retrait sous la rangée du curseur (retrait mesuré)
+      const x0 = LAYOUTS.favorites.a.x;
+      segs = [{ from: x0 + 6, to: x0 + 6 + width(l), text: l, float: { min: x0 + 6, max: x0 + 64 } }];
     } else if (s.screen === 'others') segs = othersSegments(l, i % 2 === 1);
     else if (board) segs = rowSegments(/\(SNCB\)( ★)?$/.test(s.title) ? 'boardTrain' : 'board', l);
     else if (s.screen === 'trainRun') {
@@ -512,6 +541,7 @@ function bands(s: LoggedScreen): Band[] | null {
     out.push({ y: rowsY + i * LINE_H, label: `ligne ${i + 1}`, text: l, segs });
   });
   if (note !== undefined) out.push({ y: footY, label: 'note', text: note, segs: [{ from: GEO.X_TEXT, to: GEO.X_TEXT + width(note), text: note }] });
+  if (action !== undefined) out.push({ y: footY + (footLines - 2) * LINE_H, label: 'ligne d’action', text: action, segs: [{ from: GEO.X_TEXT, to: GEO.X_TEXT + width(action), text: action }] });
   if (hint !== undefined) out.push({ y: footY + (footLines - 1) * LINE_H, label: 'aide', text: hint, segs: [{ from: GEO.X_TEXT, to: GEO.X_TEXT + width(hint), text: hint }] });
   return out;
 }
@@ -531,6 +561,17 @@ export function checkPixels(png: Buffer, s: LoggedScreen, opts: { tol?: number }
     // colonne du curseur « ▶ » (x < 27) exclue ; bande réduite de 2 px en haut et en bas (accents, jambages voisins)
     const xs = new Set<number>();
     for (let y = Math.max(0, b.y + 2); y < Math.min(h, b.y + LINE_H - 1); y++) for (let x = GEO.X_TEXT - 1; x < w; x++) if (lit(x, y)) xs.add(x);
+    // 1.3.0 : segment flottant (accordéon) : son début est le premier pixel allumé de la bande, dans sa plage
+    for (const sg of b.segs) {
+      if (!sg.float) continue;
+      const left = Math.min(...[...xs].filter((x) => x >= GEO.X_TEXT - 1));
+      if (!Number.isFinite(left) || left < sg.float.min - TOL || left > sg.float.max) {
+        bad.push(`${b.label} : « ${sg.text} » pas en retrait sous la rangée (début x = ${Number.isFinite(left) ? left : 'aucun'}, attendu entre ${sg.float.min} et ${sg.float.max})`);
+        continue;
+      }
+      sg.from = left;
+      sg.to = left + width(sg.text);
+    }
     const inSeg = (x: number) => b.segs.some((sg) => x >= sg.from - TOL && x <= sg.to + TOL);
     const stray = [...xs].filter((x) => !inSeg(x)).sort((p, q) => p - q);
     if (stray.length) bad.push(`${b.label} « ${b.segs.map((sg) => sg.text).join(' | ')} » : pixels hors colonne x = ${stray[0]}…${stray[stray.length - 1]}`);

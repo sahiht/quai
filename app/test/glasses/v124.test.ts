@@ -41,17 +41,21 @@ describe('PRD-1.2.4 § 1 : l’arrêt ou la gare où aller, en entier', () => {
   ]);
 
   it('1.2.10 : une rangée par étape : l’heure, le véhicule et « → » l’arrêt de descente, l’arrivée ou la marge ; la marche en minutes', () => {
-    const l = lines(steps(j));
-    expect(l.slice(0, 7)).toEqual([
-      'Départ 13:25, dans 1 min   arrivée 14:29',
+    const rows = [
       '13:25 à pied 7 min',
       '13:32 Bus W → Braine-l’Alleud, Gare   13:41',
       '13:41 à pied 1 min',
       '14:01 IC voie 2 → Bruxelles-Midi   14:16',
       '14:16 à pied 3 min',
       '14:22 Métro 2 → Madou   marge 3 min',
-    ]);
-    expect(l.join('\n')).not.toContain('…');
+      '14:27 à pied 2 min',
+    ];
+    // 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action prend une rangée : cinq étapes sur la 1re page, la suite sur la dernière
+    const l = lines(steps(j));
+    expect(l.slice(0, 7)).toEqual(['Départ 13:25, dans 1 min   arrivée 14:29', ...rows.slice(0, 5), '▽ suite du trajet : 2 étapes']);
+    const end = layoutPage(steps(j, 2), { sel: -1, top: 2 }).lines.map(nb);
+    expect(end.slice(1, 7)).toEqual([...rows.slice(2), 'Fin du trajet. Pas d’autre trajet pour l’instant']);
+    expect([...l, ...end].join('\n')).not.toContain('…');
   });
 
   it('un arrêt de descente trop long : coupé au mot avant l’heure d’arrivée, jamais l’heure', () => {
@@ -100,8 +104,10 @@ describe('PRD-1.2.4 § 4 : heures alignées à droite, « ~ » à gauche ; aides
     planned.legs[1].rt = false;
     // 1.2.10 : l'heure seule dans la colonne a d'une marche, suivie du véhicule pour un véhicule : on mesure la fin des
     // chiffres de l'heure dans sa case (STEP_TIME_PX)
-    const a = container(steps(planned), 'colA', -1);
-    const ends = a.content.split('\n').filter((l) => l.trim()).map((l) => ({ text: (/~?\d\d:\d\d/.exec(l) ?? [''])[0], end: a.x + textWidth(l.slice(0, (/\d\d:\d\d/.exec(l)?.index ?? 0) + 5)) }));
+    // 1.3.0 (PRD-1.3.0 § 1) : les rangées de la liste seulement (la colonne a porte aussi la ligne d'action, sur le pied)
+    const v = steps(planned);
+    const a = container(v, 'colA', -1);
+    const ends = a.content.split('\n').slice(0, geometry(v).capacity).filter((l) => l.trim()).map((l) => ({ text: (/~?\d\d:\d\d/.exec(l) ?? [''])[0], end: a.x + textWidth(l.slice(0, (/\d\d:\d\d/.exec(l)?.index ?? 0) + 5)) }));
     expect(ends.map((x) => x.text)).toEqual(['13:57', '~14:01', '14:16']);
     for (const x of ends) expect(Math.abs(x.end - ends[0].end)).toBeLessThanOrEqual(2);
     expect(LAYOUTS.steps.a.align).toBe('right');
@@ -218,7 +224,7 @@ describe('PRD-1.2.4 § 4 : heures alignées à droite, « ~ » à gauche ; aides
 
   it('aides et bas d’écran : « △▽ » (le curseur « ▶ » reste plein)', () => {
     for (const h of Object.values(HINTS)) expect(h).not.toMatch(/[▲▼]/);
-    expect(nb(HINTS.board)).toBe('△▽ départs   toucher : arrêts   double : retour');
+    expect(nb(HINTS.board)).toBe('△▽ départs   toucher : où descendre   double : retour');
     const v = steps(journey('x', [{ walk: 3, to: 'Gare du Nord' }, { ride: '3', mode: 'tram', dep: T(13, 40), arr: T(13, 50), from: 'Gare du Nord', to: 'Bourse' }, { walk: 1 }]));
     expect(v.note ?? '').not.toMatch(/[▲▼]/);
     const b = boardView(boardOf('sncb:8863008', 'Namur', [trainAt(NOW, 10)]), ctx(), { kept: false });

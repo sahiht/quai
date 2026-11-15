@@ -139,6 +139,19 @@ export interface Settings {
      * par « Y aller » ou « J'y descends » ; faux : le trajet est suivi sans aucun message ni écran qui change seul.
      */
     guide?: boolean;
+    /**
+     * 1.3.0 (PRD-1.3.0 § 6.1) : résultat du test de l'écran des lunettes. visible : un nouveau message se voit sans rien
+     * faire ; headUp : il se voit en levant la tête ; dashboard : en levant la tête on voit le Dashboard, pas Quai.
+     * Absent : pas encore testé (traité comme visible pour le rappel des messages, § 6.2).
+     */
+    alert?: 'visible' | 'headUp' | 'dashboard';
+    /**
+     * 1.3.0 (§ 6.2) : mouvement « lever la tête » appris pendant le test (capteur de mouvement des lunettes). Contrôle
+     * technique : `rest`, la position de repos sur cet axe (la tête droite, pendant l'attente du test), référence du
+     * « vu » (au-delà de rest + 60 % de l'écart, dans le sens appris) ; absente (test fait avant), le mouvement n'est pas
+     * utilisé : rappels à l'heure.
+     */
+    headUp?: { axis: 'x' | 'y' | 'z'; sign: 1 | -1; delta: number; rest?: number };
   };
   alerts: {
     platform: boolean;
@@ -423,7 +436,16 @@ export interface Suggestion {
 
 /* ------------------------------ Cœur ------------------------------ */
 
-export interface KV { get(key: string): Promise<string | null>; set(key: string, value: string): Promise<void> }
+export interface KV {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<void>;
+  /**
+   * 1.3.0 (contrôle technique) : lecture stricte, facultative. null : la clé est absente ; exception : la lecture n'a pas
+   * abouti (délai dépassé, pont en erreur), alors que `get` rend null dans les deux cas. Un échec n'est jamais gardé en
+   * cache. Absente : le stockage ne sait pas faire la différence (lecteurs : journal des trajets, réglages au lancement).
+   */
+  getStrict?(key: string): Promise<string | null>;
+}
 
 export interface CoreOptions {
   dataBase: string;             // ex. https://moi.github.io/quai/data (sans / final)
@@ -568,4 +590,35 @@ export interface GlassesApi {
   guideStatus?(): GuideStatus | null;
   /** 1.2.10 : appelé à chaque changement de l'état du guidage. Renvoie la fonction de désabonnement. */
   onGuide?(cb: (s: GuideStatus | null) => void): () => void;
+  /** 1.3.0 (PRD-1.3.0 § 6.1) : test de l'écran des lunettes, mené par le téléphone (Réglages, « Pendant un trajet ») */
+  displayTest?(cmd: DisplayTestCmd): Promise<DisplayTestState>;
+  onDisplayTest?(cb: (s: DisplayTestState) => void): () => void;
 }
+
+/* ------------------------------ 1.3.0 : test de l'écran des lunettes (PRD-1.3.0 § 6.1) ------------------------------ */
+
+/** Ordres du téléphone au test : commencer, répondre à une question, arrêter. */
+export type DisplayTestCmd =
+  | { kind: 'start' }
+  | { kind: 'answer'; answer: 'quai' | 'dashboard' | 'nothing' }
+  | { kind: 'cancel' };
+
+/**
+ * État du test, lu par le téléphone. idle : pas de test ; wait : ne rien toucher (l'écran s'éteint seul) ; sent : un
+ * message vient d'être envoyé, on attend un toucher sur les lunettes ; ask : question sur le téléphone (lever la tête) ;
+ * done : résultat enregistré (Settings.display.alert, et headUp si le mouvement a été appris).
+ */
+export interface DisplayTestState {
+  step: 'idle' | 'wait' | 'sent' | 'ask' | 'done';
+  /** secondes restantes de l'étape en cours, si elle a une durée */
+  left?: number;
+  result?: 'visible' | 'headUp' | 'dashboard';
+  /** le mouvement « lever la tête » a été appris */
+  learned?: boolean;
+  /**
+   * closed : Quai n'est pas ouvert sur les lunettes (ou elles ne sont pas connectées) ; guiding : un guidage est en
+   * cours (le test et le guidage ne vont jamais ensemble : un guidage qui démarre arrête le test). Le test ne démarre pas.
+   */
+  error?: 'closed' | 'guiding';
+}
+

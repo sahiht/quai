@@ -9,6 +9,7 @@ import './web.css';
 import { applyTestSettings, loadCore, prefixed, type CoreModule } from '../boot';
 import type { CoreOptions } from '../core/api';
 import { DEFAULT_SETTINGS } from '../core/api';
+import { createJournal, type JournalStore } from '../core/journal';
 import { parseEnv } from '../env';
 import { GlassesController } from '../glasses/controller';
 import { layoutPage } from '../glasses/layout';
@@ -50,6 +51,9 @@ async function main(): Promise<void> {
   const loc = createWebLocation(clock.now);
   if (env.mockLat !== undefined && env.mockLon !== undefined) loc.useMock(env.mockLat, env.mockLon);
   const platform: Platform = { kind: 'web', glasses: port, kv, location: loc, closeWebView() {} };
+  // 1.3.0 (PRD-1.3.0 § 6.4) : journal des trajets guidés, dans la page ; ouvert en arrière-plan à la fin du démarrage
+  // (plus bas), jamais attendu : null pour l'onglet Réglages tant qu'il n'est pas prêt.
+  let journal: JournalStore | null = null;
 
   // Écran des lunettes dès le départ : jamais d'écran noir.
   const loading = layoutPage(messageView('Quai', ['Chargement…'], { now: clock.now(), settings: DEFAULT_SETTINGS }), { sel: 0, top: 0 });
@@ -117,6 +121,7 @@ async function main(): Promise<void> {
     web: true,
     showGlasses: () => shell.show('lunettes'),
     positionPicker: () => picker(`w-pos-${Math.random().toString(36).slice(2, 7)}`),
+    journal: () => journal,
   });
 
   // Gestes : boutons (1.2.10 : « Appui long » compris), écran (glisser, toucher, double toucher, molette, doigt gardé),
@@ -153,7 +158,21 @@ async function main(): Promise<void> {
   sync();
 
   window.addEventListener('pagehide', () => void settings.flush());
+  // le journal regroupe ses enregistrements (2 s) : tout de suite quand la page se cache ou se ferme
+  const saveJournal = (): void => void journal?.flush();
+  window.addEventListener('pagehide', saveJournal);
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && saveJournal());
   await controller.start();
+  // 1.3.0, contrôle technique : le journal n'est jamais attendu au démarrage ; il s'ouvre en arrière-plan une fois l'écran
+  // d'ouverture affiché ; le contrôleur (attachJournal) et l'onglet Réglages le reçoivent dès qu'il est prêt ; s'il ne
+  // s'ouvre pas, Quai continue sans lui.
+  void createJournal(platform.kv, { now: clock.now }).then(
+    (j) => {
+      journal = j;
+      controller.attachJournal(j);
+    },
+    (e: unknown) => console.warn('[Quai] journal des trajets indisponible', e),
+  );
 }
 
 void main().catch((e) => {

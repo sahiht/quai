@@ -1,0 +1,3 @@
+Écran du trajet : une ligne « ▶ Y aller », et ▲ ramène des autres trajets au trajet proposé.
+Favoris en accordéon : le détail s’ouvre sous le favori choisi, sur deux lignes claires.
+Pendant un trajet : test de l’écran des lunettes, rappel des messages importants, vérification au départ et journal des trajets, le tout dans Quai.

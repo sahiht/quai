@@ -188,6 +188,11 @@ export const GUIDE = {
  */
 export interface DetailItem extends Item {
   detail?: string;
+  /**
+   * 1.3.0 (PRD-1.3.0 § 7) : lignes de l'accordéon (1 ou 2), dites sous la rangée quand le curseur est sur elle
+   * (GlassesView.accordion) ; `planned` : la ligne montre un « ~ ».
+   */
+  expand?: { text: string; planned?: boolean }[];
 }
 
 /**
@@ -213,6 +218,11 @@ export const WIDTHS = {
   wideLeft: right(WIDE_W) - TIGHT - X_TEXT - GEO.SAFETY,
   /** 1.2.1 : ligne d'un favori en retrait sur l'accueil (colonne b : nom, puis réponse alignée à droite). */
   homeRow: X_END - (X_TEXT + HOME_INDENT) - GEO.SAFETY,
+  /**
+   * 1.3.0 (PRD-1.3.0 § 7) : une ligne de l'accordéon de « Favoris », en retrait de HOME_INDENT depuis la marge : la place
+   * que lui donne la mise en page (layoutPage) et celle où son texte est coupé (format.ts, EXPAND_PX), une seule mesure.
+   */
+  expand: X_END - (X_TEXT + HOME_INDENT) - GEO.SAFETY,
   /** 1.2.1 : colonne de droite de l'accueil et de « Autres trajets ». */
   wideRight: WIDE_W - GEO.SAFETY,
   /** 1.2.2 : un passage du détail d'une ligne (heure, terminus s'il diffère), à côté de l'attente. */
@@ -234,19 +244,48 @@ export interface Frame {
  */
 export const itemLines = (it: Item): number => (it.gap ? 1 : 0) + (it.head ? 1 : 0) + (it.group ? 1 : 0) + (it.two || it.a2 || it.b2 ? 2 : 1) + (it.sub?.length ?? 0);
 
+/**
+ * 1.3.0 (PRD-1.3.0 § 7) : rangée ouverte d'une vue en accordéon : le rang de l'élément sous le curseur et ses lignes en
+ * plus (DetailItem.expand). La hauteur d'une rangée dépend donc du curseur : la navigation et le rendu comptent la
+ * rangée ouverte entière (maxTop, ensureVisible, pageTop, visibleRange), pour qu'elle tienne toujours à l'écran.
+ */
+export interface OpenRow {
+  at: number;
+  lines: number;
+}
+
+/** Lignes de l'accordéon d'une rangée, au plus (PRD-1.3.0 § 7 : 1 ou 2). */
+export const EXPAND_MAX = 2;
+
+/** 1.3.0 : lignes de l'accordéon d'un élément : celles qui ont un texte, deux au plus. */
+export function expandLines(it: Item | undefined): { text: string; planned?: boolean }[] {
+  const ex = (it as DetailItem | undefined)?.expand;
+  return Array.isArray(ex) ? ex.filter((e) => !!e?.text?.trim()).slice(0, EXPAND_MAX) : [];
+}
+
+/** 1.3.0 : la rangée ouverte d'une vue en accordéon quand le curseur est sur `sel` ; aucune sinon (rien à ouvrir). */
+export function openRow(v: Pick<GlassesView, 'items'> & Partial<Pick<GlassesView, 'accordion'>>, sel: number): OpenRow | undefined {
+  if (!v.accordion) return undefined;
+  const lines = expandLines(v.items[sel]).length;
+  return lines ? { at: sel, lines } : undefined;
+}
+
+/** Hauteur réelle d'un élément (lignes), rangée ouverte de l'accordéon comprise. */
+const rowLines = (items: Item[], i: number, open?: OpenRow): number => itemLines(items[i]) + (open && open.at === i ? open.lines : 0);
+
 /** Premier élément visible le plus bas possible (écrans sans curseur : la fin de la liste tient à l'écran). */
-export function maxTop(items: Item[], capacity: number): number {
+export function maxTop(items: Item[], capacity: number, open?: OpenRow): number {
   let used = 0;
   for (let i = items.length - 1; i >= 0; i--) {
-    used += itemLines(items[i]);
+    used += rowLines(items, i, open);
     if (used > capacity) return i + 1;
   }
   return 0;
 }
 
 /** Défilement borné d'un écran sans curseur. */
-export function clampTop(items: Item[], top: number, capacity: number): number {
-  return Math.min(Math.max(0, Math.round(top) || 0), maxTop(items, capacity));
+export function clampTop(items: Item[], top: number, capacity: number, open?: OpenRow): number {
+  return Math.min(Math.max(0, Math.round(top) || 0), maxTop(items, capacity, open));
 }
 
 export interface Geometry {
@@ -257,36 +296,48 @@ export interface Geometry {
   hasTop: boolean;
   /** Ligne de note dans le pied (au-dessus de l'aide). */
   noteLine: boolean;
+  /** 1.3.0 (PRD-1.3.0 § 1) : ligne d'action (GlassesView.action) dans le pied, sous la note, juste au-dessus de l'aide. */
+  actionLine: boolean;
   /** Ligne d'aide (ou de message temporaire) dans le pied. */
   hintLine: boolean;
 }
 
 /**
- * Géométrie verticale d'une vue : titre, ligne du haut éventuelle, lignes, pied (note + aides). `toast` : un message
- * temporaire est affiché (il prend la ligne d'aide, même sur un pied compact).
+ * Géométrie verticale d'une vue : titre, ligne du haut éventuelle, lignes, pied (note, action, aides). `toast` : un
+ * message temporaire est affiché (il prend la ligne d'aide, même sur un pied compact).
+ *
+ * 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action prend une rangée à la liste ; la liste descend alors du reste de la
+ * division (9 px) pour finir là où commence le pied : la colonne a, prolongée sur sa grille, porte la ligne d'action
+ * au pixel près sur la grille du pied (layoutPage). 1.3.0 (§ 7) : une vue en accordéon n'a plus de ligne du détail en
+ * bas : sa ligne de note n'est réservée (reserveNote) que si elle a une note.
  */
-export function geometry(v: Pick<GlassesView, 'top' | 'note' | 'reserveNote'> & Partial<Pick<GlassesView, 'hints' | 'compactFoot' | 'notePlanned'>>, toast = false): Geometry {
+export function geometry(v: Pick<GlassesView, 'top' | 'note' | 'reserveNote'> & Partial<Pick<GlassesView, 'hints' | 'compactFoot' | 'notePlanned' | 'action' | 'accordion'>>, toast = false): Geometry {
   const hasTop = !!v.top?.text;
-  const rowsY = GEO.TITLE_Y + LINE_H + (hasTop ? LINE_H : 0) + 3;
+  const listY = GEO.TITLE_Y + LINE_H + (hasTop ? LINE_H : 0) + 3;
   // 1.2.8 : une note qui dépend de la page (notePlanned) garde sa ligne : changer de page ne reconstruit rien
-  const noteLine = !!(v.reserveNote || v.note || v.notePlanned);
+  const noteLine = !!(v.note || v.notePlanned || (v.reserveNote && !v.accordion));
+  const actionLine = !!v.action?.trim();
   // Accueil : la ligne d'aide n'existe que si l'aide s'affiche (1.2.1 : sous la note du jour férié ; 1.2.2, REVUE-USAGE
   // n° 1 : toujours, les 7 premiers jours passés) ou pendant un message temporaire. Sans note, le pied est vide.
   const hintLine = !v.compactFoot || !!v.hints || toast;
-  const footLines = (noteLine ? 1 : 0) + (hintLine ? 1 : 0);
+  const footLines = (noteLine ? 1 : 0) + (actionLine ? 1 : 0) + (hintLine ? 1 : 0);
   const footY = SCREEN_H - GEO.BOTTOM_MARGIN - footLines * LINE_H;
-  const capacity = Math.max(1, Math.floor((footY - rowsY) / LINE_H));
-  return { rowsY, footY, footLines, capacity, hasTop, noteLine, hintLine };
+  const capacity = Math.max(1, Math.floor((footY - listY) / LINE_H));
+  const rowsY = actionLine ? Math.max(listY, footY - capacity * LINE_H) : listY;
+  return { rowsY, footY, footLines, capacity, hasTop, noteLine, actionLine, hintLine };
 }
 
-/** Garde l'élément sélectionné visible ; renvoie le premier élément visible. */
-export function ensureVisible(items: Item[], sel: number, top: number, capacity: number): number {
+/**
+ * Garde l'élément sélectionné visible ; renvoie le premier élément visible. 1.3.0 (`open`) : la rangée ouverte de
+ * l'accordéon compte entière (ses lignes en plus aussi).
+ */
+export function ensureVisible(items: Item[], sel: number, top: number, capacity: number, open?: OpenRow): number {
   if (!items.length) return 0;
   const s = Math.min(Math.max(0, sel), items.length - 1);
   let t = Math.min(Math.max(0, top), s);
   const linesFrom = (from: number, to: number): number => {
     let n = 0;
-    for (let i = from; i <= to; i++) n += itemLines(items[i]);
+    for (let i = from; i <= to; i++) n += rowLines(items, i, open);
     return n;
   };
   while (t < s && linesFrom(t, s) > capacity) t++;
@@ -296,17 +347,22 @@ export function ensureVisible(items: Item[], sel: number, top: number, capacity:
 /**
  * 1.2.3 : défilement par page d'une liste à curseur (GlassesView.paged : tableaux complets, arrêts d'un départ, détail
  * d'une ligne). Curseur visible : la page ne bouge pas ; plus bas, la page suivante commence à lui (jamais une ligne
- * déjà vue : la dernière page peut être moins pleine) ; plus haut, la page précédente finit à lui.
+ * déjà vue : la dernière page peut être moins pleine) ; plus haut, la page précédente finit à lui. 1.3.0 (`open`) :
+ * hauteurs réelles, rangée ouverte comprise.
  */
-export function pageTop(items: Item[], sel: number, top: number, capacity: number): number {
+export function pageTop(items: Item[], sel: number, top: number, capacity: number, open?: OpenRow): number {
   if (!items.length) return 0;
   const s = Math.min(Math.max(0, sel), items.length - 1);
   const t0 = Math.min(Math.max(0, Math.round(top) || 0), items.length - 1);
-  const { from, to } = visibleRange(items, t0, capacity);
+  const { from, to } = visibleRange(items, t0, capacity, open);
   if (s >= from && s < to) return t0;
   if (s >= to) return s;
   let t = s;
-  const linesFrom = (i: number): number => items.slice(i, s + 1).reduce((n, it) => n + itemLines(it), 0);
+  const linesFrom = (i: number): number => {
+    let n = 0;
+    for (let k = i; k <= s; k++) n += rowLines(items, k, open);
+    return n;
+  };
   while (t > 0 && linesFrom(t - 1) <= capacity) t--;
   return t;
 }
@@ -315,24 +371,24 @@ export function pageTop(items: Item[], sel: number, top: number, capacity: numbe
  * 1.2.4 : début de la page qui précède `top` (écrans sans curseur) : elle finit juste avant `top` et prend autant
  * d'éléments que la capacité en lignes le permet (au moins un).
  */
-export function prevPageTop(items: Item[], top: number, capacity: number): number {
+export function prevPageTop(items: Item[], top: number, capacity: number, open?: OpenRow): number {
   const t0 = Math.min(Math.max(0, Math.round(top) || 0), items.length);
   if (t0 <= 0) return 0;
   let t = t0 - 1;
-  let used = itemLines(items[t]);
-  while (t > 0 && used + itemLines(items[t - 1]) <= capacity) {
+  let used = rowLines(items, t, open);
+  while (t > 0 && used + rowLines(items, t - 1, open) <= capacity) {
     t--;
-    used += itemLines(items[t]);
+    used += rowLines(items, t, open);
   }
   return t;
 }
 
-/** Éléments visibles à partir de `top` dans la capacité donnée. */
-export function visibleRange(items: Item[], top: number, capacity: number): { from: number; to: number } {
+/** Éléments visibles à partir de `top` dans la capacité donnée (1.3.0 : rangée ouverte comprise, `open`). */
+export function visibleRange(items: Item[], top: number, capacity: number, open?: OpenRow): { from: number; to: number } {
   let used = 0;
   let to = top;
   for (let i = top; i < items.length; i++) {
-    const n = itemLines(items[i]);
+    const n = rowLines(items, i, open);
     if (used + n > capacity) break;
     used += n;
     to = i + 1;
@@ -421,25 +477,28 @@ export function leadCell(lead: string, rest: string, tail: string | undefined, s
   return { text: head + r, log: time + r };
 }
 
-/** Colonne b avec une fin protégée : le début est coupé (« … ») pour que `tail` tienne toujours en entier. */
+/**
+ * Colonne b avec une fin protégée : le début est coupé (« … ») pour que `tail` tienne toujours en entier. 1.3.0
+ * (PRD-1.3.0 § 5) : le début est coupé au mot (truncateWords), jamais au milieu d'un mot.
+ */
 export function withTail(text: string, tail: string | undefined, maxPx: number): string {
-  if (!tail) return text ? truncate(text, maxPx) : '';
+  if (!tail) return text ? truncateWords(text, maxPx) : '';
   // L'espace de tête de la fin (« (7 min) » après le texte) est gardée : truncate retire les espaces des bords.
   const lead = /^[  ]*/.exec(tail)?.[0] ?? '';
   const end = lead + truncate(tail, maxPx - textWidth(lead));
   if (!text.trim()) return truncate(tail.replace(/^[,\s]+/, ''), maxPx);
-  const head = truncate(text, maxPx - textWidth(end));
+  const head = truncateWords(text, maxPx - textWidth(end));
   return head ? head + end : truncate(tail.replace(/^[,\s]+/, ''), maxPx);
 }
 
 /**
  * Un texte à gauche et un texte à droite dans un même conteneur de `width` px (1.2.1, favoris de l'accueil) : la droite
  * entière (déjà coupée à sa largeur), la gauche coupée pour laisser `gap` px, puis des espaces mesurés au pixel pour que
- * la droite finisse au bord (± 2 px, comme padLeftTo).
+ * la droite finisse au bord (± 2 px, comme padLeftTo). 1.3.0 (PRD-1.3.0 § 5) : la gauche coupée au mot.
  */
 export function spread(left: string, right: string, width: number, gap: number): { text: string; left: string; right: string } {
   const r = right ? truncate(right, width) : '';
-  const l = left ? truncate(left, Math.max(0, width - (r ? textWidth(r) + gap : 0))) : '';
+  const l = left ? truncateWords(left, Math.max(0, width - (r ? textWidth(r) + gap : 0))) : '';
   if (!r) return { text: l, left: l, right: '' };
   return { text: l + padLeftTo(r, width - textWidth(l)), left: l, right: r };
 }
@@ -487,25 +546,48 @@ function segRowBright(segs: Seg[], indentPx: number, right: string | undefined, 
   const shown: string[] = [];
   let x = X_TEXT + indentPx;
   let prev: 'a' | 'b' | null = null;
-  for (const p of segs) {
+  // 1.3.0 (PRD-1.3.0 § 5) : place gardée pour les mots protégés qui suivent le mot `k` (Seg.keep : la voie) : leur
+  // largeur, deux espaces (deux conteneurs) et un pixel de crénage chacun
+  const reserve = (k: number): number => segs.slice(k + 1).reduce((n, q) => (q.keep && q.t ? n + 2 * SPACE_W + 1 + textWidth(glyphSafe(q.t)) : n), 0);
+  let cut = false;
+  for (let k = 0; k < segs.length; k++) {
+    const p = segs[k];
     if (!p.t) continue;
+    // après un mot coupé, les suivants tombent, sauf les mots protégés (la voie reste entière, après le nom coupé)
+    if (cut && !p.keep) continue;
     const key = p.hi ? 'a' : 'b';
     const cx = p.hi ? def.a.x : def.b.x;
+    const lim = p.keep ? limit : limit - reserve(k);
     // entre deux conteneurs, deux espaces : un glyphe large (« W ») peut déborder de sa chasse
     const space = prev ? (prev !== key ? 2 * SPACE_W : SPACE_W) : 0;
     const pad = ' '.repeat(Math.max(0, Math.round((x + space - cx - textWidth(out[key])) / SPACE_W)));
     // mesure du conteneur entier : le crénage à la jonction compte (± 1 px)
-    const fits = (t: string): boolean => cx + textWidth(out[key] + pad + t) <= limit;
+    const fits = (t: string): boolean => cx + textWidth(out[key] + pad + t) <= lim;
     // 1.2.6 : comme truncate, les caractères invisibles (sens d'écriture) retirés, les absents remplacés
     const word = glyphSafe(p.t);
     let t = word;
-    for (let w = limit - cx - textWidth(out[key] + pad); t && !fits(t); w--) t = w > 0 ? truncate(word, w) : '';
-    if (!t) break;
+    if (!fits(t)) {
+      // un mot protégé n'est jamais coupé : sans place, il n'est pas dit (ni ce qui le suit)
+      if (p.keep) break;
+      // 1.3.0 (PRD-1.3.0 § 5) : coupé au mot (ou après un morceau entier d'un nom composé), jamais au milieu d'un mot ;
+      // chaque essai plus court que le précédent (le crénage à la jonction peut coûter un pixel)
+      let w = lim - cx - textWidth(out[key] + pad);
+      t = w > 0 ? truncateWords(word, w) : '';
+      while (t && !fits(t)) {
+        w = Math.min(w - 1, textWidth(t) - 1);
+        t = w > 0 ? truncateWords(word, w) : '';
+      }
+    }
+    if (!t) {
+      // rien de ce mot ne tient : la suite tombe, sauf un mot protégé
+      cut = true;
+      continue;
+    }
     out[key] += pad + t;
     shown.push(t);
     prev = key;
     x = cx + textWidth(out[key]);
-    if (t !== word) break;
+    if (t !== word) cut = true;
   }
   // 1.2.10 : une heure alignée dans sa case (espaces de tête) se journalise sans elles
   return { ...out, c, log: shown.map((t) => t.trim()).join(' ') + (r ? COL_SEP + r : '') };
@@ -522,8 +604,10 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   const g = geometry(v, !!opts.toast);
   const scroll = !!v.scroll && !message;
   const sel = scroll ? (v.mark ?? -1) : items.length ? Math.min(Math.max(0, frame.sel), items.length - 1) : 0;
-  const top = message ? 0 : scroll ? clampTop(items, frame.top, g.capacity) : ensureVisible(items, sel, frame.top, g.capacity);
-  const { from, to } = visibleRange(items, top, g.capacity);
+  // 1.3.0 (PRD-1.3.0 § 7) : accordéon : la rangée du curseur ouverte, comptée entière dans le défilement
+  const open = message || scroll ? undefined : openRow({ items, accordion: v.accordion }, sel);
+  const top = message ? 0 : scroll ? clampTop(items, frame.top, g.capacity) : ensureVisible(items, sel, frame.top, g.capacity, open);
+  const { from, to } = visibleRange(items, top, g.capacity, open);
 
   const colA: string[] = [];
   const colB: string[] = [];
@@ -554,12 +638,12 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     }
     if (it.head) {
       // 1.2.2 : ligne pâle au-dessus de l'élément (« Adresses récentes »), jamais sous le curseur.
-      const h = truncate(it.head, X_END - def.b.x - GEO.SAFETY);
+      const h = truncateWords(it.head, X_END - def.b.x - GEO.SAFETY);
       bOnly(h, h);
     }
     if (it.group) {
       // 1.2.3 : intitulé au-dessus de l'élément, dans la colonne a (« vers Bruxelles Midi »), jamais sous le curseur.
-      const h = truncate(it.group, X_END - def.a.x - GEO.SAFETY);
+      const h = truncateWords(it.group, X_END - def.a.x - GEO.SAFETY);
       colA.push(h);
       colB.push('');
       colC.push('');
@@ -574,7 +658,9 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     // 1.2.4 (PRD-1.2.4 § 4) : heures alignées à droite dans leur case (Col.lead) ou dans leur colonne (Col.align : sa
     // largeur propre, que la colonne suivante soit remplie ou non)
     const aCell = it.aLead && def.a.lead ? leadCell(it.aLead, it.a, undefined, def.a.lead, aRoom) : null;
-    const aLog = aCell ? aCell.log : truncate(it.a, aRoom);
+    // 1.3.0 (PRD-1.3.0 § 5) : tout texte d'une rangée coupé au mot (truncateWords, withTail, spread, segRow), jamais au
+    // milieu d'un mot ; les heures, l'état et la voie (colonne c, fins protégées, texte de droite) ne sont jamais coupés
+    const aLog = aCell ? aCell.log : truncateWords(it.a, aRoom);
     const a = aCell ? aCell.text : aLog && def.a.align === 'right' && (bAny || cAny) ? alignRight(aLog, def.a) : aLog;
     const bRoom = room(def, 'b', { c: cAny });
     const bCell = it.bLead && def.b.lead ? leadCell(it.bLead, b, it.bTail, def.b.lead, bRoom) : null;
@@ -607,8 +693,8 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     lines.push([aLog, bLog, ctext].filter(Boolean).join(COL_SEP));
     }
     if (it.two || it.a2 || it.b2) {
-      const a2 = it.a2 ? truncate(it.a2, X_END - def.a.x - GEO.SAFETY) : '';
-      const b2 = it.b2 ? truncate(it.b2, X_END - def.b.x - GEO.SAFETY) : '';
+      const a2 = it.a2 ? truncateWords(it.a2, X_END - def.a.x - GEO.SAFETY) : '';
+      const b2 = it.b2 ? truncateWords(it.b2, X_END - def.b.x - GEO.SAFETY) : '';
       colA.push(a2);
       colB.push(b2);
       colC.push('');
@@ -633,25 +719,44 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
       const pad = ' '.repeat(Math.round(ind / SPACE_W));
       const w = X_END - def.b.x - ind - GEO.SAFETY;
       const row = s.bRight ? spread(s.b, withOptionalTail(s.bRight, s.bRightTail, Math.min(def.c.w ?? 0, X_END - def.c.x) - GEO.SAFETY), w, def.gap ?? GAP) : null;
-      const text = row ? row.text : truncate(s.b, w);
+      const text = row ? row.text : truncateWords(s.b, w);
       bOnly(text ? pad + text : '', row ? [row.left, row.right].filter(Boolean).join(COL_SEP) : text);
+    }
+    if (open && open.at === i) {
+      // 1.3.0 (PRD-1.3.0 § 7) : accordéon : sous la rangée du curseur, ses lignes (1 ou 2), pâles (colonne b) et en
+      // retrait de HOME_INDENT depuis la marge, coupées au mot dans WIDTHS.expand, la largeur où l'équipe des écrans a
+      // déjà coupé leur texte (EXPAND_PX) : jamais coupées deux fois ; les autres rangées restent fermées
+      const pad = ' '.repeat(Math.max(0, Math.round((X_TEXT + HOME_INDENT - def.b.x) / SPACE_W)));
+      const w = Math.min(WIDTHS.expand, X_END - def.b.x - textWidth(pad) - GEO.SAFETY);
+      for (const e of expandLines(it)) {
+        const t = truncateWords(e.text, w);
+        bOnly(t ? pad + t : '', t);
+      }
     }
   }
 
   const foot: string[] = [];
-  // 1.2.10 (PRD-1.2.10 § 2) : « Favoris » : la ligne du bas dit le détail de l'élément sous le curseur (DetailItem)
-  const detailLine = v.layout === 'favorites' && !v.note;
+  // 1.2.10 (PRD-1.2.10 § 2) : « Favoris » : la ligne du bas dit le détail de l'élément sous le curseur (DetailItem) ;
+  // 1.3.0 (PRD-1.3.0 § 7) : plus de ligne du détail (ni de filet) dans une vue en accordéon
+  const detailLine = v.layout === 'favorites' && !v.note && !v.accordion;
   const detail = detailLine ? ((items[sel] as DetailItem | undefined)?.detail ?? '') : '';
-  // 1.2.8 : « ~ horaire prévu » seulement sous une page qui montre un « ~ » (notePlanned)
-  const noteSrc = detailLine ? detail : v.note ?? (v.notePlanned && items.slice(from, to).some((it) => it.planned) ? v.notePlanned : '');
-  const noteText = noteSrc ? (detailLine ? truncateWordsPx(noteSrc, X_END - X_TEXT - GEO.SAFETY) : truncate(noteSrc, X_END - X_TEXT - GEO.SAFETY)) : '';
+  // 1.2.8 : « ~ horaire prévu » seulement sous une page qui montre un « ~ » (notePlanned) ; 1.3.0 : une ligne ouverte
+  // de l'accordéon aussi (expand.planned)
+  const plannedShown = items.slice(from, to).some((it) => it.planned) || (!!open && expandLines(items[open.at]).some((e) => e.planned));
+  const noteSrc = detailLine ? detail : v.note ?? (v.notePlanned && plannedShown ? v.notePlanned : '');
+  const noteText = noteSrc ? truncateWordsPx(noteSrc, X_END - X_TEXT - GEO.SAFETY) : '';
   // journal QUAI_SCREEN (scénarios de bout en bout) : le texte exact de la ligne du détail, que seule la mise en page
   // connaît (il suit le curseur) ; le contrôleur journalise view.log après la mise en page
   if (detailLine && v.log) v.log.detail = noteText;
   if (g.noteLine) foot.push(noteText);
-  const hintText = opts.toast ? truncate(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? truncate(v.hints, X_END - X_TEXT - GEO.SAFETY) : '';
+  // 1.3.0 (PRD-1.3.0 § 1) : ligne d'action, au plus clair, juste au-dessus de l'aide : sa place reste vide dans le pied
+  // (pâle), son texte est dans le conteneur de la colonne a, prolongé jusqu'à elle (plus bas)
+  const actionText = g.actionLine ? truncateWordsPx(v.action ?? '', X_END - X_TEXT - GEO.SAFETY) : '';
+  if (g.actionLine) foot.push('');
+  const hintText = opts.toast ? truncateWordsPx(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? truncateWordsPx(v.hints, X_END - X_TEXT - GEO.SAFETY) : '';
   if (g.hintLine) foot.push(hintText);
   if (noteText) lines.push(noteText);
+  if (actionText) lines.push(actionText);
   if (hintText && g.hintLine) lines.push(hintText);
 
   const titleW = TITLE_W;
@@ -677,6 +782,11 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   // 1.2.10 (PRD-1.2.10 § 2) : sans ligne du haut, son conteneur devient le filet pâle au-dessus de la ligne du détail
   // (1 px de haut, bordure de niveau 2), au milieu de l'espace entre la liste et le pied
   const filet = detailLine && !topRow;
+  // 1.3.0 (PRD-1.3.0 § 1) : la colonne a (au plus clair aux étapes) se prolonge sur le pied, dont la liste touche le
+  // haut (geometry) : les rangées restantes de la liste et la ligne de la note vides, puis la ligne d'action ; les huit
+  // mêmes conteneurs (limite du matériel), la ligne d'action au pixel près sur la grille du pied
+  const aRows = g.actionLine ? [...colA, ...new Array<string>(Math.max(0, g.capacity - colA.length)).fill(''), ...(g.noteLine ? [''] : []), actionText] : colA;
+  const aH = rowsH + (g.actionLine ? ((g.noteLine ? 1 : 0) + 1) * LINE_H : 0);
   const filetY = Math.round((g.rowsY + rowsH + g.footY) / 2);
   const topC: BorderedContainer = filet
     ? { ...C(IDS.top, 'top', X_TEXT, filetY, X_END - X_TEXT, FOOT_MIN_H, '', 2), border: { width: 1, level: 2 } }
@@ -686,7 +796,7 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     C(IDS.clock, 'clock', X_END - GEO.CLOCK_W, GEO.TITLE_Y, GEO.CLOCK_W, LINE_H, padLeftTo(v.clock, GEO.CLOCK_W - GEO.SAFETY), 3),
     topC,
     C(IDS.cursor, 'cursor', GEO.X_CURSOR, g.rowsY, GEO.W_CURSOR, rowsH, join(cursor), 4),
-    C(IDS.colA, 'colA', def.a.x, g.rowsY, X_END - def.a.x, rowsH, join(colA), message ? 4 : def.a.level),
+    C(IDS.colA, 'colA', def.a.x, g.rowsY, X_END - def.a.x, aH, join(aRows), message ? 4 : def.a.level),
     C(IDS.colB, 'colB', def.b.x, g.rowsY, X_END - def.b.x, rowsH, join(colB), def.b.level),
     C(IDS.colC, 'colC', def.c.x, g.rowsY, X_END - def.c.x, rowsH, join(colC), def.c.level),
     // 1.2.2 : pied vide (accueil sans aide ni jour férié) : 1 px, toujours les 8 mêmes conteneurs (REVUE-USAGE n° 1).
@@ -707,6 +817,8 @@ function withExtras(p: PageSpec, v: GlassesView): PageSpec {
  * entier qui tient, suivi de « … » ; faute de place pour un seul mot, après le dernier trait d'union, la dernière barre
  * ou la dernière apostrophe qui tient (« Comines/… », « Bruxelles-… ») ; un premier morceau seul trop long est coupé
  * au caractère (aucune autre issue). L'espace insécable lie ses deux mots (« 40 m », « arrêt : ») : jamais séparés.
+ * 1.3.0 (PRD-1.3.0 § 5) : le chemin commun de toutes les rangées ; un séparateur isolé (« - », « / ») ne finit jamais le
+ * texte coupé.
  */
 export function truncateWords(text: string, maxPx: number): string {
   const t = truncate(text, Number.MAX_SAFE_INTEGER);
@@ -720,7 +832,8 @@ export function truncateWords(text: string, maxPx: number): string {
       const part = `${words.slice(0, k).join(' ')} ${next.slice(0, i)}`;
       if (textWidth(`${part}…`) <= maxPx) return `${part}…`;
     }
-    const head = words.slice(0, k).join(' ').replace(/[\s,;:·]+$/, '');
+    // 1.3.0 : ni ponctuation ni séparateur isolé en fin (« Arlon TEC - Rue … » : « Arlon TEC… », jamais « Arlon TEC -… »)
+    const head = words.slice(0, k).join(' ').replace(/(?:\s+[-/–·])+$/, '').replace(/[\s,;:·]+$/, '');
     if (head && textWidth(`${head}…`) <= maxPx) return `${head}…`;
   }
   // un seul mot ne tient pas : ses morceaux (« Comines/komen » → « Comines/ », « Bruxelles-Aéroport » → « Bruxelles- »)
@@ -774,7 +887,7 @@ function layoutGuide(v: GlassesView, opts: LayoutOptions): PageSpec {
     // journal : la rangée telle qu'elle se lit (un seul texte, ou la chaîne composée des trois)
     lines.push(guideRowLog(a, b, c));
   }
-  const hintText = opts.toast ? truncate(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? truncate(v.hints, X_END - X_TEXT - GEO.SAFETY) : '';
+  const hintText = opts.toast ? truncateWordsPx(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? truncateWordsPx(v.hints, X_END - X_TEXT - GEO.SAFETY) : '';
   if (hintText) lines.push(hintText);
   // titre du trajet guidé (« Vers … » d'un « j'y descends ») coupé au mot, jamais au milieu d'un mot
   const title = v.title ? truncateWordsPx(v.title, TITLE_W - GEO.SAFETY) : '';
@@ -835,7 +948,8 @@ function guideRowLog(a: string, b: string, c: string): string {
 function composeTop(t: NonNullable<GlassesView['top']>, def: LayoutDef): { text: string; log: string } {
   const full = X_END - X_TEXT - GEO.SAFETY;
   if (!t.cols) {
-    const text = truncate(t.text, full);
+    // 1.3.0 (PRD-1.3.0 § 5) : coupée au mot
+    const text = truncateWordsPx(t.text, full);
     return { text, log: text };
   }
   const [a, b, c] = t.cols;

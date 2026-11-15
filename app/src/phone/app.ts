@@ -10,7 +10,9 @@
  * 1.2.9 (PRD-1.2.9 § 2) : l'accueil en miroir de celui des lunettes ; #/reglages, les autres réglages derrière un seul
  * bouton (Affichage, Alertes, Données, Position et langue et Trajets reviennent à Réglages).
  * 1.2.10 (PRD-1.2.10 § 4.4) : #/affichage/ouverture, « À l’ouverture de Quai » sur son écran (retour à Affichage).
+ * 1.3.0 (PRD-1.3.0 § 6.1) : #/reglages/test-ecran, « Tester l’écran des lunettes » (retour à Réglages, pas dans Quai Web).
  */
+import type { TripJournal } from '../core/journal-types';
 import type { Core, GlassesApi, Meta } from '../core/api';
 import type { Freshness } from '../glasses/controller';
 import type { Clock } from '../platform/clock';
@@ -21,6 +23,7 @@ import { h, ICON, svgNode } from './dom';
 import { alertsScreen } from './screens/alerts';
 import { dataScreen } from './screens/data';
 import { displayScreen, openingScreen } from './screens/display';
+import { displayTestScreen } from './screens/display-test';
 import { favoriteEditScreen, fixedTripScreen, newFavoriteScreen } from './screens/favorite-edit';
 import { favoritesScreen } from './screens/favorites';
 import { homeScreen } from './screens/home';
@@ -55,9 +58,11 @@ export interface PhoneCtx {
   /**
    * Bannière de l'accueil après la mise à jour (T1), une fois : visible si les réglages lus au lancement venaient
    * d'une version antérieure à NEWS_SINCE (seenVersion non vide), jusqu'à « OK ». Le téléphone n'écrit pas
-   * seenVersion pour elle : les lunettes s’en servent pour leur message « Quai 1.2.10 ».
+   * seenVersion pour elle : les lunettes s’en servent pour leur message « Quai 1.3.0 ».
    */
   news?: NewsState;
+  /** 1.3.0 (PRD-1.3.0 § 6.4) : journal des trajets guidés (Réglages, Données, « Journal des trajets »). */
+  journal?(): TripJournal | null;
 }
 
 export type Screen = (ctx: PhoneCtx, sub: string[]) => HTMLElement | Promise<HTMLElement>;
@@ -92,7 +97,8 @@ const SCREENS: Record<string, Route> = {
   gares: pickRoute('stations'),
   arrets: pickRoute('lines'),
   lignes: pickRoute('follows'),
-  reglages: { screen: settingsScreen, grey: true, title: T.settings },
+  // 1.3.0 : #/reglages/test-ecran : « Tester l’écran des lunettes » (pas dans Quai Web : Réglages)
+  reglages: { screen: (c, s) => (isDisplayTest(c, s) ? displayTestScreen(c) : settingsScreen(c)), grey: true, title: (c, s) => (isDisplayTest(c, s) ? T.testScreen : T.settings) },
   trajets: { screen: tripsScreen, title: T.trips },
   // 1.2.10 : #/affichage/ouverture : « À l’ouverture de Quai » sur son écran
   affichage: { screen: (c, s) => (s[0] === 'ouverture' ? openingScreen(c) : displayScreen(c)), grey: true, title: (_c, s) => (s[0] === 'ouverture' ? T.opening : T.display) },
@@ -100,6 +106,11 @@ const SCREENS: Record<string, Route> = {
   donnees: { screen: dataScreen, title: 'Données' },
   recherche: { screen: searchScreen, grey: true, title: 'Rechercher un trajet' },
 };
+
+/** 1.3.0 (PRD-1.3.0 § 6.1) : #/reglages/test-ecran mène au test de l'écran des lunettes, sauf dans Quai Web. */
+function isDisplayTest(c: PhoneCtx, s: string[]): boolean {
+  return s[0] === 'test-ecran' && !c.web;
+}
 
 /** « Mes favoris », « Nouveau favori » (#/favoris/trajet : choix « Un trajet de A à B »), ou la modification d'un favori. */
 function favoritesRoute(c: PhoneCtx, s: string[]): HTMLElement {
@@ -128,8 +139,8 @@ export function parseHash(hash: string): { name: string; sub: string[]; params: 
   return { name: parts[0] ?? '', sub: parts.slice(1), params: new URLSearchParams(query) };
 }
 
-/** Version qui a apporté les nouveautés de la bannière (PRD-1.2.10 § 7) : la 1.2.10. */
-export const NEWS_SINCE = '1.2.10';
+/** Version qui a apporté les nouveautés de la bannière (PRD-1.3.0 § 9) : la 1.3.0. */
+export const NEWS_SINCE = '1.3.0';
 
 /** Bannière « Nouveau » de l'accueil : visible ou non, « OK », et ses lignes (newsLines). */
 export interface NewsState {
@@ -140,7 +151,7 @@ export interface NewsState {
 
 /**
  * Bannière « Nouveau » : une fois, au passage d’une version antérieure à NEWS_SINCE (réglages vus avant elle au
- * lancement), jusqu’à « OK », comme le message « Quai 1.2.10 » des lunettes ; jamais après une installation neuve, ni
+ * lancement), jusqu’à « OK », comme le message « Quai 1.3.0 » des lunettes ; jamais après une installation neuve, ni
  * tant que l'appli (`app`) n'est pas elle-même dans cette version.
  */
 export function newsState(seenAtStart: string, since = NEWS_SINCE, app = APP_VERSION, web = false): NewsState {

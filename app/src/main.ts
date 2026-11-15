@@ -7,6 +7,7 @@ import type { CoreOptions } from './core/api';
 import { applyTestSettings, loadCore, prefixed, type CoreModule } from './boot';
 import { parseEnv } from './env';
 import { CONFIGURED, DATA_BASE, RELAY_BASE } from './generated/config';
+import { createJournal, type JournalStore } from './core/journal';
 import { GlassesController } from './glasses/controller';
 import { messageView } from './glasses/views';
 import { layoutPage } from './glasses/layout';
@@ -71,6 +72,9 @@ async function main(): Promise<void> {
   // Réglages (mode test : remise à zéro, réglages de démonstration).
   await applyTestSettings(env, platform.kv);
   const settings = new SettingsStore(platform.kv, await loadSettings(platform.kv));
+  // 1.3.0 (PRD-1.3.0 § 6.4) : journal des trajets guidés, sur le téléphone ; ouvert en arrière-plan à la fin du démarrage
+  // (plus bas), jamais attendu : null pour le téléphone tant qu'il n'est pas prêt.
+  let journal: JournalStore | null = null;
 
   const dataBase = env.data ?? DATA_BASE;
   const relayBase = env.relay ?? RELAY_BASE;
@@ -116,13 +120,29 @@ async function main(): Promise<void> {
     freshness: () => controller.freshness,
     coreError: () => controller.error,
     configured,
+    journal: () => journal,
   });
 
   window.addEventListener('beforeunload', () => {
     void settings.flush();
     controller.stop();
   });
+  // le journal regroupe ses enregistrements (2 s) : tout de suite quand la page se cache ou se ferme
+  const saveJournal = (): void => void journal?.flush();
+  window.addEventListener('pagehide', saveJournal);
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && saveJournal());
   await controller.start();
+  // 1.3.0, contrôle technique : le journal n'est jamais attendu au démarrage (un stockage lent ajoutait 5 à 15 s de
+  // « Chargement… ») ; il s'ouvre en arrière-plan une fois l'écran d'ouverture affiché, pour que sa lecture ne passe pas
+  // non plus devant celles du démarrage dans la file du pont. Le contrôleur (attachJournal) et le téléphone le reçoivent
+  // dès qu'il est prêt ; s'il ne s'ouvre pas, Quai continue sans lui.
+  void createJournal(platform.kv, { now: clock.now }).then(
+    (j) => {
+      journal = j;
+      controller.attachJournal(j);
+    },
+    (e: unknown) => console.warn('[Quai] journal des trajets indisponible', e),
+  );
 }
 
 /** Étapes d'un parcours simulé : « minutes:lat,lon » séparées par « ; » (lecture tolérante, étapes invalides ignorées). */
