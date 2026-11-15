@@ -21,6 +21,11 @@ export const WIDE_MARGIN_M = 1000;
 /** Au-delà, pas de calcul (une marche du guidage fait au plus 2 km) : chemin droit. */
 export const MAX_WALK_M = 5000;
 export const MAX_TILES = 16;
+/**
+ * Après l'échec d'une tuile (réseau), pas de nouvelle demande avant 30 s : le guidage peut redemander un chemin à
+ * chaque position (toutes les 2 s) ; sans réseau, la réponse (null) est alors immédiate.
+ */
+export const RETRY_MS = 30_000;
 
 export interface WalkSource {
   /** Index des tuiles ; null : pas de chemins à pied publiés. */
@@ -56,6 +61,8 @@ export class WalkRouter {
   private readonly tiles = new Map<string, Promise<TileGraph | null>>();
   private version = '';
   private graph: { key: string; g: RoutingGraph } | null = null;
+  /** dernière erreur de chaque tuile (clé « version|tuile ») */
+  private readonly failedAt = new Map<string, number>();
 
   constructor(src: WalkSource, opts: WalkRouterOptions = {}) {
     this.src = src;
@@ -104,11 +111,18 @@ export class WalkRouter {
       this.tiles.set(k, hit);
       return hit;
     }
+    const failed = this.failedAt.get(k);
+    const t = this.now();
+    if (failed !== undefined && t - failed < RETRY_MS && t >= failed) return Promise.reject(new Error('tuile piétonne indisponible (nouvel essai dans 30 s)'));
     const p = this.src.tile(key, version).then((f) => (f ? prepareTile(f) : null));
     this.tiles.set(k, p);
-    p.catch(() => {
-      if (this.tiles.get(k) === p) this.tiles.delete(k);
-    });
+    p.then(
+      () => this.failedAt.delete(k),
+      () => {
+        if (this.tiles.get(k) === p) this.tiles.delete(k);
+        this.failedAt.set(k, this.now());
+      },
+    );
     while (this.tiles.size > this.maxTiles) {
       const oldest = this.tiles.keys().next().value as string;
       this.tiles.delete(oldest);

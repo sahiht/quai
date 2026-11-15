@@ -58,12 +58,19 @@ describe('WalkRouter', () => {
     expect(calls).toEqual(['2026-11-02|2541_145', '2026-11-09|2541_145']);
   });
 
-  it('tuile en échec (réseau) : exception, rien de gardé ; le calcul suivant redemande la tuile', async () => {
+  it('tuile en échec (réseau) : exception, rien de gardé ; pas de nouvelle demande avant 30 s, puis la tuile revient', async () => {
     let fail = true;
-    const r = new WalkRouter({ index: async () => indexOf(), tile: async () => (fail ? Promise.reject(new Error('réseau')) : TILE) });
+    let calls = 0;
+    let t = 1_000_000;
+    const r = new WalkRouter({ index: async () => indexOf(), tile: async () => (calls++, fail ? Promise.reject(new Error('réseau')) : TILE) }, { now: () => t });
     await expect(r.route(at(0, -300), at(300, 0))).rejects.toThrow('réseau');
     fail = false;
+    t += 10_000;
+    await expect(r.route(at(0, -300), at(300, 0))).rejects.toThrow('nouvel essai dans 30 s');
+    expect(calls).toBe(1);
+    t += 21_000;
     expect((await r.route(at(0, -300), at(300, 0)))?.source).toBe('osm');
+    expect(calls).toBe(2);
   });
 
   it('tuile illisible : exception (le cœur rend null)', async () => {
