@@ -151,6 +151,23 @@ describe('s1210 : arrêt dépassé à Bruxelles-Nord (l’IC repart vers Bruxell
     expect(s.replan?.from.areaId).toBeUndefined();
   });
 
+  it('« j’y descends » (genre ride) : immobile à quai à Bruxelles-Nord puis emporté par l’IC : le guidage ne finit pas sur « Tu y es », « Tu as passé Bruxelles-Nord »', () => {
+    const ic = s1210Journey().legs[1];
+    const j: Journey = { id: 'jride', legs: [ic], dep: ic.dep, arr: ic.arr, leaveAt: ic.dep, transfers: 0, rt: true, alerts: [] };
+    const g = replay(j, { kind: 'ride', title: 'Vers Bruxelles-Nord', beyond: [{ name: N('Bruxelles-Central'), sched: T('08:46'), est: T('08:48'), areaId: 'sncb:8813003' }] });
+    g.at(T('07:46'), [[T('07:45:30'), lerp(P.namur, P.gembloux, 90 / 780), 19.7], [T('07:46'), lerp(P.namur, P.gembloux, 120 / 780), 19.7]]);
+    g.at(T('08:41:30'), [[T('08:41:30'), lerp(P.schuman, P.nord, 240 / 270), 8.9]]);
+    // l'arrêt en gare ressemble à la descente : « Tu y es »
+    expect(g.at(T('08:43'), [[T('08:42'), P.nord, 0], [T('08:43'), P.nord, 0]]).moment?.kind).toBe('arrived');
+    // le train repart avec la personne : pas arrivé, toujours à bord
+    expect(g.at(T('08:44'), [[T('08:43:30'), lerp(P.nord, P.central, 0.1), 5.6], [T('08:44'), lerp(P.nord, P.central, 0.2), 5.6]]).phase).toMatchObject({ kind: 'ride', leg: 0 });
+    const s = g.at(T('08:45'), [[T('08:44:30'), lerp(P.nord, P.central, 0.3), 5.6], [T('08:45'), lerp(P.nord, P.central, 0.4), 5.6]]);
+    expect(s.ended).toBe(false);
+    expect(s.moment).toMatchObject({ kind: 'passed', passed: N('Bruxelles-Nord'), getOff: N('Bruxelles-Central'), at: T('08:48') });
+    // l'arrêt suivant sans position : seulement « Descends à … » (rien à chercher, comme avant)
+    expect(s.replan).toBeUndefined();
+  });
+
   it('IC en retard encore avant Bruxelles-Nord après son heure, à plus de 300 m : pas « Tu as passé »', () => {
     const g = replay();
     g.at(T('07:46'), [[T('07:45:30'), lerp(P.namur, P.gembloux, 90 / 780), 19.7], [T('07:46'), lerp(P.namur, P.gembloux, 120 / 780), 19.7]]);

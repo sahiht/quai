@@ -470,7 +470,8 @@ function arrivedNow(c: Ctx): { yes: boolean; byFix: boolean } {
   if (!L) return { yes: true, byFix: false };
   const last = legs[L - 1];
   if (last.kind === 'ride') {
-    if (alightedFrom(m, L - 1)) return { yes: true, byFix: true };
+    // descente constatée (immobile à quai), puis emporté par le véhicule : resté à bord (arrêt dépassé), pas arrivé
+    if (alightedFrom(m, L - 1)) return carriedOn(c) ? { yes: false, byFix: false } : { yes: true, byFix: true };
     // encore à bord d'après la position (véhicule en retard, ou emporté au-delà de l'arrêt) : pas arrivé
     const aboard = boardedOn(m, L - 1) && (riding(c, L - 1) || (fast(c) && distTo(c, last.to) > GUIDE.alightNearM));
     if (now >= last.arr && !aboard) return { yes: true, byFix: false };
@@ -487,6 +488,16 @@ function arrivedNow(c: Ctx): { yes: boolean; byFix: boolean } {
     return { yes: false, byFix: false };
   }
   return { yes: false, byFix: false };
+}
+
+/**
+ * Dernière étape en véhicule, descente constatée (au pas près de l'arrêt, le temps de l'arrêt en gare), puis vitesse de
+ * véhicule à plus de 150 m de l'arrêt : la personne est restée à bord.
+ */
+function carriedOn(c: Ctx): boolean {
+  const L = c.legs.length;
+  const last = c.legs[L - 1];
+  return !!last && last.kind === 'ride' && alightedFrom(c.m, L - 1) && fast(c) && distTo(c, last.to) > GUIDE.alightNearM;
 }
 
 /**
@@ -1316,7 +1327,17 @@ export function guideStep(input: GuideInput, mem: GuideMemory): { state: GuideSt
       if (arr.byFix) m.arrivedByFix = true;
     }
     loc = { phase: { kind: 'arrived' }, leg: -1 };
-  } else loc = locate(c);
+  } else {
+    if (m.arrivedAt !== undefined && carriedOn(c)) {
+      // « Tu y es » donné trop tôt (arrêt en gare, resté à bord) : oublié, le guidage continue (arrêt dépassé)
+      const id = `arrived:${j.id}`;
+      delete m.arrivedAt;
+      delete m.arrivedByFix;
+      delete m.shown[id];
+      if (m.cur === id) delete m.cur;
+    }
+    loc = locate(c);
+  }
   if (endedNow(c, loc)) loc = { phase: { kind: 'ended' }, leg: -1 };
   detect(c, loc);
   let moment: Moment | null = null;
