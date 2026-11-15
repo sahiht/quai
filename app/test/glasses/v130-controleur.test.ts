@@ -6,16 +6,10 @@
  *    es » tout de suite, jamais de « … » figé (calcul lent, erreur, réponse dépassée) ;
  *  - § 6.1 : test de l'écran des lunettes (attente, page envoyée, question, résultat, annulation, capteur refermé) ;
  *  - § 1 : le toucher de l'écran du trajet fait ce que dit sa ligne d'action, dans chaque cas.
- * Lieux publics seulement. La navigation rend `edge` vers le haut (équipe B) ; en attendant la fusion avec l'équipe A
- * (`edgeUp` posé sur « Autres trajets »), ce fichier l'ajoute à la vraie vue (sans effet une fois fusionnée).
+ * Lieux publics seulement. Vraies vues (équipe A : `edgeUp` sur « Autres trajets », ligne d'action) et vraie navigation
+ * (équipe B : `edge` vers le haut).
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-vi.mock('../../src/glasses/views', async (importOriginal) => {
-  const m = await importOriginal<typeof import('../../src/glasses/views')>();
-  return { ...m, othersView: (...a: Parameters<typeof m.othersView>) => ({ ...m.othersView(...a), edgeUp: true }) };
-});
-
+import { afterEach, describe, expect, it } from 'vitest';
 import type { DisplayTestState, Favorite, FavoriteAnswer, Journey, LatLon, Settings } from '../../src/core/api';
 import { TEST_ASK_MS, TEST_IMU_MS, TEST_SENT_MS, TEST_WAIT_MS, type ControllerDeps } from '../../src/glasses/controller';
 import { HEADUP_REST_MIN, HeadUpLearner } from '../../src/glasses/headup';
