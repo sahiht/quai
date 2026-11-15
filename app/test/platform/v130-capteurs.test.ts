@@ -17,7 +17,7 @@ import {
   evenHubEventFromJson,
   type EvenHubEvent,
 } from '@evenrealities/even_hub_sdk';
-import { ExitDialog, readBattery, readDeviceStatus, readHubEvent, readImu, SignalDedup, type HubSignal } from '../../src/glasses/gestures';
+import { ExitDialog, GestureFilter, readBattery, readDeviceStatus, readHubEvent, readImu, SignalDedup, type HubSignal } from '../../src/glasses/gestures';
 import type { ContainerSpec } from '../../src/glasses/types';
 import { evenGlassesPort, IMU_PACES, IMU_STRAY_CLOSE_MS, imuPace, isSdkImuLog, quietImuLogs, type EvenBridge } from '../../src/platform/even';
 import { SerialQueue } from '../../src/platform/queue';
@@ -327,7 +327,9 @@ describe('mesures du capteur : Sys_ItemEvent.imuData → signal imu', () => {
     x.arm(0);
     expect(x.map(m, 10)).toBe(m);
     expect(x.pending(10)).toBe(true);
-    // par la plateforme
+    // par la plateforme : les mesures ne passent ni par le dédoublonnage ni par la boîte de sortie
+    const accept = vi.spyOn(SignalDedup.prototype, 'accept');
+    const map = vi.spyOn(ExitDialog.prototype, 'map');
     const { f, port, got, tick } = evenPort();
     await port.imu!(true, 100);
     f.hub(sdkSys({ eventType: 5 }));
@@ -338,6 +340,8 @@ describe('mesures du capteur : Sys_ItemEvent.imuData → signal imu', () => {
     tick(40);
     f.hub(imuEvent(1, 2, 3));
     expect(got.map((s) => s.kind)).toEqual(['background', 'imu', 'imu']);
+    expect(accept.mock.calls.map(([s]) => s.kind)).toEqual(['background', 'background']);
+    expect(map.mock.calls.map(([s]) => s.kind)).toEqual(['background']);
   });
 });
 
@@ -554,14 +558,16 @@ describe('traces du SDK : pas une ligne de console par mesure', () => {
 /* ------------------------------ Garde-fou pour la fusion : le contrôleur ------------------------------ */
 
 describe('garde-fou pour la fusion : le contrôleur et les signaux imu et device', () => {
-  it('100 mesures et des changements de batterie seuls : aucun rendu, pas une trace par mesure', async () => {
+  it('100 mesures et des changements de batterie seuls : aucun rendu, aucun anti-rebond des gestes, pas une trace par mesure', async () => {
     const h = await setup({ now: WALL0, settings: settingsWith([], { seenVersion: APP_VERSION }) });
     // premier état des lunettes (1.2.10 : il peut reconstruire la page une fois)
     h.emit({ kind: 'device', connected: true, wearing: true, battery: 80, charging: false });
     await h.settle(60);
     const calls = h.calls.length;
     const logs = h.logs.length;
+    const debounce = vi.spyOn(GestureFilter.prototype, 'accept');
     for (let i = 0; i < 100; i++) h.emit({ kind: 'imu', x: 0.01 * i, y: -9.8, z: 0.3, at: WALL0 + i * 100 });
+    expect(debounce).not.toHaveBeenCalled();
     h.emit({ kind: 'device', connected: true, wearing: true, battery: 79, charging: false });
     h.emit({ kind: 'device', connected: true, wearing: true, battery: 79, charging: true });
     h.emit({ kind: 'device', connected: true, wearing: true, battery: 15, charging: true });
