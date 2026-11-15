@@ -106,9 +106,9 @@ export async function createJournal(kv: KV, opts?: { now?: () => number }): Prom
   /** Plafonds appliqués (seulement si quelque chose a changé depuis la dernière fois). */
   const settle = (): void => {
     if (settled) return;
-    settled = true;
     sinceSettle = 0;
     enforceLimits(trips);
+    settled = true;
   };
 
   const write = async (): Promise<void> => {
@@ -194,12 +194,13 @@ export async function createJournal(kv: KV, opts?: { now?: () => number }): Prom
         const start = ev.k === 'start' ? trip.events.find((x) => x.k === 'start') : undefined;
         if (start) {
           if (ev.d) start.d = { ...(start.d ?? {}), ...ev.d };
+          changed(false);
         } else {
           trip.events.push(ev);
+          changed(false);
           // une boucle qui écrit sans fin : plafonds appliqués sans attendre l'enregistrement
           if (++sinceSettle >= 500) settle();
         }
-        changed(false);
       } catch (err) {
         console.warn('[Quai] journal : événement non noté', errText(err));
       }
@@ -405,7 +406,7 @@ export function refusedKey(key: string): boolean {
     .replace(/([a-z\d])([A-Z])/g, '$1 $2')
     .replace(/([A-Za-z])(\d)/g, '$1 $2')
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
@@ -413,11 +414,11 @@ export function refusedKey(key: string): boolean {
 }
 
 // deux nombres à décimales côte à côte (« 50.8466, 4.3528 », « 50,8466 4,3528 », « POINT(4.35 50.84) »)
-const PAIR_RE = /(?:^|[^\d.,])[-+−]?\d{1,3}[.,]\d{2,}\s*(?:[,;/]\s*|\s+)[-+−]?\d{1,3}[.,]\d{2,}(?!\d)/u;
+const PAIR_RE = /(?:^|[^\d.,])[-+\u2212]?\d{1,3}[.,]\d{2,}\s*(?:[,;/]\s*|\s+)[-+\u2212]?\d{1,3}[.,]\d{2,}(?!\d)/u;
 // degrés, minutes (« 50°50′48″ N », « 4° E »)
 const DMS_RE = /\d{1,3}(?:[.,]\d+)?\s*°\s*(?:\d{1,2}(?:[.,]\d+)?\s*['′’]|[NSEOW](?![a-z]))/iu;
 // « lat 50.84 », « lon=4.35 »
-const NAMED_RE = /\b(?:lat|lon|lng|latitude|longitude)\b\s*[:=]?\s*[-+−]?\d/iu;
+const NAMED_RE = /\b(?:lat|lon|lng|latitude|longitude)\b\s*[:=]?\s*[-+\u2212]?\d/iu;
 
 /** Vrai si le texte ressemble à une position (paire de coordonnées, degrés, « lat 50.84 »). */
 export function looksLikeCoordinates(s: string): boolean {
@@ -443,7 +444,7 @@ export function looksLikeAddress(s: string): boolean {
 /** Texte d'une seule ligne, sans demi-caractère, `max` caractères au plus. */
 function cleanText(s: string, max: number): string {
   let t = wellFormed(s.length > max * 4 ? s.slice(0, max * 4) : s)
-    .replace(/[^\S  ]+/g, ' ')
+    .replace(/[^\S\u00a0\u202f]+/g, ' ')
     .trim();
   const cps = Array.from(t);
   if (cps.length > max) t = `${cps.slice(0, max - 1).join('').trimEnd()}…`;
@@ -459,8 +460,8 @@ function wellFormed(s: string): string {
       if (d >= 0xdc00 && d <= 0xdfff) {
         out += s[i] + s[i + 1];
         i++;
-      } else out += '�';
-    } else if (c >= 0xdc00 && c <= 0xdfff) out += '�';
+      } else out += '\ufffd';
+    } else if (c >= 0xdc00 && c <= 0xdfff) out += '\ufffd';
     else out += s[i];
   }
   return out;
@@ -536,12 +537,12 @@ function tripText(trip: JournalTrip): string {
 /** Typographie française d'une ligne : insécables (« : ; ! ? », guillemets, nombre et unité), jamais de tiret long ni moyen. */
 function fr(s: string): string {
   return s
-    .replace(/\s+[—–]\s+/g, ', ')
-    .replace(/[—–]/g, '-')
-    .replace(/[ \t  ]*([;:!?])(?=$|[\s),.»])/g, `${NB}$1`)
-    .replace(/«[ \t  ]*/g, `«${NB}`)
-    .replace(/[ \t  ]*»/g, `${NB}»`)
-    .replace(/(\d)[ \t  ]+(%|min|km|m|s|h)(?=$|[\s,.;:!?)])/g, `$1${NB}$2`);
+    .replace(/\s+[\u2014\u2013]\s+/g, ', ')
+    .replace(/[\u2014\u2013]/g, '-')
+    .replace(/[ \t\u00a0\u202f]*([;:!?])(?=$|[\s),.»])/g, `${NB}$1`)
+    .replace(/«[ \t\u00a0\u202f]*/g, `«${NB}`)
+    .replace(/[ \t\u00a0\u202f]*»/g, `${NB}»`)
+    .replace(/(\d)[ \t\u00a0\u202f]+(%|min|km|m|s|h)(?=$|[\s,.;:!?)])/g, `$1${NB}$2`);
 }
 
 const has = (table: Readonly<Record<string, string>>, key: unknown): string | undefined =>

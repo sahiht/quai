@@ -25,7 +25,7 @@ import type { JournalTrip } from '../../src/core/journal-types';
 import { GUIDE_TEXT } from '../../src/glasses/guide-views';
 import { APP_VERSION } from '../../src/version';
 
-const NB = ' ';
+const NB = '\u00a0';
 
 /** Stockage en mémoire : ce qui est enregistré sous `quai.journal`, et chaque écriture. */
 function memKV(init?: string) {
@@ -305,12 +305,27 @@ describe('ordre et plafonds', () => {
     // relu tel quel
     expect((await createJournal(m.kv)).list()).toEqual(j.list());
   });
+
+  it('une boucle qui écrit sans fin reste rapide et sous 60 ko, sans rien perdre du dernier événement', async () => {
+    const m = memKV();
+    const j = await createJournal(m.kv);
+    const id = j.begin({ title: 'Bureau', kind: 'trip', at: T0 });
+    const t0 = performance.now();
+    for (let i = 1; i <= 20_000; i++) j.add(id, { t: at(i), k: 'positions', d: { n: i, acc: 10, gap: 1 } });
+    const ev = j.list()[0].events;
+    expect(performance.now() - t0).toBeLessThan(5000);
+    await j.flush();
+    expect(utf8Bytes(m.stored()!)).toBeLessThanOrEqual(JOURNAL_MAX_BYTES);
+    expect(ev[0].k).toBe('start');
+    expect(ev[ev.length - 1]).toEqual({ t: at(20_000), k: 'positions', d: { n: 20_000, acc: 10, gap: 1 } });
+    expect(ev.filter((e) => e.k === JOURNAL_FORGOTTEN)).toHaveLength(1);
+  });
 });
 
 describe('contenu abîmé', () => {
   it.each([
     ['pas du JSON', 'pas du json {'],
-    ['autre version', '{"v":2,"trips":[]}'],
+    ['autre version', JSON.stringify({ v: 2, trips: [{ id: 'a', title: 'Bureau', kind: 'trip', startedAt: T0, events: [] }] })],
     ['sans version', '{"trips":[]}'],
     ['trajets illisibles', '{"v":1,"trips":"x"}'],
     ['sans trajets', '{"v":1}'],
@@ -502,10 +517,10 @@ describe('jamais de coordonnées ni d’adresse', () => {
       'Trajet 12',
       'Bureau',
       '1000 Bruxelles',
-      'Lunettes : 12 % de batterie',
-      'Position perdue depuis 3 min',
-      'Pas de position : guidage à l’heure',
-      'Position « Toujours » pour l’appli Even, sur le téléphone',
+      'Lunettes\u00a0: 12\u00a0% de batterie',
+      'Position perdue depuis 3\u00a0min',
+      'Pas de position\u00a0: guidage à l’heure',
+      'Position «\u00a0Toujours\u00a0» pour l’appli Even, sur le téléphone',
       'Rue Neuve dans 30 m',
       'précision 12,5 m',
       'Quai 1.3.0',
@@ -626,19 +641,21 @@ describe('texte à copier', () => {
 
   it('typographie : insécables, jamais de tiret long ni moyen, une ligne par événement', async () => {
     const j = await createJournal(memKV().kv);
-    const id = j.begin({ title: 'Gare — Midi', kind: 'trip', at: T0 });
-    j.add(id, { t: at(1), k: 'passed', d: { stop: 'Bruxelles–Midi' } });
+    const id = j.begin({ title: 'Gare \u2014 Midi', kind: 'trip', at: T0 });
+    j.add(id, { t: at(1), k: 'passed', d: { stop: 'Bruxelles\u2013Midi' } });
     j.add(id, { t: at(2), k: 'check', d: { issues: 'Lunettes : 9 % de batterie ; Position perdue depuis 3 min' } });
     j.add(id, { t: at(3), k: 'alighted', d: { stop: 'Gare\ndu Midi' } });
     j.add(id, { t: at(4), k: 'essai ?', d: { note: 'vraiment ?' } });
+    j.add(id, { t: at(5), k: 'check', d: { issues: 'Position « Toujours » pour l’appli Even' } });
     const text = j.text(id);
-    expect(text).not.toMatch(/[—–]/);
+    expect(text).toContain(`Position «${NB}Toujours${NB}» pour l’appli Even`);
+    expect(text).not.toMatch(/[\u2014\u2013]/);
     expect(text).not.toMatch(/ [:;!?»]/);
-    expect(text).not.toMatch(/«(?! )/);
+    expect(text).not.toMatch(/«(?!\u00a0)/);
     expect(text).not.toMatch(/\d [%]|\d (?:min|m|s)\b/);
-    expect(text.split('\n')).toHaveLength(6);
+    expect(text.split('\n')).toHaveLength(7);
     expect(text).toContain(`Arrêt dépassé${NB}: Bruxelles-Midi`);
-    expect(text).toContain('trajet « Gare, Midi »');
+    expect(text).toContain('trajet «\u00a0Gare, Midi\u00a0»');
   });
 
   it('heures de Bruxelles : hiver UTC+1, été UTC+2, date du jour à Bruxelles, quel que soit le fuseau du téléphone', async () => {
