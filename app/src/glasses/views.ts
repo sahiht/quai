@@ -1086,7 +1086,8 @@ function dayTitle(title: string, day: string): string {
 /** 1.2.9 : un titre dont la fin (« , SUPPRIMÉ », « , +3 min », « , demain ») n'est jamais coupée : le début l'est avant. */
 function fitTitle(title: string, tail: string): string {
   if (!tail || textWidth(title + tail) <= WIDTHS.title) return title + tail;
-  return `${truncate(title, WIDTHS.title - textWidth(tail))}${tail}`;
+  // 1.2.10 (PRD-1.2.10 § 1, principe 7) : coupé au mot, jamais au milieu d'un mot
+  return `${truncateWords(title, WIDTHS.title - textWidth(tail))}${tail}`;
 }
 
 /**

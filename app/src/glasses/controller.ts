@@ -566,6 +566,8 @@ export class GlassesController implements GlassesApi {
   private routeJob: string | null = null;
   private routeSeq = 0;
   private routeFail = new Map<string, number>();
+  /** Dernière demande de chemin par étape (`journey:leg`) : au plus une toutes les 10 s, quel que soit le chemin gardé. */
+  private routeAsked = new Map<string, number>();
   /** Nouveau trajet demandé en cours (un à la fois) et demandes déjà traitées (trajet et raison). */
   private replanJob: string | null = null;
   private replanTried = new Set<string>();
@@ -2034,6 +2036,7 @@ export class GlassesController implements GlassesApi {
     this.whereUntil = 0;
     this.routeJob = null;
     this.routeFail.clear();
+    this.routeAsked.clear();
     this.replanJob = null;
     this.replanTried.clear();
   }
@@ -2439,6 +2442,12 @@ export class GlassesController implements GlassesApi {
     if (failed !== undefined && now - failed < ROUTE_RETRY_MS) return;
     const w = t.guide.walk;
     if (w && w.journeyId === jid && w.leg === ask.leg && now - w.at < ROUTE_FRESH_MS) return;
+    // Un seul chemin est gardé : deux marches qui se le disputent (le moteur, avec le chemin de l'une, demande celui de
+    // l'autre, et inversement) relançaient aussitôt une demande après chaque réponse, sans fin. Une demande par étape
+    // toutes les 10 s au plus, quel que soit le chemin gardé.
+    const asked = this.routeAsked.get(key);
+    if (asked !== undefined && now - asked < ROUTE_FRESH_MS) return;
+    this.routeAsked.set(key, now);
     const job = `${key}#${++this.routeSeq}`;
     this.routeJob = job;
     void deadline(core.walkRoute(ask.from, ask.to), CORE_TIMEOUT_MS, 'chemin à pied trop lent')
