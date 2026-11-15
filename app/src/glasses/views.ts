@@ -139,13 +139,33 @@ export function messageView(
 }
 
 /**
+ * 1.3.0 (PRD-1.3.0 § 6.1) : textes de l'écran des lunettes pendant le test de l'écran, une ligne courte par étape : wait
+ * (45 s, l'écran s'éteint seul), sent (nouvelle page entière : le toucher attendu), ask (la question est sur le
+ * téléphone : qui lève la tête et voit cet écran répond « Le test de Quai »), done selon le résultat (les mots du
+ * téléphone, raccourcis), ou sans résultat (« Rien », test arrêté).
+ */
+export const DISPLAY_TEST = {
+  title: 'Test de l’écran',
+  wait: 'Ne touche à rien.',
+  sent: 'Touche une fois les lunettes.',
+  ask: 'Réponds sur le téléphone.',
+  visible: 'Les messages se voient sans rien faire.',
+  headUp: 'Lève un peu la tête pour voir les messages.',
+  dashboard: 'Pendant un trajet, touche une fois pour voir Quai.',
+  none: 'Pas de résultat.',
+} as const;
+
+/**
  * 1.3.0 (PRD-1.3.0 § 6.1) : écran des lunettes pendant le test de l'écran (route `displayTest`). Contrat : l'équipe des
- * écrans écrit les textes définitifs, le contrôleur l'affiche (page entière à l'étape `sent`).
+ * écrans écrit les textes (DISPLAY_TEST), le contrôleur l'affiche (page entière à l'étape `sent`). Écran calme : aucune
+ * aide pendant le test (un toucher au mauvais moment fausserait la mesure) ; à la fin, « double toucher : retour ».
+ * Journal QUAI_SCREEN : l'étape et le résultat.
  */
 export function displayTestView(ctx: ViewCtx, step: 'wait' | 'sent' | 'ask' | 'done', result?: 'visible' | 'headUp' | 'dashboard'): GlassesView {
-  const lines =
-    step === 'wait' ? ['Ne touche à rien.'] : step === 'sent' ? ['Touche une fois les lunettes.'] : step === 'ask' ? ['Réponds sur le téléphone.'] : [result ? 'Test terminé.' : 'Test arrêté.'];
-  return messageView('Test de l’écran', lines, ctx, { screen: 'displayTest' });
+  const line = step === 'done' ? DISPLAY_TEST[result ?? 'none'] : DISPLAY_TEST[step];
+  const v = messageView(DISPLAY_TEST.title, [line], ctx, { screen: 'displayTest', ...(step === 'done' ? { hints: HINTS.message } : {}) });
+  v.log = { step, ...(step === 'done' && result ? { result } : {}) };
+  return v;
 }
 
 export function loadingView(title: string, text: string, ctx: ViewCtx, screen?: GlassesView['screen']): GlassesView {
