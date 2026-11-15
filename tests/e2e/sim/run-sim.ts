@@ -3948,7 +3948,8 @@ function ctx1210(): Ctx1210 {
     record: (r) => {
       results.push(r as StepResult);
     },
-    pageUrl: (params, webApp1210) => pageUrl(params, '', webApp1210 ? { app: webApp.url, data: (walkNight ?? night).url } : undefined),
+    // tuiles piétonnes (extrait OSM des fixtures) pour tous les scénarios 1.2.10, simulateur Even Hub compris
+    pageUrl: (params, webApp1210) => pageUrl(params, '', { ...(webApp1210 ? { app: webApp.url } : {}), data: (walkNight ?? night).url }),
     preset: (file) => ({ reset: '1', preset: `${ipv4(web.url)}/${file}` }),
     withChrome,
     sim: () => sim,

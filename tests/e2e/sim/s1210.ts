@@ -293,7 +293,9 @@ async function launch(r: Run): Promise<{ j: O.OJourney; title: string; where?: G
   const where = after.find((s) => s.show === 'where');
   check(after.length, `aucun écran du guidage après « y aller » (PRD § 3.1)`);
   const opening = where ? undefined : `l’écran du guidage ne s’ouvre pas sur « Où tu en es » (PRD § 3.1) : ${after.slice(0, 2).map(show).join(' | ')}`;
-  if (opening) r.ctx.notes.push(`${r.ctx.scenario()} : ${opening}`);
+  // PRD § 3.1 (mis à jour) : un moment déjà dû passe avant « Où tu en es » ; noté pour le rapport, pas un écart
+  if (opening && after[0]?.show === 'moment') r.ctx.notes.push(`${r.ctx.scenario()} : ouverture sur un moment déjà dû : ${show(after[0])}`);
+  else if (opening) r.ctx.notes.push(`${r.ctx.scenario()} : ${opening}`);
   const ft = await followed(r);
   check(ft?.journey?.legs?.length, `trajet suivi absent de quai.trip après « y aller » (PRD § 3.1)`);
   // titre des écrans du guidage : le nom du trajet, celui de l'écran du trajet (« Bureau », PRD § 3.2)
