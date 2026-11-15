@@ -100,7 +100,7 @@ export class WalkRouter {
       if (margin === MARGIN_M) outside = ends.some((e) => got[keys.indexOf(e)] === null);
       // contrôle technique du 15/11 : une tuile d'une autre semaine (index encore en cache quand la publication change)
       // n'est jamais mélangée aux autres (ses points de coupe ne se raccordent pas) ; elle sert dès que l'index suit
-      const loaded = got.filter((t): t is TileGraph => t !== null && t !== undefined && t.ver === index.version);
+      const loaded = got.filter((t): t is TileGraph => t !== null && t.ver === index.version);
       if (!loaded.length) return this.straight(from, to, why('nosnap'));
       const r = routeOn(this.graphOf(loaded), from, to, this.now());
       if (typeof r !== 'string') return r;
