@@ -11,13 +11,14 @@
  * Lieux publics seulement : gares de Lille-Flandres et de Tournai, Grand-Place de Lille, trajet du PRD 1.2.10 (Liège,
  * Bruxelles), tuiles d'essai autour de Flagey.
  */
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { CheckIssue, GuideState, Moment, WalkRoute } from '../../src/core/guide-types';
 import { dismissMoment, GUIDE, guideStep, type GuideInput } from '../../src/core/guide';
 import { MAX_WALK_M, WalkRouter } from '../../src/core/walk/router';
 import { distanceM } from '../../src/core/util';
 import { at, fix, guide, journeyOf, kindOf, lerp, MIN, N, offset, P, prdTrip, rideLeg, route, S, SEC, settings, step, stop, toward, walkLeg } from './guide-fixtures';
-import { at as atM, indexOf, memorySource, tileOf, type GraphDef } from './walk-helpers';
+import { at as atM, diskSource, indexOf, memorySource, tileOf, type GraphDef } from './walk-helpers';
 import { makeEnv } from './support/env';
 
 const m = <K extends Moment['kind']>(mo: Moment | null, kind: K): Extract<Moment, { kind: K }> => {
@@ -91,6 +92,20 @@ describe('1.3.0 routeur : raison d’un chemin droit (PRD-1.3.0 § 4)', () => {
     const r = await new WalkRouter({ index: async () => indexOf({ version: '2026-11-02' }), tile: async () => tileOf(street, { ver: '2026-11-09' }) }).route(atM(0, -300), atM(300, 0));
     expect(r?.source).toBe('straight');
     expect(r?.reason).not.toBe('outside');
+  });
+
+  it('vraies tuiles du pipeline (extrait du centre d’Helsinki, une tuile) : au-delà de l’extrait, outside ; dedans, le vrai chemin', async () => {
+    const src = diskSource(join(__dirname, 'walk-data', 'helsinki'));
+    const gare = { lat: 60.1712, lon: 24.9436 };
+    const marche = { lat: 60.1675, lon: 24.9525 };
+    // parc de Kaivopuisto, à 1,8 km au sud : tuile 3007_832, hors de l'extrait
+    const kaivopuisto = { lat: 60.1566, lon: 24.9563 };
+    const router = new WalkRouter(src);
+    expect(await router.route(gare, kaivopuisto)).toMatchObject({ source: 'straight', reason: 'outside', maneuvers: [] });
+    expect(await router.route(kaivopuisto, marche)).toMatchObject({ source: 'straight', reason: 'outside' });
+    const inside = await router.route(gare, marche);
+    expect(inside?.source).toBe('osm');
+    expect(inside?.reason).toBeUndefined();
   });
 
   it('Core.walkRoute : la tuile de l’arrivée manque sur le serveur (404) : outside', async () => {
