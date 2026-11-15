@@ -127,12 +127,19 @@ describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
     const h = await shown(ALL);
     // 1.3.0 : ▼ montre d'abord la 6e étape (« Fin du trajet »), puis ▼ au bout ouvre « Autres trajets »
     await h.gesture('down');
-    expect(bottom(h.last())).toBe('Fin du trajet. ▽ 2 autres trajets');
+    const end = h.last();
+    expect(bottom(end)).toBe('Fin du trajet. ▽ 2 autres trajets');
     await h.gesture('down');
     const list = await h.until((s) => s.screen === 'others');
     expect(nb(list.title)).toBe('Vers le bureau : autres trajets');
     expect(list.lines).toEqual(LIST);
     expect(list.sel).toBe(0);
+    // 1.3.0 (PRD-1.3.0 § 2) : ▲ sur la première rangée : le trajet proposé, là où il était (sa dernière page) ; ▼ : la liste
+    await h.gesture('up');
+    expect(h.last()).toMatchObject({ screen: 'steps', page: 1, followed: true });
+    expect(h.last().lines).toEqual(end.lines);
+    await h.gesture('down');
+    expect(await h.until((s) => s.screen === 'others')).toMatchObject({ screen: 'others', sel: 0, lines: LIST });
     // toucher : les étapes de « Plus tôt » ; toucher y lancerait le guidage
     await h.gesture('tap');
     const other = await h.until(steps);
