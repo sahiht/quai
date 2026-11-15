@@ -48,7 +48,13 @@ function lineLeg(net: Net, r: RRoute, ride: RideRef): Leg | null {
   for (let pos = ride.bpos; pos <= ride.apos; pos++) {
     const area = f.areas[p.a[pos]];
     const time = at(pos);
-    stops.push({ name: area?.[3] ?? { fr: '', nl: '' }, ...(area ? { areaId: area[0] } : {}), sched: time, est: time });
+    const so: Stopover = { name: area?.[3] ?? { fr: '', nl: '' }, ...(area ? { areaId: area[0] } : {}), sched: time, est: time };
+    // 1.2.10 : position de l'arrêt (guidage : arrêt passé, descente constatée par la position)
+    if (area && knownPoint(area[1], area[2])) {
+      so.lat = area[1];
+      so.lon = area[2];
+    }
+    stops.push(so);
   }
   const dep = at(ride.bpos);
   const arr = at(ride.apos);
@@ -90,7 +96,24 @@ export function rideLeg(net: Net, ride: RideRef): Leg | null {
   if (!t) return null;
   const leg = trainLeg({ day: indexDay(t.day.file), trip: t.ti, i: ride.bpos, k: ride.apos });
   if (isSncbBus(leg)) leg.mode = 'bus';
+  withStopPoints(net, leg.stops);
   return leg;
+}
+
+/** Une position connue (les données mettent 0, 0 quand elles n'en ont pas). */
+function knownPoint(lat: number | undefined, lon: number | undefined): boolean {
+  return Number.isFinite(lat) && Number.isFinite(lon) && !(lat === 0 && lon === 0);
+}
+
+/** 1.2.10 : position des gares d'une étape en train, d'après les zones du réseau de la recherche (quand elles y sont). */
+function withStopPoints(net: Net, stops: Stopover[] | undefined): void {
+  for (const so of stops ?? []) {
+    if (knownPoint(so.lat, so.lon) || !so.areaId) continue;
+    const i = net.idx.get(so.areaId);
+    if (i === undefined || !knownPoint(net.lat[i], net.lon[i])) continue;
+    so.lat = net.lat[i];
+    so.lon = net.lon[i];
+  }
 }
 
 /** Étapes complètes (marches comprises) d'un trajet trouvé, aux horaires prévus. */
