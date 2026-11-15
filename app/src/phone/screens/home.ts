@@ -8,6 +8,8 @@
  * contenu à droite ou « à choisir » (le toucher ouvre alors l'ajout). Les autres réglages sont dans Réglages.
  * 1.2.10 (PRD-1.2.10 § 4.2 et § 4.3) : « Y aller » sur chaque favori (le bouton « Lunettes » devient alors son icône) ;
  * carte « En cours » en tête pendant un trajet suivi, mise à jour en direct, avec « Arrêter le guidage ».
+ * 1.3.0 : la carte « En cours » montre aussi les problèmes de la vérification (PRD-1.3.0 § 6.3) ; bannière « Nouveau »
+ * de la 1.3.0 (§ 9).
  */
 import type { Core, FavoriteAnswer, GlassesApi, Settings } from '../../core/api';
 import type { GuideStatus } from '../../core/guide-types';
@@ -19,7 +21,7 @@ import { h, icon, ICON, svgNode, type Child } from '../dom';
 import { canGo, glassesButton, goButton, goFavorite, showTrip } from '../glasses-link';
 import { catchable, SECTION } from '../../glasses/format';
 import { HOME_FAVORITES } from '../../glasses/views';
-import { counted, guideNowLine, guideTitleLine, lineName, newsTitle, shortAnswer, T, typo, withinText } from '../text';
+import { checkLinesOf, counted, guideNowLine, guideTitleLine, lineName, newsTitle, shortAnswer, T, typo, withinText } from '../text';
 import { messageHub, MIRROR_ICON, navRow, nextId } from '../ui';
 import { shownFavorites, type ShownFavorite } from './favorites';
 import { linePickName, stationTitle, type PickKind, completeLater } from './picks';
@@ -325,6 +327,8 @@ function safe<R>(f: () => R, fallback: R): R {
  * direct (onGuide) ; elle disparaît quand plus aucun trajet n'est suivi, et revient avec le suivant. Après un arrêt,
  * « Guidage arrêté. » à sa place, qui reçoit le curseur ; disparue alors que le curseur y était : le titre de l'accueil
  * le reçoit. Lunettes sans guidage (appli plus ancienne) : rien.
+ * 1.3.0 (PRD-1.3.0 § 6.3) : sous « Maintenant », les problèmes de la vérification en cours (GuideStatus.check, lignes de
+ * checkLines : « Lunettes : 12 % de batterie »), deux au plus, annoncés quand ils changent ; aucun : rien.
  */
 function nowCard(ctx: PhoneCtx, home: () => HTMLElement | null): HTMLElement {
   const slot = h('div', { class: 'now-slot' });
@@ -333,11 +337,22 @@ function nowCard(ctx: PhoneCtx, home: () => HTMLElement | null): HTMLElement {
   const id = nextId('en-cours');
   const trip = h('p', { class: 'now-trip' });
   const now = h('p', { class: 'now-now', 'aria-live': 'polite' });
+  const checks = h('div', { class: 'now-checks', 'aria-live': 'polite', hidden: true });
   const stop = g.stopGuide ? h('button', { type: 'button', class: 'btn btn-secondary now-stop' }, T.stopGuide) : null;
   const msg = h('p', { class: 'msg', role: 'status' });
-  const card = h('section', { class: 'now-card', 'aria-labelledby': `${id}-titre` }, h('h2', { class: 'now-title', id: `${id}-titre` }, T.nowTitle), trip, now, stop, msg);
+  const card = h('section', { class: 'now-card', 'aria-labelledby': `${id}-titre` }, h('h2', { class: 'now-title', id: `${id}-titre` }, T.nowTitle), trip, now, checks, stop, msg);
   const done = h('p', { class: 'msg now-done', role: 'status', tabindex: '-1' });
   let guided = true;
+  let checked = '';
+  /** 1.3.0 : les lignes de la vérification, redessinées seulement quand elles changent (pas d'annonce répétée). */
+  const paintChecks = (st: GuideStatus): void => {
+    const lines = checkLinesOf(st);
+    const key = lines.join('\n');
+    if (key === checked) return;
+    checked = key;
+    checks.replaceChildren(...lines.map((l) => h('p', { class: 'now-check' }, l)));
+    checks.hidden = !lines.length;
+  };
   const show = (st: GuideStatus | null): void => {
     if (!st) {
       if (card.parentNode !== slot) return;
@@ -355,6 +370,7 @@ function nowCard(ctx: PhoneCtx, home: () => HTMLElement | null): HTMLElement {
     const line = guideNowLine(st);
     if (now.textContent !== line) now.textContent = line;
     now.hidden = !line;
+    paintChecks(st);
     if (stop) stop.textContent = guided ? T.stopGuide : T.stopFollow;
     if (card.parentNode !== slot) {
       msg.textContent = '';

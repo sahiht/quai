@@ -3,15 +3,18 @@
  * fraîcheur des horaires, temps réel, version de Quai. 1.2.9 (PRD-1.2.9 § 2.3) : retour à Réglages.
  * 1.2.10 (PRD-1.2.10 § 3.8 et § 4.5) : carte « Chemins à pied » : OpenStreetMap, son attribution (licence ODbL) et son
  * état : « Disponible » quand le cœur calcule les chemins à pied (Core.walkRoute), sinon « Indisponible ».
+ * 1.3.0 (PRD-1.3.0 § 6.4) : carte « Journal des trajets » (journalCard).
  */
 import type { Core, HealthResponse, Meta } from '../../core/api';
+import type { JournalTrip, TripJournal } from '../../core/journal-types';
 import { brusselsParts, hhmm, localDate } from '../../core/util';
 import type { Op } from '../../../../shared/types';
 import { APP_VERSION } from '../../version';
 import { header, type PhoneCtx } from '../app';
-import { h, liveRegion } from '../dom';
+import { h, ICON, liveRegion } from '../dom';
 import { addressAttribution } from '../field';
-import { T, typo } from '../text';
+import { journalTripLine, T, typo } from '../text';
+import { confirmInPage, copyText, nextId } from '../ui';
 
 /** Nom affiché du flux GitHub Actions (`name:` de .github/workflows/nightly.yml), tel que GitHub le montre. */
 export const NIGHTLY_WORKFLOW_NAME = 'Données de nuit';
@@ -89,6 +92,134 @@ export function generatedText(iso: string | undefined, now: number): string {
   if (localDate(t) === localDate(now) && p.h < 12) return `cette nuit, ${hhmm(t)}`;
   if (localDate(t) === localDate(now)) return `aujourd’hui, ${hhmm(t)}`;
   return `le ${String(p.d).padStart(2, '0')}/${String(p.mo).padStart(2, '0')} à ${hhmm(t)}`;
+}
+
+/** 1.3.0 : trajets montrés dans « Journal des trajets » (le journal en garde 10). */
+export const JOURNAL_SHOWN = 10;
+
+/**
+ * 1.3.0 (PRD-1.3.0 § 6.4) : carte « Journal des trajets » : les 10 derniers trajets guidés (ctx.journal, du plus récent au
+ * plus ancien), chacun avec son titre, sa date, sa durée et sa fin en clair (« arrivé », « arrêté », « fini »,
+ * « remplacé »). Toucher l'un ouvre son texte juste dessous (TripJournal.text), un seul à la fois, avec « Copier »
+ * (presse-papiers, avec repli, puis « Copié. ») ; « Effacer le journal » demande confirmation. Journal vide : « Aucun
+ * trajet guidé pour l’instant. ». Sans journal (ctx.journal absent ou pas prêt) : pas de carte.
+ */
+export function journalCard(ctx: PhoneCtx): HTMLElement | null {
+  let journal: TripJournal | null = null;
+  try {
+    journal = ctx.journal?.() ?? null;
+  } catch {
+    journal = null;
+  }
+  if (!journal) return null;
+  const j = journal;
+  const id = nextId('journal');
+  const list = h('ul', { class: 'list journal-list' });
+  const empty = h('p', { class: 'small journal-empty', tabindex: '-1' }, T.journalEmpty);
+  const clearSlot = h('div', { class: 'journal-clear' });
+  const said = h('p', { class: 'msg', role: 'status' });
+  /** Trajet dont le texte est ouvert, et de quoi le refermer. */
+  let open: { id: string; close: () => void } | null = null;
+
+  const trips = (): JournalTrip[] => {
+    try {
+      return j.list().slice(0, JOURNAL_SHOWN);
+    } catch {
+      return [];
+    }
+  };
+
+  /** Texte d'un trajet, sous sa ligne : un bloc lisible (les lignes du journal, coupées si besoin), « Copier ». */
+  const textBlock = (t: JournalTrip, blockId: string): HTMLElement => {
+    let text = '';
+    try {
+      text = j.text(t.id);
+    } catch {
+      text = '';
+    }
+    const pre = h('pre', { class: 'journal-text', id: `${blockId}-texte`, tabindex: '0', 'aria-label': typo(`Journal du trajet « ${t.title} »`) }, text);
+    const copy = h('button', { type: 'button', class: 'btn btn-secondary journal-copy' }, T.journalCopy);
+    const msg = h('p', { class: 'msg', role: 'status' });
+    copy.addEventListener('click', async () => {
+      msg.textContent = '';
+      msg.classList.remove('err');
+      const ok = await copyText(text, pre);
+      msg.textContent = ok ? T.journalCopied : T.journalCopyManual;
+      msg.classList.toggle('err', !ok);
+    });
+    return h('div', { class: 'journal-open', id: blockId }, pre, h('div', { class: 'journal-actions' }, copy, msg));
+  };
+
+  const row = (t: JournalTrip, i: number): HTMLLIElement => {
+    const blockId = `${id}-${i}`;
+    const btn = h(
+      'button',
+      { type: 'button', class: 'row journal-row', 'aria-expanded': 'false' },
+      h('span', { class: 'txt' }, h('span', { class: 't1' }, t.title), h('span', { class: 't2' }, typo(journalTripLine(t)))),
+      h('span', { class: 'chev', html: ICON.chevron }),
+    );
+    const li = h('li', null, btn);
+    const close = (): void => {
+      li.querySelector('.journal-open')?.remove();
+      btn.setAttribute('aria-expanded', 'false');
+      btn.removeAttribute('aria-controls');
+    };
+    btn.addEventListener('click', () => {
+      const was = open?.id === t.id;
+      // un seul texte ouvert à la fois ; toucher celui qui est ouvert le referme
+      open?.close();
+      open = null;
+      if (was) return;
+      li.appendChild(textBlock(t, blockId));
+      btn.setAttribute('aria-expanded', 'true');
+      btn.setAttribute('aria-controls', blockId);
+      open = { id: t.id, close };
+    });
+    return li;
+  };
+
+  const paint = (): void => {
+    const all = trips();
+    open = null;
+    list.replaceChildren(...all.map(row));
+    list.hidden = !all.length;
+    empty.hidden = !!all.length;
+    clearSlot.replaceChildren(
+      ...(all.length
+        ? [
+            confirmInPage({
+              trigger: T.journalClear,
+              question: T.journalClearAsk,
+              confirm: T.journalClearYes,
+              cancel: T.cancel,
+              onConfirm: () => {
+                try {
+                  j.clear();
+                } catch {
+                  /* le journal se relit ci-dessous */
+                }
+                paint();
+                said.textContent = T.journalCleared;
+                // la confirmation a disparu : le curseur passe à ce qui la remplace
+                (trips().length ? list.querySelector<HTMLElement>('button') : empty)?.focus();
+              },
+            }),
+          ]
+        : []),
+    );
+  };
+  paint();
+
+  return h(
+    'section',
+    { class: 'box journal', 'aria-labelledby': `${id}-titre` },
+    h('h2', { id: `${id}-titre` }, T.journalTitle),
+    h('p', { class: 'small' }, ctx.web ? T.journalLeadWeb : T.journalLead),
+    list,
+    empty,
+    clearSlot,
+    said,
+  );
 }
 
 /** État d'une carte (« Disponible », « Indisponible ») : un point plein ou vide, puis le texte. */
@@ -231,6 +362,8 @@ export function dataScreen(ctx: PhoneCtx): HTMLElement {
       h('p', { class: 'small muted' }, T.walkCredit),
     ),
     h('section', { class: 'box pad-tight' }, h('h2', { style: 'margin:0 0 4px' }, 'Mises à jour'), updates),
+    // 1.3.0 (PRD-1.3.0 § 6.4) : journal des trajets guidés, gardé sur le téléphone
+    journalCard(ctx),
     h('p', { class: 'small muted' }, 'Si une source ne répond plus, Quai affiche l’horaire prévu, signalé par le signe ~. Usage personnel et non commercial.'),
     h('p', { class: 'small muted' }, typo(`Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company, licence CC BY 4.0. Météo : Open-Meteo.com, licence CC BY 4.0. ${addressAttribution().replace(/\.\s*$/, '')}.`)),
   );

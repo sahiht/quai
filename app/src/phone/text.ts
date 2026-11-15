@@ -6,10 +6,11 @@
 import type { Endpoint, FavoriteAnswer, Journey, LineMatch, LinePick, Mode, NameLang, Op, Place, PlanResult, Propose, Settings } from '../core/api';
 import { LABEL_TEXT } from '../core/api';
 import type { GuideStatus } from '../core/guide-types';
+import type { JournalTrip } from '../core/journal-types';
 import { favoriteTitle, placeOf } from '../core/favorites';
 import { displayLabel, HOLIDAY_TEXT, holidayName, longestWalk, meansText, rideName, walksMore } from '../core/means';
 import { NB, shortAddress } from '../core/text';
-import { displayName, hhmm, OP_NAME } from '../core/util';
+import { brusselsParts, displayName, hhmm, OP_NAME } from '../core/util';
 import { atTitle, durationText, journeyStart, spanText, stopAnswerLine, transfersText, tripAnswerLine, walkMinOf } from '../glasses/format';
 import { compareVersions } from '../version';
 import { normalizeForSearch } from '../../../shared/names';
@@ -187,7 +188,83 @@ export const T = {
   /** Quai Web : le chemin se calcule dans le navigateur. */
   walkTextWeb: 'OpenStreetMap : les vrais chemins à pied, avec les escaliers, les parcs et les passages des gares. Le chemin se calcule dans ton navigateur : ta position n’est jamais envoyée.',
   walkCredit: '© les contributeurs d’OpenStreetMap, licence ODbL',
+  /**
+   * 1.3.0 (PRD-1.3.0 § 6.1) : test de l'écran des lunettes, mené par le téléphone (Réglages, « Pendant un trajet », pas
+   * dans Quai Web). Les textes des étapes sont ceux du PRD.
+   */
+  testScreen: 'Tester l’écran des lunettes',
+  testLead: 'Comment tu vois les messages de Quai pendant un trajet.',
+  testIntro: 'Quai envoie un message aux lunettes et regarde s’il se voit. Le test dure environ une minute.',
+  testStart: 'Commencer le test',
+  testRestart: 'Recommencer le test',
+  testStop: 'Arrêter le test',
+  testStopped: 'Test arrêté.',
+  testWait: `Mets tes lunettes, regarde devant toi, la tête droite, et ne touche à rien pendant 45${NB}secondes.`,
+  testSent: 'Touche une fois les lunettes.',
+  testAsk: `Lève la tête. Que vois-tu dans les lunettes${NB}?`,
+  testAnswersLabel: 'Ce que tu vois dans les lunettes',
+  testClosed: 'Ouvre Quai sur les lunettes, puis recommence.',
+  /** 1.3.0 (PRD-1.3.0 § 6.4) : carte « Journal des trajets » de l'écran Données. */
+  journalTitle: 'Journal des trajets',
+  journalLead: `Tes 10 derniers trajets guidés, gardés sur ce téléphone seulement${NB}: des heures et des arrêts, jamais ta position.`,
+  /** Quai Web : le journal reste dans le navigateur. */
+  journalLeadWeb: `Tes 10 derniers trajets guidés, gardés dans ce navigateur seulement${NB}: des heures et des arrêts, jamais ta position.`,
+  journalEmpty: 'Aucun trajet guidé pour l’instant.',
+  journalCopy: 'Copier',
+  journalCopied: 'Copié.',
+  journalCopyManual: `Copie impossible${NB}: le texte est sélectionné, copie-le avec le menu du téléphone.`,
+  journalClear: 'Effacer le journal',
+  journalClearAsk: `Effacer le journal des trajets${NB}?`,
+  journalClearYes: 'Effacer',
+  journalCleared: 'Journal effacé.',
 } as const;
+
+/** 1.3.0 (PRD-1.3.0 § 6.1) : réponses à « Que vois-tu dans les lunettes ? », dans l'ordre du PRD. */
+export const TEST_ANSWERS: readonly { answer: 'quai' | 'dashboard' | 'nothing'; label: string }[] = [
+  { answer: 'quai', label: 'Le test de Quai' },
+  { answer: 'dashboard', label: 'Le Dashboard' },
+  { answer: 'nothing', label: 'Rien' },
+];
+
+/**
+ * 1.3.0 (PRD-1.3.0 § 6.1, étape done) : ce que le téléphone conseille selon le résultat (textes du PRD) ; `none` : la
+ * réponse « Rien », aucun résultat, vérifier « Head-Up » dans l'appli Even.
+ */
+export const TEST_ADVICE: Record<NonNullable<Settings['display']['alert']> | 'none', string> = {
+  visible: 'Les messages de Quai se voient sans rien faire. S’il le faut, Quai les rappelle.',
+  headUp: `Lève un peu la tête pour voir les messages. Pour le moindre mouvement${NB}: dans l’appli Even, règle l’angle d’affichage au plus bas.`,
+  dashboard: 'En levant la tête, tu vois le Dashboard. Pendant un trajet, touche une fois les lunettes pour voir Quai.',
+  none: `Les lunettes n’ont rien montré${NB}: dans l’appli Even, vérifie le réglage «${NB}Head-Up${NB}», puis recommence le test.`,
+};
+
+/** 1.3.0 : ligne pâle sous « Tester l’écran des lunettes » dans Réglages : le dernier résultat (Settings.display.alert). */
+export const TEST_LAST: Record<NonNullable<Settings['display']['alert']>, string> = {
+  visible: `Dernier test${NB}: les messages se voient sans rien faire.`,
+  headUp: `Dernier test${NB}: les messages se voient en levant la tête.`,
+  dashboard: `Dernier test${NB}: en levant la tête, tu vois le Dashboard.`,
+};
+
+/** 1.3.0 : compte à rebours d'une étape du test (« 45 s »). */
+export const secondsLeft = (n: number): string => `${Math.max(0, Math.round(n))}${NB}s`;
+
+/** 1.3.0 (PRD-1.3.0 § 6.4) : fin d'un trajet du journal, en clair. */
+export const JOURNAL_END: Record<NonNullable<JournalTrip['end']>, string> = { done: 'arrivé', stopped: 'arrêté', ended: 'fini', replaced: 'remplacé' };
+
+/**
+ * 1.3.0 : sous-titre d'un trajet du journal : « 15/11 à 08:02, 23 min, arrivé » (heure de Bruxelles) ; pas encore fini :
+ * « 15/11 à 08:02, en cours » ; moins d'une minute : « moins d’une minute ».
+ */
+export function journalTripLine(t: Pick<JournalTrip, 'startedAt' | 'endedAt' | 'end'>): string {
+  const p = brusselsParts(t.startedAt);
+  const date = `${String(p.d).padStart(2, '0')}/${String(p.mo).padStart(2, '0')} à ${hhmm(t.startedAt)}`;
+  const ended = t.endedAt !== undefined && Number.isFinite(t.endedAt) && t.endedAt >= t.startedAt;
+  if (!t.end && !ended) return `${date}, en cours`;
+  const ms = ended ? t.endedAt! - t.startedAt : NaN;
+  const parts = [date];
+  if (Number.isFinite(ms)) parts.push(ms < 60_000 ? 'moins d’une minute' : durationText(ms / 60_000));
+  parts.push(JOURNAL_END[t.end ?? 'ended']);
+  return parts.join(', ');
+}
 
 /** 1.2.10 : choix de « À l’ouverture de Quai » (libellés de la revue d'usage n° 11, mêmes valeurs enregistrées). */
 export const OPENING_LABEL: Record<Settings['display']['opening'], string> = {
@@ -202,6 +279,15 @@ export const OPENING_ORDER: readonly Settings['display']['opening'][] = ['sugges
 export const guideTitleLine = (s: Pick<GuideStatus, 'title' | 'arr'>): string => (Number.isFinite(s.arr) && s.arr > 0 ? `${s.title}, arrivée ${hhmm(s.arr)}` : s.title);
 /** 1.2.10 : « Maintenant : bus 6 vers Gare des Guillemins » (rien si le moteur ne dit rien). */
 export const guideNowLine = (s: Pick<GuideStatus, 'now'>): string => (s.now.trim() ? typo(`Maintenant : ${s.now.trim()}`) : '');
+/**
+ * 1.3.0 (PRD-1.3.0 § 6.3) : carte « En cours » : les problèmes de la vérification (GuideStatus.check, les lignes de
+ * checkLines des lunettes : « Lunettes : 12 % de batterie »), deux au plus ; aucun : rien.
+ */
+export const checkLinesOf = (s: Pick<GuideStatus, 'check'>): string[] =>
+  (Array.isArray(s.check) ? s.check : [])
+    .filter((l): l is string => typeof l === 'string' && !!l.trim())
+    .slice(0, 2)
+    .map((l) => typo(l.trim()));
 
 
 /** Titre de la bannière « Nouveau » de l'accueil (1.2.9 : sur une ligne, les nouveautés dépliées à la demande). */
@@ -310,22 +396,50 @@ export const NEWS_1210_WEB: readonly string[] = [
   'Dans l’onglet Lunettes, le bouton « Appui long » ouvre le menu du guidage : « Arrêter le guidage », « Voir tout le trajet ».',
 ];
 
+/**
+ * 1.3.0 (PRD-1.3.0 § 9) : nouveautés de la bannière, les idées du message « Quai 1.3.0 » des lunettes (la ligne
+ * « ▶ Y aller » et ▲ pour revenir des autres trajets ; les favoris en accordéon ; le test de l'écran et le rappel des
+ * messages), puis le journal des trajets du téléphone.
+ */
+export const NEWS_130: readonly string[] = [
+  'Écran d’un trajet dans les lunettes : une ligne « ▶ Y aller » dit ce que fait un toucher. Dans « Autres trajets », ▲ sur la première ligne ramène au trajet proposé.',
+  'Favoris des lunettes : le détail du favori choisi s’ouvre juste dessous, sur deux lignes, et se referme quand tu passes au suivant.',
+  'Pendant un trajet, un message important que tu n’as pas vu revient, deux fois au plus. Dans Réglages, « Tester l’écran des lunettes » montre comment tu vois les messages.',
+  'Dans Réglages, puis Données : le journal de tes 10 derniers trajets guidés, à lire et à copier.',
+];
+
+/**
+ * 1.3.0 : les mêmes sur Quai Web : pas de test de l'écran (pas de vraies lunettes) ; la page du téléphone est l'onglet
+ * Réglages.
+ */
+export const NEWS_130_WEB: readonly string[] = [
+  NEWS_130[0],
+  NEWS_130[1],
+  'Pendant un trajet, un message important que tu n’as pas vu revient, deux fois au plus.',
+  'Dans l’onglet Réglages, bouton « Réglages », puis Données : le journal de tes 10 derniers trajets guidés, à lire et à copier.',
+];
+
 /** 1.2.8 : nouveautés de la bannière (comme le message « Quai 1.2.8 » des lunettes). */
 export const NEWS_128: readonly string[] = [
   'Dans les lunettes, touche un train au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.',
   'À chaque gare, sa voie et le prochain passage en clair (« dans 6 min ») ; ● montre où arrive le train, d’après le temps réel.',
 ];
 
-/** 1.2.6 : une nouveauté d'avant qui parle de « Bus, tram, métro », devenu deux rubriques, n'est plus dite. */
-const stillTrue = (l: string): boolean => !/^Bus, tram, métro\b/.test(l);
+/**
+ * Une nouveauté d'avant qui n'est plus vraie n'est plus dite : 1.2.6, celles qui parlent de « Bus, tram, métro »,
+ * devenu deux rubriques ; 1.3.0, le détail des favoris en bas de l'écran (la 1.2.10), devenu un accordéon.
+ */
+const NO_LONGER_TRUE: ReadonlySet<string> = new Set([NEWS_1210[2]]);
+const stillTrue = (l: string): boolean => !/^Bus, tram, métro\b/.test(l) && !NO_LONGER_TRUE.has(l);
 
 /**
- * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.10 ; depuis une version
+ * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.3.0 ; depuis une version
  * antérieure (`seen` : la version vue avant la mise à jour), celles des versions sautées ensuite, de la plus récente à
  * la plus ancienne, sans celles qui ne sont plus vraies. Quai Web (`web`) : ses propres lignes (onglet Réglages).
  */
 export function newsLines(seen = '', web = false): string[] {
-  const out = [...(web ? NEWS_1210_WEB : NEWS_1210)];
+  const out = [...(web ? NEWS_130_WEB : NEWS_130)];
+  if (seen && compareVersions(seen, '1.2.10') < 0) out.push(...(web ? NEWS_1210_WEB : NEWS_1210).filter(stillTrue));
   if (seen && compareVersions(seen, '1.2.9') < 0) out.push(...(web ? NEWS_129_WEB : NEWS_129));
   if (seen && compareVersions(seen, '1.2.8') < 0) out.push(...NEWS_128);
   if (seen && compareVersions(seen, '1.2.6') < 0) out.push(...NEWS_126);
