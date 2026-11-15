@@ -148,7 +148,7 @@ describe('1.2.2 et 1.2.6 : #/gares, #/arrets, #/lignes (Quai Web), #/trajets', (
 
   it('revue d’usage n° 5 : aucun texte affiché ne dit « tes lieux », « lieu enregistré » ni « mon lieu »', async () => {
     const shown = (root: HTMLElement): string => [root.textContent ?? '', ...[...root.querySelectorAll('[placeholder], [aria-label]')].flatMap((e) => [e.getAttribute('placeholder') ?? '', e.getAttribute('aria-label') ?? ''])].join(' ');
-    for (const hash of ['#/', '#/reglages', '#/favoris', '#/favoris/nouveau', '#/favoris/fav-gand', '#/gares/ajouter', '#/lignes/ajouter', '#/trajets', '#/affichage', '#/alertes', '#/donnees', '#/recherche', '#/bienvenue', '#/bienvenue/favoris']) {
+    for (const hash of ['#/', '#/reglages', '#/favoris', '#/favoris/nouveau', '#/favoris/fav-gand', '#/gares/ajouter', '#/lignes/ajouter', '#/trajets', '#/affichage', '#/affichage/ouverture', '#/alertes', '#/donnees', '#/recherche', '#/bienvenue', '#/bienvenue/favoris']) {
       const root = mountAt(hash, preset11());
       await until(() => textOf(root.querySelector('h1')) !== '');
       await settle();
@@ -178,6 +178,20 @@ describe('1.2.9 (PRD-1.2.9 § 2.3) : #/reglages', () => {
       document.body.replaceChildren();
     });
   }
+
+  it('1.2.10 : #/affichage/ouverture : « À l’ouverture de Quai », fond gris, curseur sur son titre ; son retour mène à Affichage', async () => {
+    const root = mountAt('#/affichage/ouverture');
+    await until(() => textOf(root.querySelector('h1')) !== '');
+    expect([textOf(root.querySelector('h1')), document.title, document.body.classList.contains('grey')]).toEqual(['À l’ouverture de Quai', 'À l’ouverture de Quai · Quai', true]);
+    expect(document.activeElement).toBe(root.querySelector('h1'));
+    expect(root.querySelectorAll('input[type="radio"]')).toHaveLength(3);
+    root.querySelector<HTMLButtonElement>('.back')!.click();
+    await until(() => textOf(root.querySelector('h1')) === 'Affichage');
+    expect(location.hash).toBe('#/affichage');
+    // la ligne de l'ouverture y ramène
+    location.hash = root.querySelector('.opening-link a')!.getAttribute('href')!;
+    await until(() => textOf(root.querySelector('h1')) === 'À l’ouverture de Quai');
+  });
 
   it('Affichage : fond gris comme Réglages ; #/trajets reste valable', async () => {
     let root = mountAt('#/affichage');

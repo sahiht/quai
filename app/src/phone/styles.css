@@ -95,6 +95,8 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 legend { padding: 0; }
 .legend { margin: 0 0 6px; font-size: 16px; line-height: 22px; font-weight: 600; }
 .legend-sm { margin: 0 0 2px; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--muted); }
+/* Titre d'un choix segmenté (« Rayon de « Autour de moi » », « Ordre des favoris ») */
+.legend-seg { margin: 0 0 6px; font-size: 15px; line-height: 20px; font-weight: 500; color: var(--text); }
 
 .choice { display: flex; align-items: center; gap: 12px; min-height: 52px; border-bottom: 1px solid var(--border); cursor: pointer; }
 .choice:last-child { border-bottom: 0; }
@@ -269,6 +271,24 @@ button.add-link { border: 0; background: transparent; padding-left: 0; color: va
 .news-lines { display: flex; flex-direction: column; gap: 4px; padding: 0 6px 8px 30px; }
 .news p { margin: 0; font-size: 15px; line-height: 21px; }
 
+/* 1.2.10 : « Y aller » sur les favoris (« Lunettes » devient son icône sur l'accueil), carte « En cours » */
+.fav-actions { display: flex; align-items: center; gap: 6px; }
+.btn-icon { width: 44px; min-width: 44px; padding: 0; }
+/* « Y aller » : vert pâle et vert foncé (6,7:1), plus calme qu'un bouton plein répété sur chaque favori */
+.btn-go { border: 1px solid var(--accent-soft); background: var(--accent-soft); color: var(--accent-ink); min-height: 44px; padding: 0 14px; font-size: 14px; white-space: nowrap; }
+.btn-go:hover:not([disabled]) { border-color: var(--accent); }
+.list > li.fav-go { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.fav-go > .btn-go { margin-right: 12px; }
+.fav-go > .msg { grid-column: 1 / -1; padding: 0 16px 10px 62px; }
+.now-slot:empty { display: none; }
+.now-card { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px 14px 16px; border: 1px solid var(--accent); border-radius: 14px; background: var(--card); }
+.now-title { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--accent-ink); }
+.now-trip { margin: 0; font-size: 16px; line-height: 22px; font-weight: 600; overflow-wrap: anywhere; }
+.now-now { margin: 0; font-size: 15px; line-height: 21px; color: var(--body); overflow-wrap: anywhere; }
+.now-stop { align-self: flex-start; margin-top: 8px; }
+.now-card .msg { margin-top: 4px; }
+.now-done { padding-left: 4px; }
+
 /* 1.2.9 : Réglages et Affichage, réglages rangés par groupe (titre pâle au-dessus de sa carte) */
 .group { display: flex; flex-direction: column; gap: 8px; }
 .group-title { padding-left: 4px; font-size: 14px; line-height: 18px; font-weight: 600; color: var(--muted); }
@@ -277,6 +297,16 @@ button.add-link { border: 0; background: transparent; padding-left: 0; color: va
 /* Affichage : les trois réglages de « Accueil des lunettes » titrés de la même façon (comme le rayon) */
 .pad-row .legend-sm { margin-bottom: 4px; font-size: 15px; line-height: 20px; font-weight: 500; color: var(--text); }
 .preview-top { display: flex; flex-direction: column; gap: 8px; }
+/* 1.2.10 : Affichage tient sur un écran de 390 × 844 (maquette C) : espaces resserrés ; « À l’ouverture de Quai », une
+   ligne qui ouvre son écran, titrée comme les réglages au-dessus */
+.screen.display { gap: 12px; }
+.display .group { gap: 6px; }
+.display .pad-row { padding: 10px 16px; }
+.display .seg { padding: 3px; }
+.opening-link .row { min-height: 56px; padding-left: 16px; }
+.opening-link .row .chev { height: 40px; }
+.opening-link .row .t1 { font-size: 15px; line-height: 20px; font-weight: 500; }
+.opening-link .row .t2 { font-size: 14px; line-height: 19px; }
 
 /* 1.1 : favoris (ordre), lieux (confirmation de position) */
 .order-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 60px; padding: 8px 10px 8px 14px; }
@@ -298,21 +328,9 @@ button.add-link { border: 0; background: transparent; padding-left: 0; color: va
 .check-row { gap: 12px; border-bottom: 0; font-size: 15px; line-height: 20px; }
 .plain { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
 
-/* 1.2.2 : gares et lignes choisies (sections de l'accueil), ajout d'une gare ou d'une ligne, liens de « Un endroit » */
-.home-picks { display: flex; flex-direction: column; gap: 8px; }
-/* Annonce (ordre, retrait) en bas de la section, sans place réservée tant qu'elle est vide. */
-.home-picks > .live:empty { min-height: 0; }
+/* 1.2.2 : listes des gares, arrêts et lignes choisis, ajout d'une gare ou d'une ligne, liens de « Un endroit » (1.2.10 :
+   les sections de l'ancien accueil sont retirées) */
 .pick-list, .opts { background: var(--card); }
-.pick-row { display: flex; flex-direction: column; padding: 8px 10px 4px 14px; }
-.pick-main { display: flex; align-items: center; gap: 12px; min-height: 48px; }
-.pick-main > .ico { width: 36px; height: 36px; border-radius: 10px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.pick-main .txt { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
-.pick-main .t1 { font-size: 16px; line-height: 22px; font-weight: 500; overflow-wrap: anywhere; }
-.pick-main .t2 { font-size: 13px; line-height: 18px; color: var(--muted); }
-.pick-main .btn { flex-shrink: 0; }
-.pick-near { display: flex; align-items: center; gap: 10px; min-height: 44px; padding-left: 48px; font-size: 14px; line-height: 20px; color: var(--body); cursor: pointer; }
-.pick-near input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); flex-shrink: 0; }
-.pick-row .confirm { margin: 4px 0 8px; }
 .row.opt { min-height: 56px; padding-right: 14px; }
 .row.opt .t1 { overflow-wrap: anywhere; }
 .row.opt .meta { flex-shrink: 0; font-size: 13px; line-height: 18px; color: var(--muted); white-space: nowrap; }
@@ -373,7 +391,7 @@ dl { margin: 0; }
 .badge.sm { min-width: 26px; height: 22px; padding: 0 5px; border-radius: 6px; font-size: 12px; }
 .badge.more { background: transparent; box-shadow: none; color: var(--muted); font-weight: 600; }
 .badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
-.pick-main > .badge, .row.opt > .badge { min-width: 36px; }
+.row.opt > .badge { min-width: 36px; }
 /* « Près de toi » : une ligne, son réseau et ses terminus, la distance ; « Ajouter » ou « Ajoutée ✓ » à droite */
 .sub-head { margin: 6px 0 0; font-size: 15px; line-height: 20px; font-weight: 600; color: var(--body); }
 .near-row { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 12px 8px 14px; border-bottom: 1px solid var(--divider); }

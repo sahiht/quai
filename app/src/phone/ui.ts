@@ -55,13 +55,16 @@ export function switchRow(opts: { label: string; sub?: string; checked: boolean;
   return h('label', { class: 'switch-row' }, h('span', { class: 'cc' }, h('span', { class: 'c1' }, opts.label), opts.sub ? h('span', { class: 'c2' }, opts.sub) : null), input);
 }
 
-/** Choix segmenté (300 / 500 / 800 m). */
-export function segmented<T extends string | number>(opts: { legend: string; hiddenLegend?: boolean; options: { value: T; label: string }[]; value: T; onChange: (v: T) => void }): HTMLFieldSetElement {
+/**
+ * Choix segmenté (300 / 500 / 800 m). 1.2.10 : `aria` d'un choix : son nom complet quand le libellé est abrégé
+ * (« Automatique » : « Automatique, selon l’heure et ta position »).
+ */
+export function segmented<T extends string | number>(opts: { legend: string; hiddenLegend?: boolean; options: { value: T; label: string; aria?: string }[]; value: T; onChange: (v: T) => void }): HTMLFieldSetElement {
   const name = nextId('seg');
   const labels: HTMLLabelElement[] = [];
   const box = h('div', { class: 'seg' });
   for (const o of opts.options) {
-    const input = h('input', { type: 'radio', name, value: String(o.value), checked: o.value === opts.value });
+    const input = h('input', { type: 'radio', name, value: String(o.value), checked: o.value === opts.value, 'aria-label': o.aria });
     const label = h('label', { class: o.value === opts.value ? 'on' : '' }, input, o.label);
     input.addEventListener('change', () => {
       if (!input.checked) return;
@@ -71,7 +74,7 @@ export function segmented<T extends string | number>(opts: { legend: string; hid
     labels.push(label);
     box.appendChild(label);
   }
-  return h('fieldset', null, h('legend', { class: opts.hiddenLegend ? 'sr-only' : 'legend-sm', style: opts.hiddenLegend ? '' : 'font-size:15px;line-height:20px;font-weight:500;color:#161A17;margin:0 0 8px' }, opts.legend), box);
+  return h('fieldset', null, h('legend', { class: opts.hiddenLegend ? 'sr-only' : 'legend-seg' }, opts.legend), box);
 }
 
 /** Un choix d'un contrôle segmenté à panneaux : titre, sous-titre, panneau montré quand il est choisi. */
@@ -137,13 +140,13 @@ export function segmentedTabs<T extends string>(opts: { label: string; options: 
   return { el: list, panels, value: () => current, select };
 }
 
-/** Groupe de boutons radio. */
-export function radios<T extends string>(opts: { legend: string; big?: boolean; options: { value: T; label: string; sub?: string }[]; value: T; onChange: (v: T) => void }): HTMLFieldSetElement {
+/** Groupe de boutons radio. 1.2.10 : `hiddenLegend` : la légende pour les lecteurs d'écran seulement (le titre la dit). */
+export function radios<T extends string>(opts: { legend: string; big?: boolean; hiddenLegend?: boolean; options: { value: T; label: string; sub?: string }[]; value: T; onChange: (v: T) => void }): HTMLFieldSetElement {
   const name = nextId('radio');
   return h(
     'fieldset',
     null,
-    h('legend', { class: opts.big ? 'legend' : 'legend-sm' }, opts.legend),
+    h('legend', { class: opts.hiddenLegend ? 'sr-only' : opts.big ? 'legend' : 'legend-sm' }, opts.legend),
     opts.options.map((o) => {
       const input = h('input', { type: 'radio', name, value: o.value, checked: o.value === opts.value });
       input.addEventListener('change', () => input.checked && opts.onChange(o.value));
@@ -324,8 +327,11 @@ export function previewItemText(i: Item): string {
   return [i.a || words, i.b, i.bRight ? `${i.bRight}${i.bRightTail ?? ''}` : '', i.c].filter(Boolean).join(' ');
 }
 
-/** Aperçu fidèle des lunettes : même mise en page que l'appareil, réduite. */
-export function glassesPreview(title: string, view: GlassesView): HTMLElement {
+/**
+ * Aperçu fidèle des lunettes : même mise en page que l'appareil, réduite. `title` : écrit au-dessus, et début de son nom
+ * pour les lecteurs d'écran ; 1.2.10 : `hiddenTitle` : dans le nom seulement (Affichage sur un seul écran).
+ */
+export function glassesPreview(title: string, view: GlassesView, opts: { hiddenTitle?: boolean } = {}): HTMLElement {
   const box = h('div', { class: 'preview', role: 'img', 'aria-label': `${title} : ${[view.title, ...view.items.map(previewItemText)].join(', ')}` });
   const nav = initNav({ screen: 'home' });
   const g = geometry(view);
@@ -338,5 +344,5 @@ export function glassesPreview(title: string, view: GlassesView): HTMLElement {
     paintContainers(screen, containers);
     queueMicrotask(() => fitScreen(box, screen));
   }
-  return h('div', { class: 'preview-wrap' }, h('span', { class: 'label' }, title), box);
+  return h('div', { class: 'preview-wrap' }, opts.hiddenTitle ? null : h('span', { class: 'label' }, title), box);
 }

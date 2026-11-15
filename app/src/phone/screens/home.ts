@@ -6,17 +6,20 @@
  * et, en retrait, jusqu'à 3 favoris dans l'ordre des lunettes, chacun avec sa réponse courte et son bouton « Lunettes »
  * (S8) ; « Autour de moi » ; « Gares de train », « Arrêts de bus, tram, métro », « Lignes de bus, tram, métro », leur
  * contenu à droite ou « à choisir » (le toucher ouvre alors l'ajout). Les autres réglages sont dans Réglages.
+ * 1.2.10 (PRD-1.2.10 § 4.2 et § 4.3) : « Y aller » sur chaque favori (le bouton « Lunettes » devient alors son icône) ;
+ * carte « En cours » en tête pendant un trajet suivi, mise à jour en direct, avec « Arrêter le guidage ».
  */
-import type { Core, FavoriteAnswer, Settings } from '../../core/api';
+import type { Core, FavoriteAnswer, GlassesApi, Settings } from '../../core/api';
+import type { GuideStatus } from '../../core/guide-types';
 import { asTrip, favoriteTitle } from '../../core/favorites';
 import type { LineFollow } from '../../core/linerun';
 import { NEWS_SINCE, type PhoneCtx } from '../app';
 import { lineBadge } from '../badges';
 import { h, icon, ICON, svgNode, type Child } from '../dom';
-import { glassesButton, showTrip } from '../glasses-link';
+import { canGo, glassesButton, goButton, goFavorite, showTrip } from '../glasses-link';
 import { catchable, SECTION } from '../../glasses/format';
 import { HOME_FAVORITES } from '../../glasses/views';
-import { counted, lineName, newsTitle, shortAnswer, T, typo, withinText } from '../text';
+import { counted, guideNowLine, guideTitleLine, lineName, newsTitle, shortAnswer, T, typo, withinText } from '../text';
 import { messageHub, MIRROR_ICON, navRow, nextId } from '../ui';
 import { shownFavorites, type ShownFavorite } from './favorites';
 import { linePickName, stationTitle, type PickKind, completeLater } from './picks';
@@ -94,7 +97,8 @@ export function rubrics(s: Settings): Rubric[] {
  * lunettes, figé tant que l'accueil reste affiché, chacun avec sa réponse courte (rafraîchie toutes les 30 s) et son
  * bouton « Lunettes ». 1.2.9 (relecture) : au-delà de 3, « Voir les 2 autres favoris » les montre de la même façon
  * (rien ne disparaît : en 1.2.8, tous avaient leur bouton « Lunettes ») ; leurs réponses ne sont calculées qu'alors.
- * Sans favori : « Aucun favori » et « Ajouter un favori ».
+ * Sans favori : « Aucun favori » et « Ajouter un favori ». 1.2.10 : « Y aller » après « Lunettes » (son icône seule,
+ * pour que le nom garde sa place), un seul message par favori, à côté de ses boutons.
  */
 function favoritesCard(ctx: PhoneCtx): HTMLElement {
   const s = ctx.settings.get();
@@ -121,11 +125,13 @@ function favoritesCard(ctx: PhoneCtx): HTMLElement {
   const shown = ordered.slice(0, HOME_FAVORITES);
   const rest = ordered.slice(HOME_FAVORITES);
   const rows = new Map<string, { name: HTMLElement; answer: HTMLElement }>();
+  const go = canGo(ctx);
   const favRow = (f: ShownFavorite): HTMLLIElement => {
-    const name = h('span', { class: 't1' }, favoriteTitle(f, s));
+    const title = favoriteTitle(f, s);
+    const name = h('span', { class: 't1' }, title);
     const answer = h('span', { class: 't2 answer' }, typo(shortAnswer(lastAnswers.get(f.id), ctx.clock.now(), s)));
     rows.set(f.id, { name, answer });
-    const { button, message } = glassesButton(hub, `Afficher ${favoriteTitle(f, s)} dans les lunettes`, async () => {
+    const { button, message } = glassesButton(hub, `Afficher ${title} dans les lunettes`, async () => {
       const st = ctx.settings.get();
       const fav = shownFavorites(st.favorites).find((x) => x.id === f.id) ?? f;
       // Jamais une réponse ancienne (retour sur l'accueil plus tard) : les lunettes suivraient un train parti.
@@ -139,8 +145,10 @@ function favoritesCard(ctx: PhoneCtx): HTMLElement {
       // Un lieu : le trajet « Ma position → lieu » (même identifiant).
       const trip = asTrip(fav);
       return showTrip(ctx, { title: favoriteTitle(fav, st), from: trip.from, to: trip.to, favoriteId: fav.id, result, index: 0 });
-    });
-    return h('li', { class: 'fav-row' }, h('span', { class: 'txt' }, name, answer), button, message);
+    }, { compact: go });
+    // « Lunettes » d'abord, « Y aller » au bout de la rangée : même message, à côté d'eux
+    const actions = h('span', { class: 'fav-actions' }, button, go ? goButton(hub, message, typo(`${T.goThere} : ${title}`), () => goFavorite(ctx, f.id)) : null);
+    return h('li', { class: 'fav-row' }, h('span', { class: 'txt' }, name, answer), actions, message);
   };
   for (const f of shown) list.appendChild(favRow(f));
   if (rest.length) {
@@ -150,6 +158,7 @@ function favoritesCard(ctx: PhoneCtx): HTMLElement {
       const added = rest.map(favRow);
       moreRow.replaceWith(...added);
       shown.push(...rest);
+      // le curseur sur le premier bouton du premier favori ajouté (« Lunettes »)
       added[0]?.querySelector<HTMLElement>('button')?.focus();
       // un calcul en cours ne connaît pas les favoris ajoutés : un autre le suit (sinon « … » jusqu'au suivant, 30 s)
       if (busy) again = true;
@@ -270,6 +279,109 @@ function newsBanner(ctx: PhoneCtx, next: () => HTMLElement): HTMLElement | null 
   return el;
 }
 
+/* ------------------------------ Carte « En cours » (1.2.10) ------------------------------ */
+
+/**
+ * Ce qui suit l'accueil (réglages, guidage) s'arrête quand `el` quitte la page, ou n'y a jamais été posé (le routeur est
+ * passé à un autre écran) : à l'appel suivant de `alive()`, au plus tard au contrôle des 30 s. Avant d'être posé,
+ * `alive()` est vrai (le routeur attend l'écran).
+ */
+function whileShown(el: HTMLElement, stop: () => void): () => boolean {
+  let seen = false;
+  let ended = false;
+  const end = (): void => {
+    if (ended) return;
+    ended = true;
+    clearInterval(timer);
+    stop();
+  };
+  const timer = setInterval(() => {
+    if (!el.isConnected) end();
+  }, ANSWER_REFRESH_MS);
+  setTimeout(() => {
+    if (el.isConnected) seen = true;
+    else if (!seen) end();
+  }, 0);
+  return () => {
+    if (el.isConnected) seen = true;
+    else if (seen) end();
+    return !ended;
+  };
+}
+
+/**
+ * 1.2.10 (PRD-1.2.10 § 4.3) : carte « En cours » en tête de l'accueil pendant un trajet suivi : « En cours » ; « Bureau,
+ * arrivée 08:54 » ; « Maintenant : bus 6 vers Gare des Guillemins » (GuideStatus.now, annoncé quand il change) ;
+ * « Arrêter le guidage », ou « Arrêter le suivi » quand le guidage est éteint (rien n'est alors guidé). Mise à jour en
+ * direct (onGuide) ; elle disparaît quand plus aucun trajet n'est suivi, et revient avec le suivant. Après un arrêt,
+ * « Guidage arrêté. » à sa place, qui reçoit le curseur ; disparue alors que le curseur y était : le titre de l'accueil
+ * le reçoit. Lunettes sans guidage (appli plus ancienne) : rien.
+ */
+function nowCard(ctx: PhoneCtx, home: () => HTMLElement | null): HTMLElement {
+  const slot = h('div', { class: 'now-slot' });
+  const g: GlassesApi | null = ctx.glasses();
+  if (!g?.guideStatus && !g?.onGuide) return slot;
+  const id = nextId('en-cours');
+  const trip = h('p', { class: 'now-trip' });
+  const now = h('p', { class: 'now-now', 'aria-live': 'polite' });
+  const stop = g.stopGuide ? h('button', { type: 'button', class: 'btn btn-secondary now-stop' }, T.stopGuide) : null;
+  const msg = h('p', { class: 'msg', role: 'status' });
+  const card = h('section', { class: 'now-card', 'aria-labelledby': `${id}-titre` }, h('h2', { class: 'now-title', id: `${id}-titre` }, T.nowTitle), trip, now, stop, msg);
+  const done = h('p', { class: 'msg now-done', role: 'status', tabindex: '-1' });
+  let guided = true;
+  const show = (st: GuideStatus | null): void => {
+    if (!st) {
+      if (card.parentNode !== slot) return;
+      const focused = card.contains(document.activeElement);
+      card.remove();
+      const title = focused ? home()?.querySelector<HTMLElement>('h1') : null;
+      if (title) {
+        title.tabIndex = -1;
+        title.focus();
+      }
+      return;
+    }
+    guided = st.guided !== false;
+    trip.textContent = typo(guideTitleLine(st));
+    const line = guideNowLine(st);
+    if (now.textContent !== line) now.textContent = line;
+    now.hidden = !line;
+    if (stop) stop.textContent = guided ? T.stopGuide : T.stopFollow;
+    if (card.parentNode !== slot) {
+      msg.textContent = '';
+      msg.classList.remove('err');
+      slot.replaceChildren(card);
+    }
+  };
+  stop?.addEventListener('click', async () => {
+    stop.disabled = true;
+    msg.textContent = '';
+    msg.classList.remove('err');
+    const said = guided ? T.guideStopped : T.followStopped;
+    try {
+      await g.stopGuide!();
+      const st = g.guideStatus?.() ?? null;
+      show(st);
+      if (!st) {
+        done.textContent = said;
+        slot.replaceChildren(done);
+        done.focus();
+      }
+    } catch (e) {
+      msg.textContent = typo(e instanceof Error && e.message ? e.message : T.glassesOff);
+      msg.classList.add('err');
+    } finally {
+      stop.disabled = false;
+    }
+  });
+  show(g.guideStatus?.() ?? null);
+  const alive = whileShown(slot, () => off?.());
+  const off = g.onGuide?.((st) => {
+    if (alive()) show(st);
+  });
+  return slot;
+}
+
 /* ------------------------------ Accueil ------------------------------ */
 
 /** 1.2.9 (relecture) : Affichage ouvert depuis l'accueil (« Aperçu », « Autour de moi ») y revient d'un toucher. */
@@ -278,11 +390,8 @@ export const AFFICHAGE_FROM_HOME = '#/affichage?retour=accueil';
 /** Ce que montre la carte des rubriques : elle n'est redessinée que si cela change. */
 const rubricKey = (s: Settings): string => JSON.stringify([s.lang, s.display.radiusM, s.stations, s.lines, s.follows ?? []]);
 
-/**
- * Accueil. `opts.focus` (#/gares, #/arrets, #/lignes tant que leur route mène ici) : ignoré depuis la 1.2.9, les
- * sections ayant quitté l'accueil.
- */
-export function homeScreen(ctx: PhoneCtx, _sub: string[] = [], _opts: { focus?: PickKind } = {}): HTMLElement {
+/** Accueil (#/, et toute ancre inconnue). */
+export function homeScreen(ctx: PhoneCtx): HTMLElement {
   const s = ctx.settings.get();
   const fresh = ctx.freshness();
   // « Où vas-tu ? » ouvre la recherche, curseur dans « Arrivée » (M4.1).
@@ -318,7 +427,7 @@ export function homeScreen(ctx: PhoneCtx, _sub: string[] = [], _opts: { focus?: 
     rubricList,
   );
   paintRubrics(s);
-  const el = h(
+  const el: HTMLElement = h(
     'div',
     { class: 'screen home' },
     h(
@@ -327,6 +436,8 @@ export function homeScreen(ctx: PhoneCtx, _sub: string[] = [], _opts: { focus?: 
       h('div', { class: 'head-titles' }, h('span', { class: 'eyebrow' }, 'Quai'), h('h1', null, 'Bonjour')),
       h('a', { class: 'btn btn-secondary head-btn', href: '#/reglages' }, svgNode(ICON.settings), h('span', null, T.settings)),
     ),
+    // 1.2.10 : « En cours » en tête, pendant un trajet suivi
+    nowCard(ctx, () => el),
     !ctx.configured
       ? h('div', { class: 'warn', role: 'alert' }, h('strong', null, 'Quai n’est pas configuré.'), typo('Les adresses des horaires et du relais manquent : lancez « npm run configure » avant de créer le paquet.'))
       : fresh && !fresh.ok
@@ -338,22 +449,14 @@ export function homeScreen(ctx: PhoneCtx, _sub: string[] = [], _opts: { focus?: 
   );
   // l'écran quitté, ou jamais posé (le routeur est passé à un autre), la carte ne suit plus
   let drawn = rubricKey(s);
-  let seen = false;
+  const alive = whileShown(el, () => stop());
   const stop = ctx.settings.subscribe((st) => {
-    if (el.isConnected) seen = true;
-    else if (seen) {
-      stop();
-      return;
-    }
+    if (!alive()) return;
     const k = rubricKey(st);
     if (k === drawn) return;
     drawn = k;
     paintRubrics(st);
   });
-  setTimeout(() => {
-    if (el.isConnected) seen = true;
-    else if (!seen) stop();
-  }, 0);
   return el;
 }
 

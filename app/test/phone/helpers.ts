@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath, URL as NodeURL } from 'node:url';
 import type { Core, GlassesApi, LineFilter, Settings, TripRequest } from '../../src/core/api';
 import { DEFAULT_SETTINGS } from '../../src/core/api';
+import type { GuideStatus } from '../../src/core/guide-types';
 import { gtfsTime } from '../../src/core/util';
 import { createFakeCore, type FakeFlags } from '../../src/dev/fake-core';
 import type { PhoneCtx } from '../../src/phone/app';
@@ -72,6 +73,62 @@ export function fakeGlasses(): FakeGlasses {
     },
   };
   return g;
+}
+
+/** 1.2.10 : guidage des lunettes factice (GlassesApi.goFavorite, stopGuide, guideStatus, onGuide). */
+export interface FakeGuide {
+  /** Favoris lancés par « Y aller ». */
+  went: string[];
+  /** Appels de stopGuide. */
+  stops: number;
+  /** État rendu par guideStatus. */
+  status: GuideStatus | null;
+  /** Abonnés de onGuide encore inscrits. */
+  listeners(): number;
+  /** Change l'état et prévient les abonnés (comme le contrôleur). */
+  emit(s: GuideStatus | null): void;
+  /** Réponse de goFavorite : un message, ou une erreur. */
+  reply: string | Error;
+  /** stopGuide échoue avec cette erreur. */
+  stopError?: Error;
+}
+
+/**
+ * Ajoute aux lunettes factices le guidage de la 1.2.10 ; `only` : seulement ces fonctions (appli partielle). « Y aller »
+ * lance le guidage (état « à pied ») ; « Arrêter le guidage » l'arrête et prévient les abonnés, comme le contrôleur.
+ */
+export function withGuide(g: GlassesApi, status: GuideStatus | null = null, only?: ('goFavorite' | 'stopGuide' | 'guideStatus' | 'onGuide')[]): FakeGuide {
+  const subs = new Set<(s: GuideStatus | null) => void>();
+  const f: FakeGuide = {
+    went: [],
+    stops: 0,
+    status,
+    listeners: () => subs.size,
+    emit(s) {
+      f.status = s;
+      for (const cb of [...subs]) cb(s);
+    },
+    reply: `Guidage lancé sur les lunettes${NB}: bus 6 à 07:12.`,
+  };
+  const api: Pick<GlassesApi, 'goFavorite' | 'stopGuide' | 'guideStatus' | 'onGuide'> = {
+    async goFavorite(id) {
+      f.went.push(id);
+      if (f.reply instanceof Error) throw f.reply;
+      return f.reply;
+    },
+    async stopGuide() {
+      f.stops += 1;
+      if (f.stopError) throw f.stopError;
+      f.emit(null);
+    },
+    guideStatus: () => f.status,
+    onGuide(cb) {
+      subs.add(cb);
+      return () => void subs.delete(cb);
+    },
+  };
+  for (const k of only ?? (Object.keys(api) as (keyof typeof api)[])) Object.assign(g, { [k]: api[k] });
+  return f;
 }
 
 export interface Harness {

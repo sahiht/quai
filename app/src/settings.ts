@@ -7,6 +7,8 @@
  * arrêts favoris y sont rangés et ne restent plus dans `favorites`.
  * 1.2.6 (docs/v1.2.6/PRD-1.2.6.md § 4) : lignes suivies sans arrêt (`follows`) ; une ligne gardée à un arrêt (LinePick
  * avec `line`) y devient une ligne suivie, son arrêt gardé comme repère (`via`) ; `lines` ne garde que les arrêts.
+ * 1.2.10 (docs/v1.2.10/PRD-1.2.10.md § 4.1) : `display.guide` (« Me guider pendant un trajet ») ; seul `false` est
+ * enregistré, l'absence vaut « allumé ».
  */
 import type { Endpoint, Favorite, FavoritePlace, FavoriteStop, FavoriteTrip, KV, LineFilter, LinePick, NameLang, Place, Propose, RecentAddress, Settings, StationPick } from './core/api';
 import { DEFAULT_SETTINGS } from './core/api';
@@ -24,6 +26,9 @@ export const SETTINGS_BACKUP_KEY = 'quai.settings.v3';
 /** 1.2.6 : réglages tels qu'avant le passage des lignes gardées à un arrêt en lignes suivies, gardés une fois. */
 export const SETTINGS_BACKUP_125_KEY = 'quai.settings.v4-1.2.5';
 export const CURRENT_VERSION = 4;
+
+/** 1.2.10 : « Me guider pendant un trajet » allumé (réglage absent ou vrai, PRD-1.2.10 § 3.5). */
+export const guideOn = (s: Pick<Settings, 'display'>): boolean => s.display.guide !== false;
 
 const OPS: readonly Op[] = ['sncb', 'stib', 'delijn', 'tec'];
 const MODES: readonly Mode[] = ['train', 'metro', 'tram', 'bus'];
@@ -432,6 +437,9 @@ export function validateSettings(input: unknown): Settings {
   const seen = typeof x.seenVersion === 'string' && /^\d+\.\d+\.\d+$/.test(x.seenVersion.trim()) ? x.seenVersion.trim() : '';
   const disp = isObj(x.display) ? x.display : {};
   const al = isObj(x.alerts) ? x.alerts : {};
+  // 1.2.10 : « Me guider pendant un trajet », allumé par défaut : seul `false` l'éteint, sinon le champ reste absent
+  // (absent = allumé, PRD-1.2.10 § 3.5), ce qui garde les réglages par défaut identiques à DEFAULT_SETTINGS
+  const guide = disp.guide === false ? { guide: false } : {};
   return {
     v: 4,
     onboarded: bool(x.onboarded, d.onboarded),
@@ -451,6 +459,7 @@ export function validateSettings(input: unknown): Settings {
       rain: bool(disp.rain, d.display.rain),
       opening: oneOf(disp.opening, OPENING, d.display.opening),
       favOrder: oneOf(disp.favOrder, FAV_ORDER, d.display.favOrder),
+      ...guide,
     },
     alerts: {
       platform: bool(al.platform, d.alerts.platform),

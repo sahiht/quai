@@ -1,8 +1,10 @@
 /**
  * Réglage 6 sur 6 : données (T6, maquette Config6) : état du relais (/api/health) et des services d'adresses,
  * fraîcheur des horaires, temps réel, version de Quai. 1.2.9 (PRD-1.2.9 § 2.3) : retour à Réglages.
+ * 1.2.10 (PRD-1.2.10 § 3.8 et § 4.5) : carte « Chemins à pied » : OpenStreetMap, son attribution (licence ODbL) et son
+ * état : « Disponible » quand le cœur calcule les chemins à pied (Core.walkRoute), sinon « Indisponible ».
  */
-import type { HealthResponse, Meta } from '../../core/api';
+import type { Core, HealthResponse, Meta } from '../../core/api';
 import { brusselsParts, hhmm, localDate } from '../../core/util';
 import type { Op } from '../../../../shared/types';
 import { APP_VERSION } from '../../version';
@@ -55,6 +57,11 @@ export function addressStatus(health: HealthResponse | null, checked: boolean): 
   return { ok: true, text: `Disponible, sauf ${down.join(' et ')}` };
 }
 
+/** 1.2.10 : état des chemins à pied : le cœur sait-il les calculer (tuiles OpenStreetMap, Core.walkRoute) ? */
+export function walkText(core: Pick<Core, 'walkRoute'> | null): { ok: boolean; text: string } {
+  return core && typeof core.walkRoute === 'function' ? { ok: true, text: 'Disponible' } : { ok: false, text: 'Indisponible' };
+}
+
 /** 1.2.5 : état de la météo dans l'écran Données. */
 export function weatherText(w: 'ok' | 'down' | 'unknown' | 'off'): { ok: boolean; text: string } {
   if (w === 'ok') return { ok: true, text: 'Disponible' };
@@ -84,25 +91,32 @@ export function generatedText(iso: string | undefined, now: number): string {
   return `le ${String(p.d).padStart(2, '0')}/${String(p.mo).padStart(2, '0')} à ${hhmm(t)}`;
 }
 
+/** État d'une carte (« Disponible », « Indisponible ») : un point plein ou vide, puis le texte. */
+function statusEl(text: string): HTMLSpanElement {
+  return h('span', { class: 'status off' }, h('span', { class: 'dot off', 'aria-hidden': 'true' }), text);
+}
+function paintStatus(el: HTMLElement, s: { ok: boolean; text: string }): void {
+  el.className = `status${s.ok ? '' : ' off'}`;
+  el.replaceChildren(h('span', { class: `dot${s.ok ? '' : ' off'}`, 'aria-hidden': 'true' }), s.text);
+}
+
 export function dataScreen(ctx: PhoneCtx): HTMLElement {
   const live = liveRegion();
-  const status = h('span', { class: 'status off' }, h('span', { class: 'dot off', 'aria-hidden': 'true' }), 'Vérification…');
+  const status = statusEl('Vérification…');
   const nets = h('ul', { class: 'list' });
   const updates = h('dl');
   const staleBox = h('div');
-  const addrState = h('span', { class: 'status off' }, h('span', { class: 'dot off', 'aria-hidden': 'true' }), '…');
-  const paintAddresses = (health: HealthResponse | null, checked: boolean): void => {
-    const a = addressStatus(health, checked);
-    addrState.className = `status${a.ok ? '' : ' off'}`;
-    addrState.replaceChildren(h('span', { class: `dot${a.ok ? '' : ' off'}`, 'aria-hidden': 'true' }), a.text);
-  };
+  const addrState = statusEl('…');
+  const paintAddresses = (health: HealthResponse | null, checked: boolean): void => paintStatus(addrState, addressStatus(health, checked));
   // 1.2.5 : météo (Open-Meteo par le relais) : disponible, indisponible, ou coupée dans Affichage
-  const weatherState = h('span', { class: 'status off' }, h('span', { class: 'dot off', 'aria-hidden': 'true' }), '…');
-  const paintWeather = (w: 'ok' | 'down' | 'unknown' | 'off'): void => {
-    const t = weatherText(w);
-    weatherState.className = `status${t.ok ? '' : ' off'}`;
-    weatherState.replaceChildren(h('span', { class: `dot${t.ok ? '' : ' off'}`, 'aria-hidden': 'true' }), t.text);
-  };
+  const weatherState = statusEl('…');
+  const paintWeather = (w: 'ok' | 'down' | 'unknown' | 'off'): void => paintStatus(weatherState, weatherText(w));
+  // 1.2.10 : chemins à pied (OpenStreetMap), calculés sur le téléphone ; sans cœur, indisponibles
+  const walkState = statusEl('…');
+  ctx.core().then(
+    (c) => paintStatus(walkState, walkText(c)),
+    () => paintStatus(walkState, walkText(null)),
+  );
   const checkWeather = async (): Promise<void> => {
     if (ctx.settings.get().display.rain === false) return paintWeather('off');
     try {
@@ -157,15 +171,13 @@ export function dataScreen(ctx: PhoneCtx): HTMLElement {
       const core = await ctx.core();
       const health = await core.health();
       const ok = health.ok;
-      status.className = `status${ok ? '' : ' off'}`;
-      status.replaceChildren(h('span', { class: `dot${ok ? '' : ' off'}`, 'aria-hidden': 'true' }), ok ? 'Connecté' : 'Injoignable');
+      paintStatus(status, { ok, text: ok ? 'Connecté' : 'Injoignable' });
       paintNets(health, ctx.meta());
       paintUpdates(ctx.meta(), health);
       paintAddresses(health, true);
       if (manual) live.say(typo(ok ? 'Connexion réussie : relais et sources répondent.' : 'Le relais répond, mais une source au moins est en panne.'), !ok);
     } catch (e) {
-      status.className = 'status off';
-      status.replaceChildren(h('span', { class: 'dot off', 'aria-hidden': 'true' }), 'Injoignable');
+      paintStatus(status, { ok: false, text: 'Injoignable' });
       paintNets(null, ctx.meta());
       paintUpdates(ctx.meta());
       paintAddresses(null, true);
@@ -209,6 +221,14 @@ export function dataScreen(ctx: PhoneCtx): HTMLElement {
       { class: 'box', style: 'padding:14px 16px;display:flex;flex-direction:column;gap:6px' },
       h('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;gap:12px' }, h('h2', null, 'Météo'), weatherState),
       h('p', { class: 'small' }, typo('Open-Meteo : la pluie prévue pendant tes marches. Quai reçoit la carte de toute la Belgique : ta position n’est jamais envoyée.')),
+    ),
+    // 1.2.10 (PRD-1.2.10 § 3.8) : chemins à pied d'OpenStreetMap, avec leur attribution (licence ODbL)
+    h(
+      'section',
+      { class: 'box', style: 'padding:14px 16px;display:flex;flex-direction:column;gap:6px' },
+      h('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;gap:12px' }, h('h2', null, T.walkTitle), walkState),
+      h('p', { class: 'small' }, typo(T.walkText)),
+      h('p', { class: 'small muted' }, T.walkCredit),
     ),
     h('section', { class: 'box pad-tight' }, h('h2', { style: 'margin:0 0 4px' }, 'Mises à jour'), updates),
     h('p', { class: 'small muted' }, 'Si une source ne répond plus, Quai affiche l’horaire prévu, signalé par le signe ~. Usage personnel et non commercial.'),

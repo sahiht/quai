@@ -5,6 +5,7 @@
  */
 import type { Endpoint, FavoriteAnswer, Journey, LineMatch, LinePick, Mode, NameLang, Op, Place, PlanResult, Propose, Settings } from '../core/api';
 import { LABEL_TEXT } from '../core/api';
+import type { GuideStatus } from '../core/guide-types';
 import { favoriteTitle, placeOf } from '../core/favorites';
 import { displayLabel, HOLIDAY_TEXT, holidayName, longestWalk, meansText, rideName, walksMore } from '../core/means';
 import { NB, shortAddress } from '../core/text';
@@ -191,7 +192,43 @@ export const T = {
   alerts: 'Alertes',
   data: 'Données',
   sources: 'Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company',
+  /** 1.2.10 (PRD-1.2.10 § 4.1) : le seul réglage du guidage, dans Réglages. */
+  groupDuringTrip: 'Pendant un trajet',
+  guide: 'Me guider pendant un trajet',
+  guideHelp: 'Les lunettes restent vides et t’écrivent seulement quand tu dois agir : partir, tourner, monter, descendre. Éteint : ton trajet est suivi sans rien afficher tout seul.',
+  /** 1.2.10 (PRD-1.2.10 § 4.2) : bouton d'un favori, et son message quand les lunettes n'en rendent pas. */
+  goThere: 'Y aller',
+  guideStarted: 'Guidage lancé sur les lunettes.',
+  followStarted: 'Trajet suivi dans les lunettes.',
+  /** 1.2.10 (PRD-1.2.10 § 4.3) : carte « En cours » de l'accueil ; « suivi » quand le guidage est éteint. */
+  nowTitle: 'En cours',
+  stopGuide: 'Arrêter le guidage',
+  stopFollow: 'Arrêter le suivi',
+  guideStopped: 'Guidage arrêté.',
+  followStopped: 'Suivi arrêté.',
+  /** 1.2.10 (PRD-1.2.10 § 4.4) : l'ouverture de Quai, sur son écran. */
+  opening: 'À l’ouverture de Quai',
+  openingLead: 'Ce que les lunettes montrent en premier.',
+  /** 1.2.10 (PRD-1.2.10 § 3.8 et § 4.5) : carte « Chemins à pied » de l'écran Données. */
+  walkTitle: 'Chemins à pied',
+  walkText: 'OpenStreetMap : les vrais chemins à pied, avec les escaliers, les parcs et les passages des gares. Le chemin se calcule sur ton téléphone : ta position n’est jamais envoyée.',
+  walkCredit: '© les contributeurs d’OpenStreetMap, licence ODbL',
 } as const;
+
+/** 1.2.10 : choix de « À l’ouverture de Quai » (libellés de la revue d'usage n° 11, mêmes valeurs enregistrées). */
+export const OPENING_LABEL: Record<Settings['display']['opening'], string> = {
+  suggest: 'L’accueil, avec mes favoris en tête',
+  firstFavorite: 'Directement mon premier favori',
+  home: 'L’accueil, sans favoris',
+};
+/** Ordre des choix de l'ouverture (celui de la 1.2.9). */
+export const OPENING_ORDER: readonly Settings['display']['opening'][] = ['suggest', 'firstFavorite', 'home'];
+
+/** 1.2.10 : carte « En cours » : « Bureau, arrivée 08:54 » (sans heure connue : le titre seul). */
+export const guideTitleLine = (s: Pick<GuideStatus, 'title' | 'arr'>): string => (Number.isFinite(s.arr) && s.arr > 0 ? `${s.title}, arrivée ${hhmm(s.arr)}` : s.title);
+/** 1.2.10 : « Maintenant : bus 6 vers Gare des Guillemins » (rien si le moteur ne dit rien). */
+export const guideNowLine = (s: Pick<GuideStatus, 'now'>): string => (s.now.trim() ? typo(`Maintenant : ${s.now.trim()}`) : '');
+
 
 /** Titre de la bannière « Nouveau » de l'accueil (1.2.9 : sur une ligne, les nouveautés dépliées à la demande). */
 export const newsTitle = (version: string): string => `Nouveau dans Quai ${version}`;
@@ -279,6 +316,26 @@ export const NEWS_129_WEB: readonly string[] = [
   NEWS_129[2],
 ];
 
+/**
+ * 1.2.10 (PRD-1.2.10 § 7) : nouveautés de la bannière, comme le message « Quai 1.2.10 » des lunettes (« Y aller »,
+ * « j'y descends », favoris sur une ligne), puis ce qui change sur le téléphone.
+ */
+export const NEWS_1210: readonly string[] = [
+  '« Y aller » : Quai te guide de porte à porte. L’écran des lunettes reste vide et t’écrit seulement quand tu dois agir : partir, tourner, monter, descendre.',
+  'Train ou bus déjà pris : dans la liste de ses arrêts, touche celui où tu descends, « j’y descends », et Quai te dit quand descendre.',
+  'Favoris des lunettes : une ligne chacun, le détail du favori choisi en bas de l’écran.',
+  'Sur l’accueil du téléphone : « Y aller » sur chaque favori et, pendant le trajet, la carte « En cours ». Le réglage « Me guider pendant un trajet » est derrière le bouton « Réglages ».',
+];
+
+/** 1.2.10 : les mêmes sur Quai Web, où la page du téléphone est l'onglet Réglages, et l'appui long de l'onglet Lunettes. */
+export const NEWS_1210_WEB: readonly string[] = [
+  NEWS_1210[0],
+  NEWS_1210[1],
+  NEWS_1210[2],
+  'Dans l’onglet Réglages : « Y aller » sur chaque favori et, pendant le trajet, la carte « En cours ». Le réglage « Me guider pendant un trajet » est derrière le bouton « Réglages ».',
+  'Dans l’onglet Lunettes, le bouton « Appui long » ouvre le menu du guidage : « Arrêter le guidage », « Voir tout le trajet ».',
+];
+
 /** 1.2.8 : nouveautés de la bannière (comme le message « Quai 1.2.8 » des lunettes). */
 export const NEWS_128: readonly string[] = [
   'Dans les lunettes, touche un train au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.',
@@ -289,12 +346,13 @@ export const NEWS_128: readonly string[] = [
 const stillTrue = (l: string): boolean => !/^Bus, tram, métro\b/.test(l);
 
 /**
- * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.9 ; depuis une version
+ * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.10 ; depuis une version
  * antérieure (`seen` : la version vue avant la mise à jour), celles des versions sautées ensuite, de la plus récente à
- * la plus ancienne, sans celles qui ne sont plus vraies.
+ * la plus ancienne, sans celles qui ne sont plus vraies. Quai Web (`web`) : ses propres lignes (onglet Réglages).
  */
 export function newsLines(seen = '', web = false): string[] {
-  const out = [...(web ? NEWS_129_WEB : NEWS_129)];
+  const out = [...(web ? NEWS_1210_WEB : NEWS_1210)];
+  if (seen && compareVersions(seen, '1.2.9') < 0) out.push(...(web ? NEWS_129_WEB : NEWS_129));
   if (seen && compareVersions(seen, '1.2.8') < 0) out.push(...NEWS_128);
   if (seen && compareVersions(seen, '1.2.6') < 0) out.push(...NEWS_126);
   if (seen && compareVersions(seen, '1.2.5') < 0) out.push(...NEWS_125.filter(stillTrue));
