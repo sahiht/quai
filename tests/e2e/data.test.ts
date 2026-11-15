@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AreaFile, LineFile, LineIndex, LineTile, Meta, SearchFile, TileFile, TrainsDay } from '../../shared/types';
 import { validateData } from './validate-data';
-import { buildFixtureData, type RunResult } from './lib/stack';
+import { buildFixtureData, buildWalkTiles, type RunResult } from './lib/stack';
 
 let dir: string;
 let build: RunResult;
@@ -220,4 +220,52 @@ describe('le validateur détecte les corruptions', () => {
   mutate('autorisations invalides', (d) => edit<LineFile>(d, 'lines/tec/N4.json', (l) => (l.pats[0].f = 'ab')), /descente au premier arrêt|aucune montée/);
   mutate('tuile de lignes fausse', (d) => edit<LineTile>(d, 'linetiles/2542_145.json', (t) => (t.a['stib:6359'] = [...t.a['stib:6359'], 11])), /≠ lignes des fichiers/);
   mutate('voyage absent du fichier de ligne', (d) => edit<LineFile>(d, 'lines/delijn/232.json', (l) => (l.trips = l.trips?.map((x) => `${x}x`))), /absent du fichier de ligne/);
+});
+
+describe('1.2.10 : tuiles piétonnes (walk/) dans les données', () => {
+  let wdir: string;
+  beforeAll(async () => {
+    wdir = mkdtempSync(join(tmpdir(), 'quai-e2e-walk-'));
+    cpSync(dir, wdir, { recursive: true });
+    await buildWalkTiles(wdir);
+  }, 120_000);
+  afterAll(() => rmSync(wdir, { recursive: true, force: true }));
+  const tiles = () => readdirSync(join(wdir, 'walk')).filter((f) => f !== 'index.json');
+
+  it('validate-data accepte walk/ à la racine : index.json et tuiles au format de core/walk/format.ts, sans erreur ni avertissement', () => {
+    expect(tiles().length).toBeGreaterThan(0);
+    const r = validateData(wdir);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings).toEqual([]);
+    expect(r.stats.walkTiles).toBe(tiles().length);
+    expect(r.stats.walkBytes).toBeGreaterThan(0);
+  });
+
+  it('le validateur détecte une tuile d’une autre version, mal nommée, illisible, et un index qui ne compte pas juste', () => {
+    const corrupt = (fn: (d: string) => void): string[] => {
+      const d = mkdtempSync(join(tmpdir(), 'quai-e2e-walk-bad-'));
+      try {
+        cpSync(wdir, d, { recursive: true });
+        fn(d);
+        return validateData(d).errors;
+      } finally {
+        rmSync(d, { recursive: true, force: true });
+      }
+    };
+    const first = tiles()[0];
+    const tile = (d: string) => JSON.parse(readFileSync(join(d, 'walk', first), 'utf8')) as Record<string, unknown>;
+    const put = (d: string, name: string, x: unknown) => writeFileSync(join(d, 'walk', name), JSON.stringify(x));
+    expect(corrupt((d) => put(d, first, { ...tile(d), ver: '1999-01-01' })).join(' ')).toMatch(/version « 1999-01-01 »/);
+    expect(corrupt((d) => put(d, first, { ...tile(d), k: '0_0' })).join(' ')).toMatch(/clé « 0_0 »/);
+    expect(corrupt((d) => put(d, first, { ...tile(d), w: '\u00e9\u00e9' })).join(' ')).toMatch(/tuile piétonne illisible|invalide/);
+    expect(corrupt((d) => writeFileSync(join(d, 'walk', 'notes.txt'), 'x')).join(' ')).toMatch(/walk\/notes\.txt : fichier inattendu/);
+    expect(corrupt((d) => {
+      const i = JSON.parse(readFileSync(join(d, 'walk', 'index.json'), 'utf8')) as Record<string, unknown>;
+      put(d, 'index.json', { ...i, tiles: (i.tiles as number) + 1 });
+    }).join(' ')).toMatch(/tuiles annoncées/);
+    expect(corrupt((d) => {
+      const i = JSON.parse(readFileSync(join(d, 'walk', 'index.json'), 'utf8')) as Record<string, unknown>;
+      put(d, 'index.json', { ...i, licence: 'aucune' });
+    }).join(' ')).toMatch(/licence ODbL absente/);
+  });
 });

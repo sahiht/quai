@@ -128,6 +128,19 @@ export async function buildFixtureData(opts: { date?: string; sources?: string; 
   return { dir, result };
 }
 
+/** 1.2.10 : extrait OpenStreetMap des tests de bout en bout (rues publiques autour des arrêts des scénarios). */
+export const WALK_OSM = join(ROOT, 'fixtures', 'pipeline', 'osm', 'namur-bruxelles.osm');
+
+/**
+ * 1.2.10 : tuiles piétonnes construites dans `<dir>/walk` depuis l'extrait des fixtures, sans réseau (commande `local`
+ * de pipeline/src/walk/cli.ts, licence comprise).
+ */
+export async function buildWalkTiles(dir: string, input = WALK_OSM): Promise<RunResult> {
+  const r = await run('node', ['--experimental-strip-types', 'src/walk/cli.ts', 'local', '--data', dir, '--input', input], { cwd: PIPELINE });
+  if (r.code !== 0) throw new Error(`tuiles piétonnes en échec (${r.code})\n${r.stdout}\n${r.stderr}`);
+  return r;
+}
+
 export const startDataServer = (dir: string) =>
   startServer('serve-data', 'npm', ['run', 'serve-data', '--', '--dir', dir, '--port', '0'], { cwd: PIPELINE, ready: /sur (http:\/\/[^\s]+)/ });
 

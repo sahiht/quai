@@ -34,6 +34,7 @@
 import { PNG } from 'pngjs';
 import { padLeftTo, textWidth } from '../../../app/src/glasses/font';
 import { GEO, HOME_INDENT, LAYOUTS, TILDE_W, WIDTHS, segRow } from '../../../app/src/glasses/layout';
+import { STEP_TIME_PX } from '../../../app/src/glasses/views';
 
 const LINE_H = 27;
 const SCREEN_H = 288;
@@ -187,6 +188,10 @@ function rowSegments(screen: string, line: string, indented = false): Seg[] {
     return out;
   }
   const def = LAYOUTS.steps;
+  // 1.2.10 (PRD-1.2.10 § 5) : une rangée par étape en mots clairs et pâles (l'heure dans sa case, le véhicule clair,
+  // « → arrêt » et « à pied 5 min » pâles), l'heure d'arrivée ou la marge calée à droite
+  const step = stepRowSegments(line);
+  if (step) return step;
   // 1.2.4 : sous « Partir à pied vers l'arrêt » (ou un trajet qui commence à bord), le nom seul, dans la colonne du texte
   if (parts.length === 1 && !TIME.test(line)) return [{ from: def.b.x, to: def.b.x + width(line), text: line }];
   const [a, b, c] = parts;
@@ -195,6 +200,41 @@ function rowSegments(screen: string, line: string, indented = false): Seg[] {
   if (b !== undefined) out.push({ from: def.b.x, to: def.b.x + width(b), text: b });
   if (c !== undefined) out.push({ from: def.c.x, to: def.c.x + width(c), text: c });
   return out;
+}
+
+/** 1.2.10 : rangée d'étape journalisée « 07:44 IC voie 6 ! → Bruxelles-Nord   08:42 », « 07:35 à pied 7 min ». */
+const STEP_ROW = /^(~?\d\d:\d\d) (.+?)(?: {3}(.+))?$/;
+
+/**
+ * 1.2.10 : segments d'une rangée d'étape, placés comme views.ts (stepRows) et layout.ts (segRow) les posent : l'heure
+ * calée à droite de sa case (STEP_TIME_PX), suivie d'une espace insécable pour un véhicule ; le véhicule au plus clair,
+ * « → arrêt » ou « à pied … » pâles ; à droite l'heure d'arrivée (pâle) ou la marge et « SUPPRIMÉ » (au plus clair).
+ */
+function stepRowSegments(line: string): Seg[] | null {
+  const m = STEP_ROW.exec(line);
+  if (!m) return null;
+  const [, time, text, right] = m;
+  const walkRow = /^à pied /.test(text);
+  const words: Word[] = [{ t: padLeftTo(time, STEP_TIME_PX) + (walkRow ? '' : '\u00a0'), hi: true }];
+  const k = text.indexOf(' → ');
+  if (walkRow) words.push({ t: nbsp(text) });
+  else if (k >= 0) words.push({ t: nbsp(text.slice(0, k)), hi: true }, { t: nbsp(text.slice(k + 1)) });
+  else words.push({ t: nbsp(text), hi: true });
+  const pale = !!right && right !== 'SUPPRIMÉ' && !/^(marge |très juste$)/.test(right);
+  const def = LAYOUTS.steps;
+  const r = segRow(words, 0, right === undefined ? undefined : nbsp(right), def, pale);
+  const out: Seg[] = [];
+  for (const [x0, content] of [
+    [def.a.x, r.a],
+    [def.b.x, r.b],
+  ] as const) {
+    for (const run of content.matchAll(/\S+(?: \S+)*/g)) {
+      const from = x0 + textWidth(content.slice(0, run.index));
+      out.push({ from, to: from + textWidth(run[0]), text: run[0] });
+    }
+  }
+  if (r.c.trim()) out.push({ from: def.c.x + textWidth(r.c) - textWidth(r.c.trim()), to: def.c.x + textWidth(r.c), text: r.c.trim() });
+  return out.sort((p, q) => p.from - q.from);
 }
 
 /**

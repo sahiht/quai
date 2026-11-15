@@ -45,7 +45,8 @@ export const HINTS = {
   moment: 'toucher : effacer   appui long : arrêter',
   arrived: 'toucher : terminer',
   stepsGo: '△▽ étapes   toucher : y aller   double : retour',
-  stepsGuided: '△▽ étapes   double : retour',
+  /** trajet guidé : arbitrage de l'intégrateur (toucher rouvre le guidage), le PRD § 5 disait « △▽ étapes   double : retour » */
+  stepsGuided: '△▽ étapes   toucher : guidage   double : retour',
   stopsAlight: '△▽ arrêts   toucher : j’y descends   double : retour',
 } as const;
 
@@ -127,7 +128,9 @@ export const stopsToAlight = (l: OLeg): number => Math.max(1, (l.stops?.length ?
 export function boardLines(j: OJourney, leg: number, now: number): Want[] {
   const l = j.legs[leg];
   const out: Want[] = [];
-  if (isTrain(l)) out.push(`${l.cat ?? 'train'} à ${time(l.dep, l.rt)}`);
+  const changed = !!l.newPlatform && !!l.platform && l.newPlatform !== l.platform;
+  // voie modifiée : « voie modifiée » au plus clair, à la suite de l'heure sur la 1re ligne ou sur une ligne à elle
+  if (isTrain(l)) out.push(changed ? new RegExp(`^${esc(`${l.cat ?? 'train'} à ${time(l.dep, l.rt)}`)}(, voie modifiée)?$`) : `${l.cat ?? 'train'} à ${time(l.dep, l.rt)}`);
   else {
     const m = minutesFloor(l.dep - now);
     if (m > 10) out.push(`à ${time(l.dep, l.rt)}`);
@@ -141,7 +144,7 @@ export function boardLines(j: OJourney, leg: number, now: number): Want[] {
   out.push(stopsPhrase(stopsToAlight(l)));
   const prev = j.legs[leg - 1];
   if (prev && prev.kind === 'walk' && leg > 1) out.push(/^\d+ min à pied jusqu’au quai, marge \d+ min$/);
-  if (l.newPlatform && l.platform && l.newPlatform !== l.platform) out.push('voie modifiée');
+  if (changed) out.push('voie modifiée');
   return out;
 }
 

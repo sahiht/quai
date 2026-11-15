@@ -106,8 +106,9 @@ async function setNow(r: Run, t: number): Promise<void> {
 
 /** Position poussée vers les flux du guidage (`window.__quaiPushFix`, équipe B). */
 async function push(r: Run, p: TracePoint): Promise<void> {
-  const ok = await r.page.eval<boolean>(`(() => { if (typeof window.__quaiPushFix !== 'function') return false; window.__quaiPushFix(${JSON.stringify(toFix(p))}); return true; })()`);
-  check(ok, 'crochet manquant : window.__quaiPushFix({ lat, lon, accuracy, speed, heading, at }) en mode e2e (équipe B, PRD § 10)');
+  const ok = await r.page.eval<string>(`(() => { if (typeof window.__quaiPushFix !== 'function') return 'absent'; return window.__quaiPushFix(${JSON.stringify(toFix(p))}) ? 'pris' : 'refusé'; })()`);
+  check(ok !== 'absent', 'crochet manquant : window.__quaiPushFix({ lat, lon, accuracy, speed, heading, at }) en mode e2e (équipe B, PRD § 10)');
+  check(ok === 'pris', `position refusée par window.__quaiPushFix (${p.lat}, ${p.lon} à ${O.hm(p.at)}) : aucun flux de position en service ?`);
 }
 
 /** Va à l'instant `t` et y pousse la position de la trace (le moteur se recalcule à chaque position, PRD § 3.7). */
@@ -384,7 +385,7 @@ async function s1210go(ctx: Ctx): Promise<void> {
       check(s, `moment « board » de l’${O.vehicle(j.legs[ic])} jamais affiché en arrivant à la gare : dernier écran ${show(r.page.lastScreen())}`);
       const want = O.boardLines(j, ic, T('07:41'));
       expectLines(s, want.filter((w) => w !== 'voie modifiée'), '« À l’arrêt » / monter (§ 3.2, board)', ['voie modifiée', /^\d+ min à pied jusqu’au quai, marge \d+ min$/]);
-      if (want.includes('voie modifiée')) check(s.lines.some((l) => O.norm(l) === 'voie modifiée'), `« voie modifiée » absent du moment « board » : ${show(s)}`);
+      if (want.includes('voie modifiée')) check(s.lines.some((l) => O.norm(l) === 'voie modifiée' || O.norm(l).endsWith(', voie modifiée')), `« voie modifiée » absent du moment « board » : ${show(s)}`);
       momentCommon(s, title);
       return { screen: s, shot: { kind: 'guide', image: true } };
     });
@@ -583,7 +584,7 @@ async function s1210menu(ctx: Ctx): Promise<void> {
       await gesture(r, 'down');
       await gesture(r, 'tap');
       const s = await waitGuide(r, '« Voir tout le trajet » : l’écran du trajet guidé (§ 3.4, § 5)', (x) => x.screen === 'steps');
-      check(O.matches(hint(s), O.HINTS.stepsGuided), `aide « ${hint(s)} » au lieu de « ${O.HINTS.stepsGuided} » (trajet déjà guidé, § 5)`);
+      check(O.matches(hint(s), O.HINTS.stepsGuided), `aide « ${hint(s)} » au lieu de « ${O.HINTS.stepsGuided} » (trajet déjà guidé, § 5 et arbitrage de l’intégrateur)`);
       await gesture(r, 'double');
       await waitGuide(r, 'retour au guidage par double toucher (§ 3.4)', isGuide);
       return { screen: s, shot: { kind: 'layout' } };

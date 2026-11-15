@@ -106,7 +106,9 @@ describe('oracle des textes du guidage (PRD § 3.2, § 3.3)', () => {
     expect(O.matches('IC à 07:44, très juste', leave[2])).toBe(false);
     expect(leave[2]).toBe('IC à 07:44');
     expect(O.platformLines(J.legs[1])).toEqual(['Voie modifiée', 'IC à 07:44, voie 6 au lieu de 4']);
-    expect(O.boardLines(J, 1, t('07:41')).slice(0, 3)).toEqual(['IC à 07:44', 'vers Bruxelles-Midi', 'descente dans 5 arrêts']);
+    const board = O.boardLines(J, 1, t('07:41'));
+    expect(O.matches('IC à 07:44, voie modifiée', board[0]) && O.matches('IC à 07:44', board[0])).toBe(true);
+    expect(board.slice(1, 3)).toEqual(['vers Bruxelles-Midi', 'descente dans 5 arrêts']);
     expect(O.boardLines(J, 1, t('07:41'))).toContain('voie modifiée');
     expect(O.boardSign(J.legs[1])).toEqual({ label: 'voie', value: '6' });
     expect(O.boardSign(J.legs[3])).toEqual({ label: 'tram', value: '3' });
