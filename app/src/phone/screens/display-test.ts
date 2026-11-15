@@ -84,6 +84,8 @@ export function displayTestScreen(ctx: PhoneCtx): HTMLElement {
   let active = false;
   /** États reçus des lunettes : un état rendu par une commande plus ancienne n'efface pas un état plus récent. */
   let received = 0;
+  /** Tour du test : chaque début ou arrêt en ouvre un ; la réponse d'un ordre d'un tour passé est oubliée. */
+  let round = 0;
   let gone = false;
   let tick: ReturnType<typeof setTimeout> | undefined;
 
@@ -130,19 +132,23 @@ export function displayTestScreen(ctx: PhoneCtx): HTMLElement {
     show('off', T.glassesOff, can ? [button(T.testRestart, 'btn-secondary', () => begin())] : []);
   };
 
+  /** Envoie un ordre ; l'état rendu est montré (sauf pour « cancel » : « Test arrêté. » est déjà là). */
   const send = async (cmd: DisplayTestCmd): Promise<void> => {
     if (!can || !g?.displayTest) return showOff();
     const at = received;
+    const mine = round;
+    const current = (): boolean => !gone && cmd.kind !== 'cancel' && round === mine;
     try {
       const s = await g.displayTest(cmd);
-      if (!gone && received === at && s) paint(s);
+      if (current() && received === at && s) paint(s);
     } catch {
-      if (!gone && cmd.kind !== 'cancel') showOff();
+      if (current()) showOff();
     }
   };
 
   const begin = (): void => {
     if (!can) return showOff();
+    round += 1;
     active = true;
     testOwner = me;
     countdown(undefined);
@@ -152,6 +158,7 @@ export function displayTestScreen(ctx: PhoneCtx): HTMLElement {
 
   const stop = (b: HTMLButtonElement): void => {
     b.disabled = true;
+    round += 1;
     active = false;
     countdown(undefined);
     show('stopped', T.testStopped, [button(T.testRestart, 'btn-secondary', () => begin())]);

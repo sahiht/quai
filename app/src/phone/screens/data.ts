@@ -129,7 +129,10 @@ export function journalCard(ctx: PhoneCtx): HTMLElement | null {
     }
   };
 
-  /** Texte d'un trajet, sous sa ligne : un bloc lisible (les lignes du journal, coupées si besoin), « Copier ». */
+  /**
+   * Texte d'un trajet, sous sa ligne : un bloc lisible, une ligne du journal par ligne (une ligne trop longue continue en
+   * retrait, l'heure reste visible en tête), puis « Copier », qui copie le texte du journal tel quel.
+   */
   const textBlock = (t: JournalTrip, blockId: string): HTMLElement => {
     let text = '';
     try {
@@ -137,17 +140,22 @@ export function journalCard(ctx: PhoneCtx): HTMLElement | null {
     } catch {
       text = '';
     }
-    const pre = h('pre', { class: 'journal-text', id: `${blockId}-texte`, tabindex: '0', 'aria-label': typo(`Journal du trajet « ${t.title} »`) }, text);
+    const lines = text.split('\n').filter((l) => l.trim());
+    const block = h(
+      'div',
+      { class: 'journal-text', id: `${blockId}-texte`, role: 'group', 'aria-label': typo(`Journal du trajet « ${t.title} »`) },
+      lines.map((l, i) => h('p', { class: i === 0 ? 'jl jl-head' : 'jl' }, l)),
+    );
     const copy = h('button', { type: 'button', class: 'btn btn-secondary journal-copy' }, T.journalCopy);
     const msg = h('p', { class: 'msg', role: 'status' });
     copy.addEventListener('click', async () => {
       msg.textContent = '';
       msg.classList.remove('err');
-      const ok = await copyText(text, pre);
+      const ok = await copyText(text, block);
       msg.textContent = ok ? T.journalCopied : T.journalCopyManual;
       msg.classList.toggle('err', !ok);
     });
-    return h('div', { class: 'journal-open', id: blockId }, pre, h('div', { class: 'journal-actions' }, copy, msg));
+    return h('div', { class: 'journal-open', id: blockId }, block, h('div', { class: 'journal-actions' }, copy, msg));
   };
 
   const row = (t: JournalTrip, i: number): HTMLLIElement => {
@@ -199,9 +207,10 @@ export function journalCard(ctx: PhoneCtx): HTMLElement | null {
                   /* le journal se relit ci-dessous */
                 }
                 paint();
-                said.textContent = T.journalCleared;
+                const left = trips().length;
+                said.textContent = left ? '' : T.journalCleared;
                 // la confirmation a disparu : le curseur passe à ce qui la remplace
-                (trips().length ? list.querySelector<HTMLElement>('button') : empty)?.focus();
+                (left ? list.querySelector<HTMLElement>('button') : empty)?.focus();
               },
             }),
           ]

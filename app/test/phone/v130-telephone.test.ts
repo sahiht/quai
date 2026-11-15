@@ -345,6 +345,27 @@ describe('1.3.0 : écran du test de l’écran des lunettes (PRD-1.3.0 § 6.1)',
     }
   });
 
+  it('arrêté puis relancé aussitôt : la réponse tardive du « cancel » ne remplace pas le nouveau test', async () => {
+    const hz = harness({ settings: defaults() });
+    let release: (s: DisplayTestState) => void = () => undefined;
+    const cmds: DisplayTestCmd[] = [];
+    hz.glasses.displayTest = (cmd) => {
+      cmds.push(cmd);
+      return cmd.kind === 'cancel' ? new Promise<DisplayTestState>((r) => (release = r)) : Promise.resolve({ step: 'wait', left: 45 });
+    };
+    hz.glasses.onDisplayTest = () => () => undefined;
+    openDisplayTest(hz.ctx);
+    const el = mount(displayTestScreen(hz.ctx));
+    await until(() => leftText(el) === '45 s');
+    button(el, 'Arrêter le test').click();
+    button(el, 'Recommencer le test').click();
+    await until(() => leftText(el) === '45 s');
+    release({ step: 'idle' });
+    await settle();
+    expect(stepText(el)).toMatch(/^Mets tes lunettes/);
+    expect(cmds.map((c) => c.kind)).toEqual(['start', 'cancel', 'start']);
+  });
+
   it('la demande du bouton ne sert qu’une fois, et seulement tout de suite', () => {
     const hz = harness({ settings: defaults() });
     const t = withDisplayTest(hz.glasses);
@@ -606,8 +627,10 @@ describe('1.3.0 : carte « Journal des trajets » de l’écran Données (PRD-1.
     rowBtn(0).click();
     expect(j.texts).toEqual(['j12']);
     const pre = box.querySelector<HTMLElement>('.journal-text')!;
-    expect(pre.tagName).toBe('PRE');
-    expect(pre.textContent).toBe('Journal Quai 1.3.0, trajet « Bureau », 15/11/2026\n08:02:10 Partir maintenant affiché\n08:09:40 Monter dans le bus 6 affiché');
+    // une ligne du journal par ligne, la première en tête
+    expect([...pre.querySelectorAll('.jl')].map((l) => l.textContent)).toEqual(['Journal Quai 1.3.0, trajet « Bureau », 15/11/2026', '08:02:10 Partir maintenant affiché', '08:09:40 Monter dans le bus 6 affiché']);
+    expect(pre.querySelector('.jl')!.classList.contains('jl-head')).toBe(true);
+    expect(pre.getAttribute('aria-label')).toBe('Journal du trajet «\u00a0Bureau\u00a0»');
     expect(rowBtn(0).getAttribute('aria-expanded')).toBe('true');
     expect(document.getElementById(rowBtn(0).getAttribute('aria-controls')!)!.contains(pre)).toBe(true);
     // juste sous sa ligne
@@ -657,7 +680,8 @@ describe('1.3.0 : carte « Journal des trajets » de l’écran Données (PRD-1.
     await until(() => textOf(box.querySelector('.journal-open .msg')) !== '');
     expect(textOf(box.querySelector('.journal-open .msg'))).toBe('Copie impossible : le texte est sélectionné, copie-le avec le menu du téléphone.');
     expect(box.querySelector('.journal-open .msg')!.classList.contains('err')).toBe(true);
-    expect(window.getSelection()?.toString()).toBe(text);
+    const selected = window.getSelection()?.toString() ?? '';
+    for (const line of text.split('\n')) expect(selected).toContain(line);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
   });
 

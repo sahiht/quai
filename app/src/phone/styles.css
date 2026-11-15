@@ -305,7 +305,9 @@ button.add-link { border: 0; background: transparent; padding-left: 0; color: va
 .journal-row .chev svg { transition: transform 0.15s; }
 .journal-row[aria-expanded="true"] .chev svg { transform: rotate(90deg); }
 .journal-open { display: flex; flex-direction: column; gap: 8px; padding: 0 4px 12px; }
-.journal-text { margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text); }
+.journal-text { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--text); font-variant-numeric: tabular-nums; }
+.journal-text .jl { margin: 0; padding-left: 1.5em; text-indent: -1.5em; font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
+.journal-text .jl-head { margin-bottom: 4px; font-weight: 600; }
 .journal-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .journal-empty { padding: 4px 0; }
 .journal-clear:empty { display: none; }
