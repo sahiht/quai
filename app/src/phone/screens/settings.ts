@@ -6,12 +6,15 @@
  * réglables sur place (les pas-à-pas de l'écran Trajets), puis « Position et langue » ; « Quai » : Données ; en bas, les
  * sources des horaires. Favoris, gares, arrêts et lignes se règlent sur l'accueil. Affichage, Alertes, Données et
  * Position et langue reviennent ici.
+ * 1.3.0 (PRD-1.3.0 § 6.1) : sous « Me guider pendant un trajet », le bouton « Tester l’écran des lunettes » (pas dans
+ * Quai Web, ni avec des lunettes qui ne savent pas le faire), et dessous, pâle, le dernier résultat s'il existe.
  */
 import { guideOn } from '../../settings';
 import { header, type PhoneCtx } from '../app';
 import { h, icon } from '../dom';
-import { alertsSummary, displaySummary, LANG_TEXT, T, typo } from '../text';
+import { alertsSummary, displaySummary, LANG_TEXT, T, TEST_LAST, typo } from '../text';
 import { group, navRow, nextId, switchRow } from '../ui';
+import { openDisplayTest } from './display-test';
 import { ANSWER_REFRESH_MS } from './home';
 import { tripSteppers } from './trips';
 
@@ -47,6 +50,28 @@ function guideSwitch(ctx: PhoneCtx): HTMLElement {
   return row;
 }
 
+/**
+ * 1.3.0 (PRD-1.3.0 § 6.1) : bouton « Tester l’écran des lunettes » : l'écran du test, qui commence aussitôt. Dessous,
+ * pâle, le dernier résultat (Settings.display.alert) s'il existe, qui décrit aussi le bouton. Quai Web (pas de vraies
+ * lunettes) ou lunettes sans test (appli plus ancienne) : rien.
+ */
+function displayTestRow(ctx: PhoneCtx): HTMLElement | null {
+  if (ctx.web) return null;
+  let can = false;
+  try {
+    can = typeof ctx.glasses()?.displayTest === 'function';
+  } catch {
+    can = false;
+  }
+  if (!can) return null;
+  const alert = ctx.settings.get().display.alert;
+  const id = nextId('test-ecran');
+  const last = alert && TEST_LAST[alert] ? h('p', { class: 'small muted test-last', id: `${id}-dernier` }, TEST_LAST[alert]) : null;
+  const button = h('button', { type: 'button', class: 'btn btn-secondary btn-block test-open', 'aria-describedby': last ? last.id : undefined }, T.testScreen);
+  button.addEventListener('click', () => openDisplayTest(ctx));
+  return h('div', { class: 'test-row' }, button, last);
+}
+
 export function settingsScreen(ctx: PhoneCtx): HTMLElement {
   const s = ctx.settings.get();
   const data = navRow({ href: '#/donnees', icon: icon('data'), title: T.data, sub: dataSubtitle(ctx) });
@@ -64,7 +89,7 @@ export function settingsScreen(ctx: PhoneCtx): HTMLElement {
         navRow({ href: '#/alertes', icon: icon('alert'), title: T.alerts, sub: alertsSummary(s.alerts) }),
       ),
     ),
-    group('rg-guidage', T.groupDuringTrip, h('div', { class: 'box' }, guideSwitch(ctx))),
+    group('rg-guidage', T.groupDuringTrip, h('div', { class: 'box' }, guideSwitch(ctx), displayTestRow(ctx))),
     group(
       'rg-trajets',
       T.groupTrips,
