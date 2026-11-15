@@ -811,6 +811,8 @@ function withExtras(p: PageSpec, v: GlassesView): PageSpec {
  * entier qui tient, suivi de « … » ; faute de place pour un seul mot, après le dernier trait d'union, la dernière barre
  * ou la dernière apostrophe qui tient (« Comines/… », « Bruxelles-… ») ; un premier morceau seul trop long est coupé
  * au caractère (aucune autre issue). L'espace insécable lie ses deux mots (« 40 m », « arrêt : ») : jamais séparés.
+ * 1.3.0 (PRD-1.3.0 § 5) : le chemin commun de toutes les rangées ; un séparateur isolé (« - », « / ») ne finit jamais le
+ * texte coupé.
  */
 export function truncateWords(text: string, maxPx: number): string {
   const t = truncate(text, Number.MAX_SAFE_INTEGER);
@@ -824,7 +826,8 @@ export function truncateWords(text: string, maxPx: number): string {
       const part = `${words.slice(0, k).join(' ')} ${next.slice(0, i)}`;
       if (textWidth(`${part}…`) <= maxPx) return `${part}…`;
     }
-    const head = words.slice(0, k).join(' ').replace(/[\s,;:·]+$/, '');
+    // 1.3.0 : ni ponctuation ni séparateur isolé en fin (« Arlon TEC - Rue … » : « Arlon TEC… », jamais « Arlon TEC -… »)
+    const head = words.slice(0, k).join(' ').replace(/(?:\s+[-/–·])+$/, '').replace(/[\s,;:·]+$/, '');
     if (head && textWidth(`${head}…`) <= maxPx) return `${head}…`;
   }
   // un seul mot ne tient pas : ses morceaux (« Comines/komen » → « Comines/ », « Bruxelles-Aéroport » → « Bruxelles- »)

@@ -342,6 +342,17 @@ describe('PRD-1.3.0 § 5 : toute rangée coupe un nom trop long au mot ; heures,
     expect(p.lines[1]).toContain('…');
   });
 
+  it('un séparateur isolé (« - », « / ») ne finit jamais un nom coupé (noms réels du TEC et de De Lijn)', () => {
+    for (const name of ['Arlon TEC - Rue Sainte-Croix', '’s Gravenvoeren Kerk / Eglise', 'Andenne Ville - 4 coins', 'Bredene Café De Zeemeeuw / Breeweg']) {
+      for (let w = 60; w < textWidth(name); w += 2) {
+        const t = truncateWords(name, w);
+        expect(t, `${name} à ${w} px`).not.toMatch(/\s[-/]…$/);
+        expect(textWidth(t)).toBeLessThanOrEqual(w);
+      }
+    }
+    expect(truncateWords('Arlon TEC - Rue Sainte-Croix', textWidth('Arlon TEC - Rue…') - 1)).toBe('Arlon TEC…');
+  });
+
   it('un premier mot seul trop long reste coupé au caractère (aucune autre issue), jamais vide', () => {
     const word = 'Werviksesteenweg';
     expect(truncateWords(word, 90)).toMatch(/^Wervik.*…$/);
