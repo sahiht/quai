@@ -140,6 +140,15 @@ export function checkGuidePixels(png: Buffer, s: GuideShot, opts: { image: boole
       const e = extent(lit, yy, boxes);
       return e.n > 0 && Math.abs(e.min - x0) <= TOL + 1 && e.max >= x0 + lw - END_TOL && e.max <= x0 + lw + TOL;
     };
+    // sans image, les rangées suivent la grille des autres écrans (layout.ts) : ligne du haut sous le titre, rangées de la
+    // liste (3 px plus bas), pied compté du bas de l'écran ; la première qui convient, dans l'ordre
+    if (!boxes.length) {
+      const grid = [...Array.from({ length: 9 }, (_, k) => [GEO.TITLE_Y + LINE_H * (k + 1), GEO.TITLE_Y + LINE_H * (k + 1) + 3]).flat(), ...[1, 2, 3].map((n) => H - GEO.BOTTOM_MARGIN - n * LINE_H)]
+        .filter((g) => g >= y - 4 && g <= H - LINE_H)
+        .sort((p, q) => p - q);
+      const g = grid.find((gy) => fits(gy, GEO.X_TEXT));
+      if (g !== undefined) found = { y: g, x0: GEO.X_TEXT };
+    }
     for (let yy = y; yy <= H - LINE_H + 4 && !found; yy++) {
       for (const x0 of boxes.length ? [X_IMAGE_TEXT, GEO.X_TEXT] : [GEO.X_TEXT]) {
         if (!fits(yy, x0)) continue;

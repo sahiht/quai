@@ -142,10 +142,11 @@ export function boardLines(j: OJourney, leg: number, now: number): Want[] {
     }
   }
   if (l.head) out.push(`vers ${l.head.fr}`);
-  out.push(stopsPhrase(stopsToAlight(l)));
   const prev = j.legs[leg - 1];
-  // correspondance : « 3 min à pied jusqu'au quai, marge 6 min » (train) ; « 2 min à pied jusqu'à l'arrêt, très juste »
+  // correspondance : « 3 min à pied jusqu'au quai, marge 6 min » (train) ; « 2 min à pied jusqu'à l'arrêt, très juste » ;
+  // trois lignes au plus (PRD § 3.9) : elle prend la place de « descente dans n arrêts »
   if (prev && prev.kind === 'walk' && leg > 1) out.push(isTrain(l) ? /^\d+ min à pied jusqu’au quai, (marge \d+ min|très juste)$/ : /^\d+ min à pied jusqu’à l’arrêt, (marge \d+ min|très juste)$/);
+  else out.push(stopsPhrase(stopsToAlight(l)));
   return out;
 }
 

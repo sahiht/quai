@@ -166,7 +166,7 @@ async function canvasShot(r: Run): Promise<Buffer> {
   return canvasToShot(Buffer.from(b64, 'base64'));
 }
 
-type ShotKind = { kind: 'guide'; image: boolean } | { kind: 'empty' } | { kind: 'layout' } | { kind: 'menu' };
+type ShotKind = { kind: 'guide'; image: boolean } | { kind: 'empty' } | { kind: 'layout' } | { kind: 'menu' } | { kind: 'capture' };
 
 /** Étape Quai Web : capture du canvas contrôlée au pixel, résultat dans le rapport commun. */
 async function gstep(r: Run, name: string, fn: () => Promise<{ screen?: GlassesScreen; shot?: ShotKind } | void>, opts: { critical?: boolean } = {}): Promise<void> {
@@ -192,6 +192,9 @@ async function gstep(r: Run, name: string, fn: () => Promise<{ screen?: GlassesS
       if (out.shot.kind === 'empty') {
         const n = litCount(buf);
         if (n) bad = [`écran calme attendu (aucun pixel allumé), ${n} pixels allumés`];
+      } else if (out.shot.kind === 'capture') {
+        // capture seulement (l'écran est contrôlé au pixel ailleurs) : jamais un écran noir
+        if (!litCount(buf)) bad = ['écran noir'];
       } else if (out.shot.kind === 'layout' || out.shot.kind === 'menu') {
         // écrans à gabarit (accueil, trajet, arrêts, menu de l'appui long) : le contrôle des colonnes de layout.ts, avec
         // 6 px de marge (canvas : la police du système déborde de 1 à 4 px l'avance des G2 aux extrémités)
@@ -622,7 +625,8 @@ async function s1210menu(ctx: Ctx): Promise<void> {
       check(O.matches(hint(s), O.HINTS.stepsGuided), `aide « ${hint(s)} » au lieu de « ${O.HINTS.stepsGuided} » (trajet déjà guidé, § 5 et arbitrage de l’intégrateur)`);
       await gesture(r, 'double');
       await waitGuide(r, 'retour au guidage par double toucher (§ 3.4)', isGuide);
-      return { screen: s, shot: { kind: 'layout' } };
+      // l'écran du trajet est contrôlé au pixel dans le simulateur (s1210sim, s1) ; sur le canvas, capture seulement
+      return { screen: s, shot: { kind: 'capture' } };
     });
     await gstep(r, 'guide-double-toucher-en-cours', async () => {
       await gesture(r, 'double');
