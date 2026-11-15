@@ -129,7 +129,7 @@ function fakeJournal(trips: JournalTrip[]): TripJournal & { cleared: number; tex
 
 /** Règles de l'appli pour un texte visible : jamais de tiret long ni moyen, espaces insécables, apostrophe « ’ ». */
 function typoOk(s: string, what = s): void {
-  expect(s, what).not.toMatch(/[–—]/);
+  expect(s, what).not.toMatch(/[\u2013\u2014]/);
   // jamais une espace ordinaire devant « : ; ! ? », ni dans les guillemets français
   expect(s, what).not.toMatch(/ [:;!?]/);
   expect(s, what).not.toMatch(/« | »/);
@@ -257,7 +257,7 @@ describe('1.3.0 : écran du test de l’écran des lunettes (PRD-1.3.0 § 6.1)',
     expect(leftText(el)).toBe('9 s');
     t.emit({ step: 'ask' });
     expect(stepText(el)).toBe('Lève la tête. Que vois-tu dans les lunettes ?');
-    expect(el.querySelector('.test-step')!.textContent).toMatch(/lunettes \?$/);
+    expect(el.querySelector('.test-step')!.textContent).toMatch(/lunettes\u00a0\?$/);
     expect(leftText(el)).toBeNull();
     expect(buttons(el)).toEqual(['Le test de Quai', 'Le Dashboard', 'Rien', 'Arrêter le test']);
     const group = el.querySelector<HTMLElement>('.test-answers')!;
@@ -497,9 +497,9 @@ describe('1.3.0 : écran du test de l’écran des lunettes (PRD-1.3.0 § 6.1)',
   });
 
   it('textes du test : ceux du PRD, typographie française, jamais de tiret long ni moyen', () => {
-    expect(T.testWait).toBe('Mets tes lunettes, regarde devant toi, la tête droite, et ne touche à rien pendant 45 secondes.');
+    expect(T.testWait).toBe('Mets tes lunettes, regarde devant toi, la tête droite, et ne touche à rien pendant 45\u00a0secondes.');
     expect(T.testSent).toBe('Touche une fois les lunettes.');
-    expect(T.testAsk).toBe('Lève la tête. Que vois-tu dans les lunettes ?');
+    expect(T.testAsk).toBe('Lève la tête. Que vois-tu dans les lunettes\u00a0?');
     expect(T.testClosed).toBe('Ouvre Quai sur les lunettes, puis recommence.');
     expect(T.testStop).toBe('Arrêter le test');
     expect(TEST_ANSWERS.map((a) => [a.answer, a.label])).toEqual([
@@ -509,7 +509,7 @@ describe('1.3.0 : écran du test de l’écran des lunettes (PRD-1.3.0 § 6.1)',
     ]);
     expect(plain(TEST_ADVICE.headUp)).toBe('Lève un peu la tête pour voir les messages. Pour le moindre mouvement : dans l’appli Even, règle l’angle d’affichage au plus bas.');
     expect(TEST_ADVICE.none).toMatch(/Head-Up/);
-    expect(secondsLeft(45)).toBe('45 s');
+    expect(secondsLeft(45)).toBe('45\u00a0s');
     for (const [k, v] of Object.entries(T).filter(([k]) => /^test/.test(k))) typoOk(v, k);
     for (const [k, v] of [...Object.entries(TEST_ADVICE), ...Object.entries(TEST_LAST)]) typoOk(v, k);
   });
@@ -537,7 +537,7 @@ describe('1.3.0 : la carte « En cours » montre la vérification (PRD-1.3.0 § 
     expect(order.indexOf('now-checks')).toBeLessThan(order.indexOf('btn'));
     // annoncées quand elles changent ; typographie gardée (insécables de checkLines)
     expect(card.querySelector('.now-checks')!.getAttribute('aria-live')).toBe('polite');
-    expect(card.querySelector('.now-check')!.textContent).toBe('Lunettes : 12 % de batterie');
+    expect(card.querySelector('.now-check')!.textContent).toBe('Lunettes\u00a0: 12\u00a0% de batterie');
     // plus de problème : la ligne disparaît
     guide.emit({ ...STATUS });
     expect(checks(el)).toEqual([]);
@@ -788,7 +788,7 @@ describe('1.3.0 : bannière « Nouveau dans Quai 1.3.0 » du téléphone (PRD-1.
     hz.ctx.news = newsState('1.2.10', NEWS_SINCE, '1.3.0');
     const el = mount(homeScreen(hz.ctx));
     for (const p of el.querySelectorAll('.news-lines p')) typoOk(p.textContent!);
-    for (const l of [...NEWS_130, ...NEWS_130_WEB]) expect(l).not.toMatch(/[–—]|vous\b/);
+    for (const l of [...NEWS_130, ...NEWS_130_WEB]) expect(l).not.toMatch(/[\u2013\u2014]|vous\b/);
   });
 });
 
