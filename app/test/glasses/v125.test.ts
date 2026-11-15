@@ -58,15 +58,20 @@ const tramFrom = (id: string, d: number, a: number, then: Parameters<typeof jour
 const withRain = (j: Journey, ...walks: number[]): Journey => ({ ...j, legs: j.legs.map((l, i) => (walks.includes(i) ? { ...l, rain: true } : l)) });
 
 describe('PRD-1.2.5 § 1 : « Si tu le rates »', () => {
-  it('5 min au plus avant de partir, et jusqu’au départ du premier véhicule ; sinon la raison', () => {
+  it('5 min au plus avant de partir, et jusqu’au départ du premier véhicule ; sinon (1.2.10) le départ et l’arrivée', () => {
     expect(MISS_WINDOW_MIN).toBe(5);
-    // départ à pied à 07:38 : à 07:32, encore la raison ; à 07:33, « Si tu le rates »
-    expect(top(j1, ALL, T(7, 32))).toBe('Le plus court : 1 changement, à pied 5 + 4 + 2 min');
+    // départ à pied à 07:38 : à 07:32, rien ; à 07:33, « Si tu le rates » (missLine, que le moteur reprend)
+    expect(missLine(j1, ALL, j1.leaveAt, T(7, 32))).toBeNull();
+    expect(nb(missLine(j1, ALL, j1.leaveAt, T(7, 33))!)).toBe('Si tu le rates : arrivée 08:56, 30 min plus tard');
+    // en marchant vers l'arrêt, avant le bus : encore ; le bus est parti : plus rien
+    expect(nb(missLine(j1, ALL, j1.leaveAt, T(7, 42))!)).toBe('Si tu le rates : arrivée 08:56, 30 min plus tard');
+    expect(missLine(j1, ALL, j1.leaveAt, T(7, 43))).toBeNull();
+    // la ligne du haut de l'écran du trajet : « Si tu le rates » dans la fenêtre ; avant et après, 1.2.10 (PRD-1.2.10
+    // § 5) : le départ et l'arrivée
+    expect(top(j1, ALL, T(7, 32))).toBe('Départ 07:38, dans 6 min   arrivée 08:26');
     expect(top(j1, ALL, T(7, 33))).toBe('Si tu le rates : arrivée 08:56, 30 min plus tard');
-    // en marchant vers l'arrêt, avant le bus : encore
     expect(top(j1, ALL, T(7, 42))).toBe('Si tu le rates : arrivée 08:56, 30 min plus tard');
-    // le bus est parti : la raison revient
-    expect(top(j1, ALL, T(7, 43))).toBe('Le plus court : 1 changement, à pied 5 + 4 + 2 min');
+    expect(top(j1, ALL, T(7, 43))).toBe('Départ 07:38   arrivée 08:26');
   });
 
   it('raté à l’arrêt : les trajets qui repartent du même arrêt plus tard, jamais d’un autre ; un autre trajet peut y passer', () => {
@@ -76,7 +81,7 @@ describe('PRD-1.2.5 § 1 : « Si tu le rates »', () => {
     expect(nb(missLine(j2, ALL, j2.leaveAt, T(7, 31))!)).toBe('Si tu le rates : arrivée 08:26, 6 min plus tard');
     // rien n'en repart : rien (la raison reste)
     expect(missLine(j3, ALL, j3.leaveAt, T(8, 6))).toBeNull();
-    expect(top(j3, ALL, T(8, 6))).toBe('Le suivant : même trajet, 30 min plus tard');
+    expect(top(j3, ALL, T(8, 6))).toBe('Départ 08:08, dans 2 min   arrivée 08:56');
   });
 
   it('même nom : même arrêt jusqu’à 400 m (distance réelle, diagonale comprise), au-delà un autre', () => {
@@ -148,65 +153,65 @@ describe('PRD-1.2.5 § 2 : marge d’une correspondance de 5 min ou moins', () =
     legs: j.legs.map((l, i) => (i === legIndex ? { ...l, dep: l.dep + deltaMin * MIN, arr: l.arr + deltaMin * MIN, schedDep: l.schedDep + deltaMin * MIN, schedArr: l.schedArr + deltaMin * MIN } : l)),
   });
 
-  it('« marge 2 min » sur l’étape du véhicule ; jamais sur le premier véhicule ; plus de 5 min : rien', () => {
+  it('« marge 2 min » sur l’étape du véhicule ; jamais sur le premier véhicule ; plus de 5 min : l’heure d’arrivée (1.2.10)', () => {
     expect(MARGIN_SHOWN_MAX).toBe(5);
     // bus jusqu'à 07:55, 4 min à pied, l'IC à 08:01 : 2 min de marge
-    expect(state(j1, NOW, /^08:01 /)).toBe('08:01   IC vers Liers, voie 3   marge 2 min');
-    expect(state(j1, NOW, /^07:43 /)).toBe('07:43   Bus 36 vers Rixensart');
-    // l'IC 5 min plus tard : 7 min de marge, rien
-    expect(state(shift(j1, 3, 5), NOW, /^08:06 /)).toBe('08:06   IC vers Liers, voie 3');
+    expect(state(j1, NOW, /^08:01 /)).toBe('08:01 IC voie 3 → Bruxelles-Central   marge 2 min');
+    expect(state(j1, NOW, /^07:43 /)).toBe('07:43 Bus 36 → Braine-l’Alleud   07:55');
+    // l'IC 5 min plus tard : 7 min de marge, son heure d'arrivée
+    expect(state(shift(j1, 3, 5), NOW, /^08:06 /)).toBe('08:06 IC voie 3 → Bruxelles-Central   08:29');
     // 3 min plus tard : 5 min de marge, dite
-    expect(state(shift(j1, 3, 3), NOW, /^08:04 /)).toBe('08:04   IC vers Liers, voie 3   marge 5 min');
+    expect(state(shift(j1, 3, 3), NOW, /^08:04 /)).toBe('08:04 IC voie 3 → Bruxelles-Central   marge 5 min');
   });
 
-  it('« très juste » sans marge (ou en retard) ; « en cours » une fois dedans ; « SUPPRIMÉ » d’abord', () => {
+  it('« très juste » sans marge (ou en retard) ; à bord, l’heure d’arrivée ; « SUPPRIMÉ » d’abord', () => {
     expect(marginText(0)).toBe('très juste');
     expect(marginText(-3)).toBe('très juste');
     expect(nb(marginText(4))).toBe('marge 4 min');
     // le bus arrive 2 min plus tard (07:57) : 4 min de marche, l'IC à 08:01 : 0 min
     const late: Journey = { ...j1, legs: j1.legs.map((l, i) => (i === 1 ? { ...l, arr: l.arr + 2 * MIN, delayMin: 2 } : i === 2 ? { ...l, dep: l.dep + 2 * MIN, arr: l.arr + 2 * MIN } : l)) };
-    expect(state(late, NOW, /^08:01 /)).toBe('08:01   IC vers Liers, voie 3   très juste');
-    // dans l'IC : « en cours »
-    expect(state(j1, T(8, 5), /^08:01 /)).toBe('08:01   IC vers Liers, voie 3   en cours');
+    expect(state(late, NOW, /^08:01 /)).toBe('08:01 IC voie 3 → Bruxelles-Central   très juste');
+    // dans l'IC : son heure d'arrivée
+    expect(state(j1, T(8, 5), /^08:01 /)).toBe('08:01 IC voie 3 → Bruxelles-Central   08:24');
     const gone: Journey = { ...j1, legs: j1.legs.map((l, i) => (i === 3 ? { ...l, cancelled: true } : l)) };
-    expect(state(gone, NOW, /^08:01 /)).toBe('08:01   IC vers Liers, voie 3   SUPPRIMÉ');
+    expect(state(gone, NOW, /^08:01 /)).toBe('08:01 IC voie 3 → Bruxelles-Central   SUPPRIMÉ');
   });
 
-  it('retard du véhicule : « +3 min » (l’heure de la ligne est la prévue) ; aucune marge : « très juste » quand même', () => {
-    // l'IC a 3 min de retard (08:04 au lieu de 08:01), la marche finit à 07:59 : son retard, comme la 1.2.4
+  it('retard du véhicule : son heure estimée en tête de rangée ; aucune marge : « très juste » quand même', () => {
+    // l'IC a 3 min de retard (08:04 au lieu de 08:01) : sa rangée dit 08:04 et la marge réelle (5 min)
     const delayed: Journey = { ...j1, legs: j1.legs.map((l, i) => (i === 3 ? { ...l, dep: l.dep + 3 * MIN, arr: l.arr + 3 * MIN, delayMin: 3 } : l)) };
-    expect(state(delayed, NOW, /^08:01 /)).toBe('08:01   IC vers Liers, voie 3   +3 min');
-    // le bus a 6 min de retard (arrivée 08:01, à pied jusqu'à 08:05), l'IC 1 min (08:02) : « très juste » passe avant
+    expect(state(delayed, NOW, /^08:04 /)).toBe('08:04 IC voie 3 → Bruxelles-Central   marge 5 min');
+    // le bus a 6 min de retard (arrivée 08:01, à pied jusqu'à 08:05), l'IC 1 min (08:02) : « très juste »
     const both: Journey = {
       ...j1,
       legs: j1.legs.map((l, i) =>
         i === 1 ? { ...l, dep: l.dep + 6 * MIN, arr: l.arr + 6 * MIN, delayMin: 6 } : i === 2 ? { ...l, dep: l.dep + 6 * MIN, arr: l.arr + 6 * MIN } : i === 3 ? { ...l, dep: l.dep + MIN, arr: l.arr + MIN, delayMin: 1 } : l,
       ),
     };
-    expect(state(both, NOW, /^08:01 {3}IC/)).toBe('08:01   IC vers Liers, voie 3   très juste');
-    expect(state(both, NOW, /^07:43 /)).toBe('07:43   Bus 36 vers Rixensart   +6 min');
+    expect(state(both, NOW, /^08:02 IC/)).toBe('08:02 IC voie 3 → Bruxelles-Central   très juste');
+    expect(state(both, NOW, /^07:49 /)).toBe('07:49 Bus 36 → Braine-l’Alleud   08:01');
   });
 });
 
 describe('PRD-1.2.5 § 3 : pluie prévue sur les marches de 5 min ou plus', () => {
   const stepLines = (j: Journey, journeys = [j], now = NOW) => lines(stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: journeys.indexOf(j), fresh: true }, ctx(now))).map(nb);
 
-  it('« (5 min, pluie) » au départ à pied, « (2 min à pied) » sans : la marche de 4 min n’en dit jamais rien', () => {
+  it('« à pied 5 min, pluie » ; la marche de 4 min et celle de 2 min n’en disent jamais rien (1.2.10 § 5)', () => {
     const wet = withRain(j1, 0, 2, 4);
     const l = stepLines(wet, [wet], T(7, 20));
-    expect(l).toContain('07:38   Partir à pied vers l’arrêt (5 min, pluie)   dans 18 min');
+    expect(l).toContain('07:38 à pied 5 min, pluie');
     // la marche de 4 min et celle de 2 min : trop courtes pour la pluie, même marquées
-    expect(l).toContain('07:55   À pied vers la gare (4 min)');
+    expect(l).toContain('07:55 à pied 4 min');
     for (const x of l) expect(textWidth(x)).toBeLessThanOrEqual(WIDTHS.full);
   });
 
   it('arrivée à pied, trajet tout à pied ; jamais sans marque du cœur', () => {
     const end = journey('e', [{ ride: '3', mode: 'tram', dep: T(7, 40), arr: T(7, 50), from: 'Gare du Nord', to: 'Bourse', head: 'Churchill' }, { walk: 6 }]);
     const wetEnd = withRain(end, 1);
-    expect(stepLines(wetEnd)).toContain('07:56   Arrivée au bureau (6 min à pied, pluie)');
-    expect(stepLines(end)).toContain('07:56   Arrivée au bureau (6 min à pied)');
+    expect(stepLines(wetEnd)).toContain('07:50 à pied 6 min, pluie');
+    expect(stepLines(end)).toContain('07:50 à pied 6 min');
     const walk: Journey = { id: 'w', legs: [{ kind: 'walk', from: { name: { fr: 'Ici', nl: 'Ici' }, lat: 50.8, lon: 4.3 }, to: { name: { fr: 'Bureau', nl: 'Bureau' }, lat: 50.8, lon: 4.3 }, dep: T(7, 40), arr: T(7, 52), schedDep: T(7, 40), schedArr: T(7, 52), walkMin: 12, rain: true }], dep: T(7, 40), arr: T(7, 52), leaveAt: T(7, 40), transfers: 0, rt: true, alerts: [] };
-    expect(stepLines(walk).some((x) => /^07:40   Partir à pied \(12 min, pluie\)/.test(x))).toBe(true);
+    expect(stepLines(walk)).toContain('07:40 à pied 12 min, pluie');
     // « Autres trajets » : à pied tout du long, sous la pluie
     expect(nb(otherDetail(walk, [j1, walk]))).toBe('à pied, 12 min sous la pluie');
     expect(nb(otherDetail({ ...walk, legs: [{ ...walk.legs[0], rain: undefined }] }, [j1, walk]))).toBe('à pied, 12 min');
