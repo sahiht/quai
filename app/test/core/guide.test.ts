@@ -98,6 +98,16 @@ describe('heure seule (sans position), trajet complet', () => {
     expect(s.where.chain[0]).toEqual({ label: 'à pied', state: 'now' });
   });
 
+  it('« Partir maintenant » avec 2 min de marge : pas « très juste » une seconde après (marge exacte, 60 s au plus)', () => {
+    const r = guide(prdTrip());
+    step(r, at('07:05'));
+    expect(m(step(r, at('07:05:01')).moment, 'leave').tight).toBeUndefined();
+    expect(m(step(r, at('07:05:59')).moment, 'leave').tight).toBeUndefined();
+    const late = m(step(r, at('07:06')).moment, 'leave');
+    expect(late.tight).toBe(true);
+    expect(late.marginMin).toBe(1);
+  });
+
   it('« Partir maintenant » finit 3 min après et ne revient pas', () => {
     const r = guide(prdTrip());
     step(r, at('07:05'));

@@ -944,12 +944,15 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
         const walkMin = walkMinOf(w);
         const mo: Moment = { kind: 'leave', id, since, until: at + GUIDE.leaveMs, leg: 0, walkMin, toward: w.to.name };
         if (r) {
-          const margin = Math.floor((r.dep - now) / MIN) - walkMin;
+          // marge exacte (en minutes, avec les secondes) : 2 min de marge ne deviennent pas « très juste » une seconde
+          // après l'apparition (1,98 arrondi à 1) ; très juste : 60 s au plus
+          const exact = (r.dep - now) / MIN - walkMin;
+          const margin = Math.floor(exact);
           mo.vehicle = vehicleRef(r);
           mo.depAt = r.dep;
           mo.rt = !!r.rt;
           mo.marginMin = margin;
-          if (margin <= GUIDE.tightMin) {
+          if (exact <= GUIDE.tightMin) {
             mo.tight = true;
             if (c.in.missed) mo.missed = { ...c.in.missed };
           }
