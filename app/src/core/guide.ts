@@ -586,16 +586,25 @@ function pending(c: Ctx, loc: Loc, reason: ReplanReason, k: number): Pending {
 
 /** Arrêt de descente dépassé (à bord, plus de 300 m au-delà, en s'éloignant, après son heure). */
 function passedAt(c: Ctx, loc: Loc): number {
-  const { legs, now, m } = c;
+  const { m } = c;
   if (!c.fix) return -1;
-  let k = -1;
-  if (loc.phase.kind === 'ride') k = loc.phase.leg;
-  else if (m.alighted && !boardedOn(m, m.alighted.leg + 1) && fast(c)) k = m.alighted.leg;
-  if (k < 0) return -1;
+  const cands: number[] = [];
+  if (loc.phase.kind === 'ride') cands.push(loc.phase.leg);
+  // descente constatée (immobile à quai), puis on roule : peut-être resté dans ce véhicule, même quand l'heure dit déjà
+  // le véhicule suivant (pas encore monté dedans)
+  if (m.alighted && fast(c) && !cands.includes(m.alighted.leg) && !(loc.phase.kind === 'ride' && boardedOn(m, loc.phase.leg))) cands.push(m.alighted.leg);
+  for (const k of cands) if (passedLeg(c, k)) return k;
+  return -1;
+}
+
+/** L'arrêt de descente de l'étape `k` est-il dépassé (voir passedAt) ? */
+function passedLeg(c: Ctx, k: number): boolean {
+  const { legs, now, m } = c;
+  const fix = c.fix as GuideFix;
   const l = legs[k];
-  if (!knownPoint(l.to) || now < l.arr) return -1;
-  const d = distanceM(c.fix, l.to);
-  if (d <= GUIDE.passedM) return -1;
+  if (!knownPoint(l.to) || now < l.arr) return false;
+  const d = distanceM(fix, l.to);
+  if (d <= GUIDE.passedM) return false;
   // au-delà : de l'autre côté de l'arrêt, dans le sens de la marche du véhicule
   const stops = stopsOf(l);
   const pts = stopPoints(l, stops);
@@ -605,17 +614,22 @@ function passedAt(c: Ctx, loc: Loc): number {
     const kx = Math.cos(l.to.lat * (Math.PI / 180));
     const vx = (l.to.lon - before.lon) * kx;
     const vy = l.to.lat - before.lat;
-    const wx = (c.fix.lon - l.to.lon) * kx;
-    const wy = c.fix.lat - l.to.lat;
-    if (vx * wx + vy * wy <= 0) return -1;
+    const wx = (fix.lon - l.to.lon) * kx;
+    const wy = fix.lat - l.to.lat;
+    if (vx * wx + vy * wy <= 0) {
+      // pas dans le sens d'arrivée : encore le long de la ligne avant l'arrêt (véhicule en retard), ou bien le véhicule
+      // a tourné après l'arrêt (Schuman → Bruxelles-Nord, puis Bruxelles-Central) : au-delà s'il est loin de la ligne
+      const pr = rideProj(c, l);
+      if (!pr || pr.offM <= GUIDE.passedM) return false;
+    }
   }
   // en s'éloignant
   const away = c.prev ? distanceM(c.prev, l.to) < d - 5 : fast(c);
-  if (!away) return -1;
+  if (!away) return false;
   // pas monté dans le véhicule suivant (il s'éloigne aussi)
   const nk = nextRide(legs, k + 1);
-  if (nk >= 0 && boardedOn(m, nk)) return -1;
-  return k;
+  if (nk >= 0 && boardedOn(m, nk)) return false;
+  return true;
 }
 
 /** Causes d'un nouveau trajet, dans l'ordre : supprimé, correspondance ratée, raté, arrêt dépassé. */

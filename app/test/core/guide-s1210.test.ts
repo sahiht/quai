@@ -112,3 +112,28 @@ describe('s1210 : correspondance très juste à Bruxelles-Nord (IC puis tram 3)'
     expect(g.mem().alighted?.leg).toBe(3);
   });
 });
+
+describe('s1210 : arrêt dépassé à Bruxelles-Nord (l’IC repart vers Bruxelles-Central)', () => {
+  it('« Tu as passé Bruxelles-Nord » dès que la position est à plus de 300 m au-delà, en s’éloignant, même si le train tourne après la gare', () => {
+    const g = replay();
+    g.at(T('07:46'), [[T('07:45:30'), lerp(P.namur, P.gembloux, 90 / 780), 19.7], [T('07:46'), lerp(P.namur, P.gembloux, 120 / 780), 19.7]]);
+    g.at(T('08:41:30'), [[T('08:41:30'), lerp(P.schuman, P.nord, 240 / 270), 8.9]]);
+    // à quai à Bruxelles-Nord (immobile : la descente peut sembler faite), puis le train repart vers Bruxelles-Central
+    g.at(T('08:43'), [[T('08:42'), P.nord, 0], [T('08:43'), P.nord, 0]]);
+    g.at(T('08:44'), [[T('08:43:30'), lerp(P.nord, P.central, 0.1), 5.6], [T('08:44'), lerp(P.nord, P.central, 0.2), 5.6]]);
+    expect(g.mem().boarded?.leg).not.toBe(3);
+    const s = g.at(T('08:45'), [[T('08:44:30'), lerp(P.nord, P.central, 0.3), 5.6], [T('08:45'), lerp(P.nord, P.central, 0.4), 5.6]]);
+    expect(s.moment).toMatchObject({ kind: 'passed', passed: N('Bruxelles-Nord') });
+    expect(s.replan).toMatchObject({ reason: 'passed' });
+  });
+
+  it('IC en retard encore avant Bruxelles-Nord après son heure, à plus de 300 m : pas « Tu as passé »', () => {
+    const g = replay();
+    g.at(T('07:46'), [[T('07:45:30'), lerp(P.namur, P.gembloux, 90 / 780), 19.7], [T('07:46'), lerp(P.namur, P.gembloux, 120 / 780), 19.7]]);
+    // 08:43 : 4 min de retard, le train arrive de Schuman (à 800 m puis 600 m de la gare)
+    g.at(T('08:43'), [[T('08:42:30'), lerp(P.schuman, P.nord, 0.62), 8], [T('08:43'), lerp(P.schuman, P.nord, 0.7), 8]]);
+    const s = g.at(T('08:43:30'), [[T('08:43:30'), lerp(P.schuman, P.nord, 0.78), 8]]);
+    expect(s.moment?.kind).not.toBe('passed');
+    expect(s.replan).toBeUndefined();
+  });
+});
