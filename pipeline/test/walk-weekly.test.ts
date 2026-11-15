@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { parse } from 'yaml';
 import { afterAll, describe, expect, it } from 'vitest';
 import { main } from '../src/walk/cli.ts';
-import { isoWeek, publishWalk, readTiles, weeklyWalk, type WeeklyOptions } from '../src/walk/weekly.ts';
+import { downloadExtract, isoWeek, publishWalk, readTiles, weeklyWalk, type WeeklyOptions } from '../src/walk/weekly.ts';
 import { cleanupTempDirs, ROOT_DIR, tempDir } from './helpers.ts';
 import { ll, osmXml, writePbf, writeXml } from './walk-helpers.ts';
 
@@ -262,7 +262,11 @@ describe('flux « Données de nuit » (nightly.yml)', () => {
       run: 'node --experimental-strip-types src/walk/cli.ts weekly --cache ../gtfs-cache/walk --stops ../site/data',
       env: { QUAI_WALK_FORCE: "${{ inputs.verification && '1' || '' }}" },
     });
-    expect(steps[walk]['timeout-minutes']).toBeLessThanOrEqual(20);
+    // 1.2.10 (vérification du 15/11) : l'extrait de Belgique peut demander plus de 12 min ; téléchargement repris, délai
+    // total de 40 min, puis la construction : l'étape a 60 min, la tâche de nuit assez pour tout (données comprises)
+    expect(steps[walk]['timeout-minutes']).toBe(60);
+    const job = (parse(text) as { jobs: { build: { 'timeout-minutes': number } } }).jobs.build;
+    expect(job['timeout-minutes']).toBeGreaterThanOrEqual(120);
     expect(steps[pub]).toMatchObject({
       if: "${{ !cancelled() && steps.data.outcome == 'success' }}",
       'continue-on-error': true,
@@ -285,5 +289,90 @@ describe('flux « Données de nuit » (nightly.yml)', () => {
     expect(scan).toBeGreaterThan(i((s) => s.id === 'webapp'));
     expect(scan).toBeLessThan(i((s) => s.uses === 'actions/upload-pages-artifact@v5'));
     expect(text).not.toMatch(/[\u2013\u2014]/);
+  });
+});
+
+describe('1.2.10 : téléchargement de l’extrait repris là où il s’est arrêté (vérification du 15/11)', () => {
+  const body = Buffer.from(Array.from({ length: 50_000 }, (_, i) => (i * 7) % 251));
+  const md5 = (b: Buffer) => createHash('md5').update(b).digest('hex');
+  /** Flux qui livre `first`, puis se coupe (l'erreur vient après la lecture du morceau, comme une vraie coupure). */
+  const cutStream = (first: Buffer) => {
+    let n = 0;
+    return new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (n++ === 0) c.enqueue(new Uint8Array(first));
+        else c.error(new Error('connexion coupée'));
+      },
+    });
+  };
+  /** Portail : coupe la 1re réponse après `cut` octets ; reprend avec « Range » si « If-Range » vaut son ETag. */
+  function portal(o: { cut: number; etag?: string; changed?: Buffer }) {
+    const calls: { range?: string; ifRange?: string }[] = [];
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const h = new Headers(init?.headers);
+      calls.push({ range: h.get('range') ?? undefined, ifRange: h.get('if-range') ?? undefined });
+      const etag = o.etag ?? '"v1"';
+      const range = /^bytes=(\d+)-$/.exec(h.get('range') ?? '');
+      if (calls.length === 1) {
+        const stream = cutStream(body.subarray(0, o.cut));
+        return new Response(stream, { status: 200, headers: { etag, 'content-length': String(body.length) } });
+      }
+      if (o.changed) return new Response(new Uint8Array(o.changed), { status: 200, headers: { etag: '"v2"', 'content-length': String(o.changed.length) } });
+      if (range && h.get('if-range') === etag) {
+        const from = Number(range[1]);
+        const rest = body.subarray(from);
+        return new Response(new Uint8Array(rest), { status: 206, headers: { etag, 'content-range': `bytes ${from}-${body.length - 1}/${body.length}`, 'content-length': String(rest.length) } });
+      }
+      return new Response(new Uint8Array(body), { status: 200, headers: { etag, 'content-length': String(body.length) } });
+    }) as typeof fetch;
+    return { calls, fetchImpl };
+  }
+
+  it('coupure : le 2e essai reprend au même octet (Range, If-Range) ; fichier entier, MD5 juste, rien qui traîne', async () => {
+    const dir = tempDir('walk-dl');
+    const dest = join(dir, 'extract.osm.pbf');
+    const p = portal({ cut: 20_000 });
+    const logs: string[] = [];
+    const got = await downloadExtract(URL_PBF, dest, { fetchImpl: p.fetchImpl, retries: 2, backoffMs: [0], log: (m) => logs.push(m), progressBytes: 10_000 });
+    expect(got).toEqual({ bytes: body.length, md5: md5(body) });
+    expect(readFileSync(dest).equals(body)).toBe(true);
+    expect(p.calls).toEqual([{}, { range: 'bytes=20000-', ifRange: '"v1"' }]);
+    expect(existsSync(`${dest}.part`)).toBe(false);
+    expect(existsSync(`${dest}.part.json`)).toBe(false);
+    expect(logs.some((l) => l.includes('gardés pour la reprise'))).toBe(true);
+    expect(logs.some((l) => /reprise à/.test(l))).toBe(true);
+    expect(logs.join('\n')).not.toMatch(/[\u2013\u2014]/);
+  });
+
+  it('fichier du portail changé entre deux essais : renvoyé en entier, tout recommence, MD5 du nouveau fichier', async () => {
+    const dir = tempDir('walk-dl');
+    const dest = join(dir, 'extract.osm.pbf');
+    const changed = Buffer.from(body.subarray(0, 30_000).map((x) => 255 - x));
+    const p = portal({ cut: 20_000, changed });
+    const got = await downloadExtract(URL_PBF, dest, { fetchImpl: p.fetchImpl, retries: 2, backoffMs: [0], log: quiet });
+    expect(got).toEqual({ bytes: changed.length, md5: md5(changed) });
+    expect(readFileSync(dest).equals(changed)).toBe(true);
+  });
+
+  it('sans ETag ni Last-Modified : pas de reprise possible, le morceau ne sert pas ; délai total épuisé : erreur en français', async () => {
+    const dir = tempDir('walk-dl');
+    const dest = join(dir, 'extract.osm.pbf');
+    let n = 0;
+    const fetchImpl = (async () => {
+      n++;
+      return new Response(cutStream(body.subarray(0, 1000)), { status: 200 });
+    }) as typeof fetch;
+    await expect(downloadExtract(URL_PBF, dest, { fetchImpl, retries: 1, backoffMs: [0], log: quiet })).rejects.toThrow(/^téléchargement de l'extrait impossible/);
+    expect(n).toBe(2);
+    expect(existsSync(dest)).toBe(false);
+    await expect(downloadExtract(URL_PBF, dest, { fetchImpl, retries: 3, backoffMs: [0], log: quiet, timeoutMs: 0 })).rejects.toThrow(/délai global dépassé/);
+  });
+
+  it('réponse plus courte qu’annoncé : extrait tronqué, jamais renommé comme complet', async () => {
+    const dir = tempDir('walk-dl');
+    const dest = join(dir, 'extract.osm.pbf');
+    const fetchImpl = (async () => new Response(new Uint8Array(body.subarray(0, 100)), { status: 200, headers: { 'content-length': String(body.length) } })) as typeof fetch;
+    await expect(downloadExtract(URL_PBF, dest, { fetchImpl, retries: 0, backoffMs: [0], log: quiet })).rejects.toThrow(/tronqué|impossible/);
+    expect(existsSync(dest)).toBe(false);
   });
 });

@@ -12,7 +12,7 @@
  * données de la nuit ; sans tuiles, rien n'est publié et l'appli retombe sur le chemin droit.
  */
 import { createHash } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { appendFile, copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { basename, join } from 'node:path';
@@ -68,63 +68,150 @@ export async function readTiles(dir: string): Promise<WalkIndex | null> {
 
 export interface DownloadOpts {
   fetchImpl?: typeof fetch;
+  /** délai total du téléchargement, tous essais compris (reprise comprise) */
   timeoutMs?: number;
   stallMs?: number;
   retries?: number;
   backoffMs?: number[];
   log?: (m: string) => void;
+  /** journal de progression tous les N octets (64 Mo par défaut) */
+  progressBytes?: number;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const mo1 = (b: number) => `${(b / 1e6).toFixed(0)} Mo`;
 
-/** Télécharge `url` dans `dest` (écrit à côté puis renommé) ; renvoie octets et MD5. Erreur en français. */
+/** Fiche du morceau déjà reçu (`<dest>.part.json`) : de quoi reprendre au même octet, sur le même fichier du portail. */
+interface PartInfo {
+  v: 1;
+  url: string;
+  etag?: string;
+  lastModified?: string;
+}
+
+async function readPart(part: string, url: string): Promise<{ size: number; info: PartInfo } | null> {
+  const info = (await readJson(`${part}.json`)) as PartInfo | null;
+  if (!info || info.v !== 1 || info.url !== url || (!info.etag && !info.lastModified)) return null;
+  const s = await stat(part).catch(() => null);
+  return s && s.size > 0 ? { size: s.size, info } : null;
+}
+
+async function dropPart(part: string): Promise<void> {
+  await rm(part, { force: true }).catch(() => undefined);
+  await rm(`${part}.json`, { force: true }).catch(() => undefined);
+}
+
+/** MD5 des octets déjà reçus (reprise) : lu par morceaux, jamais tout en mémoire. */
+async function hashFile(path: string, hash: ReturnType<typeof createHash>): Promise<void> {
+  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
+}
+
+/**
+ * Télécharge `url` dans `dest` (écrit à côté dans `<dest>.part`, puis renommé) ; renvoie octets et MD5. Erreur en
+ * français. 1.2.10 (vérification du 15/11 : extrait de Belgique trop lent pour un seul essai de 12 min) : un essai
+ * interrompu laisse son morceau ; l'essai suivant reprend au même octet (« Range » et « If-Range » : si le fichier du
+ * portail a changé entre-temps, il est renvoyé en entier et tout recommence). Délai total pour tous les essais ;
+ * progression journalisée (octets, débit).
+ */
 export async function downloadExtract(url: string, dest: string, o: DownloadOpts = {}): Promise<{ bytes: number; md5: string }> {
   const doFetch = o.fetchImpl ?? fetch;
   const log = o.log ?? (() => undefined);
-  const retries = o.retries ?? 2;
-  const backoff = o.backoffMs ?? [10_000, 30_000];
+  const retries = o.retries ?? 4;
+  const backoff = o.backoffMs ?? [10_000, 30_000, 60_000];
+  const every = o.progressBytes ?? 64 * 1024 * 1024;
+  const deadline = Date.now() + (o.timeoutMs ?? 40 * 60_000);
+  const part = `${dest}.part`;
   let last = '';
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) await sleep(backoff[Math.min(attempt - 1, backoff.length - 1)] ?? 0);
+    const left = deadline - Date.now();
+    if (left <= 0) {
+      last = last || 'délai global dépassé';
+      break;
+    }
     const ctrl = new AbortController();
-    const overall = setTimeout(() => ctrl.abort(new Error('délai global dépassé')), o.timeoutMs ?? 12 * 60_000);
+    const overall = setTimeout(() => ctrl.abort(new Error('délai global dépassé')), left);
     let stall: ReturnType<typeof setTimeout> | undefined;
     const arm = () => {
       if (stall) clearTimeout(stall);
       stall = setTimeout(() => ctrl.abort(new Error('aucune donnée reçue')), o.stallMs ?? 60_000);
     };
-    const part = `${dest}.part`;
+    let out: ReturnType<typeof createWriteStream> | undefined;
     try {
       arm();
-      const res = await doFetch(url, { headers: { 'User-Agent': 'quai-pipeline/1.0 (+donnees ouvertes)' }, signal: ctrl.signal });
-      if (!res.ok || !res.body) {
+      const have = await readPart(part, url);
+      const headers: Record<string, string> = { 'User-Agent': 'quai-pipeline/1.0 (+donnees ouvertes)' };
+      if (have) {
+        headers.Range = `bytes=${have.size}-`;
+        headers['If-Range'] = have.info.etag ?? have.info.lastModified ?? '';
+      }
+      const res = await doFetch(url, { headers, signal: ctrl.signal });
+      if (res.status === 416) {
+        // morceau inutilisable (plus long que le fichier du portail) : tout recommence à l'essai suivant
+        await res.body?.cancel().catch(() => undefined);
+        await dropPart(part);
+        throw new Error('reprise refusée (HTTP 416)');
+      }
+      if (!(res.status === 200 || res.status === 206) || !res.body) {
         await res.body?.cancel().catch(() => undefined);
         throw new Error(`HTTP ${res.status}`);
       }
       const hash = createHash('md5');
-      const out = createWriteStream(part);
-      let bytes = 0;
-      try {
-        for await (const chunk of res.body as AsyncIterable<Uint8Array>) {
-          arm();
-          bytes += chunk.length;
-          hash.update(chunk);
-          if (!out.write(chunk)) await once(out, 'drain');
+      let from = 0;
+      if (res.status === 206 && have) {
+        const m = /^bytes (\d+)-/i.exec(res.headers.get('content-range') ?? '');
+        if (!m || Number(m[1]) !== have.size) {
+          await res.body.cancel().catch(() => undefined);
+          await dropPart(part);
+          throw new Error('reprise incohérente (Content-Range)');
         }
-        out.end();
-        await once(out, 'close');
-      } catch (e) {
-        out.destroy();
-        throw e;
+        from = have.size;
+        await hashFile(part, hash);
+        log(`Chemins à pied : reprise à ${mo1(from)}`);
+      } else if (res.status === 206) {
+        // morceau demandé sans reprise : réponse inattendue
+        await res.body.cancel().catch(() => undefined);
+        throw new Error('réponse partielle inattendue (HTTP 206)');
+      } else {
+        // fichier entier : nouveau départ, et de quoi reprendre au même octet si l'essai est interrompu
+        const etag = res.headers.get('etag') ?? undefined;
+        const lastModified = res.headers.get('last-modified') ?? undefined;
+        await dropPart(part);
+        if (etag || lastModified) await writeFile(`${part}.json`, JSON.stringify({ v: 1, url, etag, lastModified } satisfies PartInfo));
       }
+      const total = from + Number(res.headers.get('content-length') ?? 0);
+      out = createWriteStream(part, { flags: from ? 'a' : 'w' });
+      const t0 = Date.now();
+      let bytes = from;
+      let next = from + every;
+      for await (const chunk of res.body as AsyncIterable<Uint8Array>) {
+        arm();
+        bytes += chunk.length;
+        hash.update(chunk);
+        if (!out.write(chunk)) await once(out, 'drain');
+        if (bytes >= next) {
+          next += every;
+          const rate = (bytes - from) / Math.max(1, (Date.now() - t0) / 1000);
+          log(`Chemins à pied : ${mo1(bytes)}${total > from ? ` sur ${mo1(total)}` : ''} reçus (${(rate / 1e6).toFixed(1).replace('.', ',')} Mo/s)`);
+        }
+      }
+      out.end();
+      await once(out, 'close');
+      out = undefined;
       if (!bytes) throw new Error('réponse vide');
+      if (total > from && bytes !== total) throw new Error(`extrait tronqué (${bytes} octets sur ${total})`);
       await rename(part, dest);
+      await rm(`${part}.json`, { force: true }).catch(() => undefined);
       return { bytes, md5: hash.digest('hex') };
     } catch (e) {
-      await rm(part, { force: true }).catch(() => undefined);
+      if (out) {
+        out.end();
+        await once(out, 'close').catch(() => undefined);
+      }
       const reason = ctrl.signal.aborted ? String((ctrl.signal.reason as Error)?.message ?? 'interrompu') : e instanceof Error ? e.message : String(e);
       last = reason;
-      log(`Chemins à pied : téléchargement de l'extrait, essai ${attempt + 1} échoué (${reason})`);
+      const kept = await stat(part).catch(() => null);
+      log(`Chemins à pied : téléchargement de l'extrait, essai ${attempt + 1} échoué (${reason})${kept?.size ? `, ${mo1(kept.size)} gardés pour la reprise` : ''}`);
     } finally {
       clearTimeout(overall);
       if (stall) clearTimeout(stall);

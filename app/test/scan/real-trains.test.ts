@@ -44,6 +44,12 @@ function pagesOf(v: GlassesView): PageSpec[] {
 const pct = (n: number, d: number): string => `${String(d ? Math.round((1000 * n) / d) / 10 : 0).replace('.', ',')} %`;
 const median = (xs: number[]): number => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? 0;
 
+/** 1.2.10 : première gare où descendre après la montée (ni supprimée) ; la gare de montée s'il n'y en a pas. */
+function firstAlight(stops: readonly StopCall[], at: number): number {
+  const k = stops.findIndex((c, i) => i > at && !c.cancelled);
+  return k >= 0 ? k : at;
+}
+
 describe.skipIf(!DIR)('1.2.8 : balayage des trains (QUAI_SCAN_DATA)', () => {
   it('chaque voyage : tout son trajet vu de trois gares, ses rangées dans les lunettes, le ● d’après un temps réel simulé', async () => {
     const dir = DIR!;
@@ -92,10 +98,12 @@ describe.skipIf(!DIR)('1.2.8 : balayage des trains (QUAI_SCAN_DATA)', () => {
           const ctx: ViewCtx = { now, settings };
           const v = trainRunView(ds, ctx);
           views++;
-          // à l'ouverture, le curseur sur la gare de montée, à l'écran
+          // à l'ouverture (1.2.10, « j'y descends ») : le curseur sur la première gare où descendre, la gare de montée
+          // juste au-dessus, les deux à l'écran
           const g = geometry(v);
           const f = effectiveFrame(initNav({ screen: 'home' }).stack[0], v, g.capacity);
-          if (f.sel !== at || f.top > at || at >= f.top + g.capacity) err(`${label} : curseur ${f.sel} (haut ${f.top}) au lieu de ${at}`);
+          const off = firstAlight(stops, at);
+          if (f.sel !== off || f.top > at || off >= f.top + g.capacity) err(`${label} : curseur ${f.sel} (haut ${f.top}) au lieu de ${off}`);
           for (const p of pagesOf(v)) {
             const bad = overflowing(p);
             if (bad.length) err(`${label} : ${bad[0]}`);
@@ -136,7 +144,7 @@ describe.skipIf(!DIR)('1.2.8 : balayage des trains (QUAI_SCAN_DATA)', () => {
           const v = trainRunView({ op: 'sncb', mode: 'train', line: trip.cat, head: trip.head, stops: late, anyPlanned: false, state: 'ok', at: lastAt }, { now, settings });
           const page = layoutPage(v, effectiveFrame(initNav({ screen: 'home' }).stack[0], v, geometry(v).capacity));
           if (!page.lines.some((l) => l.startsWith('● ') && !l.includes(': le train'))) err(`${label} : le ● n'est pas sur la page du curseur`);
-          if (page.sel !== lastAt) err(`${label} : curseur ${page.sel} au lieu de ${lastAt}`);
+          if (page.sel !== firstAlight(late, lastAt)) err(`${label} : curseur ${page.sel} au lieu de ${firstAlight(late, lastAt)}`);
         }
       }
     });

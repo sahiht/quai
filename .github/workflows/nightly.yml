@@ -45,7 +45,8 @@ jobs:
   build:
     name: Préparer les données
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 1.2.10 : une fois par semaine, l'extrait OpenStreetMap de Belgique et le graphe piéton (jusqu'à 60 min)
+    timeout-minutes: 120
     permissions:
       contents: read
       pages: read
@@ -103,7 +104,7 @@ jobs:
         id: walk
         if: ${{ !cancelled() && steps.data.outcome == 'success' }}
         continue-on-error: true
-        timeout-minutes: 20
+        timeout-minutes: 60
         working-directory: pipeline
         env:
           QUAI_WALK_FORCE: ${{ inputs.verification && '1' || '' }}
