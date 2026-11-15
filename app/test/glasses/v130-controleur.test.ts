@@ -32,8 +32,9 @@ import { TEST_ASK_MS, TEST_IMU_MS, TEST_SENT_MS, TEST_WAIT_MS, type ControllerDe
 import { HEADUP_REST_MIN, HeadUpLearner } from '../../src/glasses/headup';
 import { current } from '../../src/glasses/nav';
 import { MENU_IDS, type ContainerSpec, type StepsRoute } from '../../src/glasses/types';
-import { MAISON, MIN, PLACES, at, journey, nb, settingsWith } from './helpers';
-import { DAY, NOW, SPOTS, cleanupKit, door, guideSetup, type KitOptions } from './controller-guide-kit';
+import { displayTestView } from '../../src/glasses/views';
+import { MAISON, MIN, PLACES, journey, lines, nb, settingsWith } from './helpers';
+import { NOW, SPOTS, cleanupKit, door, guideSetup, type KitOptions } from './controller-guide-kit';
 
 afterEach(cleanupKit);
 
@@ -63,7 +64,6 @@ async function kit(o: KitOptions & { imu?: boolean | null }) {
   return { ...k, imuCalls, imuGuided, saved, states };
 }
 
-const T = (hh: number, mm: number) => at(DAY, hh, mm);
 const ready = (s: { screen: string; lines: string[] }) => s.screen === 'favorites' && !s.lines.some((l) => / …$/.test(nb(l)));
 const lineOf = (lines: string[], name: string) => nb(lines.find((l) => nb(l).startsWith(`${name}   `)) ?? '');
 
@@ -284,6 +284,8 @@ describe('§ 8 : chaque favori reçoit sa réponse, « … » seulement pendant 
 /** Mesure du capteur (repos : la tête droite, un peu de bruit ; `dy` : la tête levée). */
 const imu = (i: number, dy = 0) => ({ kind: 'imu' as const, x: 0.1 + (i % 2) * 0.02, y: 9.7 + ((i * 7) % 5) * 0.01 + dy, z: 0.3 - (i % 3) * 0.01, at: NOW + i * TEST_IMU_MS });
 const pageText = (cs: ContainerSpec[]) => cs.map((c) => nb(c.content)).join('\n');
+/** Lignes de l'écran du test à l'étape ask, telles que les écrit l'équipe des écrans (displayTestView). */
+const askLines = (k: { clock: { now(): number }; settings: { get(): Settings } }) => lines(displayTestView({ now: k.clock.now(), settings: k.settings.get() }, 'ask'));
 
 describe('§ 6.1 : test de l’écran des lunettes', () => {
   it('visible : attente sans rien envoyer (pas même l’heure), page entière, un toucher, résultat enregistré, écran d’avant', async () => {
@@ -332,7 +334,7 @@ describe('§ 6.1 : test de l’écran des lunettes', () => {
     for (let i = 0; i < 40; i++) k.c.onSignal(imu(i));
     await k.settle(TEST_WAIT_MS + TEST_SENT_MS);
     expect(k.states.at(-1)).toEqual({ step: 'ask' });
-    expect(pageText(k.sent())).toContain('Réponds sur le téléphone');
+    expect(k.last().lines).toEqual(askLines(k));
     // la tête levée : y monte de 2,5 et reste ; x bouge un peu ; aucune mesure ne fait de rendu ni de journal
     const calls = k.calls.length;
     const logs = k.logs.length;
@@ -489,7 +491,7 @@ describe('§ 6.1 : le test de l’écran et le guidage ne vont jamais ensemble ;
     expect(k.imuCalls.at(-1)).toEqual([true, TEST_IMU_MS]);
     // l'écran du test reconstruit (page entière)
     expect(k.since(from).map((c) => c.op)).toEqual(['rebuild']);
-    expect(pageText(k.sent())).toContain('Réponds sur le téléphone');
+    expect(k.last().lines).toEqual(askLines(k));
     for (let i = 0; i < 10; i++) k.c.onSignal(imu(i, 2));
     const done = await k.c.displayTest({ kind: 'answer', answer: 'quai' });
     expect(done).toEqual({ step: 'done', result: 'headUp', learned: true });
@@ -593,4 +595,3 @@ describe('§ 1 : le toucher de l’écran du trajet fait ce que dit sa ligne d�
   });
 });
 
-void T;
