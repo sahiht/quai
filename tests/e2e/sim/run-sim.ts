@@ -2765,8 +2765,9 @@ async function phone(): Promise<void> {
         card(cards[2], 'Le suivant', '08:52 → 10:07', /^bus W \+ /);
         const n = page.screens().length;
         await page.click('.result:nth-child(2) button.btn-glasses');
-        const g = await page.waitScreen((s) => s.screen === 'steps' && s.page === 2 && s.followed === true, 20_000, 'carte « Plus tôt » dans les lunettes', n);
-        check(g.label === 'earlier' && g.lines[0] === 'Plus tôt de 8 min, mais 19 min à pied', `lunettes ${g.label} « ${g.lines[0]} » (§ 2.2)`);
+        const g = await page.waitScreen((s) => s.screen === 'steps' && s.page === 2, 20_000, 'carte « Plus tôt » dans les lunettes', n);
+        // 1.2.10 (PRD-1.2.10 § 5) : la ligne du haut dit le départ et l'arrivée (la raison reste sur la carte du téléphone)
+        check(g.label === 'earlier' && /^Départ 08:34, dans \d+ min {3}arrivée ~09:35$/.test(g.lines[0] ?? ''), `lunettes ${g.label} « ${g.lines[0]} » (PRD-1.2.10 § 5)`);
         return { glasses: g };
       });
       await phoneStep(page, 'results-none', async () => {
@@ -3016,6 +3017,8 @@ async function phone(): Promise<void> {
 /* ------------------------------ « ★ garder ce trajet » depuis ma position (Chrome, accéléré) ------------------------------ */
 
 async function keep(): Promise<void> {
+  // 1.2.10 : plus d'aide à l'arrivée qui s'ouvre seule (écran calme, PRD-1.2.10 § 1 ; § 3.5 : aucun écran ne change seul) ;
+  // garder un trajet parti de « Ma position » se fait sur le téléphone (« Garder en favori ») : un lieu (PRD-1.2 § 2.3)
   await withChrome(async (page) => {
     await phoneStep(page, 'arrival-keep', async () => {
       await page.goto(pageUrl({ ...PCUR({ ...S3, mockNow: '2026-11-10T14:05:00+01:00' }), mockSpeed: '20', mockPath: PATH_S3 }, '#/recherche'));
@@ -3025,21 +3028,14 @@ async function keep(): Promise<void> {
       await page.waitFor(`document.querySelectorAll('.result').length >= 1`, 15_000, 'cartes vers Gand-Saint-Pierre');
       const n = page.screens().length;
       await page.click('.result:nth-child(1) button.btn-glasses');
-      // le bouton « Lunettes » est une demande : le trajet est suivi (PRD-1.2.2 § 6)
-      await page.waitScreen((s) => s.screen === 'steps' && s.followed === true, 20_000, 'trajet suivi dans les lunettes', n);
-      const a = await page.waitScreen((s) => s.screen === 'arrival', 150_000, 'aide à l’arrivée (accéléré)', n);
-      check(a.title === 'Arrivée à Gand-Saint-Pierre' && hint(a) === H.arrival, `« ${a.title} », aide « ${hint(a)} »`);
-      const m = page.screens().length;
-      await page.gesture('tap');
-      await page.waitScreen((s) => s.screen === 'arrival' && hint(s) === '★ Trajet ajouté aux favoris', 6_000, '« ★ Trajet ajouté aux favoris »', m);
-      await sleep(2_900);
-      const k = page.screens().length;
-      await page.gesture('tap');
-      await page.waitScreen((s) => s.screen === 'arrival' && hint(s) === '★ Déjà dans les favoris', 6_000, 'seconde fois : « ★ Déjà dans les favoris »', k);
-      // Parti de « Ma position » : un lieu (PRD-1.2 § 2.3), pas un trajet fixe
+      await page.waitScreen((s) => s.screen === 'steps', 20_000, 'trajet dans les lunettes', n);
+      // 25 s réelles en accéléré (×20 : plus de 8 min) jusqu'après l'arrivée : jamais un écran d'arrivée ouvert seul
+      await sleep(25_000);
+      check(!page.screens().slice(n).some((s) => s.screen === 'arrival' || s.screen === 'train'), `écran ouvert seul sans guidage : ${JSON.stringify(page.screens().slice(n).map((s) => s.screen))}`);
+      await page.clickText('Garder en favori', '.result:nth-child(1)');
       await hashGo(page, '#/favoris');
       const rows = await waitRows(page, 4);
-      check(rows[3].t1 === 'Gand-Saint-Pierre' && rows[3].t2 === 'Près de Gand-Saint-Pierre', `nouveau lieu en fin de liste : ${rowText(rows[3])}`);
+      check(rows.some((r) => r.t1 === 'Gand-Saint-Pierre' && r.t2 === 'Près de Gand-Saint-Pierre'), `nouveau lieu « Gand-Saint-Pierre » : ${rows.map(rowText).join(' ; ')}`);
       check(rows.filter((r) => /Gand-Saint-Pierre/.test(r.t1)).length === 2, 'un seul lieu ajouté (le trajet fixe Bruxelles-Central → Gand-Saint-Pierre reste)');
       return { glasses: page.lastScreen() };
     });

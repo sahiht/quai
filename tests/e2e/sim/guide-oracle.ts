@@ -129,8 +129,9 @@ export function boardLines(j: OJourney, leg: number, now: number): Want[] {
   const l = j.legs[leg];
   const out: Want[] = [];
   const changed = !!l.newPlatform && !!l.platform && l.newPlatform !== l.platform;
-  // voie modifiée : « voie modifiée » au plus clair, à la suite de l'heure sur la 1re ligne ou sur une ligne à elle
-  if (isTrain(l)) out.push(changed ? new RegExp(`^${esc(`${l.cat ?? 'train'} à ${time(l.dep, l.rt)}`)}(, voie modifiée)?$`) : `${l.cat ?? 'train'} à ${time(l.dep, l.rt)}`);
+  const p = l.newPlatform ?? l.platform;
+  // train : « IC à 07:30, voie 3 » ; voie modifiée : « IC à 07:30, voie 6 ! » (arbitrage du contrôle usager)
+  if (isTrain(l)) out.push(`${l.cat ?? 'train'} à ${time(l.dep, l.rt)}${p ? `, voie ${p}${changed ? ' !' : ''}` : ''}`);
   else {
     const m = minutesFloor(l.dep - now);
     if (m > 10) out.push(`à ${time(l.dep, l.rt)}`);
@@ -144,7 +145,6 @@ export function boardLines(j: OJourney, leg: number, now: number): Want[] {
   out.push(stopsPhrase(stopsToAlight(l)));
   const prev = j.legs[leg - 1];
   if (prev && prev.kind === 'walk' && leg > 1) out.push(/^\d+ min à pied jusqu’au quai, marge \d+ min$/);
-  if (changed) out.push('voie modifiée');
   return out;
 }
 
@@ -251,7 +251,8 @@ export function whereRideLines(j: OJourney, leg: number, nextIdx: number, nowIdx
   const n = stops[nextIdx];
   return [
     chainLine(j, nowIdx),
-    new RegExp(`^[●◎○─…]+ (  )?${esc(stopsPhrase(stops.length - 1 - nextIdx + 1))}$|^[●◎○─…]+$`),
+    // le prochain arrêt est la descente : « c'est ta descente » (arbitrage du contrôle usager)
+    stops.length - 1 - nextIdx === 0 ? /^[●◎○─…]+ (  )?(c’est ta descente|descente au prochain arrêt)$/ : new RegExp(`^[●◎○─…]+ (  )?${esc(stopsPhrase(stops.length - 1 - nextIdx + 1))}$|^[●◎○─…]+$`),
     ...(n ? [`Prochain arrêt : ${n.name.fr}, ${time(n.est, l.rt)}`] : []),
     `descente : ${l.to.name.fr}, ${time(l.arr, l.rt)}`,
     ...(kind === 'trip' ? [`arrivée ${time(j.arr, j.rt)}`] : []),

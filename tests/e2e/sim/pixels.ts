@@ -120,7 +120,7 @@ const roomTo = (def: { c: { x: number }; gap?: number }, x: number): number => d
 const roomIn = (c: { x: number; w?: number }): number => Math.min(c.w ?? 0, GEO.X_END - c.x) - GEO.SAFETY;
 
 /** Segments attendus d'une ligne de liste selon le gabarit (colonnes séparées par 3 espaces dans le journal). */
-function rowSegments(screen: string, line: string, indented = false, beforeBoarding = false): Seg[] {
+function rowSegments(screen: string, line: string, indented = false, beforeBoarding: false | 'before' | 'boarding' = false): Seg[] {
   const parts = line.split('   ');
   if (MENU[screen]) {
     const def = LAYOUTS[MENU[screen]];
@@ -289,12 +289,14 @@ const PASSED = /^~?\d\d:\d\d$/;
  * 1.2.8 : une gare de tout le trajet d'un train (« ● Namur voie 6 ! ») : le repère et le nom au plus clair, la voie pâle
  * (modifiée, « ! » : au plus clair) ; une gare quittée tout en pâle.
  */
-function trainWords(left: string, right?: string, beforeBoarding = false): Word[] {
-  // 1.2.10 (PRD-1.2.10 § 3.1) : la gare de la montée et celles d'avant, toutes pâles (sans action), comme une gare quittée
-  const gone = beforeBoarding || (!!right && PASSED.test(right));
+function trainWords(left: string, right?: string, beforeBoarding: false | 'before' | 'boarding' = false): Word[] {
+  // 1.2.10 (PRD-1.2.10 § 3.1) : la gare de la montée et celles d'avant, pâles (sans action), comme une gare quittée ;
+  // la voie modifiée de la gare de montée reste au plus clair (contrôle usager)
+  const gone = !!beforeBoarding || (!!right && PASSED.test(right));
   const m = /^([●○]) (.+?)(?: (voie \S+(?: !)?))?$/.exec(left);
   if (!m) return [{ t: nbsp(left), hi: !gone }];
-  return [{ t: m[1], hi: !gone }, { t: nbsp(m[2]), hi: !gone }, ...(m[3] ? [{ t: nbsp(m[3]), hi: !gone && m[3].endsWith('!') }] : [])];
+  const platformHi = m[3]?.endsWith('!') && (beforeBoarding === 'boarding' || !gone);
+  return [{ t: m[1], hi: !gone }, { t: nbsp(m[2]), hi: !gone }, ...(m[3] ? [{ t: nbsp(m[3]), hi: !!platformHi }] : [])];
 }
 
 function segRowSegments(line: string, indentPx: number, words: (left: string, right?: string) => Word[] = versWords, paleRight?: RegExp): Seg[] {
@@ -503,7 +505,9 @@ function bands(s: LoggedScreen): Band[] | null {
     else if (s.screen === 'trainRun') {
       // 1.2.10 : rang de la gare dans le trajet (top + i) ; jusqu'à la gare du tableau (`gare`), tout est pâle
       const x = s as LoggedScreen & { gare?: number; top?: number };
-      segs = rowSegments(s.screen, l, false, (x.top ?? 0) + i <= (x.gare ?? -1));
+      const k = (x.top ?? 0) + i;
+      const g = x.gare ?? -1;
+      segs = rowSegments(s.screen, l, false, k < g ? 'before' : k === g ? 'boarding' : false);
     } else segs = rowSegments(s.screen, l, indented[i]);
     out.push({ y: rowsY + i * LINE_H, label: `ligne ${i + 1}`, text: l, segs });
   });

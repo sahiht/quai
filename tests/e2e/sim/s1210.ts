@@ -316,7 +316,15 @@ async function s1210go(ctx: Ctx): Promise<void> {
       const x = await launch(r);
       j = x.j;
       title = x.title;
-      // le trajet est guidé : la suite se joue même si l'ouverture ne montre pas « Où tu en es » (écart signalé ici)
+      // PRD § 3.1 (mis à jour) : un moment déjà dû (voie modifiée, « monter », nouveau trajet) passe avant « Où tu en es »
+      const first = r.page.screens().filter(isGuide).find((g) => g.show === 'where' || g.show === 'moment');
+      if (first && first.show === 'moment') {
+        const l = j.legs[rideLeg(j)];
+        check(O.matches(first.lines[0], 'Voie modifiée'), `moment dû au lancement : « Voie modifiée » attendu (IC voie 6 au lieu de 4), vu ${show(first)}`);
+        expectLines(first, O.platformLines(l), 'moment dû au lancement (§ 3.1, platform)');
+        momentCommon(first, title);
+        return { screen: first };
+      }
       check(x.where, x.opening ?? '« Où tu en es » absent au lancement');
       const w = x.where;
       check(w.lines.length >= 3, `« Où tu en es » : ${show(w)}`);
