@@ -273,14 +273,17 @@ describe('signaux : menu, lunettes, doublons, boîte de sortie', () => {
     ]);
   });
 
-  it('lunettes : seulement les changements de connexion ou de port', () => {
+  it('lunettes : seulement les changements (connexion, port ; 1.3.0 : batterie) ; le même état répété : rien', () => {
     const { f, got } = setup();
     f.device({ connectType: 'connected', isWearing: true, batteryLevel: 90 });
     f.device({ connectType: 'connected', isWearing: true, batteryLevel: 89 });
+    f.device({ connectType: 'connected', isWearing: true, batteryLevel: 89 });
     f.device({ connectType: 'disconnected', isWearing: true });
     f.device({ connectType: 'connected', isWearing: true });
+    // 1.3.0 (PRD-1.3.0 § 6.3) : la batterie est dans le signal ; son changement en fait un
     expect(got).toEqual([
-      { kind: 'device', connected: true, wearing: true },
+      { kind: 'device', connected: true, wearing: true, battery: 90 },
+      { kind: 'device', connected: true, wearing: true, battery: 89 },
       { kind: 'device', connected: false, wearing: true },
       { kind: 'device', connected: true, wearing: true },
     ]);

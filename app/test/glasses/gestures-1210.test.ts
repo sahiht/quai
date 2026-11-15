@@ -52,7 +52,8 @@ describe('menu système (menuItemClickEvent, SDK 0.0.14+)', () => {
 
 describe('état des lunettes (onDeviceStatusChanged)', () => {
   it('lecture : « connected » seulement compte comme connecté ; port lu s’il est donné', () => {
-    expect(readDeviceStatus({ sn: 'x', connectType: 'connected', isWearing: true, batteryLevel: 80 })).toEqual({ connected: true, wearing: true });
+    // 1.3.0 (PRD-1.3.0 § 6.3) : la batterie des lunettes connectées est lue aussi
+    expect(readDeviceStatus({ sn: 'x', connectType: 'connected', isWearing: true, batteryLevel: 80 })).toEqual({ connected: true, wearing: true, battery: 80 });
     expect(readDeviceStatus({ connectType: 'connecting' })).toEqual({ connected: false });
     expect(readDeviceStatus({ connectType: 'disconnected', isWearing: false })).toEqual({ connected: false, wearing: false });
     expect(readDeviceStatus({ connectType: 'connectionFailed' })).toEqual({ connected: false });
@@ -61,12 +62,15 @@ describe('état des lunettes (onDeviceStatusChanged)', () => {
     expect(readDeviceStatus({ isWearing: true })).toBeNull();
   });
 
-  it('dédoublonné : batterie et charge seules ne font aucun signal ; chaque vrai changement en fait un', () => {
+  it('dédoublonné : le même état répété ne fait aucun signal ; chaque vrai changement en fait un', () => {
+    // 1.3.0 (PRD-1.3.0 § 6.3) : la batterie et la charge sont dans le signal ; leur changement en fait un aussi (la
+    // connexion et le port y sont inchangés, le contrôleur ne reconstruit pas la page pour autant)
     const d = new DeviceSignals();
     const seen: (HubSignal | null)[] = [];
     const push = (s: unknown) => seen.push(d.next(s));
     push({ connectType: 'connected', isWearing: true, batteryLevel: 80 });
     push({ connectType: 'connected', isWearing: true, batteryLevel: 79 });
+    push({ connectType: 'connected', isWearing: true, batteryLevel: 79, isCharging: true });
     push({ connectType: 'connected', isWearing: true, batteryLevel: 79, isCharging: true });
     push({ connectType: 'disconnected', isWearing: true });
     push({ connectType: 'connecting', isWearing: true });
@@ -75,8 +79,9 @@ describe('état des lunettes (onDeviceStatusChanged)', () => {
     push({ connectType: 'connected', isWearing: true });
     push({ bad: 1 });
     expect(seen).toEqual([
-      { kind: 'device', connected: true, wearing: true },
-      null,
+      { kind: 'device', connected: true, wearing: true, battery: 80 },
+      { kind: 'device', connected: true, wearing: true, battery: 79 },
+      { kind: 'device', connected: true, wearing: true, battery: 79, charging: true },
       null,
       { kind: 'device', connected: false, wearing: true },
       null,
