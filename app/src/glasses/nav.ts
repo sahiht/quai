@@ -201,8 +201,10 @@ export function serializeNav(s: NavState): string {
 }
 
 /** Écrans connus (un instantané de la 1.0 peut contenir un écran retiré en 1.1 : « journeys », « trip », Q6). */
-// 1.2.6 : « Lignes » et toute une ligne (relecture : sans eux, la reprise après verrouillage ramenait à l'accueil)
-const SCREENS: ReadonlySet<string> = new Set(['home', 'nearby', 'board', 'favorites', 'stations', 'lines', 'follows', 'lineRun', 'line', 'keepLine', 'stops', 'steps', 'others', 'followed', 'train', 'arrival', 'message']);
+// 1.2.6 : « Lignes » et toute une ligne (relecture : sans eux, la reprise après verrouillage ramenait à l'accueil).
+// 1.2.10 : l'écran du guidage est repris (téléphone verrouillé, page rechargée) ; le menu de l'appui long, passager, ne
+// l'est pas (la reprise rouvre l'écran du guidage qu'il couvrait).
+const SCREENS: ReadonlySet<string> = new Set(['home', 'nearby', 'board', 'favorites', 'stations', 'lines', 'follows', 'lineRun', 'line', 'keepLine', 'stops', 'steps', 'others', 'followed', 'train', 'arrival', 'guide', 'message']);
 
 /**
  * Lecture défensive d'un instantané ; null s'il est invalide. Les écrans inconnus sont retirés de la pile. 1.2.2 : un
