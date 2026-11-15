@@ -401,6 +401,22 @@ describe('1.3.0 moteur : vérification au départ et en route (PRD-1.3.0 § 6.3)
     }
   });
 
+  it('arrivé : « Tu y es » n’attend pas derrière une vérification ; aucune vérification à l’arrivée', () => {
+    // lancé 10 s avant d'arriver aux étangs d'Ixelles (dernière marche), batterie basse : la vérification tombe à
+    // l'arrivée, « Tu y es » passe
+    const r = guide(prdTrip(), { startedAt: at('08:53:20'), battery: 12 });
+    step(r, at('08:53:20'), fix(toward(P.flagey, P.etangs, 300), at('08:53:20')));
+    const s = step(r, at('08:53:50'), fix(P.etangs, at('08:53:50')));
+    expect(s.phase.kind).toBe('arrived');
+    expect(kindOf(s)).toBe('arrived');
+    expect(issues(s)).toEqual([{ kind: 'battery', level: 12 }]);
+    // montrée juste avant d'arriver : elle s'arrête à l'arrivée
+    const r2 = guide(prdTrip(), { startedAt: at('08:53:00'), battery: 12 });
+    step(r2, at('08:53:00'), fix(toward(P.flagey, P.etangs, 200), at('08:53:00')));
+    expect(kindOf(step(r2, at('08:53:30'), fix(toward(P.flagey, P.etangs, 250), at('08:53:30'))))).toBe('check');
+    expect(kindOf(step(r2, at('08:53:40'), fix(P.etangs, at('08:53:40'))))).toBe('arrived');
+  });
+
   it('effacé d’un toucher : ne revient pas', () => {
     const r = guide(prdTrip(), { startedAt: at('06:40'), battery: 12 });
     step(r, at('06:40'));

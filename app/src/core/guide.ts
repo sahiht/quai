@@ -974,19 +974,20 @@ function checkCands(c: Ctx, loc: Loc): Cand[] {
   const leg = Math.max(0, loc.leg);
   const out: Cand[] = [];
   const has = (kind: CheckIssue['kind']) => c.issues.some((i) => i.kind === kind);
+  // arrivé : « Tu y es » n'attend pas derrière une vérification
+  const arrived = loc.phase.kind === 'arrived' || loc.phase.kind === 'ended';
   let live = false;
   for (const [id, since0] of Object.entries(m.shown)) {
     if (!id.startsWith('check:') || m.dismissed.includes(id)) continue;
     const kinds = checkKinds(id);
-    const end = now >= since0 + GUIDE.checkMs || !kinds.some(has);
+    const end = now >= since0 + GUIDE.checkMs || !kinds.some(has) || arrived;
     live ||= !end;
     out.push({
       id, kind: 'check', trig: false, end,
       make: (since) => ({ kind: 'check', id, since, until: since + GUIDE.checkMs, leg, issues: c.issues.filter((i) => kinds.includes(i.kind)) }),
     });
   }
-  const ph = loc.phase.kind;
-  if (live || ph === 'arrived' || ph === 'ended') return out;
+  if (live || arrived) return out;
   const said = (i: CheckIssue) => k.told.includes(i.kind) || (i.kind === 'battery' && k.bat !== true) || (i.kind === 'noPosition' && k.noPos !== true);
   const due = c.issues.filter((i) => !said(i)).slice(0, 2);
   if (!due.length) return out;
