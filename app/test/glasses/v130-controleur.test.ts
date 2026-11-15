@@ -6,25 +6,14 @@
  *    es » tout de suite, jamais de « … » figé (calcul lent, erreur, réponse dépassée) ;
  *  - § 6.1 : test de l'écran des lunettes (attente, page envoyée, question, résultat, annulation, capteur refermé) ;
  *  - § 1 : le toucher de l'écran du trajet fait ce que dit sa ligne d'action, dans chaque cas.
- * Lieux publics seulement. En attendant la fusion avec les équipes A (`edgeUp` sur « Autres trajets ») et B (la
- * navigation rend `edge` vers le haut), ce fichier les ajoute par-dessus les vrais modules (sans effet une fois fusionnés).
+ * Lieux publics seulement. La navigation rend `edge` vers le haut (équipe B) ; en attendant la fusion avec l'équipe A
+ * (`edgeUp` posé sur « Autres trajets »), ce fichier l'ajoute à la vraie vue (sans effet une fois fusionnée).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../src/glasses/views', async (importOriginal) => {
   const m = await importOriginal<typeof import('../../src/glasses/views')>();
   return { ...m, othersView: (...a: Parameters<typeof m.othersView>) => ({ ...m.othersView(...a), edgeUp: true }) };
-});
-vi.mock('../../src/glasses/nav', async (importOriginal) => {
-  const m = await importOriginal<typeof import('../../src/glasses/nav')>();
-  return {
-    ...m,
-    handleGesture: (...a: Parameters<typeof m.handleGesture>) => {
-      const out = m.handleGesture(...a);
-      const edgeUp = a[1] === 'up' && (a[2] as { edgeUp?: boolean }).edgeUp && out.effect.kind === 'none';
-      return edgeUp ? { state: out.state, effect: { kind: 'edge' as const, dir: 'up' as const } } : out;
-    },
-  };
 });
 
 import type { DisplayTestState, Favorite, FavoriteAnswer, Journey, LatLon, Settings } from '../../src/core/api';
