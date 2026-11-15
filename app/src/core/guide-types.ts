@@ -177,6 +177,8 @@ export interface WhereAmI {
     remainingMin: number;
     vehicle?: VehicleRef;
     depAt?: number;
+    /** 1.2.10 (contrôle technique) : temps réel du véhicule visé (« IC à 07:44 » ; « ~ » sans), pas celui du trajet */
+    rt?: boolean;
     marginMin?: number;
     next?: { turn: TurnKind; distM: number };
     /** sans chemin : direction de la cible par rapport à la marche (degrés, 0 = devant), si le cap est connu */

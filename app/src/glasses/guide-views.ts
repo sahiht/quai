@@ -408,7 +408,8 @@ function whereLines(w: WhereAmI, s: GuideState, j: Journey, ctx: ViewCtx, maxPx:
     out.push(L('hi', truncateWords(`À pied ${to}`, maxPx)));
     out.push(L('norm', walk.remainingM !== undefined ? `${metersText(walk.remainingM)}, ${minText(Math.max(1, walk.remainingMin))}` : minText(Math.max(1, walk.remainingMin))));
     if (walk.vehicle && walk.depAt !== undefined) {
-      out.push(L('norm', `${vehicle(walk.vehicle)} à ${timeOf(walk.depAt, w.rt, ctx)}${walk.marginMin !== undefined ? `, ${marginText(walk.marginMin)}` : ''}`));
+      // l'heure du véhicule visé, avec son temps réel (pas celui du trajet entier) : comme « Partir maintenant »
+      out.push(L('norm', `${vehicle(walk.vehicle)} à ${timeOf(walk.depAt, walk.rt ?? w.rt, ctx)}${walk.marginMin !== undefined ? `, ${marginText(walk.marginMin)}` : ''}`));
     }
     out.push(arr);
     return { lines: out };

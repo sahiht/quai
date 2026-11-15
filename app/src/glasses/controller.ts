@@ -57,7 +57,7 @@ import { shortAddress } from '../core/text';
 import { displayName, distanceM, mainMode } from '../core/util';
 import type { Mode, Names, Op } from '../../../shared/types';
 import { normalizeForSearch } from '../../../shared/names';
-import type { Clock } from '../platform/clock';
+import { CLOCK_EVENT, type Clock } from '../platform/clock';
 import { deadline } from '../platform/queue';
 import type { Fix, PageExtra, Platform } from '../platform/types';
 import { LIMITS, newId, type SettingsStore } from '../settings';
@@ -507,6 +507,8 @@ export class GlassesController implements GlassesApi {
   private autoDone = new Set<string>();
   private lastLog = '';
   private unsubscribe: (() => void) | null = null;
+  /** 1.2.10 (mode test) : abonnement à l'horloge simulée réglée par window.__quaiClock.set. */
+  private offClock: (() => void) | null = null;
   private pendingRestore: NavState | null = null;
   private pendingShow: NavState | null = null;
   private seq = 0;
@@ -596,6 +598,7 @@ export class GlassesController implements GlassesApi {
   /** Démarre : page de chargement immédiate (jamais d'écran noir), puis écran d'ouverture. */
   async start(): Promise<void> {
     this.unsubscribe = this.d.platform.glasses.onSignal((s) => this.onSignal(s));
+    this.listenClock();
     this.d.core.onGeneration?.(() => this.generationChanged());
     await this.render(true);
     if (!this.d.configured) {
@@ -840,11 +843,33 @@ export class GlassesController implements GlassesApi {
     this.clearTimers();
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.offClock?.();
+    this.offClock = null;
     // 1.2.10 : positions continues et minuterie du guidage arrêtées ; un enregistrement différé est fait tout de suite
     this.stopWatch();
     clearTimeout(this.guideTimer);
     this.guideTimer = undefined;
     if (this.saveTimer) this.saveFollowed();
+  }
+
+  /**
+   * 1.2.10 (mode test seulement) : l'horloge simulée réglée par window.__quaiClock.set (CLOCK_EVENT, « pour qui veut
+   * recalculer tout de suite ») : les minuteries tournent en temps réel ; sans cela, après un saut de l'horloge, le
+   * guidage n'était recalculé qu'au réveil suivant (jusqu'à 60 s), et les positions poussées sans flux en service
+   * (position coupée plus de 10 min avant de partir) n'y arrivaient pas : pas de « Partir maintenant » à l'heure.
+   */
+  private listenClock(): void {
+    const w = globalThis as { addEventListener?: (t: string, f: () => void) => void; removeEventListener?: (t: string, f: () => void) => void };
+    if (!this.d.e2e || typeof w.addEventListener !== 'function') return;
+    const on = (): void => {
+      if (this.stopped || !this.ready || this.paused) return;
+      // le flux de position n'est pas touché ici : un flux relancé redonnerait la dernière position simulée, d'avant le
+      // saut, comme si elle était de maintenant (les positions de la nouvelle heure arrivent juste après)
+      if (this.trip?.guide) this.stepGuide({ keepWatch: true });
+      else void this.render();
+    };
+    w.addEventListener(CLOCK_EVENT, on);
+    this.offClock = () => w.removeEventListener?.(CLOCK_EVENT, on);
   }
 
   private startTimers(): void {
@@ -2313,7 +2338,7 @@ export class GlassesController implements GlassesApi {
    * positions continues selon le besoin du moteur, chemin à pied et nouveau trajet demandés, prochain recalcul, carte
    * « En cours » du téléphone, écran du guidage s'il est affiché (`render` faux : pas de rendu).
    */
-  private stepGuide(o: { render?: boolean } = {}): GuideState | null {
+  private stepGuide(o: { render?: boolean; keepWatch?: boolean } = {}): GuideState | null {
     const t = this.trip;
     const g = t?.guide;
     if (!t || !g || this.stopped) return null;
@@ -2342,7 +2367,7 @@ export class GlassesController implements GlassesApi {
       this.endGuide('ended');
       return null;
     }
-    this.applyLocation(st.location);
+    if (!o.keepWatch) this.applyLocation(st.location);
     if (st.needRoute) this.askRoute(st.needRoute);
     this.maybeReplan(st);
     this.scheduleGuideWake(st);

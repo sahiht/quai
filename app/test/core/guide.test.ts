@@ -4,7 +4,7 @@
  * pied, bus 71 jusqu'à Flagey, à pied jusqu'aux étangs d'Ixelles. Heure seule, positions, temps réel, imprévus.
  */
 import { describe, expect, it } from 'vitest';
-import type { Moment } from '../../src/core/guide-types';
+import type { GuideMemory, Moment, WalkRoute } from '../../src/core/guide-types';
 import { dismissMoment, GUIDE, guideStep, newGuideMemory, replanJourney, replanNone, type GuideInput } from '../../src/core/guide';
 import {
   at,
@@ -68,6 +68,17 @@ describe('heure seule (sans position), trajet complet', () => {
     expect(s.where).toMatchObject({ title: 'Bureau', arr: at('08:54'), rt: true });
   });
 
+  it('« où tu en es » à pied : temps réel du véhicule visé (bus 6), pas celui du trajet entier', () => {
+    const j = prdTrip();
+    j.legs[5] = { ...j.legs[5], rt: false };
+    j.rt = false;
+    const s = step(guide(j), at('07:00'));
+    expect(s.where.rt).toBe(false);
+    expect(s.where.walk).toMatchObject({ vehicle: { op: 'tec', mode: 'bus', line: '6' }, depAt: at('07:12'), rt: true });
+    const s2 = step(guide(prdTrip({ bus6Rt: false })), at('07:00'));
+    expect(s2.where.walk?.rt).toBe(false);
+  });
+
   it('10 min avant de partir : position moyenne', () => {
     const r = guide(prdTrip());
     expect(step(r, at('06:54')).location).toBe('off');
@@ -85,6 +96,16 @@ describe('heure seule (sans position), trajet complet', () => {
     expect(mo.tight).toBeUndefined();
     expect(s.location).toBe('high');
     expect(s.where.chain[0]).toEqual({ label: 'à pied', state: 'now' });
+  });
+
+  it('« Partir maintenant » avec 2 min de marge : pas « très juste » une seconde après (marge exacte, 60 s au plus)', () => {
+    const r = guide(prdTrip());
+    step(r, at('07:05'));
+    expect(m(step(r, at('07:05:01')).moment, 'leave').tight).toBeUndefined();
+    expect(m(step(r, at('07:05:59')).moment, 'leave').tight).toBeUndefined();
+    const late = m(step(r, at('07:06')).moment, 'leave');
+    expect(late.tight).toBe(true);
+    expect(late.marginMin).toBe(1);
   });
 
   it('« Partir maintenant » finit 3 min après et ne revient pas', () => {
@@ -180,12 +201,16 @@ describe('heure seule (sans position), trajet complet', () => {
   it('IC : « Prochain arrêt » 1 min avant Ans et Louvain, jamais dans les 5 min avant « Descends »', () => {
     const r = guide(prdTrip());
     const ans = m(step(r, at('07:36')).moment, 'nextStop');
-    expect(ans).toMatchObject({ id: 'nextStop:jprd:3:1', stop: N('Ans'), at: at('07:37'), stopsToAlight: 3, alight: N('Bruxelles-Central', 'Brussel-Centraal'), until: at('07:39') });
+    expect(ans).toMatchObject({ id: 'nextStop:jprd:3:1', stop: N('Ans'), at: at('07:37'), stopsToAlight: 4, alight: N('Bruxelles-Central', 'Brussel-Centraal'), until: at('07:39') });
     expect(r.mem.lastNextStopAt).toBe(at('07:36'));
     expect(kindOf(step(r, at('07:38')))).toBe('nextStop');
     expect(step(r, at('07:39')).moment).toBeNull();
-    const lou = m(step(r, at('08:04')).moment, 'nextStop');
-    expect(lou).toMatchObject({ stop: N('Louvain', 'Leuven'), stopsToAlight: 2 });
+    // exemple du PRD : « Prochain arrêt : Louvain » ; « descente dans 3 arrêts, à Bruxelles-Central » (Louvain,
+    // Bruxelles-Nord, Bruxelles-Central) ; le même compte que « Où tu en es » au même instant
+    const s4 = step(r, at('08:04'));
+    const lou = m(s4.moment, 'nextStop');
+    expect(lou).toMatchObject({ stop: N('Louvain', 'Leuven'), stopsToAlight: 3 });
+    expect(s4.where.ride).toMatchObject({ nextStop: N('Louvain', 'Leuven'), stopsToAlight: 3 });
     expect(step(r, at('08:07')).moment).toBeNull();
     // Bruxelles-Nord (08:22) : dans les 5 min avant « Descends » (08:23)
     expect(step(r, at('08:21')).moment).toBeNull();
@@ -322,6 +347,41 @@ describe('positions', () => {
     expect(s.moment).toBeNull();
   });
 
+  it('à 50 m de l’arrêt à vol d’oiseau mais un virage à 38 m sur le chemin : « monter » d’abord, le virage derrière (après l’effacement), le chemin gardé', () => {
+    // le chemin passe à 50 m au sud de l'arrêt Monument Gramme, file vers l'est, tourne à gauche, puis revient à l'arrêt
+    const S0 = P.gramme;
+    const rt = route([offset(S0, -200, -50), offset(S0, 43, -50), offset(S0, 43, 0), S0], [{ at: 1, turn: 'left', street: 'Boulevard Piercot' }, { at: 2, turn: 'left' }]);
+    const r = guide(prdTrip(), { walk: { leg: 0, route: rt } });
+    step(r, at('07:08'), fix(offset(S0, -60, -50), at('07:08'), { speed: 1.4 }));
+    let s = step(r, at('07:09'), fix(offset(S0, 5, -50), at('07:09'), { speed: 1.4 }));
+    expect(s.phase).toEqual({ kind: 'wait', leg: 1 });
+    expect(m(s.moment, 'board').leg).toBe(1);
+    // le chemin de la marche reste gardé tant qu'un virage est devant (pas celui de la marche suivante)
+    expect(s.needRoute).toBeUndefined();
+    r.mem = dismissMoment(r.mem, s.moment!.id, at('07:09:05'));
+    s = step(r, at('07:09:06'), fix(offset(S0, 6, -50), at('07:09:06'), { speed: 1.4 }));
+    expect(m(s.moment, 'turn')).toMatchObject({ turn: 'left', street: 'Boulevard Piercot', distM: 37 });
+  });
+
+  it('la phase ne dépend pas du chemin gardé : à la correspondance de Bruxelles-Central, pas d’alternance de demandes entre les marches 4 et 6', () => {
+    // à 72 m à vol d'oiseau de l'arrêt du bus 71, 65 m à côté du chemin de la marche 4, dont il reste 30 m
+    const stopP = P.gareCentrale;
+    const r4 = route([P.central, offset(stopP, -40, 0), stopP]);
+    const here = offset(stopP, -30, 65);
+    const r6 = route([P.flagey, offset(P.flagey, 0, -200), P.etangs]);
+    const run = (walk: { leg: number; route: WalkRoute }) => {
+      const r = guide(prdTrip(), { walk });
+      r.mem = { v: 1, dismissed: [], shown: {}, ...{ jid: 'jprd', boarded: { leg: 3, at: at('07:31') }, alighted: { leg: 3, at: at('08:27:30') } } } as GuideMemory;
+      return step(r, at('08:29'), fix(here, at('08:29'), { speed: 1.2 }));
+    };
+    const with4 = run({ leg: 4, route: r4 });
+    const with6 = run({ leg: 6, route: r6 });
+    expect(with4.phase).toEqual(with6.phase);
+    // le chemin demandé est le même, que l'on garde celui de la marche 4 ou celui de la marche 6
+    expect(with6.needRoute?.leg).toBe(4);
+    expect(with4.needRoute).toBeUndefined();
+  });
+
   it('chemin de la marche en cours demandé une fois ; à bord, celui de la marche suivante', () => {
     const r = guide(prdTrip(), { walk: { leg: 0, route: firstWalkRoute() } });
     expect(step(r, at('06:40')).needRoute).toBeUndefined();
@@ -454,7 +514,11 @@ describe('positions', () => {
 });
 
 describe('arrêt dépassé', () => {
-  const ride71 = (r: ReturnType<typeof guide>) => step(r, at('08:35'), fix(toward(P.gareCentrale, P.porteNamur, 200), at('08:35'), { speed: 8 }));
+  // à l'arrêt Gare Centrale (correspondance), puis dans le bus 71
+  const ride71 = (r: ReturnType<typeof guide>) => {
+    step(r, at('08:33:30'), fix(P.gareCentrale, at('08:33:30'), { speed: 0 }));
+    return step(r, at('08:35'), fix(toward(P.gareCentrale, P.porteNamur, 200), at('08:35'), { speed: 8 }));
+  };
   const beyond = (m2: number) => toward(P.porteNamur, P.flagey, 1389 + m2);
 
   it('plus de 300 m au-delà de Flagey, en s’éloignant, après son heure : « Tu as passé Flagey », nouveau trajet demandé', () => {
