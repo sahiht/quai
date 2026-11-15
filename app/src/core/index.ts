@@ -58,6 +58,8 @@ import { lineHeadsIn, lineRunIn, type FollowRef, type LineFollow, type LineRun }
 import { departureStopsAt, missingStops } from './stopcalls';
 import { brusselsParts, distanceM, localDate, walkMinutes } from './util';
 import { DAY_START_HOUR } from './text';
+import { WalkRouter } from './walk/router';
+import type { WalkRoute } from './guide-types';
 
 export { dataFreshness, type Freshness } from './freshness';
 export { QuaiError, MESSAGES, type QuaiErrorCode } from './errors';
@@ -104,6 +106,8 @@ export function createCore(opts: CoreOptions): Core {
   const weather = new WeatherClient(trimSlash(opts.relayBase), fetchFn, now);
   const rainOn = (s: Settings): boolean => s.display.rain !== false;
   const engine = new TrainEngine();
+  // 1.2.10 : chemin à pied sur le téléphone (tuiles data/walk/, demandées par zone ; la position ne part jamais)
+  const walk = new WalkRouter({ index: () => data.walkIndex(), tile: (k, v) => data.walkTile(k, v) }, { now });
 
   const ensure = (): Promise<Meta> => data.requireMeta();
 
@@ -240,6 +244,19 @@ export function createCore(opts: CoreOptions): Core {
 
     async init(): Promise<Meta> {
       return data.loadMeta();
+    },
+
+    /**
+     * 1.2.10 (PRD-1.2.10 § 3.8) : chemin à pied (core/walk/router.ts). Vrai chemin, chemin droit si un bout n'a pas de
+     * voie à 100 m ou qu'aucun chemin ne les relie ; null si les données manquent ou que le réseau fait défaut (le
+     * guidage réessaie au besoin). Jamais d'exception.
+     */
+    async walkRoute(from: LatLon, to: LatLon): Promise<WalkRoute | null> {
+      try {
+        return await walk.route(from, to);
+      } catch {
+        return null;
+      }
     },
 
     async nearby(lat: number, lon: number, radiusM: number, o?: { light?: boolean }): Promise<NearbyItem[]> {

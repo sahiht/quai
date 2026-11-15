@@ -1,0 +1,118 @@
+/**
+ * 1.2.10 (PRD-1.2.10 § 3.8) : chemin à pied du téléphone. Charge les tuiles piétonnes autour de la marche (cadre des
+ * deux bouts + 300 m ; sans chemin trouvé, une fois + 1 km), les garde décodées en mémoire (16 tuiles au plus), puis
+ * calcule (route.ts). Les tuiles sont demandées par zone, comme les tuiles d'arrêts : aucune position ne part.
+ *
+ * Résultat : le vrai chemin (`source: 'osm'`) ; le chemin droit (`straight`, aucun virage) quand un bout n'a aucune
+ * voie à 100 m, qu'aucun chemin ne relie les deux bouts, ou que la marche dépasse 5 km ; null quand les données
+ * manquent (pas de chemins publiés) ; exception quand le réseau ou une tuile fait défaut (l'appelant réessaie plus
+ * tard).
+ */
+import type { LatLon } from '../api';
+import type { WalkRoute } from '../guide-types';
+import { leafKeysForBox, WALK_UNIT, type UnitBox, type WalkIndex, type WalkTileFile } from './format';
+import { M_PER_U, mergeTiles, prepareTile, unitsM, type RoutingGraph, type TileGraph } from './graph';
+import { routeOn, straightRoute } from './route';
+
+/** Marge autour du cadre des deux bouts. */
+export const MARGIN_M = 300;
+/** Marge du second essai, quand aucun chemin n'a été trouvé. */
+export const WIDE_MARGIN_M = 1000;
+/** Au-delà, pas de calcul (une marche du guidage fait au plus 2 km) : chemin droit. */
+export const MAX_WALK_M = 5000;
+export const MAX_TILES = 16;
+
+export interface WalkSource {
+  /** Index des tuiles ; null : pas de chemins à pied publiés. */
+  index(): Promise<WalkIndex | null>;
+  /** Une tuile ; null : tuile vide (absente de la publication). */
+  tile(key: string, version: string): Promise<WalkTileFile | null>;
+}
+
+export interface WalkRouterOptions {
+  now?: () => number;
+  maxTiles?: number;
+}
+
+const valid = (p: LatLon | null | undefined): p is LatLon =>
+  !!p && Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
+
+/** Cadre en unités de deux points, élargi de `marginM`. */
+export function boxAround(a: LatLon, b: LatLon, marginM: number): UnitBox {
+  const la0 = Math.min(a.lat, b.lat) / WALK_UNIT;
+  const la1 = Math.max(a.lat, b.lat) / WALK_UNIT;
+  const lo0 = Math.min(a.lon, b.lon) / WALK_UNIT;
+  const lo1 = Math.max(a.lon, b.lon) / WALK_UNIT;
+  const dLat = marginM / M_PER_U;
+  const dLon = marginM / (M_PER_U * Math.max(0.1, Math.cos(((la0 + la1) / 2) * WALK_UNIT * (Math.PI / 180))));
+  return { lat0: Math.floor(la0 - dLat), lat1: Math.ceil(la1 + dLat), lon0: Math.floor(lo0 - dLon), lon1: Math.ceil(lo1 + dLon) };
+}
+
+export class WalkRouter {
+  private readonly src: WalkSource;
+  private readonly now: () => number;
+  private readonly maxTiles: number;
+  /** tuiles décodées (ou en cours), clé « version|tuile », la plus récemment servie en dernier */
+  private readonly tiles = new Map<string, Promise<TileGraph | null>>();
+  private version = '';
+  private graph: { key: string; g: RoutingGraph } | null = null;
+
+  constructor(src: WalkSource, opts: WalkRouterOptions = {}) {
+    this.src = src;
+    this.now = opts.now ?? (() => Date.now());
+    this.maxTiles = opts.maxTiles ?? MAX_TILES;
+  }
+
+  /** Chemin à pied de `from` à `to` (voir l'en-tête du fichier pour les cas). */
+  async route(from: LatLon, to: LatLon): Promise<WalkRoute | null> {
+    if (!valid(from) || !valid(to)) return null;
+    const crow = unitsM(from.lat / WALK_UNIT, from.lon / WALK_UNIT, to.lat / WALK_UNIT, to.lon / WALK_UNIT);
+    if (crow > MAX_WALK_M) return straightRoute(from, to, this.now());
+    const index = await this.src.index();
+    if (!index) return null;
+    if (index.version !== this.version) {
+      this.version = index.version;
+      this.tiles.clear();
+      this.graph = null;
+    }
+    const split = new Set(index.split);
+    for (const margin of [MARGIN_M, WIDE_MARGIN_M]) {
+      const keys = leafKeysForBox(boxAround(from, to, margin), split);
+      const loaded = (await Promise.all(keys.map((k) => this.tile(k, index.version)))).filter((t): t is TileGraph => t !== null);
+      if (!loaded.length) return straightRoute(from, to, this.now());
+      const r = routeOn(this.graphOf(loaded), from, to, this.now());
+      if (typeof r !== 'string') return r;
+      if (r === 'nosnap') return straightRoute(from, to, this.now());
+    }
+    return straightRoute(from, to, this.now());
+  }
+
+  /** Graphe des tuiles données (le dernier est gardé : un nouveau calcul sur la même marche le reprend). */
+  private graphOf(tiles: TileGraph[]): RoutingGraph {
+    const key = tiles.map((t) => `${t.ver}|${t.key}`).join(',');
+    if (this.graph?.key === key) return this.graph.g;
+    const g = mergeTiles(tiles);
+    this.graph = { key, g };
+    return g;
+  }
+
+  private tile(key: string, version: string): Promise<TileGraph | null> {
+    const k = `${version}|${key}`;
+    const hit = this.tiles.get(k);
+    if (hit) {
+      this.tiles.delete(k);
+      this.tiles.set(k, hit);
+      return hit;
+    }
+    const p = this.src.tile(key, version).then((f) => (f ? prepareTile(f) : null));
+    this.tiles.set(k, p);
+    p.catch(() => {
+      if (this.tiles.get(k) === p) this.tiles.delete(k);
+    });
+    while (this.tiles.size > this.maxTiles) {
+      const oldest = this.tiles.keys().next().value as string;
+      this.tiles.delete(oldest);
+    }
+    return p;
+  }
+}

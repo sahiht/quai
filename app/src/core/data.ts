@@ -9,6 +9,7 @@ import { QuaiError, type QuaiErrorCode } from './errors';
 import { getText, HttpStatusError, safeJson, type FetchLike } from './net';
 import { localDate } from './util';
 import type { PersistentCache } from './persist';
+import { isTileKey, isWalkIndex, isWalkTile, type WalkIndex, type WalkTileFile } from './walk/format';
 
 const TIMEOUT_MS = 10_000;
 /** Lecture du cache persistant (pont de l'appli, parfois lent) : au-delà, on passe au réseau. */
@@ -147,6 +148,35 @@ export class DataClient {
    */
   json<T>(path: string, valid: (x: unknown) => x is T): Promise<T | null> {
     return this.file(path, valid, null);
+  }
+
+  /**
+   * 1.2.10 : index des chemins à pied (walk/index.json), par le cache commun (petit fichier) ; null : pas de chemins
+   * à pied dans cette publication (l'appli retombe sur le chemin droit).
+   */
+  walkIndex(): Promise<WalkIndex | null> {
+    return this.file('walk/index.json', isWalkIndex, null);
+  }
+
+  /**
+   * 1.2.10 : une tuile piétonne (walk/{clé}.json), demandée par zone comme les tuiles d'arrêts. Hors des caches de ce
+   * client : le chemin à pied garde ses tuiles décodées (core/walk/router.ts), et 300 ko de tuile ne doivent ni
+   * chasser les fichiers des favoris du cache persistant ni occuper le pont de stockage pendant un guidage.
+   * `?v=` : la version des tuiles (une nouvelle semaine ne se mélange pas avec l'ancienne dans le cache HTTP).
+   * null : tuile vide (404) ; réseau en échec : QuaiError('dataUnreachable') ; contenu invalide : 'dataUnavailable'.
+   */
+  async walkTile(key: string, version: string): Promise<WalkTileFile | null> {
+    if (!isTileKey(key)) return null;
+    let r: { status: number; text: string };
+    try {
+      r = await this.fetchRetry(`walk/${key}.json?v=${encodeURIComponent(version)}`);
+    } catch {
+      throw new QuaiError('dataUnreachable');
+    }
+    if (r.status === 404) return null;
+    const parsed = safeJson(r.text);
+    if (!isWalkTile(parsed) || parsed.k !== key) throw new QuaiError('dataUnavailable');
+    return parsed;
   }
 
   /** Caractères gardés dans le cache mémoire (tests, mesures). */
