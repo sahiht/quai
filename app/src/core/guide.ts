@@ -73,6 +73,8 @@ export const GUIDE = {
   /** arrêt dépassé : plus de 300 m au-delà, en s'éloignant, après son heure ; 3 min */
   passedM: 300,
   passedMs: 3 * MIN,
+  /** arrêt dépassé, nouveau trajet qui garde le véhicule : la dernière minute avant sa descente est à « Descends » */
+  passedKeptMs: 1 * MIN,
   /** « Tu y es » : à 50 m de la destination ; 2 min, puis fin */
   arrivedM: 50,
   arrivedMs: 2 * MIN,
@@ -470,7 +472,8 @@ function arrivedNow(c: Ctx): { yes: boolean; byFix: boolean } {
   if (!L) return { yes: true, byFix: false };
   const last = legs[L - 1];
   if (last.kind === 'ride') {
-    if (alightedFrom(m, L - 1)) return { yes: true, byFix: true };
+    // descente constatée (immobile à quai), puis emporté par le véhicule : resté à bord (arrêt dépassé), pas arrivé
+    if (alightedFrom(m, L - 1)) return carriedOn(c) ? { yes: false, byFix: false } : { yes: true, byFix: true };
     // encore à bord d'après la position (véhicule en retard, ou emporté au-delà de l'arrêt) : pas arrivé
     const aboard = boardedOn(m, L - 1) && (riding(c, L - 1) || (fast(c) && distTo(c, last.to) > GUIDE.alightNearM));
     if (now >= last.arr && !aboard) return { yes: true, byFix: false };
@@ -487,6 +490,16 @@ function arrivedNow(c: Ctx): { yes: boolean; byFix: boolean } {
     return { yes: false, byFix: false };
   }
   return { yes: false, byFix: false };
+}
+
+/**
+ * Dernière étape en véhicule, descente constatée (au pas près de l'arrêt, le temps de l'arrêt en gare), puis vitesse de
+ * véhicule à plus de 150 m de l'arrêt : la personne est restée à bord.
+ */
+function carriedOn(c: Ctx): boolean {
+  const L = c.legs.length;
+  const last = c.legs[L - 1];
+  return !!last && last.kind === 'ride' && alightedFrom(c.m, L - 1) && fast(c) && distTo(c, last.to) > GUIDE.alightNearM;
 }
 
 /**
@@ -702,9 +715,13 @@ function detect(c: Ctx, loc: Loc): void {
       }
       found.passed = legs[k].to.name;
       if (legs[k].tripId) found.tripId = legs[k].tripId;
-      if (kind === 'ride') found.local = true;
+      // genre ride : rien à chercher ; l'arrêt suivant connu, avec sa position : le même véhicule jusqu'à lui
+      // (rideOnJourney, par le contrôleur) ; sinon seulement « Descends à … »
+      if (kind === 'ride' && !(nx && knownPoint(nx))) found.local = true;
       if (m.alighted && m.alighted.leg >= k) delete m.alighted;
       m.boarded = { leg: k, at: m.boarded?.leg === k ? m.boarded.at : now };
+      // le véhicule où l'on est : le nouveau trajet qui le garde jusqu'à l'arrêt suivant le retrouve (adopt)
+      found.onBoard = { ...(legs[k].tripId ? { tripId: legs[k].tripId } : {}), schedDep: legs[k].schedDep, at: m.boarded.at };
     }
   }
   const same = (a: Pending, b: Pending) => a.jid === b.jid && a.reason === b.reason && a.leg === b.leg;
@@ -751,6 +768,13 @@ function justArrived(c: Ctx): number {
     return nk >= 0 && boardedOn(m, nk) ? -1 : k;
   }
   return -1;
+}
+
+/** Arrêt dépassé, nouveau trajet adopté qui garde le véhicule où l'on est : rang de son étape (-1 sinon). */
+function keptLeg(c: Ctx, re: Pending): number {
+  const ob = re.onBoard;
+  if (re.reason !== 'passed' || !ob || re.swap?.jid !== c.j.id) return -1;
+  return c.legs.findIndex((l) => l.kind === 'ride' && !l.cancelled && l.schedDep === ob.schedDep && (l.tripId ?? '') === (ob.tripId ?? ''));
 }
 
 /** Heure où « Descends au prochain arrêt » apparaît (Infinity : pas encore, d'après la position). */
@@ -838,11 +862,17 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
   if (re && re.reason === 'passed' && (re.jid === jid || re.swap?.jid === jid) && re.passed) {
     const id = `passed:${re.jid}:${re.leg}`;
     const since0 = m.shown[id] ?? now;
-    const until = since0 + GUIDE.passedMs;
+    // nouveau trajet qui garde le véhicule jusqu'à l'arrêt suivant (replanJourney, rideOnJourney) : la suite est celle
+    // d'un trajet normal, « Descends au prochain arrêt » au plus tard la dernière minute avant d'y arriver
+    const kl = keptLeg(c, re);
+    const until = kl >= 0 ? Math.max(since0, Math.min(since0 + GUIDE.passedMs, legs[kl].arr - GUIDE.passedKeptMs)) : since0 + GUIDE.passedMs;
     let getOff: Names = { fr: '', nl: '' };
     let at = 0;
     const next = re.swap ? undefined : beyondOf(c, re.leg).find((s) => s.est >= now - 30 * SEC);
-    if (re.getOff) {
+    if (kl >= 0) {
+      getOff = legs[kl].to.name;
+      at = legs[kl].arr;
+    } else if (re.getOff) {
       // l'arrêt suivant noté à la détection (arrêts suivants du véhicule) : le même, avant et après le nouveau trajet
       getOff = re.getOff;
       at = re.getOffAt ?? 0;
@@ -860,9 +890,11 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
       }
     }
     const passedName = re.passed;
+    // genre ride : « Descends à … » seulement (PRD § 3.6), pas d'arrivée d'un « nouveau trajet » (le même véhicule)
+    const arr = re.swap?.jid === jid && c.in.kind === 'trip' ? { arr: j.arr } : {};
     out.push({
       id, kind: 'passed', trig: now < re.t + GUIDE.passedMs, end: now >= until,
-      make: (since) => ({ kind: 'passed', id, since, until: since + GUIDE.passedMs, leg: re.leg, passed: passedName, getOff, at, ...(re.swap?.jid === jid ? { arr: j.arr } : {}) }),
+      make: (since) => ({ kind: 'passed', id, since, until, leg: re.leg, passed: passedName, getOff, at, ...arr }),
     });
   }
 
@@ -1316,7 +1348,17 @@ export function guideStep(input: GuideInput, mem: GuideMemory): { state: GuideSt
       if (arr.byFix) m.arrivedByFix = true;
     }
     loc = { phase: { kind: 'arrived' }, leg: -1 };
-  } else loc = locate(c);
+  } else {
+    if (m.arrivedAt !== undefined && carriedOn(c)) {
+      // « Tu y es » donné trop tôt (arrêt en gare, resté à bord) : oublié, le guidage continue (arrêt dépassé)
+      const id = `arrived:${j.id}`;
+      delete m.arrivedAt;
+      delete m.arrivedByFix;
+      delete m.shown[id];
+      if (m.cur === id) delete m.cur;
+    }
+    loc = locate(c);
+  }
   if (endedNow(c, loc)) loc = { phase: { kind: 'ended' }, leg: -1 };
   detect(c, loc);
   let moment: Moment | null = null;
@@ -1337,7 +1379,7 @@ export function guideStep(input: GuideInput, mem: GuideMemory): { state: GuideSt
     ended,
   };
   const re = m.re;
-  if (c.guided && !ended && re && re.jid === j.id && !re.swap && re.none === undefined && !re.local && (input.kind === 'trip' || re.reason === 'missed' || re.reason === 'cancelled')) {
+  if (c.guided && !ended && re && re.jid === j.id && !re.swap && re.none === undefined && !re.local && (input.kind === 'trip' || re.reason !== 'late')) {
     state.replan = { from: { ...re.from }, reason: re.reason === 'late' ? 'missed' : re.reason, at: re.at };
   }
   const need = ended ? undefined : needRouteOf(c, loc);
@@ -1350,9 +1392,10 @@ export function guideStep(input: GuideInput, mem: GuideMemory): { state: GuideSt
 /**
  * Nouveau trajet après une demande `state.replan` : encore dans un véhicule de l'ancien trajet (recalcul depuis sa
  * descente, correspondance ratée), les étapes jusqu'à ce véhicule compris restent devant le nouveau trajet (« Descends »
- * de ce véhicule, chaîne de « Où tu en es ») ; sinon le nouveau trajet tel quel.
+ * de ce véhicule, chaîne de « Où tu en es ») ; arrêt dépassé, arrêts suivants connus (`beyond`) : le véhicule où l'on
+ * est resté, prolongé jusqu'à l'arrêt suivant où commence le nouveau trajet ; sinon le nouveau trajet tel quel.
  */
-export function replanJourney(old: Journey, fresh: Journey, now: number): Journey {
+export function replanJourney(old: Journey, fresh: Journey, now: number, beyond?: BeyondByLeg): Journey {
   const start = fresh.legs[0]?.from;
   if (!start) return fresh;
   for (let k = 0; k < old.legs.length; k++) {
@@ -1360,11 +1403,72 @@ export function replanJourney(old: Journey, fresh: Journey, now: number): Journe
     if (l.kind !== 'ride' || l.cancelled || now >= l.arr || now < l.dep - GUIDE.boardAfterMs) continue;
     const same = (!!l.to.areaId && l.to.areaId === start.areaId) || (knownPoint(l.to) && knownPoint(start) && distanceM(l.to, start) <= 50);
     if (!same) continue;
-    const legs = [...old.legs.slice(0, k + 1), ...fresh.legs];
-    const rides = legs.filter(isRide);
-    return { ...fresh, id: journeyId(legs), legs, dep: old.dep, arr: fresh.arr, leaveAt: old.leaveAt, transfers: Math.max(0, rides.length - 1), rt: rides.every((x) => x.rt === true) };
+    return joined(old, fresh, [...old.legs.slice(0, k + 1), ...fresh.legs], fresh.arr);
   }
-  return fresh;
+  // arrêt dépassé, arrêts suivants du véhicule connus (`beyond`, GuideInput.beyondByLeg) : le véhicule où l'on est resté,
+  // jusqu'à l'arrêt suivant où commence le nouveau trajet (jamais « Partir maintenant » encore à bord)
+  const kept = beyond ? keepAboard(old, beyond, start, now) : null;
+  if (!kept) return fresh;
+  let rest = fresh.legs;
+  const ext = kept.legs[kept.legs.length - 1];
+  const f0 = rest[0];
+  if (f0.kind === 'ride' && !!f0.tripId && f0.tripId === ext.tripId) {
+    // le nouveau trajet continue dans ce véhicule : une seule étape, jusqu'à sa descente
+    kept.legs[kept.legs.length - 1] = { ...ext, to: f0.to, arr: f0.arr, schedArr: f0.schedArr, stops: [...stopsOf(ext), ...stopsOf(f0).slice(1)], ...(f0.toSeq !== undefined ? { toSeq: f0.toSeq } : {}), ...(f0.toStop ? { toStop: f0.toStop } : {}) };
+    rest = rest.slice(1);
+  }
+  return joined(old, fresh, [...kept.legs, ...rest], fresh.arr);
+}
+
+/** Arrêts suivants de chaque étape en véhicule, par rang dans les étapes (GuideInput.beyondByLeg). */
+export type BeyondByLeg = Readonly<Record<number, readonly Stopover[]>>;
+
+/** Trajet fait des étapes `legs` : début et heure de partir de l'ancien, le reste de `base`. */
+function joined(old: Journey, base: Journey, legs: Leg[], arr: number): Journey {
+  const rides = legs.filter(isRide);
+  return { ...base, id: journeyId(legs), legs, dep: old.dep, arr, leaveAt: old.leaveAt, transfers: Math.max(0, rides.length - 1), rt: rides.every((x) => x.rt === true) };
+}
+
+/**
+ * Arrêt dépassé : les étapes de l'ancien trajet jusqu'au véhicule où l'on est resté, lui prolongé jusqu'à `to`, un de
+ * ses arrêts suivants (`beyond`, par rang d'étape) : arrêts, arrivée et descente de cet arrêt. Rien si aucun véhicule
+ * parti ne s'y arrête. `i` : rang de `to` dans les arrêts suivants.
+ */
+function keepAboard(old: Journey, beyond: BeyondByLeg, to: LatLon & { areaId?: string }, now: number): { legs: Leg[]; i: number } | null {
+  for (let k = old.legs.length - 1; k >= 0; k--) {
+    const l = old.legs[k];
+    const after = beyond[k];
+    if (l.kind !== 'ride' || l.cancelled || !after?.length || now < l.dep - GUIDE.boardAfterMs) continue;
+    const i = after.findIndex((s) => (!!s.areaId && s.areaId === to.areaId) || (knownPoint(s) && knownPoint(to) && distanceM(s, to) <= 50));
+    if (i < 0) continue;
+    const s = after[i];
+    const p = knownPoint(s) ? s : knownPoint(to) ? to : { lat: 0, lon: 0 };
+    const ext: Leg = {
+      ...l,
+      to: { name: s.name, lat: p.lat, lon: p.lon, ...(s.areaId ? { areaId: s.areaId } : {}) },
+      arr: Math.max(s.est, l.dep),
+      schedArr: s.sched,
+      stops: [...stopsOf(l), ...after.slice(0, i + 1)].map((x) => ({ ...x })),
+    };
+    // la descente d'avant n'en est plus une (temps réel : l'arrivée suit alors le retard du départ)
+    delete ext.toSeq;
+    delete ext.toStop;
+    return { legs: [...old.legs.slice(0, k), ext], i };
+  }
+  return null;
+}
+
+/**
+ * Genre ride (« j'y descends »), arrêt dépassé, l'arrêt suivant connu (`state.replan`, raison passed, depuis `to`) :
+ * le même véhicule jusqu'à cet arrêt, suivi comme un trajet normal (« Descends au prochain arrêt », « Tu y es »), et
+ * les arrêts d'après lui (GuideInput.beyond). Rien si les arrêts suivants (`beyond`) ne le donnent pas.
+ */
+export function rideOnJourney(old: Journey, beyond: readonly Stopover[], to: LatLon & { areaId?: string }, now: number): { journey: Journey; beyond: Stopover[] } | null {
+  const k = old.legs.findIndex(isRide);
+  const kept = k >= 0 ? keepAboard(old, { [k]: beyond }, to, now) : null;
+  if (!kept) return null;
+  const legs = kept.legs;
+  return { journey: joined(old, old, legs, legs[legs.length - 1].arr), beyond: beyond.slice(kept.i + 1).map((x) => ({ ...x })) };
 }
 
 /* ------------------------------ Genre ride (« J'y descends ») ------------------------------ */
