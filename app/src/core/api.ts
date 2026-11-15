@@ -139,6 +139,14 @@ export interface Settings {
      * par « Y aller » ou « J'y descends » ; faux : le trajet est suivi sans aucun message ni écran qui change seul.
      */
     guide?: boolean;
+    /**
+     * 1.3.0 (PRD-1.3.0 § 6.1) : résultat du test de l'écran des lunettes. visible : un nouveau message se voit sans rien
+     * faire ; headUp : il se voit en levant la tête ; dashboard : en levant la tête on voit le Dashboard, pas Quai.
+     * Absent : pas encore testé (traité comme visible pour le rappel des messages, § 6.2).
+     */
+    alert?: 'visible' | 'headUp' | 'dashboard';
+    /** 1.3.0 (§ 6.2) : mouvement « lever la tête » appris pendant le test (capteur de mouvement des lunettes) */
+    headUp?: { axis: 'x' | 'y' | 'z'; sign: 1 | -1; delta: number };
   };
   alerts: {
     platform: boolean;
@@ -568,4 +576,30 @@ export interface GlassesApi {
   guideStatus?(): GuideStatus | null;
   /** 1.2.10 : appelé à chaque changement de l'état du guidage. Renvoie la fonction de désabonnement. */
   onGuide?(cb: (s: GuideStatus | null) => void): () => void;
+  /** 1.3.0 (PRD-1.3.0 § 6.1) : test de l'écran des lunettes, mené par le téléphone (Réglages, « Pendant un trajet ») */
+  displayTest?(cmd: DisplayTestCmd): Promise<DisplayTestState>;
+  onDisplayTest?(cb: (s: DisplayTestState) => void): () => void;
 }
+
+/* ------------------------------ 1.3.0 : test de l'écran des lunettes (PRD-1.3.0 § 6.1) ------------------------------ */
+
+/** Ordres du téléphone au test : commencer, répondre à une question, arrêter. */
+export type DisplayTestCmd =
+  | { kind: 'start' }
+  | { kind: 'answer'; answer: 'quai' | 'dashboard' | 'nothing' }
+  | { kind: 'cancel' };
+
+/**
+ * État du test, lu par le téléphone. idle : pas de test ; wait : ne rien toucher (l'écran s'éteint seul) ; sent : un
+ * message vient d'être envoyé, on attend un toucher sur les lunettes ; ask : question sur le téléphone (lever la tête) ;
+ * done : résultat enregistré (Settings.display.alert, et headUp si le mouvement a été appris).
+ */
+export interface DisplayTestState {
+  step: 'idle' | 'wait' | 'sent' | 'ask' | 'done';
+  /** secondes restantes de l'étape en cours, si elle a une durée */
+  left?: number;
+  result?: 'visible' | 'headUp' | 'dashboard';
+  /** le mouvement « lever la tête » a été appris */
+  learned?: boolean;
+}
+

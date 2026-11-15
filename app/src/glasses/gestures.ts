@@ -28,7 +28,10 @@ export type HubSignal =
   /** 1.2.10 : choix du menu système de l'appui long (menuItemClickEvent), identifiant MenuItem.id. */
   | { kind: 'menu'; id: number }
   /** 1.2.10 : lunettes reconnectées ou remises (onDeviceStatusChanged) : la page est reconstruite. */
-  | { kind: 'device'; connected: boolean; wearing?: boolean };
+  /** 1.3.0 (PRD-1.3.0 § 6.3) : `battery` : batterie des lunettes, 0 à 100, si l'hôte la donne */
+  | { kind: 'device'; connected: boolean; wearing?: boolean; battery?: number }
+  /** 1.3.0 (PRD-1.3.0 § 6.2) : mesure du capteur de mouvement des lunettes (imuControl ouvert), valeurs brutes */
+  | { kind: 'imu'; x: number; y: number; z: number; at: number };
 
 const CLICK = 0;
 const SCROLL_TOP = 1;

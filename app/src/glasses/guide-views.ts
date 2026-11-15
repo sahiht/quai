@@ -57,6 +57,10 @@ export const GUIDE_TEXT = {
   platformBoard: 'voie modifiée',
   /** « Où tu en es » à bord, quand le prochain arrêt est la descente */
   alightHere: 'c’est ta descente',
+  /** 1.3.0 (PRD-1.3.0 § 4) : marche hors de l'extrait de Belgique */
+  offMap: 'Hors de Belgique',
+  /** 1.3.0 (PRD-1.3.0 § 6.3) : vérification au départ */
+  check: 'À vérifier',
   arrived: 'Tu y es',
   none: 'Pas d’autre trajet trouvé',
   tight: 'très juste',
@@ -275,6 +279,11 @@ function momentView(m: Moment, s: GuideState, j: Journey, ctx: ViewCtx): MomentV
       return passedMoment(m, ride, ctx);
     case 'arrived':
       return arrivedMoment(m);
+    // 1.3.0 : vues de l'équipe des écrans (PRD-1.3.0 § 4 et § 6.3) ; en attendant, la première ligne seule
+    case 'offMap':
+      return { lines: [MAIN(GUIDE_TEXT.offMap)], hints: HINTS.guide };
+    case 'check':
+      return { lines: [MAIN(GUIDE_TEXT.check)], hints: HINTS.guide };
   }
 }
 

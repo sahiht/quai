@@ -51,8 +51,19 @@ export interface WalkRoute {
   maneuvers: Maneuver[];
   /** osm : vrai chemin ; straight : pas de données, segment droit (aucun virage annoncé) */
   source: 'osm' | 'straight';
+  /**
+   * 1.3.0 (PRD-1.3.0 § 4) : pourquoi un chemin droit. outside : un bout sans tuile piétonne (hors de l'extrait de
+   * Belgique) ; nosnap : aucune voie à 100 m ; nopath : pas de chemin dans les tuiles ; far : marche de plus de 5 km.
+   */
+  reason?: 'outside' | 'nosnap' | 'nopath' | 'far';
   builtAt: number;
 }
+
+/** 1.3.0 (PRD-1.3.0 § 6.3) : ce que la vérification au départ signale, une ligne chacun. */
+export type CheckIssue =
+  | { kind: 'noPosition' }
+  | { kind: 'positionLost'; minutes: number }
+  | { kind: 'battery'; level: number };
 
 /** Où l'on en est sur un chemin à pied (walkProgress). */
 export interface WalkProgress {
@@ -161,7 +172,11 @@ export type Moment =
       none?: boolean;
     })
   | (MomentBase & { kind: 'passed'; passed: Names; getOff: Names; at: number; arr?: number })
-  | (MomentBase & { kind: 'arrived'; title: string; at: number; diffMin: number });
+  | (MomentBase & { kind: 'arrived'; title: string; at: number; diffMin: number })
+  /** 1.3.0 (PRD-1.3.0 § 4) : marche sans chemin à pied (hors de Belgique) : la direction et le temps, sans virage. */
+  | (MomentBase & { kind: 'offMap'; walkMin: number; distM?: number; bearingDeg?: number; toward?: Names })
+  /** 1.3.0 (PRD-1.3.0 § 6.3) : vérification au départ (position, batterie des lunettes). */
+  | (MomentBase & { kind: 'check'; issues: CheckIssue[] });
 
 /** « Où tu en es » (toucher sur l'écran vide, et à l'ouverture du guidage) : PRD § 3.3. */
 export interface WhereAmI {
@@ -183,6 +198,10 @@ export interface WhereAmI {
     next?: { turn: TurnKind; distM: number };
     /** sans chemin : direction de la cible par rapport à la marche (degrés, 0 = devant), si le cap est connu */
     bearingDeg?: number;
+    /** 1.3.0 (PRD-1.3.0 § 4) : marche hors de l'extrait de Belgique (chemin droit, raison outside) */
+    offMap?: boolean;
+    /** 1.3.0 : distance à vol d'oiseau jusqu'à la cible (m), pour une marche sans chemin */
+    crowM?: number;
   };
   wait?: { stop: Names; vehicle: VehicleRef; head: Names; depAt: number; rt: boolean; platform?: string; platformChanged?: boolean };
   ride?: { vehicle: VehicleRef; head?: Names; total: number; next: number; nextStop: Names; nextAt: number; alight: Names; alightAt: number; stopsToAlight: number; rt: boolean };

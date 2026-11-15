@@ -145,6 +145,8 @@ export interface GuideInput {
    * ils remplacent `beyond` (genre ride : la seule étape).
    */
   beyondByLeg?: Record<number, Stopover[]>;
+  /** 1.3.0 (PRD-1.3.0 § 6.3) : batterie des lunettes (0 à 100), si connue (signal `device` de la plateforme) */
+  battery?: number;
 }
 
 /* ------------------------------ Mémoire ------------------------------ */
@@ -735,7 +737,8 @@ function detect(c: Ctx, loc: Loc): void {
 
 /* ------------------------------ Moments ------------------------------ */
 
-const PRIO: Record<Moment['kind'], number> = { replan: 0, passed: 1, alight: 2, platform: 3, board: 4, turn: 5, leave: 6, nextStop: 7, arrived: 8 };
+// 1.3.0 (PRD-1.3.0 § 3) : offMap après leave (la marche commence), check après eux (jamais devant une action)
+const PRIO: Record<Moment['kind'], number> = { replan: 0, passed: 1, alight: 2, platform: 3, board: 4, turn: 5, leave: 6, offMap: 7, check: 8, nextStop: 9, arrived: 10 };
 
 interface Cand {
   id: string;

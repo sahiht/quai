@@ -41,6 +41,8 @@ export type ScreenId =
   | 'guide'
   /** 1.2.10 : menu de l'appui long, rendu par Quai quand les lunettes n'ont pas de menu système (Quai Web). */
   | 'menu'
+  /** 1.3.0 (PRD-1.3.0 § 6.1) : test de l'écran des lunettes (mené depuis le téléphone). */
+  | 'displayTest'
   | 'message';
 
 /** Zone d'arrêt identifiée (gare, arrêt) pour les routes. */
@@ -170,6 +172,8 @@ export type Route =
   | { screen: 'guide' }
   /** 1.2.10 : menu de l'appui long (Quai Web), mêmes choix que le menu système des lunettes. */
   | { screen: 'menu'; items: MenuItem[] }
+  /** 1.3.0 (PRD-1.3.0 § 6.1) : test de l'écran : l'étape montrée sur les lunettes */
+  | { screen: 'displayTest'; step: 'wait' | 'sent' | 'ask' | 'done' }
   | { screen: 'message'; kind: MessageKind; title: string; lines: string[] };
 
 /** 1.2.10 : un choix du menu de l'appui long (32 octets UTF-8 au plus, 10 choix au plus, SDK 0.0.14+). */
@@ -360,6 +364,21 @@ export interface GlassesView {
   reserveNote?: boolean;
   /** Aides de gestes (vide si désactivées). */
   hints: string;
+  /**
+   * 1.3.0 (PRD-1.3.0 § 1) : ligne d'action au plus clair, juste au-dessus des aides (« ▶ Y aller », « ▶ Retour au
+   * guidage », « ▶ Suivre ce trajet », « ▶ Trajet suivi ») : ce que fait un toucher sur cet écran.
+   */
+  action?: string;
+  /**
+   * 1.3.0 (PRD-1.3.0 § 2) : ▲ sur la première rangée de cette liste n'est pas sans effet : la navigation rend `edge`
+   * (vers le haut) et le contrôleur revient à l'écran d'avant (« Autres trajets » : le trajet proposé).
+   */
+  edgeUp?: boolean;
+  /**
+   * 1.3.0 (PRD-1.3.0 § 7) : accordéon : sous la rangée du curseur, ses lignes `expand` (DetailItem), pâles et en
+   * retrait ; les autres rangées restent sur une ligne. Remplace la ligne du détail en bas de « Favoris ».
+   */
+  accordion?: boolean;
   /**
    * 1.2.1 (accueil) : sous une note (jour férié), la ligne d'aide n'est pas réservée quand l'aide est vide ; la note
    * devient la dernière ligne de l'écran et la liste garde une ligne de plus. 1.2.2 (REVUE-USAGE n° 1) : sans note

@@ -23,6 +23,11 @@ export interface GlassesPort {
   onSignal(cb: (s: HubSignal) => void): () => void;
   /** Quitter : 1 = boîte de confirmation système, 0 = immédiat. */
   exit(mode: 0 | 1): Promise<void>;
+  /**
+   * 1.3.0 (PRD-1.3.0 § 6.2) : capteur de mouvement des lunettes (imuControl) : ouvert, une mesure toutes les `paceMs`
+   * (100 à 1000, par 100) en signal `imu` ; fermé. Faux si l'hôte refuse (le rappel des messages se passe alors du capteur).
+   */
+  imu?(on: boolean, paceMs?: number): Promise<boolean>;
 }
 
 /** 1.2.10 : images et choix du menu d'une page. */

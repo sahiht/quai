@@ -188,6 +188,11 @@ export const GUIDE = {
  */
 export interface DetailItem extends Item {
   detail?: string;
+  /**
+   * 1.3.0 (PRD-1.3.0 § 7) : lignes de l'accordéon (1 ou 2), dites sous la rangée quand le curseur est sur elle
+   * (GlassesView.accordion) ; `planned` : la ligne montre un « ~ ».
+   */
+  expand?: { text: string; planned?: boolean }[];
 }
 
 /**
