@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Moment } from '../../src/core/guide-types';
-import { dismissMoment, GUIDE, guideStep, newGuideMemory, replanNone } from '../../src/core/guide';
+import { dismissMoment, GUIDE, guideStep, newGuideMemory, replanNone, type GuideInput } from '../../src/core/guide';
 import {
   at,
   BUS6,
@@ -690,8 +690,8 @@ describe('reprise après suspension (téléphone verrouillé)', () => {
     step(r, at('07:05'));
     step(r, at('07:06'), fix(offset(P.avroy, 0, -60), at('07:06')));
     const kept = JSON.parse(JSON.stringify(r.mem));
-    const a = guideStep({ ...(r.input as never), journey: r.j, now: at('07:10'), fixes: [] }, r.mem);
-    const b = guideStep({ ...(r.input as never), journey: r.j, now: at('07:10'), fixes: [] }, kept);
+    const a = guideStep({ ...(r.input as GuideInput), journey: r.j, now: at('07:10'), fixes: [] }, r.mem);
+    const b = guideStep({ ...(r.input as GuideInput), journey: r.j, now: at('07:10'), fixes: [] }, kept);
     expect(b).toEqual(a);
   });
 });
@@ -709,7 +709,7 @@ describe('contrat du moteur', () => {
       return o;
     };
     deep(r.mem);
-    const input = { ...(r.input as never), journey: r.j, now: at('07:12:30'), fixes: [fix(P.gramme, at('07:12:20'))] };
+    const input = { ...(r.input as GuideInput), journey: r.j, now: at('07:12:30'), fixes: [fix(P.gramme, at('07:12:20'))] };
     const a = guideStep(input, r.mem);
     const b = guideStep(input, r.mem);
     expect(b).toEqual(a);
