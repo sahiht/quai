@@ -4,7 +4,7 @@
  * Échap ou Retour arrière = double toucher ; boutons sous l'écran.
  *
  * 1.2.10 (PRD-1.2.10 § 3.4) : appui long (geste `long`, menu du guidage) : doigt gardé 600 ms sur l'écran, touche L,
- * ou bouton « Appui long » de la barre des gestes, qui demande le geste à l'écran par l'événement GESTURE_EVENT.
+ * ou bouton « Appui long » de la barre des gestes (data-g="long", câblé par web/main.ts comme les autres).
  */
 import type { Gesture } from '../glasses/nav';
 
@@ -15,13 +15,8 @@ export const TAP_MAX_MS = 650;
 export const DOUBLE_TAP_MS = 300;
 /** 1.2.10 : doigt gardé immobile ce temps sur l'écran : appui long (avant TAP_MAX_MS : jamais un toucher en plus). */
 export const LONG_PRESS_MS = 600;
-/**
- * 1.2.10 : événement DOM envoyé à l'écran des lunettes pour lui demander un geste (detail : le geste), par le bouton
- * « Appui long » de la barre des gestes (web/shell.ts) ; attachScreenGestures le transmet comme les autres gestes.
- */
-export const GESTURE_EVENT = 'quai-geste';
-
-const GESTURES: readonly Gesture[] = ['up', 'down', 'tap', 'double', 'long'];
+/** Gestes des boutons de la barre (data-g), dans leur ordre. */
+export const GESTURES: readonly Gesture[] = ['up', 'down', 'tap', 'double', 'long'];
 /** Vrai si `g` est un geste des lunettes. */
 export const isGesture = (g: unknown): g is Gesture => typeof g === 'string' && (GESTURES as readonly string[]).includes(g);
 /** Molette ou pavé tactile : distance cumulée pour un pas, et intervalle minimal entre deux pas. */
@@ -108,7 +103,7 @@ const NATIVE_ROLES = /^(button|option|combobox|switch|tab|link|menuitem|radio|ch
  */
 export function keyBelongsToFocus(el: ElementLike | null | undefined, key: string): boolean {
   if (!el || !el.tagName) return false;
-  if (el.closest?.('[data-g], [data-gesture]')) return key === 'Enter' || key === ' ';
+  if (el.closest?.('[data-g]')) return key === 'Enter' || key === ' ';
   if (el.isContentEditable) return true;
   if (NATIVE_TAGS.test(el.tagName.toUpperCase())) return true;
   const role = el.getAttribute?.('role');
@@ -117,8 +112,7 @@ export function keyBelongsToFocus(el: ElementLike | null | undefined, key: strin
 
 /**
  * Gestes sur l'écran : glisser, toucher, double toucher, molette, et (1.2.10) appui long : doigt gardé LONG_PRESS_MS
- * sans bouger (le relâcher ensuite ne fait rien de plus), ou geste demandé par GESTURE_EVENT. Renvoie la fonction qui
- * les retire.
+ * sans bouger (le relâcher ensuite ne fait rien de plus). Renvoie la fonction qui les retire.
  */
 export function attachScreenGestures(el: HTMLElement, emit: (g: Gesture) => void, timers: Timers = realTimers): () => void {
   const taps = new TapSequencer((g) => emit(g), DOUBLE_TAP_MS, timers);
@@ -176,12 +170,6 @@ export function attachScreenGestures(el: HTMLElement, emit: (g: Gesture) => void
     emit(wheel > 0 ? 'down' : 'up');
     wheel = 0;
   };
-  const asked = (e: Event): void => {
-    const g = (e as CustomEvent<unknown>).detail;
-    if (!isGesture(g)) return;
-    taps.cancel();
-    emit(g);
-  };
   const noMenu = (e: Event): void => e.preventDefault();
   el.addEventListener('pointerdown', down);
   el.addEventListener('pointermove', move);
@@ -189,7 +177,6 @@ export function attachScreenGestures(el: HTMLElement, emit: (g: Gesture) => void
   el.addEventListener('pointercancel', cancel);
   el.addEventListener('wheel', onWheel, { passive: false });
   el.addEventListener('contextmenu', noMenu);
-  el.addEventListener(GESTURE_EVENT, asked);
   return () => {
     taps.cancel();
     clearLong();
@@ -199,13 +186,7 @@ export function attachScreenGestures(el: HTMLElement, emit: (g: Gesture) => void
     el.removeEventListener('pointercancel', cancel);
     el.removeEventListener('wheel', onWheel);
     el.removeEventListener('contextmenu', noMenu);
-    el.removeEventListener(GESTURE_EVENT, asked);
   };
-}
-
-/** 1.2.10 : demande un geste à l'écran des lunettes (bouton « Appui long » de la barre des gestes). */
-export function requestGesture(screen: EventTarget, g: Gesture): void {
-  screen.dispatchEvent(new CustomEvent(GESTURE_EVENT, { detail: g }));
 }
 
 /** Clavier : gestes quand `active()` est vrai et que la touche n'appartient pas à l'élément qui a le focus. */

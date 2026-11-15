@@ -4,7 +4,6 @@
  * les deux vues sont côte à côte.
  */
 import { GRID } from './icon-grid';
-import { requestGesture } from './gestures';
 import { h } from '../phone/dom';
 
 export type Panel = 'lunettes' | 'reglages';
@@ -13,10 +12,7 @@ export const WIDE_QUERY = '(min-width: 1024px)';
 export interface Shell {
   root: HTMLElement;
   canvas: HTMLCanvasElement;
-  /**
-   * Barre des gestes (boutons data-g="up|down|tap|double") ; 1.2.10 : bouton « Appui long » (data-gesture="long"), qui
-   * demande le geste à l'écran (web/gestures.ts, GESTURE_EVENT, transmis par attachScreenGestures).
-   */
+  /** Barre des gestes (boutons data-g="up|down|tap|double|long" ; 1.2.10 : « Appui long »). */
   gestures: HTMLElement;
   /** Sous la barre des gestes (rubrique Position). */
   extra: HTMLElement;
@@ -55,11 +51,7 @@ export function mountShell(host: HTMLElement, initial: Panel): Shell {
     button('down', '▼', 'Glisser vers le bas'),
     button('tap', 'Toucher'),
     button('double', 'Double toucher'),
-    h(
-      'button',
-      { type: 'button', class: 'w-g w-g-long', 'data-gesture': 'long', onmousedown: (e: MouseEvent) => e.preventDefault(), onclick: () => requestGesture(canvas, 'long') },
-      'Appui long',
-    ),
+    button('long', 'Appui long'),
   );
   const help = h(
     'p',

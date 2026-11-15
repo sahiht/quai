@@ -15,6 +15,7 @@ import { getAdvW, getTextWidth } from '@evenrealities/pretext';
 import { LINE_H, SCREEN_H, SCREEN_W } from '../glasses/font';
 import { describeImage, renderImage } from '../glasses/images';
 import { pageImages } from '../platform/page';
+import type { GlassesPort } from '../platform/types';
 import type { Brightness, ContainerSpec, ImageSpec } from '../glasses/types';
 
 /** Vert des lunettes. */
@@ -358,8 +359,13 @@ export class GlassesCanvas {
    */
   paint(cs: readonly ContainerSpec[], images?: readonly ImageSpec[]): void {
     this.cs = cs.map((c) => ({ ...c }));
-    // mêmes règles que l'appli Even : une image hors des limites du SDK n'existe pas non plus ici
-    if (images) this.imgs = pageImages(this.cs, images).map((spec) => ({ spec: { ...spec }, pixels: null }));
+    if (images) this.setImages(images);
+    else this.changed();
+  }
+
+  /** 1.2.10 : conteneurs d'image d'une nouvelle page, créés vides (mêmes règles que l'appli Even : limites du SDK). */
+  setImages(images: readonly ImageSpec[]): void {
+    this.imgs = pageImages(this.cs, images).map((spec) => ({ spec: { ...spec }, pixels: null }));
     this.changed();
   }
 
@@ -423,4 +429,27 @@ export class GlassesCanvas {
     ctx.setTransform(w / SCREEN_W, 0, 0, h / SCREEN_H, 0, 0);
     drawContainers(ctx, this.cs, GREEN, this.imgs);
   }
+}
+
+/**
+ * 1.2.10 : port des lunettes de Quai Web avec les images de la page : start et rebuild créent ses conteneurs d'image
+ * (vides) dans le canvas, paint y dessine une image ; le reste du port est inchangé (web/port.ts).
+ */
+export function withCanvasImages<P extends GlassesPort>(port: P, screen: Pick<GlassesCanvas, 'setImages' | 'paintImage'>): P {
+  return {
+    ...port,
+    async start(cs, extra) {
+      const ok = await port.start(cs, extra);
+      screen.setImages(extra?.images ?? []);
+      return ok;
+    },
+    async rebuild(cs, extra) {
+      const ok = await port.rebuild(cs, extra);
+      screen.setImages(extra?.images ?? []);
+      return ok;
+    },
+    async paint(img) {
+      return screen.paintImage(img);
+    },
+  };
 }

@@ -10,8 +10,9 @@ import type { HubSignal } from '../../src/glasses/gestures';
 import type { Gesture } from '../../src/glasses/nav';
 import type { ContainerSpec, ImageSpec } from '../../src/glasses/types';
 import { createBrowserPlatform } from '../../src/platform/browser';
-import { describeContainers, drawImages, GlassesCanvas, GREEN, imageRGBA, type PaintedImage } from '../../src/web/display';
-import { attachKeyboard, attachScreenGestures, DOUBLE_TAP_MS, GESTURE_EVENT, keyBelongsToFocus, keyToGesture, LONG_PRESS_MS, requestGesture, type Timers } from '../../src/web/gestures';
+import { describeContainers, drawImages, GlassesCanvas, GREEN, imageRGBA, withCanvasImages, type PaintedImage } from '../../src/web/display';
+import { attachKeyboard, attachScreenGestures, DOUBLE_TAP_MS, GESTURES, keyBelongsToFocus, keyToGesture, LONG_PRESS_MS, type Timers } from '../../src/web/gestures';
+import { createWebGlassesPort } from '../../src/web/port';
 import { mountShell } from '../../src/web/shell';
 
 afterEach(() => document.body.replaceChildren());
@@ -143,6 +144,29 @@ describe('images dessinées dans l’écran de Quai Web', () => {
     warn.mockRestore();
   });
 
+  it('port de Quai Web avec images (web/main.ts) : page, image dessinée, texte mis à jour sans la perdre, page suivante sans image', async () => {
+    const canvas = document.createElement('canvas');
+    const screen = new GlassesCanvas(canvas, undefined, false);
+    const port = withCanvasImages(createWebGlassesPort(screen), screen);
+    expect(await port.start(CS, { images: [TURN] })).toBe(true);
+    expect(screen.images.map((i) => [i.spec.name, i.pixels])).toEqual([['img-turn', null]]);
+    expect(await port.paint!(TURN)).toBe(true);
+    expect(Array.from(screen.images[0].pixels!)).toEqual(Array.from(renderImage(TURN)));
+    await port.upgrade({ ...CS[1], content: 'à gauche dans 30 m' }, { content: true, level: false });
+    expect(screen.images[0].pixels).not.toBeNull();
+    expect(port.containers()[1].content).toBe('à gauche dans 30 m');
+    expect(await port.rebuild(CS, { images: [SIGN] })).toBe(true);
+    expect(await port.paint!(TURN)).toBe(false);
+    expect(await port.paint!(SIGN)).toBe(true);
+    await port.rebuild(CS);
+    expect(screen.images).toEqual([]);
+    // le reste du port est celui de web/port.ts : signaux
+    const got: HubSignal[] = [];
+    port.onSignal((s) => got.push(s));
+    port.emit({ kind: 'gesture', gesture: 'long' });
+    expect(got).toEqual([{ kind: 'gesture', gesture: 'long' }]);
+  });
+
   it('texte lisible : l’image dessinée est dite (« image : flèche à gauche »), pas un conteneur vide', () => {
     const text = describeContainers(CS, [
       { spec: TURN, pixels: renderImage(TURN) },
@@ -155,23 +179,26 @@ describe('images dessinées dans l’écran de Quai Web', () => {
 });
 
 describe('appui long sur Quai Web', () => {
-  it('bouton « Appui long » à côté de « Toucher » et « Double toucher » : il demande le geste à l’écran', () => {
+  it('bouton « Appui long » à côté de « Toucher » et « Double toucher », data-g="long" comme les autres', () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const shell = mountShell(host, 'lunettes');
-    const labels = [...shell.gestures.querySelectorAll('button')].map((b) => b.textContent);
-    expect(labels).toEqual(['▲', '▼', 'Toucher', 'Double toucher', 'Appui long']);
-    const long = shell.gestures.querySelector<HTMLButtonElement>('button[data-gesture="long"]')!;
-    expect(long.className).toContain('w-g');
-    // la barre câblée par web/main.ts (button[data-g]) ne le prend pas : jamais deux gestes pour un clic
-    expect([...shell.gestures.querySelectorAll('button[data-g]')].map((b) => (b as HTMLElement).dataset.g)).toEqual(['up', 'down', 'tap', 'double']);
+    const buttons = [...shell.gestures.querySelectorAll<HTMLButtonElement>('button')];
+    expect(buttons.map((b) => b.textContent)).toEqual(['▲', '▼', 'Toucher', 'Double toucher', 'Appui long']);
+    expect(buttons.map((b) => b.dataset.g)).toEqual(['up', 'down', 'tap', 'double', 'long']);
+    expect(buttons[4].className).toBe('w-g w-g-long');
+    // câblage de web/main.ts : chaque bouton data-g dont le geste est connu envoie son geste, une fois par clic
     const got: Gesture[] = [];
-    attachScreenGestures(shell.canvas, (g) => got.push(g));
-    long.click();
-    expect(got).toEqual(['long']);
+    shell.gestures.querySelectorAll<HTMLButtonElement>('button[data-g]').forEach((b) => {
+      const g = b.dataset.g as Gesture;
+      if (GESTURES.includes(g)) b.addEventListener('click', () => got.push(g));
+    });
+    buttons[4].click();
+    buttons[2].click();
+    expect(got).toEqual(['long', 'tap']);
     // aide : typographie française, espace insécable devant les deux-points
     const help = shell.root.querySelector('.w-help')!.textContent ?? '';
-    expect(help).toContain('Appui long : garde le doigt posé.');
+    expect(help).toContain('Appui long\u00a0: garde le doigt posé.');
     expect(help).toContain('L = appui long.');
     expect(help).not.toMatch(/ [:;!?]/);
     expect(help).not.toMatch(/[—–]/);
@@ -202,21 +229,17 @@ describe('appui long sur Quai Web', () => {
     timers.advance(LONG_PRESS_MS * 2);
     pointer(el, 'pointerup', 100, 160, 5900);
     expect(got).toEqual(['long', 'tap', 'down']);
-    // geste demandé par l'événement : seulement des gestes connus
-    requestGesture(el, 'long');
-    el.dispatchEvent(new CustomEvent(GESTURE_EVENT, { detail: 'voler' }));
-    expect(got).toEqual(['long', 'tap', 'down', 'long']);
+    // gestes retirés : plus rien
     off();
-    requestGesture(el, 'long');
     pointer(el, 'pointerdown', 100, 100, 9000);
     timers.advance(LONG_PRESS_MS);
-    expect(got).toHaveLength(4);
+    expect(got).toHaveLength(3);
   });
 
   it('touche L : appui long ; un champ garde sa touche ; un bouton de geste garde Entrée, pas les flèches', () => {
     expect(keyToGesture('l')).toBe('long');
     expect(keyToGesture('L')).toBe('long');
-    const inGestureBar = { tagName: 'BUTTON', getAttribute: () => null, closest: (sel: string) => (sel.includes('[data-gesture]') ? {} : null) };
+    const inGestureBar = { tagName: 'BUTTON', getAttribute: () => null, closest: (sel: string) => (sel === '[data-g]' ? {} : null) };
     expect(keyBelongsToFocus(inGestureBar, 'Enter')).toBe(true);
     expect(keyBelongsToFocus(inGestureBar, 'ArrowDown')).toBe(false);
     const got: Gesture[] = [];
