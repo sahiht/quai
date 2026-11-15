@@ -4,6 +4,8 @@
  * GTFS-RT que le portail BMC) ; SNCB et STIB d'après les formats documentés du relais (relay/README.md). Lieux publics
  * seulement (gares, arrêts).
  */
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   ALERT_MAX_CHARS,
@@ -16,6 +18,7 @@ import {
   atPlace,
   fitWords,
   fits,
+  frenchText,
   isAllClear,
   linesInText,
   parseHeader,
@@ -28,6 +31,7 @@ import {
 } from '../../src/core/alerts';
 import { textWidth } from '../../src/glasses/font';
 import { WIDTHS } from '../../src/glasses/layout';
+import { APP_DIR } from './support/network';
 
 const NB = ' ';
 const nb = (s: string | null | undefined) => (s ?? '').replace(/ /g, ' ');
@@ -358,4 +362,72 @@ describe('rédaction : « Travaux : … » court et utile, 48 caractères, au pi
     expect(stibMessageText('Suite à des travaux, les trams 3 et 4 ne desservent pas les arrêts Rogier et Gare du Nord')).toBe('Suite à des travaux, les trams 3 et 4…');
     expect(stibMessageText('   ')).toBeNull();
   });
+});
+
+describe('autres cas', () => {
+  it('SNCB, alerte sans arrêt (agence seule) qui nomme sa gare : seulement pour un train qui y passe', () => {
+    const ott: FeedAlert = { id: 'o', routes: [], stops: [], global: true, cause: 'MAINTENANCE', effect: 'SIGNIFICANT_DELAYS', header: { fr: 'Travaux à Ottignies : quelques minutes de retard possibles' }, active: [] };
+    const through: AlertScope = { op: 'sncb', lines: ['IC'], routes: [], stops: [{ id: '8863008', name: 'Namur', end: true }, { id: '8811601', name: 'Ottignies', end: false }, { id: '8813003', name: 'Bruxelles-Central', end: true }], from: T0, to: T1 };
+    const elsewhere: AlertScope = { ...through, stops: [{ id: '8841004', name: 'Liège-Guillemins', end: true }, { id: '8844008', name: 'Verviers-Central', end: true }] };
+    expect(nb(scopeTexts([ott], through)[0])).toBe('Travaux : retards possibles à Ottignies');
+    expect(alertMatch(ott, elsewhere)).toBeNull();
+  });
+
+  it('titre « Lieu | Cause » sans effet : « Manifestation à Bruxelles » si le trajet y passe', () => {
+    const demo: FeedAlert = { id: 'd', routes: [], stops: [], global: true, header: { fr: 'Bruxelles | Manifestation' }, active: [] };
+    expect(nb(scopeTexts([demo], W_LEG)[0])).toBe('Manifestation à Bruxelles');
+    expect(alertMatch(demo, tecLeg('1', 'N2010-21947', [['N508aga', 'Namur Gare', true]]))).toBeNull();
+  });
+
+  it('compatibilité des WebView : aucune expression régulière à « lookbehind » dans core/alerts.ts', () => {
+    expect(readFileSync(join(APP_DIR, 'src', 'core', 'alerts.ts'), 'utf8')).not.toMatch(/\(\?<[=!]/);
+  });
+});
+
+/**
+ * Vraies données (facultatif) : chaque nom d'arrêt et de gare publié, dans les textes qui le nomment.
+ *   QUAI_REAL_DATA=/home/claude/real-data-13/data npx vitest run test/core/alerts.test.ts
+ */
+const REAL = process.env.QUAI_REAL_DATA && process.env.QUAI_REAL_DATA !== '1' ? process.env.QUAI_REAL_DATA : '/home/claude/real-data-13/data';
+const realEnabled = !!process.env.QUAI_REAL_DATA && existsSync(join(REAL, 'meta.json'));
+
+describe.skipIf(!realEnabled)('données réelles : tous les noms d’arrêts tiennent, jamais coupés dans un mot', () => {
+  it('« arrêt X déplacé », « déviation à X », « retards possibles à X » : 48 caractères, au pixel, le nom entier ou rien', () => {
+    const names = new Map<string, string>();
+    for (const f of readdirSync(join(REAL, 'tiles'))) {
+      const tile = JSON.parse(readFileSync(join(REAL, 'tiles', f), 'utf8')) as { areas?: { id: string; op: string; n: { fr: string; nl: string } }[] };
+      for (const a of tile.areas ?? []) for (const n of [a.n.fr, a.n.nl]) if (n) names.set(n, a.op);
+    }
+    expect(names.size).toBeGreaterThan(20_000);
+    // cause, effet, forme courte quand le nom ne tient pas
+    const kinds: [string, string, string][] = [
+      ['CONSTRUCTION', 'STOP_MOVED', 'Travaux : arrêt déplacé'],
+      ['CONSTRUCTION', 'DETOUR', 'Travaux : déviation'],
+      ['MAINTENANCE', 'SIGNIFICANT_DELAYS', 'Travaux : retards possibles'],
+      ['TECHNICAL_PROBLEM', 'ACCESSIBILITY_ISSUE', 'Problème technique : accès difficile'],
+      ['DEMONSTRATION', 'NO_SERVICE', 'Manifestation : service interrompu'],
+    ];
+    let named = 0;
+    let checked = 0;
+    for (const [name, op] of names) {
+      for (const [cause, effect, short] of kinds) {
+        // titre vague (« Perturbation ») : seul l'arrêt du trajet peut nommer le lieu
+        const a: FeedAlert = { id: 'r', routes: [], stops: ['x'], cause, effect, header: { fr: 'Perturbation' }, active: [] };
+        for (const b of [TRIP_BUDGET, BOARD_BUDGET]) {
+          const t = worksText(a, { by: 'end', stop: name }, b);
+          checked++;
+          expect(t, `${op} ${name}`).toBeTruthy();
+          expect([...t!].length, t!).toBeLessThanOrEqual(b.maxChars);
+          expect(textWidth(t!), t!).toBeLessThanOrEqual(b.maxPx);
+          expect(t!).not.toMatch(/[|–—]/);
+          expect(t!.endsWith('…'), t!).toBe(false);
+          // le nom entier, ou la forme courte : jamais un morceau de nom
+          if (nb(t).includes(nb(frenchText(name)))) named++;
+          else expect(nb(t), `${op} ${name}`).toBe(short);
+        }
+      }
+    }
+    // 13/11 : 37,6 % des textes gardent le nom (« Travaux : arrêt Namur Gare déplacé »), les autres la forme courte
+    expect(named / checked).toBeGreaterThan(0.3);
+  }, 300_000);
 });

@@ -142,7 +142,8 @@ const CAUSE_WORDS: [RegExp, string][] = [
   [/^(travaux|chantier|werken|werkzaamheden|works?)\b/, 'Travaux'],
   [/^(accident|ongeval|collision|aanrijding)\b/, 'Accident'],
   [/^(greve|staking|strike|action syndicale|actions syndicales|vakbondsactie)\b/, 'Grève'],
-  [/^(manifestation|betoging|evenement|evenementen|event|braderie|marche|kermesse|carnaval|course|cortege)\b/, 'Événement'],
+  [/^(manifestation|betoging)\b/, 'Manifestation'],
+  [/^(evenement|evenementen|event|braderie|marche|kermesse|carnaval|course|cortege|festival|feest)\b/, 'Événement'],
   [/^(intemperies|neige|verglas|inondation|sneeuw|ijzel|storm|tempete)\b/, 'Intempéries'],
   [/^(incident|panne|defectuosite|storing|defect)\b/, 'Incident'],
   [/^(deviation|omleiding|detour)\b/, 'Déviation'],
@@ -467,7 +468,12 @@ const GENERIC = new Set(['perturbation', 'perturbation inattendue', 'perturbatio
 /** Titre qui ne dit rien (« Perturbation inattendue » de De Lijn) : la description dit quoi. */
 const isGeneric = (s: string): boolean => GENERIC.has(fold(s));
 /** Première phrase d'une description (« T1 : Quai 1 supprimé. Tram T1 vers Expo… » → « T1 : Quai 1 supprimé »). */
-const firstSentence = (s: string): string => clean(s).split(/(?<=[a-zà-ÿ0-9)»])[.!]\s+/u)[0]?.replace(/[.!]$/, '').trim() ?? '';
+const firstSentence = (s: string): string => {
+  // sans « lookbehind » (absent des WebView d'iOS avant 16.4 : l'appli ne démarrerait pas)
+  const t = clean(s);
+  const m = /[a-zà-ÿ0-9)»][.!]\s/u.exec(t);
+  return (m ? t.slice(0, m.index + 1) : t).replace(/[.!]$/, '').trim();
+};
 
 /** Segments d'un titre structuré qui ne sont ni la cause ni les lignes (« réfection rue Zéphirin Fontaine »). */
 function segmentsText(raw: string, h: ParsedHeader): string {
