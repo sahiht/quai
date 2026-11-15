@@ -179,7 +179,7 @@ export const TRIP_KEY = 'quai.trip';
  * ou avant), jamais après une installation neuve, ni tant que l'appli n'est pas en 1.2.10. Son titre et ses lignes :
  * NEWS_TITLE et newsLines (views.ts, équipe des écrans).
  */
-export const NEWS_SINCE = '1.2.10';
+export const NEWS_SINCE = '1.3.0';
 
 /**
  * Date du premier lancement (PRD-1.2.1 § 4.6), en ms : clé du stockage de l'appli sur le téléphone, hors du schéma des

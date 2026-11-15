@@ -56,8 +56,8 @@ const j3 = journey(
 const ALL = [j1, j2, j3];
 
 /** 1.2.10 : trajet guidé (écran calme allumé) : toucher revient au guidage. */
-const HINT_FOLLOWED = '△▽ étapes   toucher : guidage   double : retour';
-const HINT_OTHER = '△▽ étapes   toucher : y aller   double : retour';
+const HINT_FOLLOWED = '△▽ étapes   double : retour';
+const HINT_OTHER = '△▽ étapes   double : retour';
 /** Les six rangées du trajet 1 (1.2.10 § 5) : marges des correspondances de 5 min ou moins, sinon l'arrivée. */
 const J1_ROWS = [
   '07:38 à pied 5 min',
@@ -159,7 +159,7 @@ describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
     const followed = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: ALL, index: 1, fromList: true }, off);
     expect(followed.tap).toEqual({ kind: 'open', route: { screen: 'followed' } });
     expect(followed.mark).toBe(0);
-    expect(lines(followed).at(-1)).toBe('△▽ étapes   toucher : ne plus suivre   double : retour');
+    expect(lines(followed).at(-1)).toBe('△▽ étapes   double : retour');
     // un autre trajet, réglage éteint : « y aller » quand même (il fera suivre sans messages)
     expect(stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: ALL, index: 0 }, off).tap).toEqual({ kind: 'goGuide' });
     expect(stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: ALL, index: 0, followedId: 'j1' }, { ...c, guidedJourneyId: 'j2' }).tap).toEqual({ kind: 'goGuide' });

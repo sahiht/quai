@@ -20,7 +20,7 @@ import { MIN, PLACES, dep, settingsWith } from './helpers';
 
 const answers = (fav: Favorite, now: number): FavoriteAnswer | undefined =>
   fav.id === 'fav-bureau' ? { favoriteId: fav.id, kind: 'trip', state: 'ok', plan: { journeys: [door('j-bureau', NOW + 2 * MIN, NOW + 75 * MIN)] }, updatedAt: now } : undefined;
-const settings = (patch: Record<string, unknown> = {}) => settingsWith([PLACES.bureau], { seenVersion: '1.2.10', ...patch });
+const settings = (patch: Record<string, unknown> = {}) => settingsWith([PLACES.bureau], { seenVersion: '1.3.0', ...patch });
 const homeReady = (s: { screen: string; lines: string[] }) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l));
 const intent = (h: Kit, i: Intent) => (h.c as unknown as { runIntent(i: Intent): Promise<void> }).runIntent(i);
 

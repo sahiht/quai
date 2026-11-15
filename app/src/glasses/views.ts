@@ -27,6 +27,7 @@ import { lineKey } from '../core/linepicks';
 import { trainProgress } from '../core/stopcalls';
 import {
   departureWait,
+  EXPAND_PX,
   MARGIN_SHOWN_MAX,
   NOTE_RT_KEPT,
   RAIN_TAIL,
@@ -39,6 +40,7 @@ import {
   rainyWalk,
 } from './format';
 import {
+  ACTION,
   BOARD,
   HINTS,
   HOME_OFFLINE,
@@ -105,7 +107,9 @@ export interface ViewCtx {
   rt?: CoreStatus['rt'];
   /**
    * 1.2.10 (PRD-1.2.10 § 5) : identifiant du trajet guidé (ou suivi sans messages, réglage éteint, § 3.5), rempli par le
-   * contrôleur : son écran ne propose plus « y aller » (aides « △▽ étapes   double : retour »), il porte « ▶ ».
+   * contrôleur : son écran ne propose plus « y aller », il porte « ▶ ». 1.3.0 (PRD-1.3.0 § 1) : sa ligne d'action dit
+   * « ▶ Retour au guidage » (réglage éteint : « ▶ Trajet suivi ») ; un trajet seulement suivi (d.followedId, bouton
+   * « Lunettes » du téléphone) garde « ▶ Y aller ».
    */
   guidedJourneyId?: string;
 }
@@ -197,7 +201,24 @@ export function firstRunView(ctx: ViewCtx): GlassesView {
 }
 
 /** Titre du message de nouveautés (une fois, après la mise à jour depuis une version antérieure). */
-export const NEWS_TITLE = 'Quai 1.2.10';
+export const NEWS_TITLE = 'Quai 1.3.0';
+
+/**
+ * 1.3.0 : lignes du message « Quai 1.3.0 » (PRD-1.3.0 § 9) ; chacune tient sur une ligne des lunettes : la ligne « ▶ Y
+ * aller » et ▲ pour revenir des autres trajets ; les favoris en accordéon ; le test de l'écran (sur le téléphone) et le
+ * rappel des messages.
+ */
+export const NEWS_LINES_130: readonly string[] = [
+  `Trajet${NB}: ligne «${NB}▶ Y aller${NB}», ▲ revient des autres trajets.`,
+  `Favoris${NB}: le détail s’ouvre sous le favori choisi.`,
+  'Test de l’écran sur le téléphone, messages rappelés.',
+];
+
+/**
+ * 1.3.0 : les mêmes sur Quai Web, où la page du téléphone est l'onglet Réglages et où le test de l'écran n'existe pas
+ * (pas de lunettes, PRD-1.3.0 § 6.1) : le rappel des messages, et le journal des trajets de l'onglet Réglages (§ 6.4).
+ */
+export const NEWS_LINES_130_WEB: readonly string[] = [NEWS_LINES_130[0], NEWS_LINES_130[1], 'Messages rappelés, journal des trajets dans l’onglet Réglages.'];
 
 /**
  * 1.2.10 : lignes du message « Quai 1.2.10 » (PRD-1.2.10 § 7) ; chacune tient sur une ligne des lunettes. Aucun mot ne
@@ -209,6 +230,12 @@ export const NEWS_LINES_1210: readonly string[] = [
   `Favoris${NB}: une ligne chacun, le détail en bas.`,
 ];
 export const NEWS_LINES_1210_WEB: readonly string[] = NEWS_LINES_1210;
+
+/**
+ * 1.3.0 : les nouveautés de la 1.2.10 encore vraies, pour qui vient d'avant la 1.2.10 : « le détail en bas » des
+ * favoris ne l'est plus (accordéon, PRD-1.3.0 § 7 ; la 2e ligne de la 1.3.0 le dit), comme NEWS_LINES_125.
+ */
+export const NEWS_LINES_1210_KEPT: readonly string[] = NEWS_LINES_1210.slice(0, 2);
 
 /** 1.2.9 : lignes du message « Quai 1.2.9 » (PRD-1.2.9 § 4) ; chacune tient sur une ligne des lunettes. */
 export const NEWS_LINES_129: readonly string[] = [
@@ -246,12 +273,14 @@ export const NEWS_LINES_125: readonly string[] = [
 ];
 
 /**
- * Lignes du message « Quai 1.2.10 », une seule fois : celles de la 1.2.10 ; à qui vient d'avant la 1.2.9, aussi celles
- * de la 1.2.9, puis d'avant la 1.2.8, celles de la 1.2.8, puis d'avant la 1.2.6, celles de la 1.2.6, puis d'avant la
- * 1.2.5, celles de la 1.2.5 : les plus récentes d'abord, une version entière ou rien, NEWS_MAX lignes au plus (un écran).
+ * Lignes du message « Quai 1.3.0 », une seule fois : celles de la 1.3.0 ; à qui vient d'avant la 1.2.10, aussi celles
+ * de la 1.2.10 encore vraies, puis d'avant la 1.2.9, celles de la 1.2.9, d'avant la 1.2.8, celles de la 1.2.8, d'avant
+ * la 1.2.6, celles de la 1.2.6, d'avant la 1.2.5, celles de la 1.2.5 : les plus récentes d'abord, une version entière
+ * ou rien, NEWS_MAX lignes au plus (un écran). Quai Web : « onglet Réglages » là où le téléphone est nommé.
  */
 export function newsLines(seen = '', web = false): string[] {
-  const blocks: (readonly string[])[] = [web ? NEWS_LINES_1210_WEB : NEWS_LINES_1210];
+  const blocks: (readonly string[])[] = [web ? NEWS_LINES_130_WEB : NEWS_LINES_130];
+  if (seen && compareVersions(seen, '1.2.10') < 0) blocks.push(NEWS_LINES_1210_KEPT);
   if (seen && compareVersions(seen, '1.2.9') < 0) blocks.push(web ? NEWS_LINES_129_WEB : NEWS_LINES_129);
   if (seen && compareVersions(seen, '1.2.8') < 0) blocks.push(NEWS_LINES_128);
   if (seen && compareVersions(seen, '1.2.6') < 0) blocks.push(NEWS_LINES);
@@ -261,7 +290,7 @@ export function newsLines(seen = '', web = false): string[] {
   return out;
 }
 
-/** Message « Quai 1.2.10 » : toucher mène à l'accueil. `lines` : celles calculées à l'ouverture (route du message). */
+/** Message des nouveautés (« Quai 1.3.0 ») : toucher mène à l'accueil. `lines` : celles calculées à l'ouverture (route du message). */
 export function newsView(ctx: ViewCtx, lines: string[] = newsLines('', !!ctx.web)): GlassesView {
   return messageView(NEWS_TITLE, lines.length ? lines : newsLines('', !!ctx.web), ctx, { hints: HINTS.news, tap: { kind: 'continue' } });
 }
@@ -325,9 +354,10 @@ export const TROUBLE_MARK = `${NB}!`;
 
 /**
  * Élément d'un favori dans « Favoris » (1.2.10, PRD-1.2.10 § 2) : une ligne : le nom au plus clair, « ! » s'il a un
- * souci, à droite la réponse au format de l'accueil (« dans 3 min → 08:58 », « tu y es », « … ») ; le détail
- * (favoriteDetail : « bus W ~07:36, direct ») dans la ligne du bas quand le curseur est sur lui (DetailItem). Le nom
- * est coupé au mot avant « ! », jamais l'inverse. `planned` : le détail montre un « ~ ».
+ * souci, à droite la réponse au format de l'accueil (« dans 3 min → 08:58 », « tu y es », « … »). Le nom est coupé au
+ * mot avant « ! », jamais l'inverse. 1.3.0 (PRD-1.3.0 § 7) : son accordéon (DetailItem.expand, favoriteDetail : « à pied
+ * 7 min, puis bus W ~11:49 », « direct »), ouvert sous lui quand le curseur y est ; rien à ouvrir : pas d'`expand`.
+ * `planned` : l'accordéon montre un « ~ ».
  */
 export function favoriteItem(e: FavoriteEntry, ctx: ViewCtx): { item: DetailItem; planned: boolean } {
   const f = e.fav;
@@ -341,13 +371,14 @@ export function favoriteItem(e: FavoriteEntry, ctx: ViewCtx): { item: DetailItem
     const line = stopAnswerLine(e.answer, ctx.now, ctx.settings);
     const item: DetailItem = { a, c: right.text, action };
     if (right.tail) item.cTail = right.tail;
-    if (line.second) item.detail = line.second;
-    return { item, planned: !!line.second?.includes('~') };
+    const second = line.second ? truncateWords(line.second, EXPAND_PX) : '';
+    if (second) item.expand = [{ text: second, ...(second.includes('~') ? { planned: true } : {}) }];
+    return { item, planned: second.includes('~') };
   }
   const item: DetailItem = { a, c: tripHomeText(e.answer, ctx.now), action };
-  const detail = favoriteDetail(e.answer, ctx.now, ctx.settings);
-  if (detail) item.detail = detail.text;
-  return { item, planned: !!detail?.planned };
+  const expand = favoriteDetail(e.answer, ctx.now, ctx.settings);
+  if (expand.length) item.expand = expand;
+  return { item, planned: expand.some((l) => l.planned) };
 }
 
 /* ------------------------------ Accueil ------------------------------ */
@@ -571,30 +602,32 @@ function otherAddressItem(ctx: ViewCtx): Item {
 
 /**
  * « Favoris » (PRD-1.2.2 § 1.2 ; 1.2.10, PRD-1.2.10 § 2) : tous les favoris (lieux et trajets) dans l'ordre réglé, une
- * ligne chacun (sept à l'écran) ; sans favori, « Ajouter un favori » ; puis la ligne pâle « Adresses récentes » et ces
- * adresses (3 au plus, jamais celle d'un favori, une ligne chacune, réponse au format de l'accueil) ; enfin « Autre
- * adresse   sur le téléphone ». En bas, fixe, sous un filet pâle, le détail de l'élément sous le curseur : celui du
- * favori (« ~ » devant une heure prévue : pas de note à part), l'adresse complète d'une adresse récente, rien pour
- * « tu y es », sans trajet ou « Autre adresse ». Horaires périmés : leur message dans la ligne du haut. Toucher une
- * adresse récente : ses étapes, comme dans l'ancien « Aller à… ».
+ * ligne chacun ; sans favori, « Ajouter un favori » ; puis la ligne pâle « Adresses récentes » et ces adresses (3 au
+ * plus, jamais celle d'un favori, une ligne chacune, réponse au format de l'accueil) ; enfin « Autre adresse   sur le
+ * téléphone ». 1.3.0 (PRD-1.3.0 § 7) : en accordéon (GlassesView.accordion) : la rangée du curseur s'ouvre sur ses
+ * lignes pâles en retrait (DetailItem.expand) : celles du favori (favoriteItem ; « ~ » devant une heure prévue, pas de
+ * note à part), l'adresse complète d'une adresse récente ; rien pour « tu y es », sans trajet, en calcul ou « Autre
+ * adresse ». La ligne du détail en bas (1.2.10) et son filet n'existent plus : aucune ligne de note réservée. Horaires
+ * périmés : leur message dans la ligne du haut. Toucher une adresse récente : ses étapes, comme dans l'ancien « Aller à… ».
  */
 export function favoritesView(d: FavoritesData, ctx: ViewCtx): GlassesView {
   const s = ctx.settings;
   const entries = d.entries ?? s.favorites.map((fav) => ({ fav }));
   const v = base('favorites', 'favorites', 'Favoris', ctx);
+  v.accordion = true;
   for (const e of entries) v.items.push(favoriteItem(e, ctx).item);
   if (!entries.length) v.items.push(addFavoriteItem(ctx));
   recentShown(s).forEach((r, k) => {
     const key = recentKey(r.label);
     const short = shortAddress(r.label);
     const to = r.approx ? { type: 'address' as const, label: r.label, lat: r.lat, lon: r.lon, approx: true } : { type: 'address' as const, label: r.label, lat: r.lat, lon: r.lon };
-    const item: DetailItem = { a: truncateWords(short, WIDTHS.wideLeft), c: d.recents?.[key] ?? '…', action: { kind: 'go', key, to, label: short }, detail: r.label };
+    // l'adresse complète, une ligne, coupée au mot
+    const item: DetailItem = { a: truncateWords(short, WIDTHS.wideLeft), c: d.recents?.[key] ?? '…', action: { kind: 'go', key, to, label: short }, expand: [{ text: truncateWords(r.label, EXPAND_PX) }] };
     if (k === 0) item.head = RECENT_HEAD;
     v.items.push(item);
   });
   v.items.push(otherAddressItem(ctx));
   if (ctx.stale) v.top = { text: ctx.stale, strong: true };
-  v.reserveNote = true;
   v.hints = hints(ctx, HINTS.favorites);
   v.log = { order: entries.map((e) => e.fav.id) };
   return v;
@@ -1388,13 +1421,43 @@ export function stepsTopLine(j: Journey, start: number, now: number, markPlanned
 }
 
 /**
+ * 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action d'un toucher de l'écran d'un trajet : goGuide « ▶ Y aller » (réglage « Me
+ * guider » éteint : « ▶ Suivre ce trajet », goGuide fait alors suivre le trajet sans messages) ; resume « ▶ Retour au
+ * guidage » ; l'écran du trajet suivi « ▶ Trajet suivi ». Un toucher sans effet (absent) : pas de ligne d'action.
+ */
+export function stepsAction(tap: Intent | undefined, guideOff: boolean): string | undefined {
+  if (!tap) return undefined;
+  if (tap.kind === 'goGuide') return guideOff ? ACTION.follow : ACTION.go;
+  if (tap.kind === 'resume') return ACTION.back;
+  if (tap.kind === 'open' && tap.route.screen === 'followed') return ACTION.followed;
+  return undefined;
+}
+
+/**
+ * 1.3.0 (PRD-1.3.0 § 1) : toucher de l'écran d'un trajet, sa ligne d'action et ses aides (« △▽ étapes   double :
+ * retour » dans tous les cas : le toucher est dans la ligne d'action). Réglage « Me guider » éteint et trajet suivi :
+ * l'écran du trajet suivi (« Ne plus suivre », comme en 1.2.10). Le trajet guidé (ctx.guidedJourneyId, réglage allumé) :
+ * retour à l'écran du guidage. Sinon « y aller » (goGuide), aussi pour un trajet suivi sans guidage (bouton
+ * « Lunettes » du téléphone) : il n'a pas d'écran du guidage où revenir, « y aller » le guide.
+ */
+function stepsTap(v: GlassesView, j: Journey, followed: boolean, ctx: ViewCtx): void {
+  const off = ctx.settings.display.guide === false;
+  if (followed && off) v.tap = { kind: 'open', route: { screen: 'followed' } };
+  else if (followed && ctx.guidedJourneyId === j.id) v.tap = { kind: 'resume' };
+  else v.tap = { kind: 'goGuide' };
+  v.hints = hints(ctx, HINTS.steps);
+  const action = stepsAction(v.tap, off);
+  if (action) v.action = action;
+}
+
+/**
  * « Trajet proposé » (L3) : une proposition, sans curseur ; ▲▼ font défiler ses étapes ; au bout, ▼ ouvre « Autres
  * trajets » (contrôleur). 1.2.10 (PRD-1.2.10 § 5), plus facile à lire : le nom du trajet en titre (« Bureau »), l'heure
  * à droite ; ligne du haut : l'alerte du trajet au plus clair, sinon « Si tu le rates » (1.2.5, 5 min avant de partir et
  * jusqu'au départ du premier véhicule), sinon « Départ 07:05, dans 3 min » et « arrivée 08:54 » ; une rangée par étape
- * (stepRows). Toucher : « y aller », le guidage de la proposition affichée (goGuide). Le trajet guidé
- * (ctx.guidedJourneyId, ou suivi : d.followedId) porte « ▶ » ; écran calme allumé : toucher revient au guidage
- * (resume) ; éteint (suivi sans messages, § 3.5) : « Ne plus suivre » (écran `followed`, aides de la 1.2.9).
+ * (stepRows). Le trajet guidé (ctx.guidedJourneyId, ou suivi : d.followedId) porte « ▶ ». 1.3.0 (PRD-1.3.0 § 1) : le
+ * toucher et sa ligne d'action (stepsTap), posés avant la géométrie : la ligne d'action prend une rangée aux étapes,
+ * « Fin du trajet. ▽ … » reste. Même règle pour un trajet ouvert depuis « Autres trajets ».
  */
 export function stepsPage(route: Pick<StepsRoute, 'title' | 'label'>, d: StepsData, ctx: ViewCtx): GlassesView {
   const j = d.journeys[d.index];
@@ -1416,6 +1479,8 @@ export function stepsPage(route: Pick<StepsRoute, 'title' | 'label'>, d: StepsDa
     if (mark < 0) mark = rows.length - 1;
     v.mark = mark;
   }
+  // 1.3.0 : le toucher, sa ligne d'action et les aides d'abord : la mise en page retire une rangée pour la ligne d'action
+  stepsTap(v, j, guided, ctx);
   // Défilement : au premier affichage, le repère reste visible ; les étapes cachées se comptent en étapes.
   const capacity = geometry(v).capacity;
   const max = maxTop(v.items, capacity);
@@ -1423,18 +1488,6 @@ export function stepsPage(route: Pick<StepsRoute, 'title' | 'label'>, d: StepsDa
   const wanted = d.fresh && v.initialTop !== undefined ? v.initialTop : d.top ?? 0;
   const shownTop = Math.min(Math.max(0, wanted), max);
   v.note = stepsBottom(Math.max(0, v.items.length - visibleRange(v.items, shownTop, capacity).to), d);
-  if (guided && ctx.settings.display.guide === false) {
-    // suivi sans guidage (réglage « Me guider pendant un trajet » éteint) : « Ne plus suivre », comme en 1.2.9
-    v.hints = hints(ctx, HINTS.steps);
-    v.tap = { kind: 'open', route: { screen: 'followed' } };
-  } else if (guided) {
-    // guidé : toucher revient à l'écran du guidage
-    v.hints = hints(ctx, HINTS.stepsGuided);
-    v.tap = { kind: 'resume' };
-  } else {
-    v.hints = hints(ctx, HINTS.stepsGo);
-    v.tap = { kind: 'goGuide' };
-  }
   v.log = { page: d.index + 1, pages: d.journeys.length, label: labelOf(j.label) ?? '', followed: guided };
   return v;
 }
@@ -1591,7 +1644,7 @@ export function otherDetail(j: Journey, journeys: readonly Journey[]): string {
  * « Autres trajets » (PRD-1.2.1 § 3.3) : une entrée par autre proposition, dans l'ordre ; ligne 1 = nom affiché
  * (displayLabel) et « 19:47 → 20:58 », ligne 2 plus pâle (otherDetail : moyens, puis le pourquoi). Curseur ; toucher : les étapes de l'entrée
  * (empilées au-dessus de la liste) ; double toucher : retour aux étapes d'où la liste a été ouverte. `journeys` :
- * propositions de la route, rafraîchies (temps réel).
+ * propositions de la route, rafraîchies (temps réel). 1.3.0 (PRD-1.3.0 § 2) : ▲ sur la première rangée aussi (edgeUp).
  */
 export function othersView(r: OthersRoute, journeys: Journey[], ctx: ViewCtx): GlassesView {
   const title = othersTitle(r.title);
@@ -1606,6 +1659,9 @@ export function othersView(r: OthersRoute, journeys: Journey[], ctx: ViewCtx): G
     v.items.push({ a: displayLabel(j, journeys), c: spanText(journeyStart(j), j.arr, ctx.now), b2: otherDetail(j, journeys), action: { kind: 'open', route } });
   });
   if (!v.items.length) return messageView(title, [NO_OTHER_TRIP], ctx, { hints: HINTS.message, screen: 'others' });
+  // 1.3.0 (PRD-1.3.0 § 2) : ▲ sur la première rangée ramène au trajet proposé (la navigation rend `edge`, le contrôleur
+  // dépile) ; les aides ne changent pas
+  v.edgeUp = true;
   v.hints = hints(ctx, HINTS.others);
   v.log = { page: r.index + 1, pages: journeys.length };
   return v;
