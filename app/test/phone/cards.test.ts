@@ -26,8 +26,8 @@ const texts = (r: PlanResult, max: number) => r.journeys.map((j) => [cardTitle(j
  * (/home/claude/real-data-11/data, 11/11/2026) : mêmes étiquettes, véhicules, marches et arrivées. ---
  */
 
-/** Maison → Mama, 11/11 à 19:42 : bus W puis S1 (arrivée 21:11) ; « Plus tôt » : 19 min à pied, IC 20:08, IC 20:33 (20:58). */
-function maisonMama(): PlanResult {
+/** Maison → Parc, 11/11 à 19:42 : bus W puis S1 (arrivée 21:11) ; « Plus tôt » : 19 min à pied, IC 20:08, IC 20:33 (20:58). */
+function maisonParc(): PlanResult {
   const first = trip('short', nov11(19, 59), [6, [nov11(20, 5), nov11(20, 16), 'bus W'], 1, [nov11(20, 23), nov11(21, 2), 'S1'], 9]);
   const earlier = trip('earlier', nov11(19, 49), [19, [nov11(20, 8), nov11(20, 27), 'IC'], [nov11(20, 33), nov11(20, 49), 'IC'], 9]);
   const none = trip('none', nov11(19, 57), [19, [nov11(20, 16), nov11(21, 2), 'S1'], 9]);
@@ -63,8 +63,8 @@ describe('palier de marche (§ 1.1)', () => {
 
 describe('ligne « moyens » (§ 2.3, § 7.2)', () => {
   it('les véhicules, puis les marches dans l’ordre ; plus de 3 marches : le total ; sans marche : les véhicules', () => {
-    expect(meansLine(maisonMama().journeys[0])).toBe('bus W + S1, à pied 6 + 1 + 9 min');
-    expect(meansLine(maisonMama().journeys[1])).toBe('IC + IC, à pied 19 + 9 min');
+    expect(meansLine(maisonParc().journeys[0])).toBe('bus W + S1, à pied 6 + 1 + 9 min');
+    expect(meansLine(maisonParc().journeys[1])).toBe('IC + IC, à pied 19 + 9 min');
     expect(meansLine(maisonBureau().journeys[0])).toBe('bus 36 + IC + métro 2, 13 min à pied');
     expect(meansLine(trip('short', at(8, 0), [[at(8, 0), at(8, 30), 'IC'], [at(8, 36), at(9, 0), 'IC']]))).toBe('IC + IC');
     expect(typo(meansLine(braineMadou().journeys[0]))).toBe(`bus W + métro 2, à${NB}pied 8 + 1 + 2${NB}min`);
@@ -76,8 +76,8 @@ describe('ligne « moyens » (§ 2.3, § 7.2)', () => {
 });
 
 describe('cartes des trois cas réels (§ 1.5, marche maximale 5 min)', () => {
-  it('Maison → Mama : « Moins de marche » arrive 13 min après le plus rapide ; « Plus tôt de 13 min, mais 19 min à pied. »', () => {
-    const r = maisonMama();
+  it('Maison → Parc : « Moins de marche » arrive 13 min après le plus rapide ; « Plus tôt de 13 min, mais 19 min à pied. »', () => {
+    const r = maisonParc();
     expect(texts(r, 5)).toEqual([
       ['Moins de marche', 'bus W + S1, à pied 6 + 1 + 9 min', 'Arrive 13 min après le plus rapide, avec moins de marche.'],
       ['Plus tôt', 'IC + IC, à pied 19 + 9 min', 'Plus tôt de 13 min, mais 19 min à pied.'],
@@ -190,19 +190,19 @@ describe('phrases des autres propositions (§ 7.2, § 2.2)', () => {
   });
 
   it('jamais la raison du cœur : mêmes phrases quelle que soit `reason`', () => {
-    const r = maisonMama();
+    const r = maisonParc();
     const odd: PlanResult = { journeys: r.journeys.map((j) => ({ ...j, reason: 'Le plus rapide : 5 min plus tôt, 1 changement' })) };
     expect(texts(odd, 5)).toEqual(texts(r, 5));
   });
 
   it('aucun tiret long dans les textes des cartes', () => {
-    for (const r of [maisonMama(), maisonBureau(), braineMadou()]) for (const t of texts(r, 5).flat()) expect(t).not.toMatch(/[—–]/);
+    for (const r of [maisonParc(), maisonBureau(), braineMadou()]) for (const t of texts(r, 5).flat()) expect(t).not.toMatch(/[—–]/);
   });
 });
 
 describe('cartes de la recherche (§ 7.2)', () => {
-  it('Maison → Mama : nom affiché, ligne « moyens » sous les heures, phrase ; bouton « Afficher Moins de marche dans les lunettes »', async () => {
-    const r = maisonMama();
+  it('Maison → Parc : nom affiché, ligne « moyens » sous les heures, phrase ; bouton « Afficher Moins de marche dans les lunettes »', async () => {
+    const r = maisonParc();
     const hz = harness({ now: nov11(19, 42), settings: defaults({ maxWalkMin: 5 }), params: 'de=sncb:8863008&vers=sncb:8813003', core: (c) => ({ ...c, route: async () => r }) });
     const el = mount(searchScreen(hz.ctx));
     await until(() => el.querySelectorAll('.result').length === 3);

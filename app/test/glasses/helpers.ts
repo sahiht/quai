@@ -219,7 +219,7 @@ export const PLACES = {
   /** 1.2.2 : un 4e lieu, à un arrêt public (Waterloo Eglise). */
   ecole: { kind: 'place', id: 'fav-ecole', label: 'École', lat: 50.7174, lon: 4.3979, propose: 'never' } as Favorite,
   bureau: { kind: 'place', id: 'fav-bureau', label: 'Bureau', lat: 50.8504, lon: 4.3707, propose: 'never' } as Favorite,
-  mama: { kind: 'place', id: 'fav-mama', label: 'Mama', lat: 50.87755, lon: 4.37966, propose: 'never' } as Favorite,
+  parc: { kind: 'place', id: 'fav-parc', label: 'Parc', lat: 50.87755, lon: 4.37966, propose: 'never' } as Favorite,
   /** Arrêt favori de la 1.2.1 : les réglages v4 le rangent dans « Gares » (migration, settings.ts). */
   gare: { kind: 'stop', id: 'fav-gare', areaId: 'sncb:8814266', op: 'sncb', name: N('Braine-l’Alleud'), lat: 50.6833, lon: 4.3747, propose: 'never' } as Favorite,
 };
