@@ -51,7 +51,7 @@ const SECTIONS = ['Gares de train   1 gare', 'Arrêts de bus, tram, métro   1 a
  * guidé ou suivi ; le titre est le nom du trajet (« Bureau »), sans état à droite.
  */
 const HINT_GO = '△▽ étapes   toucher : y aller   double : retour';
-const HINT_GUIDED = '△▽ étapes   double : retour';
+const HINT_GUIDED = '△▽ étapes   toucher : guidage   double : retour';
 
 /**
  * Ouvre le favori sous le curseur, puis le fait suivre sans guidage, comme le bouton « Lunettes » du téléphone (1.2.10 : le
@@ -442,9 +442,11 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     const st = await until((x) => stepsReady(x) && x.followed === true);
     expect(st).toMatchObject({ page: 1, title: 'Bureau', sel: 0 });
     expect(st.lines.at(-1)).toBe(HINT_GUIDED);
-    // toucher : rien à lancer ; double toucher : le guidage
+    // toucher : retour au guidage (arbitrage du 15/11) ; double toucher depuis les étapes : le guidage aussi
     await gesture('tap');
-    expect(last().screen).toBe('steps');
+    expect(last().screen).toBe('guide');
+    c.onSignal({ kind: 'menu', id: 2 });
+    await until((x) => stepsReady(x) && x.followed === true);
     await gesture('double');
     expect(last().screen).toBe('guide');
     c.stop();
@@ -455,9 +457,10 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     const { c, gesture, until, last } = h;
     await until(homeReady);
     const p1 = await openAndFollow(h);
-    // 1.2.10 (PRD-1.2.10 § 5) : ligne du haut : le départ et l'arrivée ; toutes les étapes tiennent : « Fin du trajet »
+    // 1.2.10 (PRD-1.2.10 § 5, arbitrage du 15/11) : ligne du haut : « Si tu le rates » dans sa fenêtre de la 1.2.5 (départ
+    // dans 1 min) ; toutes les étapes tiennent : « Fin du trajet »
     expect(p1).toMatchObject({ page: 1, title: 'Bureau', followed: true });
-    expect(p1.lines[0]).toBe('Départ 07:33, dans 1 min   arrivée ~08:58');
+    expect(p1.lines[0]).toMatch(/^Si tu le rates\s: arrivée \d\d:\d\d, /);
     expect(p1.lines.slice(-2)).toEqual(['Fin du trajet. ▽ 2 autres trajets', HINT_GUIDED]);
     // ▼ au bout : « Autres trajets », jamais un autre trajet directement
     await gesture('down');
@@ -1011,9 +1014,9 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
     // le bouton « Lunettes » du téléphone est une demande : le trajet est suivi (PRD-1.2.2 § 6)
     expect(p1).toMatchObject({ page: 1, pages: 3, label: 'short', followed: true, title: 'Saint-Géry' });
     // 1.2.5 : départ à pied dans 2 min : « Si tu le rates » (l'IC de 08:42 de Namur, « Le suivant ») ; la raison est gardée
-    // 1.2.10 (PRD-1.2.10 § 5) : en haut, le départ et l'arrivée (« Si tu le rates » passe au moment « Partir
-    // maintenant » du guidage, § 3.2) ; la raison est gardée
-    expect(p1.lines[0]).toBe('Départ 07:33, dans 2 min   arrivée ~08:57');
+    // 1.2.10 (PRD-1.2.10 § 5, arbitrage du 15/11) : en haut, « Si tu le rates » reste dans sa fenêtre de la 1.2.5 (aussi au
+    // moment « Partir maintenant » du guidage, § 3.2) ; la raison est gardée
+    expect(nb(p1.lines[0])).toBe('Si tu le rates : arrivée 09:57, 1 h plus tard');
     expect(h.c.followed?.journey.reason).toBe(`Le plus court${NB}: direct, à pied 7 + 11${NB}min`);
     expect(p1.lines.slice(-2)).toEqual(['Fin du trajet. ▽ 2 autres trajets', HINT_GUIDED]);
     fits(p1);
@@ -1027,8 +1030,9 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
     expect(p2).toMatchObject({ page: 2, pages: 3, label: 'lesswalk', followed: false, title: 'Saint-Géry' });
     // une rangée par étape, l'heure au début ; la correspondance du tram, 2 min après la marche, montre sa marge ; les
     // 6 étapes tiennent : « Fin du trajet »
-    expect(p2.lines).toEqual([
-      'Départ 07:33, dans 2 min   arrivée ~08:53',
+    // en haut : « Si tu le rates » (fenêtre de la 1.2.5, gardée en 1.2.10)
+    expect(p2.lines.map(nb)).toEqual([
+      'Si tu le rates : arrivée 09:57, 1 h 04 plus tard',
       '07:33 à pied 7 min',
       '~07:42 IC voie 4 → Bruxelles-Nord   08:40',
       '08:40 à pied 2 min',
@@ -1375,8 +1379,9 @@ describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-
     const d = await setupController({ kv: a.kv, now: at(7, 36), flags: { noRt: true }, settings });
     const st = await d.until(stepsReady);
     expect(st).toMatchObject({ page: 1, label: 'short', followed: true });
-    // 1.2.10 (PRD-1.2.10 § 5) : parti à 07:33 : en haut, le départ et l'arrivée ; la raison relue « Le plus court »
-    expect(st.lines[0]).toBe('Départ 07:33   arrivée ~08:58');
+    // 1.2.10 (PRD-1.2.10 § 5, arbitrage du 15/11) : parti à 07:33, avant le départ du premier véhicule : « Si tu le
+    // rates » (fenêtre de la 1.2.5) ; la raison relue « Le plus court »
+    expect(st.lines[0]).toMatch(/^Si tu le rates\s: arrivée \d\d:\d\d, /);
     expect(st.title).toBe('Bureau');
     expect(nb(d.c.followed?.journey.reason ?? '')).toBe('Le plus court : 1 changement, à pied 7 + 2 + 9 min');
     expect(d.c.followed?.journeys.map((j) => j.label)).toEqual(['short', 'next', 'later']);

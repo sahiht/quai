@@ -498,8 +498,11 @@ describe('PRD-1.2.5 § 1 avec le vrai cœur : « Si tu le rates » et l’alerte
     // espaces insécables lues comme des espaces
     const topAt = (journeys: Journey[], now: number, settings = env.preset): string | undefined =>
       stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: 0, fresh: true }, { now, settings }).top?.text.replace(/\u00a0/g, ' ');
-    // 2 min avant de partir : 1.2.10 (PRD-1.2.10 § 5), le départ et l'arrivée en haut de l'écran du trajet
-    expect(topAt(js, j.leaveAt - 2 * MIN)).toBe(`Départ ${hhmm(j.leaveAt)}, dans 2 min   arrivée ~${hhmm(j.arr)}`);
+    // 2 min avant de partir : « Si tu le rates » en haut de l'écran du trajet (1.2.5, gardé en 1.2.10 : arbitrage du
+    // 15/11, PRD-1.2.10 § 5 : alerte, puis « Si tu le rates », puis le départ et l'arrivée)
+    expect(topAt(js, j.leaveAt - 2 * MIN)).toMatch(new RegExp(`^Si tu le rates : arrivée ${hhmm(missedOf(j, js)!.arr)}, `));
+    // 10 min avant, hors de la fenêtre de « Si tu le rates » : le départ et l'arrivée
+    expect(topAt(js, j.leaveAt - 10 * MIN)).toBe(`Départ ${hhmm(j.leaveAt)}, dans 10 min   arrivée ~${hhmm(j.arr)}`);
     // « Si tu le rates » accompagne le moment « Partir maintenant » du guidage (PRD-1.2.10 § 3.2, très juste) : le
     // contrôleur lui passe l'arrivée du premier trajet de repli parti du même arrêt, plus tard
     const missed = missedOf(j, js);
@@ -511,11 +514,14 @@ describe('PRD-1.2.5 § 1 avec le vrai cœur : « Si tu le rates » et l’alerte
     const walking = await env.core.refresh(j, env.preset);
     expect(walking.alerts[0]?.kind).toBe('leave');
     expect(topAt([walking, ...js.slice(1)], env.clock.now())).toMatch(/^Partir maintenant/);
-    // l'alerte coupée : le départ (passé) et l'arrivée
+    // l'alerte coupée : « Si tu le rates » jusqu'au départ du premier véhicule (comme en 1.2.5)
     const quiet = { ...env.preset, alerts: { ...env.preset.alerts, leave: false } };
     const noAlert = await env.core.refresh(j, quiet);
     expect(noAlert.alerts).toEqual([]);
-    expect(topAt([noAlert, ...js.slice(1)], env.clock.now(), quiet)).toBe(`Départ ${hhmm(j.leaveAt)}   arrivée ~${hhmm(noAlert.arr)}`);
+    expect(topAt([noAlert, ...js.slice(1)], env.clock.now(), quiet)).toMatch(/^Si tu le rates/);
+    // le premier véhicule parti, hors de la fenêtre : le départ et l'arrivée
+    const firstRide = j.legs.find((l) => l.kind === 'ride')!;
+    expect(topAt([noAlert, ...js.slice(1)], firstRide.dep + MIN, quiet)).toMatch(new RegExp(`^Départ ${hhmm(j.leaveAt)}   arrivée ~`));
   });
 });
 
