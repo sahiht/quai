@@ -1607,7 +1607,8 @@ export class GlassesController implements GlassesApi {
    * repris.
    */
   private async resumeFavorite(id: string): Promise<boolean> {
-    if (this.trip?.favoriteId !== id || this.tripState() !== 'running') return false;
+    // 1.2.10 : un trajet guidé est en cours dès son lancement (son favori rouvre l'écran du guidage)
+    if (this.trip?.favoriteId !== id || !this.tripRunning()) return false;
     const nav = this.resumeNav(this.nav, false);
     if (!nav) return false;
     this.nav = nav;
@@ -2055,9 +2056,10 @@ export class GlassesController implements GlassesApi {
     return !!this.trip?.guide && this.guideOn();
   }
 
-  /** « Où tu en es » pendant `ms` (quand il n'y a pas de moment). */
+  /** « Où tu en es » pendant `ms` (quand il n'y a pas de moment) ; la minuterie du guidage l'efface à l'heure. */
   private showWhere(ms: number): void {
     this.whereUntil = this.d.clock.now() + ms;
+    if (this.trip?.guide && this.guideState) this.scheduleGuideWake(this.guideState);
   }
 
   /** État propre au contrôleur, remis à zéro à chaque lancement et à la fin (les positions restent : elles sont vraies). */

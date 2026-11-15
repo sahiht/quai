@@ -218,6 +218,20 @@ describe('PRD-1.2.10 § 3.4 : gestes et menu', () => {
     await h.settle();
     expect(screensOf(h)).toEqual(['home', 'guide']);
     expect(h.last()).toMatchObject({ screen: 'guide', show: 'where' });
+    await h.settle(15_500);
+    expect(h.last()).toMatchObject({ screen: 'guide', show: 'empty' });
+  });
+
+  it('réglage allumé : l’écran du guidage remplace les écrans automatiques de la 1.2.9 (pas de « Dans le train » au départ)', async () => {
+    const h = await guided();
+    await h.emit({ kind: 'menu', id: 2 });
+    expect(screensOf(h)).toEqual(['home', 'guide', 'steps']);
+    // le bus W part à 07:38 : la 1.2.9 ouvrait « Dans le train » sur l'écran du trajet suivi
+    await h.settle(10 * MIN);
+    await h.c.refreshCurrent();
+    await h.settle();
+    expect(screensOf(h)).toEqual(['home', 'guide', 'steps']);
+    expect(h.screens().some((s) => s.screen === 'train' || s.screen === 'arrival')).toBe(false);
   });
 
   it('glisser sur l’écran du guidage : rien', async () => {
