@@ -86,10 +86,13 @@ describe('PRD-1.2.10 § 3.2, § 3.3 : ce que montre l’écran du guidage', () =
     expect(h.last()).toMatchObject({ show: 'moment', moment: 'nextStop:j-bureau:1:3' });
   });
 
-  it('un moment qui finit seul laisse l’écran vide (pas « Où tu en es »)', async () => {
+  it('un moment qui finit seul laisse l’écran vide (pas « Où tu en es ») ; au lancement, il attend la fin de « Où tu en es »', async () => {
     const h = await guided({}, false);
     expect(h.last().show).toBe('where');
     await show(h, moment('turn', 'turn:j-bureau:0:1', NOW, NOW + 30 * MIN, { turn: 'left', distM: 40 }));
+    // PRD § 3.1 : « Où tu en es » d'abord (15 s), le moment ensuite
+    expect(h.last().show).toBe('where');
+    await h.settle(15_500);
     expect(h.last().show).toBe('moment');
     await show(h, null);
     expect(h.last().show).toBe('empty');
