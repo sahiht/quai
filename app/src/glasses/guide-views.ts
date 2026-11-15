@@ -55,6 +55,8 @@ export const GUIDE_TEXT = {
   alight: 'Descends au prochain arrêt',
   platform: 'Voie modifiée',
   platformBoard: 'voie modifiée',
+  /** « Où tu en es » à bord, quand le prochain arrêt est la descente */
+  alightHere: 'c’est ta descente',
   arrived: 'Tu y es',
   none: 'Pas d’autre trajet trouvé',
   tight: 'très juste',
@@ -168,8 +170,10 @@ function turnMoment(m: Extract<Moment, { kind: 'turn' }>, j: Journey, title: str
 function boardMoment(m: Extract<Moment, { kind: 'board' }>, ctx: ViewCtx): MomentView {
   const train = isTrainRef(m.vehicle);
   const when = train ? `${vehicle(m.vehicle)} à ${timeOf(m.depAt, m.rt, ctx)}` : boardWait(m.depAt, m.rt, ctx.now, mp(ctx));
-  // la voie ne concerne que les trains
-  const lines: GLine[] = [MAIN(train && m.platformChanged ? `${when}, ${GUIDE_TEXT.platformBoard}` : when)];
+  // la voie ne concerne que les trains ; elle est aussi écrite (contrôle usager du 15/11 : le texte suffit sans
+  // l'image, § 3.9) : « IC à 07:30, voie 3 », modifiée « voie 6 ! » comme à l'écran du trajet
+  const plat = !train ? '' : m.platform ? `, voie ${m.platform}${m.platformChanged ? `${NB}!` : ''}` : m.platformChanged ? `, ${GUIDE_TEXT.platformBoard}` : '';
+  const lines: GLine[] = [MAIN(`${when}${plat}`)];
   const head = headText(m.head, ctx.settings.lang, m.vehicle.op);
   if (head) lines.push(F('pale', (w) => fitName('vers ', head, '', w)));
   // correspondance en gare : la marche jusqu'au quai et la marge passent avant le nombre d'arrêts (trois lignes au plus)
@@ -372,7 +376,9 @@ function whereLines(w: WhereAmI, s: GuideState, j: Journey, ctx: ViewCtx, maxPx:
     const head = ride.stopsToAlight > 0 && ride.total >= 2 ? composeRow([{ t: prog, lv: 'norm' }, { t: alightWords(ride.stopsToAlight), lv: 'pale', gap: 15 }]) : undefined;
     const out: GLine[] = [];
     out.push(L('hi', fitName(`Prochain arrêt${NB}: `, nameOf(ride.nextStop, ctx), `, ${timeOf(ride.nextAt, ride.rt, ctx)}`, maxPx)));
-    out.push(L('pale', fitName(`descente${NB}: `, nameOf(ride.alight, ctx), `, ${timeOf(ride.alightAt, ride.rt, ctx)}`, maxPx)));
+    // le prochain arrêt est la descente : pas deux fois le même nom (contrôle usager du 15/11)
+    const lastStop = nameOf(ride.nextStop, ctx) === nameOf(ride.alight, ctx) && ride.nextAt === ride.alightAt;
+    out.push(L('pale', lastStop ? GUIDE_TEXT.alightHere : fitName(`descente${NB}: `, nameOf(ride.alight, ctx), `, ${timeOf(ride.alightAt, ride.rt, ctx)}`, maxPx)));
     if (trip) out.push(arr);
     return { head, lines: out };
   }

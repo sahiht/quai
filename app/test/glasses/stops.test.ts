@@ -221,7 +221,8 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
     const b = nb(container(p, 'colB').content).split('\n');
     const c = nb(container(p, 'colC').content).split('\n');
     expect([a[0].trim(), b[0].replace(/ +/g, ' ').trim(), (c[0] ?? '').trim()]).toEqual(['', '○ Gembloux voie 1 07:30', '']);
-    expect([a[1].trim(), b[1].replace(/ +/g, ' ').trim(), (c[1] ?? '').trim()]).toEqual(['', '● Namur voie 6 ! dans 13 min', '']);
+    // contrôle usager du 15/11 : sa voie modifiée reste au plus clair (colonne a), le reste de la rangée pâle
+    expect([a[1].trim(), b[1].replace(/ +/g, ' ').trim(), (c[1] ?? '').trim()]).toEqual(['voie 6 !', '● Namur dans 13 min', '']);
     expect([a[2].replace(/ +/g, ' ').trim(), b[2].trim()]).toEqual(['○ Andenne', 'voie 1']);
     expect(p.sel).toBe(6);
     // △ : les gares d'avant, jusqu'à la gare de départ du train

@@ -202,14 +202,17 @@ describe('PRD § 3.2 : les moments', () => {
     expect(vehicleSign(METRO2)).toEqual({ kind: 'sign', label: 'métro', value: '2' });
     expect(vehicleSign({ op: 'sncb', mode: 'bus', line: 'BUS' })).toEqual({ kind: 'sign', label: 'bus', value: 'SNCB' });
     const train = shown(board({ vehicle: IC, depAt: T(7, 30), platform: '3', head: N('Ostende'), stopsToAlight: 6 }));
-    expect(train.lines).toEqual(['IC à 07:30', 'vers Ostende', 'descente dans 6 arrêts', HINT]);
+    // contrôle usager du 15/11 : la voie aussi dans le texte (le texte suffit sans l'image, § 3.9)
+    expect(train.lines).toEqual(['IC à 07:30, voie 3', 'vers Ostende', 'descente dans 6 arrêts', HINT]);
     expect(train.v.images?.[0].image).toEqual({ kind: 'sign', label: 'voie', value: '3' });
     expect(shown(board({ vehicle: IC, depAt: T(7, 30), head: N('Ostende') })).v.images?.[0].image).toEqual({ kind: 'sign', label: 'train', value: 'IC' });
     const changed = shown(board({ vehicle: IC, depAt: T(7, 30), platform: '6', platformChanged: true, head: N('Ostende') }));
-    expect(changed.lines[0]).toBe('IC à 07:30, voie modifiée');
-    expect(levels(changed.p).hi[0]).toBe('IC à 07:30, voie modifiée');
+    expect(changed.lines[0]).toBe('IC à 07:30, voie 6 !');
+    expect(levels(changed.p).hi[0]).toBe('IC à 07:30, voie 6 !');
+    // sans voie connue : « train / IC », rien dans le texte
+    expect(shown(board({ vehicle: IC, depAt: T(7, 30), head: N('Ostende') })).lines[0]).toBe('IC à 07:30');
     const corr = shown(board({ vehicle: IC, depAt: T(7, 30), platform: '3', head: N('Ostende'), walkMin: 3, marginMin: 6 }));
-    expect(corr.lines.slice(0, 3)).toEqual(['IC à 07:30', 'vers Ostende', '3 min à pied jusqu’au quai, marge 6 min']);
+    expect(corr.lines.slice(0, 3)).toEqual(['IC à 07:30, voie 3', 'vers Ostende', '3 min à pied jusqu’au quai, marge 6 min']);
   });
 
   it('platform : « Voie modifiée » ; « IC à 07:30, voie 6 au lieu de 4 » ; panneau « voie / 6 »', () => {
@@ -372,6 +375,10 @@ describe('PRD § 3.3 : « Où tu en es »', () => {
     expect(lv.pale.slice(3, 5)).toEqual(['descente : Gare des Guillemins, 07:20', 'arrivée 08:54']);
     // genre ride : pas d'arrivée du trajet
     expect(on('ride').lines.slice(-2)).toEqual(['descente : Gare des Guillemins, 07:20', HINT]);
+    // contrôle usager du 15/11 : le prochain arrêt est la descente : son nom une seule fois
+    const last = shown(null, 'where', { kind: 'trip', phase: { kind: 'ride', leg: 1, next: 5 }, where: { ...WHERE, chain: [{ label: 'à pied', state: 'done' }, { label: 'bus 6', state: 'now' }, { label: 'IC', state: 'next' }], walk: undefined, ride: { ...ride, next: 5, nextStop: N('Gare des Guillemins'), nextAt: T(7, 20), stopsToAlight: 1 } } });
+    expect(last.lines.slice(-4)).toEqual(['Prochain arrêt : Gare des Guillemins, 07:20', 'c’est ta descente', 'arrivée 08:54', HINT]);
+    expect(levels(last.p).pale).toContain('c’est ta descente');
   });
 
   it('chaîne trop longue : « … » au milieu, à la place des étapes les plus loin de celle en cours', () => {

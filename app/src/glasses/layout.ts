@@ -713,6 +713,13 @@ export function truncateWords(text: string, maxPx: number): string {
   if (textWidth(t) <= maxPx) return t;
   const words = t.split(' ');
   for (let k = words.length - 1; k >= 1; k--) {
+    // le mot suivant, s'il est composé, garde ses premiers morceaux entiers (« Express Wavre-… ») : le plus long qui tient
+    const next = words[k];
+    for (let i = next.length - 1; i > 0; i--) {
+      if (!/[-/’']/.test(next[i - 1])) continue;
+      const part = `${words.slice(0, k).join(' ')} ${next.slice(0, i)}`;
+      if (textWidth(`${part}…`) <= maxPx) return `${part}…`;
+    }
     const head = words.slice(0, k).join(' ').replace(/[\s,;:·]+$/, '');
     if (head && textWidth(`${head}…`) <= maxPx) return `${head}…`;
   }

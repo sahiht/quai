@@ -926,7 +926,7 @@ export interface StopLine {
 export function keepLineTitle(stop: string): string {
   const tail = `${NB}: garder une ligne`;
   if (textWidth(stop + tail) <= WIDTHS.title) return stop + tail;
-  return `${truncate(stop, WIDTHS.title - textWidth(tail))}${tail}`;
+  return `${truncateWords(stop, WIDTHS.title - textWidth(tail))}${tail}`;
 }
 
 /**
@@ -994,7 +994,7 @@ export function boardViewTitle(b: Pick<Board, 'area'>, l: NameLang, kept: boolea
   if (textWidth(full) <= WIDTHS.title) return full;
   const name = displayName(b.area.n, l);
   const tail = full.slice(name.length);
-  return `${truncate(name, WIDTHS.title - textWidth(tail))}${tail}`;
+  return `${truncateWords(name, WIDTHS.title - textWidth(tail))}${tail}`;
 }
 
 /** Départs d'une gare SNCB (★ : « Gares ») plutôt que d'un arrêt de bus, tram ou métro (★ : « garder une ligne »). */
@@ -1160,7 +1160,9 @@ export function trainRunView(ds: DepartureStops, ctx: ViewCtx): GlassesView {
       { t: i === vehicle ? '●' : '○', hi: !gone },
       { t: displayName(c.name, l), hi: !gone },
     ];
-    if (plat) segs.push({ t: plat, hi: !gone && !!c.newPlatform });
+    // voie modifiée au plus clair, aussi à la gare de la montée (pâle et sans action) : l'information la plus utile de
+    // l'écran pour qui monte là (contrôle usager du 15/11) ; jamais aux gares que le train a quittées
+    if (plat) segs.push({ t: plat, hi: !!c.newPlatform && !passed[i] && i >= at });
     const right = c.cancelled ? 'SUPPRIMÉ' : passed[i] ? `${plannedMark(c.rt, m)}${hhmm(c.est)}` : nextPassageText({ est: c.est, rt: c.rt }, ctx.now, m);
     const item: Item = { a: '', segs, bRight: right, key: `${c.areaId ?? ''}#${i}` };
     if (gone) item.rightPale = true;
@@ -1452,7 +1454,7 @@ export function missLine(j: Journey, journeys: readonly Journey[], leave: number
 export function followedTitle(title: string): string {
   const tail = `${NB}: trajet suivi`;
   if (textWidth(title + tail) <= WIDTHS.title) return title + tail;
-  return `${truncate(title, WIDTHS.title - textWidth(tail))}${tail}`;
+  return `${truncateWords(title, WIDTHS.title - textWidth(tail))}${tail}`;
 }
 
 /** Ce que l'écran du trajet suivi montre : le trajet (rafraîchi) et son titre. */
@@ -1496,7 +1498,7 @@ export function othersTitle(title: string): string {
   const tail = `${NB}: autres trajets`;
   const full = `${title}${tail}`;
   if (textWidth(full) <= WIDTHS.title) return full;
-  return `${truncate(title, WIDTHS.title - textWidth(tail))}${tail}`;
+  return `${truncateWords(title, WIDTHS.title - textWidth(tail))}${tail}`;
 }
 
 /** Écart entre deux heures en mots : « 13 min », « 1 h » pour une heure pleine (comme les raisons du cœur). */
@@ -1541,7 +1543,7 @@ export function otherWhy(j: Journey, first: Journey | undefined): string | null 
 export function otherDetail(j: Journey, journeys: readonly Journey[]): string {
   const rides = j.legs.filter((l) => l.kind === 'ride').map(rideWords);
   // 1.2.5 : à pied tout du long, sous la pluie : « à pied, 25 min sous la pluie »
-  if (!rides.length) return truncate(`${meansLine(j)}${rainyJourney(j) ? ` ${RAIN_WORDS}` : ''}`, WIDTHS.full);
+  if (!rides.length) return truncateWords(`${meansLine(j)}${rainyJourney(j) ? ` ${RAIN_WORDS}` : ''}`, WIDTHS.full);
   const walks = walksPhrase(j);
   const why = otherWhy(j, journeys[0]) ?? (walks && rainyJourney(j) ? `${walks} ${RAIN_WORDS}` : walks);
   for (let k = Math.min(rides.length, 3); k >= 1; k--) {
@@ -1551,8 +1553,8 @@ export function otherDetail(j: Journey, journeys: readonly Journey[]): string {
   }
   // même le premier véhicule ne tient pas : son nom est coupé, le pourquoi reste entier
   const tail = why ? `, ${why}` : '';
-  const head = truncate(rides.length > 1 ? `${rides[0]} + …` : rides[0], WIDTHS.full - textWidth(tail));
-  return head ? `${head}${tail}` : truncate(why, WIDTHS.full);
+  const head = truncateWords(rides.length > 1 ? `${rides[0]} + …` : rides[0], WIDTHS.full - textWidth(tail));
+  return head ? `${head}${tail}` : truncateWords(why, WIDTHS.full);
 }
 
 /**

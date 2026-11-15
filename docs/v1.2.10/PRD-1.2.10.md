@@ -67,7 +67,9 @@ rapport (nom, raison, effet sur les autres équipes).
   liste (arbitré) : les départs d'un arrêt restent dans Gares, Arrêts, Autour de moi. Aides de cette liste :
   « △▽ arrêts   toucher : j'y descends   double : retour ».
 - Un nouveau guidage remplace le précédent. Le trajet suivi (`FollowedTrip`, clé `quai.trip`) porte le guidage.
-- Au lancement : l'écran `guide` s'ouvre sur « Où tu en es » (§ 3.3), qui s'efface seul au bout de 15 s.
+- Au lancement : l'écran `guide` s'ouvre sur « Où tu en es » (§ 3.3), qui s'efface seul au bout de 15 s. Arbitré le
+  15/11 (contrôle usager) : un moment déjà dû (voie modifiée, « monter » d'un bus qui arrive, nouveau trajet) passe
+  d'abord ; « Où tu en es » reste à un toucher.
 
 ### 3.2 Écran calme et moments
 

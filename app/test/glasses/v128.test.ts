@@ -104,9 +104,17 @@ describe('1.2.8 : tout le trajet d’un train', () => {
       ],
       1,
     );
-    const ls = lines(stopsView(route, long, ctx()));
+    const lv = stopsView(route, long, ctx());
+    const ls = lines(lv);
     expect(ls[0]).toBe('○ Bruxelles-Aéroport-Zaventem voie 3   dans 30 min');
     expect(ls[1]).toBe('○ Bruxelles-Nord voie 12 !   dans 40 min');
+    // 1.2.10 (contrôle usager du 15/11) : la gare de la montée est pâle et sans action, mais sa voie modifiée reste au
+    // plus clair ; la gare d'avant, pâle, sa voie aussi
+    const platSeg = (i: number) => lv.items[i].segs?.find((x) => x.t.startsWith('voie'));
+    expect(nb(platSeg(1)?.t ?? '')).toBe('voie 12 !');
+    expect(platSeg(1)?.hi).toBe(true);
+    expect(lv.items[1].action).toBeUndefined();
+    expect(platSeg(0)?.hi).toBeFalsy();
     expect(ls[2]).toMatch(/^○ Marchienne-au-Pont Bifurcation.*…? {3}dans 58 min$/);
   });
 });
