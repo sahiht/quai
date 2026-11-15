@@ -2,6 +2,8 @@
 /**
  * Affichage (T5, S3) : « À l’ouverture de Quai » et « Ordre des favoris » (libellés de la revue d'usage n° 11, mêmes
  * valeurs) ; aperçu : l'accueil des lunettes avec ses favoris, qui suit les réglages ; réglages v4 de l'exemple.
+ * 1.2.10 (PRD-1.2.10 § 4.4) : sur un seul écran : « Ordre des favoris » en deux choix côte à côte, l'ouverture sur son
+ * écran (#/affichage/ouverture), qui revient à Affichage (et, depuis l'accueil, à l'Affichage de l'accueil).
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { textWidth } from '../../src/glasses/font';
@@ -9,7 +11,7 @@ import { geometry, layoutPage } from '../../src/glasses/layout';
 import { effectiveFrame, initNav } from '../../src/glasses/nav';
 import type { PageSpec } from '../../src/glasses/types';
 import { homePreview, sampleSettings } from '../../src/phone/samples';
-import { displayScreen } from '../../src/phone/screens/display';
+import { displayScreen, openingScreen } from '../../src/phone/screens/display';
 import { defaults, harness, mount, textOf, until } from './helpers';
 
 afterEach(() => document.body.replaceChildren());
@@ -55,22 +57,27 @@ describe('Affichage', () => {
     expect(hz.settings.get().display.depsPerStop).toBe(6);
   });
 
-  it('libellés de la revue d’usage n° 11 : ouverture et ordre des favoris, sans « proposer » ni « lieu »', () => {
+  it('libellés de la revue d’usage n° 11 : ordre des favoris, ouverture sur son écran, sans « proposer » ni « lieu »', () => {
     const hz = harness({ settings: defaults() });
     const el = mount(displayScreen(hz.ctx));
-    const legends = [...el.querySelectorAll('legend')].map((l) => textOf(l));
-    expect(legends).toContain('À l’ouverture de Quai');
-    expect(legends).toContain('Ordre des favoris');
-    const labels = [...el.querySelectorAll('label.choice')].map((l) => [l.querySelector('input')!.value, textOf(l)]);
-    // 1.2.9 (PRD-1.2.9 § 2.4) : l'ordre des favoris, puis l'ouverture de Quai
-    expect(labels).toEqual([
-      ['smart', 'Automatique, selon l’heure et ta position'],
-      ['mine', 'Dans mon ordre'],
+    expect([...el.querySelectorAll('legend')].map((l) => textOf(l))).toEqual(['Rayon de « Autour de moi »', 'Ordre des favoris']);
+    // 1.2.10 : deux choix côte à côte ; le premier, abrégé, garde son nom complet pour les lecteurs d'écran
+    const order = [...el.querySelectorAll<HTMLInputElement>('input[type="radio"]')].filter((r) => r.name === el.querySelector<HTMLInputElement>('input[value="mine"]')!.name);
+    expect(order.map((r) => [r.value, textOf(r.closest('label')), r.getAttribute('aria-label')])).toEqual([
+      ['smart', 'Automatique', 'Automatique, selon l’heure et ta position'],
+      ['mine', 'Dans mon ordre', null],
+    ]);
+    expect(el.querySelector('label.choice')).toBeNull();
+    // l'ouverture : une ligne (un vrai lien) qui ouvre son écran, sa valeur dessous
+    const row = el.querySelector<HTMLAnchorElement>('.opening-link a.nav-row')!;
+    expect([textOf(row.querySelector('.t1')), textOf(row.querySelector('.t2')), row.getAttribute('href')]).toEqual(['À l’ouverture de Quai', 'L’accueil, avec mes favoris en tête', '#/affichage/ouverture']);
+    const opening = mount(openingScreen(harness({ settings: defaults() }).ctx));
+    expect([...opening.querySelectorAll('label.choice')].map((l) => [l.querySelector('input')!.value, textOf(l)])).toEqual([
       ['suggest', 'L’accueil, avec mes favoris en tête'],
       ['firstFavorite', 'Directement mon premier favori'],
       ['home', 'L’accueil, sans favoris'],
     ]);
-    expect(textOf(el)).not.toMatch(/propos|le lieu/);
+    expect(textOf(el) + textOf(opening)).not.toMatch(/propos|le lieu/);
   });
 
   it('1.2.9 (PRD-1.2.9 § 2.4) : retour « Réglages », l’aperçu en haut, groupes « Accueil des lunettes » et « Sur tous les écrans »', () => {
@@ -87,8 +94,9 @@ describe('Affichage', () => {
     // l'aperçu avant les groupes
     const preview = el.querySelector('.preview')!;
     expect(preview.compareDocumentPosition(groups[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect([...groups[0].querySelectorAll('legend')].map((l) => textOf(l))).toEqual(['Rayon de « Autour de moi »', 'Ordre des favoris', 'À l’ouverture de Quai']);
-    expect([...groups[0].querySelectorAll('.seg label')].map((l) => textOf(l))).toEqual(['300 m', '500 m', '800 m']);
+    expect([...groups[0].querySelectorAll('legend')].map((l) => textOf(l))).toEqual(['Rayon de « Autour de moi »', 'Ordre des favoris']);
+    expect([...groups[0].querySelectorAll('.seg label')].map((l) => textOf(l))).toEqual(['300 m', '500 m', '800 m', 'Automatique', 'Dans mon ordre']);
+    expect(textOf(groups[0].querySelector('.opening-link .t1'))).toBe('À l’ouverture de Quai');
     expect([...groups[1].querySelectorAll('.switch-row')].map((r) => [textOf(r.querySelector('.c1')), r.querySelector<HTMLInputElement>('input')!.checked])).toEqual([
       ['Aides de gestes', true],
       ['Signaler les horaires prévus', true],
@@ -99,7 +107,7 @@ describe('Affichage', () => {
     expect(groups[1].querySelector('.box > :first-child')!.classList.contains('bordered')).toBe(false);
   });
 
-  it('chaque réglage est enregistré, et l’aperçu suit (rayon, aides de gestes, signe ~, ouverture)', async () => {
+  it('chaque réglage est enregistré, et l’aperçu suit (rayon, aides de gestes, signe ~, ordre)', async () => {
     const hz = harness({ settings: defaults() });
     const el = mount(displayScreen(hz.ctx));
     const label = () => el.querySelector('.preview')!.getAttribute('aria-label')!.replace(/ /g, ' ');
@@ -111,9 +119,9 @@ describe('Affichage', () => {
     await until(() => hz.settings.get().display.gestureHints === false);
     sw('Signaler les horaires prévus').click();
     await until(() => hz.settings.get().display.markPlanned === false);
-    [...el.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find((r) => r.value === 'home')!.click();
-    await until(() => hz.settings.get().display.opening === 'home');
-    expect(hz.settings.get().display).toMatchObject({ radiusM: 800, gestureHints: false, markPlanned: false, rain: true, opening: 'home', favOrder: 'smart' });
+    el.querySelector<HTMLInputElement>('input[value="mine"]')!.click();
+    await until(() => hz.settings.get().display.favOrder === 'mine' && label().includes('Favoris 3, Vers Gand-Saint-Pierre'));
+    expect(hz.settings.get().display).toMatchObject({ radiusM: 800, gestureHints: false, markPlanned: false, rain: true, opening: 'suggest', favOrder: 'mine' });
   });
 
   it('« Dans mon ordre » est enregistré (S3)', async () => {
@@ -171,3 +179,67 @@ describe('Affichage', () => {
     expect(label).toBe('Aperçu dans les lunettes : Quai, Favoris 3, Bureau dans 4 min → 09:00, Vers Mons dans 14 min → 09:04, Vers Gand-Saint-Pierre 08:58 → 09:30, Autour de moi 3 arrêts, Gares de train 1 gare, Arrêts de bus, tram, métro 1 arrêt, Lignes de bus, tram, métro 1 ligne');
   });
 });
+
+describe('1.2.10 : Affichage sur un seul écran, l’ouverture sur son écran (PRD-1.2.10 § 4.4)', () => {
+  it('« À l’ouverture de Quai » : retour « Affichage », phrase, l’aperçu, trois choix (légende pour les lecteurs d’écran) enregistrés tout de suite ; l’aperçu suit', async () => {
+    const hz = harness({ settings: defaults() });
+    const el = mount(openingScreen(hz.ctx));
+    expect(textOf(el.querySelector('h1'))).toBe('À l’ouverture de Quai');
+    expect(textOf(el.querySelector('.lead'))).toBe('Ce que les lunettes montrent en premier.');
+    const legend = el.querySelector('legend')!;
+    expect([textOf(legend), legend.className]).toEqual(['À l’ouverture de Quai', 'sr-only']);
+    const label = () => el.querySelector('.preview')!.getAttribute('aria-label')!.replace(/ /g, ' ');
+    expect(label()).toMatch(/^Aperçu dans les lunettes : Quai, Favoris 3, Bureau /);
+    expect(el.querySelector<HTMLInputElement>('input[value="suggest"]')!.checked).toBe(true);
+    el.querySelector<HTMLInputElement>('input[value="home"]')!.click();
+    // « L’accueil, sans favoris » : plus aucun favori sous « Favoris » dans l'aperçu
+    await until(() => hz.settings.get().display.opening === 'home' && /Favoris 3, Autour de moi/.test(label()));
+    el.querySelector<HTMLInputElement>('input[value="firstFavorite"]')!.click();
+    await until(() => hz.settings.get().display.opening === 'firstFavorite');
+    // retour à Affichage, qui montre la valeur choisie
+    const back = el.querySelector<HTMLButtonElement>('.back')!;
+    expect(textOf(back)).toBe('Affichage');
+    back.click();
+    expect(hz.went).toEqual(['#/affichage']);
+    const display = mount(displayScreen(hz.ctx));
+    expect(textOf(display.querySelector('.opening-link .t2'))).toBe('Directement mon premier favori');
+  });
+
+  it('ouvert depuis l’accueil (?retour=accueil) : Affichage → ouverture → Affichage → accueil, sans perdre le chemin du retour', () => {
+    const hz = harness({ settings: defaults(), params: 'retour=accueil' });
+    const display = mount(displayScreen(hz.ctx));
+    expect(display.querySelector('.opening-link a')!.getAttribute('href')).toBe('#/affichage/ouverture?retour=accueil');
+    const opening = mount(openingScreen(hz.ctx));
+    opening.querySelector<HTMLButtonElement>('.back')!.click();
+    expect(hz.went).toEqual(['#/affichage?retour=accueil']);
+    const again = mount(displayScreen(hz.ctx));
+    expect(textOf(again.querySelector('.back'))).toBe('Accueil');
+  });
+
+  it('tient dans 390 × 844 (calcul des sections, hauteurs mesurées dans Chrome) : rien de plus que l’en-tête, l’aperçu, deux choix segmentés, une ligne et trois interrupteurs', () => {
+    const el = mount(displayScreen(harness({ settings: defaults() }).ctx));
+    // les blocs de l'écran, dans l'ordre : en-tête, aperçu sans titre écrit, deux groupes
+    expect([...el.children].map((c) => c.tagName.toLowerCase() + (c.className ? `.${c.className.split(' ')[0]}` : ''))).toEqual(['header.head', 'div.preview-top', 'section.group', 'section.group']);
+    expect(el.querySelector('header .lead')).toBeNull();
+    expect(el.querySelector('.preview-wrap .label')).toBeNull();
+    const [home, all] = [...el.querySelectorAll<HTMLElement>('section.group')];
+    expect([...home.querySelectorAll('.box > *')].map((c) => c.className)).toEqual(['pad-row', 'pad-row bordered', 'list bordered opening-link']);
+    expect(home.querySelectorAll('.seg')).toHaveLength(2);
+    expect(all.querySelectorAll('.switch-row')).toHaveLength(3);
+    // sous-titres des interrupteurs : deux sur une ligne (36 caractères au plus à 13 px), la pluie sur deux
+    const subs = [...all.querySelectorAll('.switch-row .c2')].map((c) => plainText(c));
+    expect(subs.map((t) => t.length <= 36)).toEqual([true, true, false]);
+    // hauteurs (px) mesurées à 390 × 844 dans Chrome (Inter) : marges de la page 24 + 32, espaces de 12, en-tête 80,
+    // aperçu 175 (350 × 175), titre de groupe 18 + 6, choix segmenté 96, ligne de l'ouverture 57, interrupteur 56 (69
+    // sur deux lignes), traits de 1 px
+    const groupHome = 18 + 6 + (96 + 1 + 96 + 1 + 57 + 2);
+    const groupAll = 18 + 6 + (56 + 1 + 56 + 1 + 68 + 2);
+    const total = 24 + 80 + 12 + 175 + 12 + groupHome + 12 + groupAll + 32;
+    expect(total).toBeLessThanOrEqual(844 - 10);
+  });
+});
+
+/** Texte d'un élément, espaces insécables compris comme des espaces. */
+function plainText(el: Element): string {
+  return (el.textContent ?? '').replace(/ /g, ' ');
+}

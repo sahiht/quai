@@ -43,9 +43,11 @@ describe('1.2.8 : tout le trajet d’un train', () => {
       '○ Bruxelles-Nord voie 11   dans 40 min',
       '○ Louvain voie 9   à 09:02',
       '○ Liège-Guillemins voie 5   à 09:38',
-      '△▽ gares   toucher : départs   double : retour',
+      '△▽ arrêts   toucher : j’y descends   double : retour',
     ]);
-    expect(page(v).sel).toBe(2);
+    // 1.2.10 : le curseur sur la première gare où descendre (Louvain), la gare de la montée au-dessus
+    expect(page(v).sel).toBe(3);
+    expect(v.items.map((it) => it.action)).toEqual([undefined, undefined, undefined, { kind: 'alight', index: 3 }, { kind: 'alight', index: 4 }]);
     expect(nb(layoutPage(v, { sel: 0, top: 0 }).lines[0])).toBe('○ Bruxelles-Midi voie 15   dans 30 min');
   });
 
@@ -56,7 +58,7 @@ describe('1.2.8 : tout le trajet d’un train', () => {
     expect(nb(v.top?.text ?? '')).toBe('● : le train arrive');
     // la gare qu'il vient de quitter (en pâle, son heure), le ●, puis le curseur sur Bruxelles-Nord
     expect(lines(v).slice(0, 4)).toEqual(['● : le train arrive', '○ Bruxelles-Midi voie 15   08:30', '● Bruxelles-Central voie 3   dans 2 min', '○ Bruxelles-Nord voie 11   dans 7 min']);
-    expect(page(v).sel).toBe(2);
+    expect(page(v).sel).toBe(3);
     // au terminus : toutes quittées, tout en pâle, aucun ●
     const end = stopsView(route, s, ctx(at('2026-11-10', 9, 40)));
     expect(end.top).toBeUndefined();
@@ -74,15 +76,17 @@ describe('1.2.8 : tout le trajet d’un train', () => {
     const v = stopsView(route, far, ctx());
     expect(v.log).toMatchObject({ gare: 6, vehicle: 5 });
     const p = page(v);
-    expect(p.sel).toBe(6);
+    // 1.2.10 : le curseur sur la première gare où descendre (Louvain)
+    expect(p.sel).toBe(7);
     const rows = p.lines.map(nb);
     expect(rows.some((l) => l.startsWith('● Bruxelles-Central'))).toBe(true);
     expect(rows.some((l) => l.startsWith('○ Bruxelles-Nord'))).toBe(true);
-    // plus loin (07:20, il a quitté Ostende, il arrive à Bruges) : Ostende ne tient plus avec le curseur, le ● oui
+    // plus loin (07:20, il a quitté Ostende, il arrive à Bruges) : Bruges ne tient plus avec le curseur et la gare de
+    // la montée : la gare d'avant celle-ci au-dessus
     const early = stopsView(route, far, ctx(at('2026-11-10', 7, 20)));
     expect(early.log).toMatchObject({ vehicle: 1 });
-    expect(page(early).lines.map(nb).slice(0, 2)).toEqual(['● : le train arrive', '● Bruges   dans 2 min']);
-    expect(page(early).sel).toBe(6);
+    expect(page(early).lines.map(nb).slice(0, 4)).toEqual(['● : le train arrive', '○ Bruxelles-Central   dans 50 min', '○ Bruxelles-Midi   à 08:22', '○ Louvain   à 08:34']);
+    expect(page(early).sel).toBe(7);
     // plus loin encore (07:05, il n'a pas quitté Ostende) : aucun ●, la gare d'avant au-dessus du curseur
     const before = stopsView(route, far, ctx(at('2026-11-10', 7, 5)));
     expect(before.log).toMatchObject({ vehicle: -1 });
@@ -100,9 +104,17 @@ describe('1.2.8 : tout le trajet d’un train', () => {
       ],
       1,
     );
-    const ls = lines(stopsView(route, long, ctx()));
+    const lv = stopsView(route, long, ctx());
+    const ls = lines(lv);
     expect(ls[0]).toBe('○ Bruxelles-Aéroport-Zaventem voie 3   dans 30 min');
     expect(ls[1]).toBe('○ Bruxelles-Nord voie 12 !   dans 40 min');
+    // 1.2.10 (contrôle usager du 15/11) : la gare de la montée est pâle et sans action, mais sa voie modifiée reste au
+    // plus clair ; la gare d'avant, pâle, sa voie aussi
+    const platSeg = (i: number) => lv.items[i].segs?.find((x) => x.t.startsWith('voie'));
+    expect(nb(platSeg(1)?.t ?? '')).toBe('voie 12 !');
+    expect(platSeg(1)?.hi).toBe(true);
+    expect(lv.items[1].action).toBeUndefined();
+    expect(platSeg(0)?.hi).toBeFalsy();
     expect(ls[2]).toMatch(/^○ Marchienne-au-Pont Bifurcation.*…? {3}dans 58 min$/);
   });
 });

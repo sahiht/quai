@@ -12,6 +12,7 @@
  */
 import type { Op, Mode, Names, AreaSummary, Meta, HealthResponse, GeocodeResult, GeoSource } from '../../../shared/types';
 import type { FollowRef, LineFollow, LineRun } from './linerun';
+import type { GuideStatus, WalkRoute } from './guide-types';
 
 export type { Op, Mode, Names, AreaSummary, Meta, HealthResponse, GeocodeResult, GeoSource };
 
@@ -133,6 +134,11 @@ export interface Settings {
     rain: boolean;              // 1.2.5 : pluie prévue sur les marches de 5 min ou plus (Open-Meteo)
     opening: 'suggest' | 'home' | 'firstFavorite';
     favOrder: 'smart' | 'mine'; // « Ordre des favoris » : « Selon l'heure et le lieu » ou « Dans mon ordre » (S3)
+    /**
+     * 1.2.10 : « Me guider pendant un trajet » (PRD-1.2.10 § 4.1). Absent ou vrai : écran calme pendant un trajet lancé
+     * par « Y aller » ou « J'y descends » ; faux : le trajet est suivi sans aucun message ni écran qui change seul.
+     */
+    guide?: boolean;
   };
   alerts: {
     platform: boolean;
@@ -273,7 +279,8 @@ export interface LineMatch {
 /** 1.2.2 : arrêt d'une ligne (lineStops). */
 export interface LineStop { areaId: string; name: Names; lat: number; lon: number; distanceM?: number }
 
-export interface Stopover { name: Names; areaId?: string; sched: number; est: number; platform?: string }
+/** 1.2.10 : `lat`/`lon` de l'arrêt (guidage : arrêt passé, descente constatée par la position), quand ils sont connus. */
+export interface Stopover { name: Names; areaId?: string; sched: number; est: number; platform?: string; lat?: number; lon?: number }
 
 export interface Leg {
   kind: 'walk' | 'ride';
@@ -431,6 +438,17 @@ export interface Core {
    * Charge meta.json (erreur lisible en français si les données sont absentes).
    * Des horaires périmés ne font pas échouer init() : vérifier avec dataFreshness(meta, now) exporté par core/index.ts.
    */
+  /**
+   * 1.2.10 : chemin à pied calculé sur le téléphone (graphe piéton OpenStreetMap, tuiles data/walk/). null : impossible
+   * (données absentes) ; le chemin droit (`source: 'straight'`) quand les extrémités ne s'accrochent à aucune voie.
+   */
+  walkRoute?(from: LatLon, to: LatLon): Promise<WalkRoute | null>;
+  /**
+   * 1.2.10 : chemins à pied publiés (data/walk/index.json), pour la carte « Chemins à pied » de l'écran Données :
+   * `date` = date des données OpenStreetMap (AAAA-MM-JJ), `tiles` = nombre de tuiles. null : pas de chemins à pied
+   * dans la publication (ou index illisible, serveur injoignable). Jamais d'exception.
+   */
+  walkIndex?(): Promise<{ date: string; tiles?: number } | null>;
   init(): Promise<Meta>;
   /** La publication en vigueur : elle peut changer après init() (copie remplacée par le réseau, relecture de 10 min). */
   readonly meta: Meta | null;
@@ -542,4 +560,12 @@ export interface TripRequest {
 export interface GlassesApi {
   showTrip(req: TripRequest): Promise<string>;
   showBoard(areaId: string, filter?: LineFilter[]): Promise<string>;
+  /** 1.2.10 : bouton « Y aller » d'un favori du téléphone : calcule son trajet et lance le guidage. Message rendu. */
+  goFavorite?(id: string): Promise<string>;
+  /** 1.2.10 : « Arrêter le guidage » (carte « En cours » du téléphone). */
+  stopGuide?(): Promise<void>;
+  /** 1.2.10 : état du guidage pour la carte « En cours » ; null : aucun trajet suivi. */
+  guideStatus?(): GuideStatus | null;
+  /** 1.2.10 : appelé à chaque changement de l'état du guidage. Renvoie la fonction de désabonnement. */
+  onGuide?(cb: (s: GuideStatus | null) => void): () => void;
 }

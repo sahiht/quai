@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 /**
  * Réglages (#/reglages, 1.2.9, PRD-1.2.9 § 2.3) : retour « Accueil », « Dans les lunettes » (Affichage, Alertes, leurs
- * résumés selon les réglages), « Tes trajets » (« Marche maximale » et « Marge avant de partir » réglables sur place,
- * les pas-à-pas de l'écran Trajets, puis « Position et langue »), « Quai » (Données), les sources en bas. Affichage,
- * Alertes, Données, Position et langue et Trajets reviennent à Réglages ; les favoris, à l'accueil.
+ * résumés selon les réglages), 1.2.10 (PRD-1.2.10 § 4.1) « Pendant un trajet » (« Me guider pendant un trajet »),
+ * « Tes trajets » (« Marche maximale » et « Marge avant de partir » réglables sur place, les pas-à-pas de l'écran
+ * Trajets, puis « Position et langue »), « Quai » (Données), les sources en bas. Affichage, Alertes, Données, Position
+ * et langue et Trajets reviennent à Réglages ; les favoris, à l'accueil.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { alertsScreen } from '../../src/phone/screens/alerts';
@@ -24,13 +25,13 @@ const rows = (el: HTMLElement) => [...el.querySelectorAll<HTMLAnchorElement>('a.
 const steppers = (el: HTMLElement) => [...el.querySelectorAll('.stepper-row')].map((r) => [textOf(r.querySelector('.c1')), textOf(r.querySelector('.c2')), textOf(r.querySelector('output'))]);
 
 describe('écran Réglages', () => {
-  it('retour « Accueil », titre, phrase ; groupes « Dans les lunettes », « Tes trajets », « Quai » ; les sources en bas', () => {
+  it('retour « Accueil », titre, phrase ; groupes « Dans les lunettes », « Pendant un trajet », « Tes trajets », « Quai » ; les sources en bas', () => {
     const hz = harness({ settings: defaults() });
     const el = mount(settingsScreen(hz.ctx));
     expect(textOf(el.querySelector('h1'))).toBe('Réglages');
     expect(textOf(el.querySelector('.lead'))).toBe('Favoris, gares, arrêts et lignes se règlent sur l’accueil, dans l’ordre des lunettes.');
     const groups = [...el.querySelectorAll<HTMLElement>('section.group')];
-    expect(groups.map((g) => textOf(g.querySelector('h2')))).toEqual(['Dans les lunettes', 'Tes trajets', 'Quai']);
+    expect(groups.map((g) => textOf(g.querySelector('h2')))).toEqual(['Dans les lunettes', 'Pendant un trajet', 'Tes trajets', 'Quai']);
     for (const g of groups) expect(g.getAttribute('aria-labelledby')).toBe(g.querySelector('h2')!.id);
     expect(rows(el)).toEqual([
       ['Affichage', 'Rayon 500 m, horaires prévus « ~ », pluie pendant la marche', '#/affichage'],
@@ -55,7 +56,7 @@ describe('écran Réglages', () => {
   it('« Tes trajets » : les deux pas-à-pas de l’écran Trajets, réglables sur place (mêmes bornes, pas et textes), puis « Position et langue »', async () => {
     const hz = harness({ settings: defaults() });
     const el = mount(settingsScreen(hz.ctx));
-    const trips = [...el.querySelectorAll<HTMLElement>('section.group')][1];
+    const trips = [...el.querySelectorAll<HTMLElement>('section.group')][2];
     expect(steppers(trips)).toEqual([
       ['Marche maximale', 'D’abord les trajets dans cette limite ; au-delà, s’il n’y a pas mieux', '10 min'],
       ['Marge avant de partir', 'comprise dans l’heure de départ conseillée', '2 min'],
@@ -165,5 +166,57 @@ describe('retours vers Réglages (PRD-1.2.9 § 2.3) ; les favoris reviennent à 
     expect(textOf(back)).toBe('Accueil');
     back.click();
     expect(hz.went).toEqual(['#/']);
+  });
+});
+
+describe('1.2.10 : « Pendant un trajet » : « Me guider pendant un trajet » (PRD-1.2.10 § 4.1)', () => {
+  const HELP = 'Les lunettes restent vides et t’écrivent seulement quand tu dois agir : partir, tourner, monter, descendre. Éteint : ton trajet est suivi sans rien afficher tout seul.';
+  const guideRow = (el: HTMLElement): HTMLElement => {
+    const group = [...el.querySelectorAll<HTMLElement>('section.group')].find((g) => textOf(g.querySelector('h2')) === 'Pendant un trajet')!;
+    const rows = [...group.querySelectorAll<HTMLElement>('.switch-row')];
+    expect(rows).toHaveLength(1);
+    return rows[0];
+  };
+
+  it('après « Dans les lunettes », un interrupteur allumé par défaut, avec l’aide exacte du PRD ; nommé par son libellé, décrit par l’aide', () => {
+    const el = mount(settingsScreen(harness({ settings: defaults() }).ctx));
+    const row = guideRow(el);
+    expect(textOf(row.querySelector('.c1'))).toBe('Me guider pendant un trajet');
+    expect(textOf(row.querySelector('.c2'))).toBe(HELP);
+    // typographie française : espaces insécables devant « : »
+    expect(row.querySelector('.c2')!.textContent).toMatch(/agir : partir, .* Éteint : ton trajet/);
+    const input = row.querySelector<HTMLInputElement>('input')!;
+    expect([input.type, input.getAttribute('role'), input.checked]).toEqual(['checkbox', 'switch', true]);
+    expect(textOf(document.getElementById(input.getAttribute('aria-labelledby')!))).toBe('Me guider pendant un trajet');
+    expect(textOf(document.getElementById(input.getAttribute('aria-describedby')!))).toBe(HELP);
+    // tout le libellé se touche (cible de 44 px et plus : la ligne entière)
+    expect(input.closest('label')).toBe(row);
+  });
+
+  it('éteint d’un toucher : enregistré tout de suite, vu des lunettes (réglages partagés) ; rallumé : le champ disparaît ; l’écran suivant suit', async () => {
+    const hz = harness({ settings: defaults() });
+    const glasses: (boolean | undefined)[] = [];
+    hz.settings.subscribe((s) => glasses.push(s.display.guide));
+    const el = mount(settingsScreen(hz.ctx));
+    const input = guideRow(el).querySelector<HTMLInputElement>('input')!;
+    input.click();
+    await until(() => hz.settings.get().display.guide === false);
+    expect(glasses).toEqual([false]);
+    await hz.settings.flush();
+    expect(JSON.parse(hz.kv.data.get('quai.settings')!).display.guide).toBe(false);
+    // un autre écran ouvert ensuite le montre éteint
+    expect(guideRow(mount(settingsScreen(hz.ctx))).querySelector<HTMLInputElement>('input')!.checked).toBe(false);
+    const again = guideRow(document.body.firstElementChild as HTMLElement).querySelector<HTMLInputElement>('input')!;
+    again.click();
+    await until(() => hz.settings.get().display.guide !== false);
+    expect('guide' in hz.settings.get().display).toBe(false);
+    expect(glasses).toEqual([false, undefined]);
+  });
+
+  it('les autres réglages ne changent pas quand on l’éteint', async () => {
+    const hz = harness({ settings: defaults({ display: { ...defaults().display, radiusM: 800, markPlanned: false } }) });
+    guideRow(mount(settingsScreen(hz.ctx))).querySelector<HTMLInputElement>('input')!.click();
+    await until(() => hz.settings.get().display.guide === false);
+    expect(hz.settings.get().display).toEqual({ ...defaults().display, radiusM: 800, markPlanned: false, guide: false });
   });
 });

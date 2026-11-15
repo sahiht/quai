@@ -34,10 +34,11 @@
 import { PNG } from 'pngjs';
 import { padLeftTo, textWidth } from '../../../app/src/glasses/font';
 import { GEO, HOME_INDENT, LAYOUTS, TILDE_W, WIDTHS, segRow } from '../../../app/src/glasses/layout';
+import { STEP_TIME_PX } from '../../../app/src/glasses/views';
 
 const LINE_H = 27;
 const SCREEN_H = 288;
-const TOL = 3;
+const TOL_SIM = 3;
 /** Fin de texte : le dernier pixel allumé peut précéder l'avance du dernier caractère (approche, « . », « : »). */
 const END_TOL = 9;
 
@@ -52,14 +53,14 @@ export interface LoggedScreen {
 type Seg = { from: number; to: number; text: string };
 
 /** Écrans en liste à une colonne de droite (gabarit de chacun, layout.ts). */
-const MENU: Record<string, keyof typeof LAYOUTS> = { favorites: 'favorites', stations: 'stations', keepLine: 'menu', followed: 'menu' };
+const MENU: Record<string, keyof typeof LAYOUTS> = { favorites: 'favorites', stations: 'stations', keepLine: 'menu', followed: 'menu', menu: 'menu' };
 const CHECKED = new Set(['home', 'steps', 'others', 'lines', 'follows', 'lineRun', 'trainRun', 'line', 'board', 'stops', 'train', ...Object.keys(MENU)]);
 /** 1.2.3 : ligne du haut d'un tableau (message de l'opérateur, « Départs de demain ») ; sa note, jamais une ligne de liste. */
 const TOP_BOARD = /^(! |Départs de demain$)/;
 const NOTE_BOARD = /^(~ horaire prévu|Temps réel indisponible|Pas de réseau)/;
 /** 1.2.3 : voyage disparu : message (gabarit des messages), non contrôlé ici. */
 const VANISHED = 'Ce départ n’est plus dans les horaires.';
-const TOP_STEPS = /^(! |Si tu le rates |Le plus court|Le plus simple|Le plus rapide|Moins de marche|Plus tôt|Sans changement|Moins de changements|À pied|Le suivant|Plus tard)/;
+const TOP_STEPS = /^(! |Départ \d\d:\d\d|Si tu le rates |Le plus court|Le plus simple|Le plus rapide|Moins de marche|Plus tôt|Sans changement|Moins de changements|À pied|Le suivant|Plus tard)/;
 const TOP_HOME = /^(Temps réel indisponible|Pas de réseau|Horaires |Près de |! )/;
 const NOTE = /^(~ horaire prévu|\* s’arrête avant le terminus|Temps réel indisponible|Temps réel coupé|Pas de réseau|Horaires |[▼▽] |Fin du trajet\.|[▲△] trajet précédent|Pas d’autre trajet pour l’instant$)/;
 /** 1.2.5 (PRD-1.2.5 § 7) : « Dans le train », tous les véhicules : la ligne de progression en ligne du haut. */
@@ -119,7 +120,7 @@ const roomTo = (def: { c: { x: number }; gap?: number }, x: number): number => d
 const roomIn = (c: { x: number; w?: number }): number => Math.min(c.w ?? 0, GEO.X_END - c.x) - GEO.SAFETY;
 
 /** Segments attendus d'une ligne de liste selon le gabarit (colonnes séparées par 3 espaces dans le journal). */
-function rowSegments(screen: string, line: string, indented = false): Seg[] {
+function rowSegments(screen: string, line: string, indented = false, beforeBoarding: false | 'before' | 'boarding' = false): Seg[] {
   const parts = line.split('   ');
   if (MENU[screen]) {
     const def = LAYOUTS[MENU[screen]];
@@ -134,7 +135,7 @@ function rowSegments(screen: string, line: string, indented = false): Seg[] {
   if (screen === 'trainRun') {
     // 1.2.8 : tout le trajet d'un train : une gare par rangée, son passage calé à droite ; une gare quittée (son heure
     // seule) tout en pâle, l'heure comprise, à la même place
-    return segRowSegments(line, 0, trainWords, PASSED);
+    return segRowSegments(line, 0, (left, right) => trainWords(left, right, beforeBoarding), beforeBoarding ? /./ : PASSED);
   }
   if (screen === 'lines' || screen === 'follows') {
     // intitulés, noms d'arrêts et titres de lignes à la marge ; leurs lignes en retrait (espaces de 5 px, subIndent),
@@ -187,6 +188,10 @@ function rowSegments(screen: string, line: string, indented = false): Seg[] {
     return out;
   }
   const def = LAYOUTS.steps;
+  // 1.2.10 (PRD-1.2.10 § 5) : une rangée par étape en mots clairs et pâles (l'heure dans sa case, le véhicule clair,
+  // « → arrêt » et « à pied 5 min » pâles), l'heure d'arrivée ou la marge calée à droite
+  const step = stepRowSegments(line);
+  if (step) return step;
   // 1.2.4 : sous « Partir à pied vers l'arrêt » (ou un trajet qui commence à bord), le nom seul, dans la colonne du texte
   if (parts.length === 1 && !TIME.test(line)) return [{ from: def.b.x, to: def.b.x + width(line), text: line }];
   const [a, b, c] = parts;
@@ -195,6 +200,41 @@ function rowSegments(screen: string, line: string, indented = false): Seg[] {
   if (b !== undefined) out.push({ from: def.b.x, to: def.b.x + width(b), text: b });
   if (c !== undefined) out.push({ from: def.c.x, to: def.c.x + width(c), text: c });
   return out;
+}
+
+/** 1.2.10 : rangée d'étape journalisée « 07:44 IC voie 6 ! → Bruxelles-Nord   08:42 », « 07:35 à pied 7 min ». */
+const STEP_ROW = /^(~?\d\d:\d\d) (.+?)(?: {3}(.+))?$/;
+
+/**
+ * 1.2.10 : segments d'une rangée d'étape, placés comme views.ts (stepRows) et layout.ts (segRow) les posent : l'heure
+ * calée à droite de sa case (STEP_TIME_PX), suivie d'une espace insécable pour un véhicule ; le véhicule au plus clair,
+ * « → arrêt » ou « à pied … » pâles ; à droite l'heure d'arrivée (pâle) ou la marge et « SUPPRIMÉ » (au plus clair).
+ */
+function stepRowSegments(line: string): Seg[] | null {
+  const m = STEP_ROW.exec(line);
+  if (!m) return null;
+  const [, time, text, right] = m;
+  const walkRow = /^à pied /.test(text);
+  const words: Word[] = [{ t: padLeftTo(time, STEP_TIME_PX) + (walkRow ? '' : '\u00a0'), hi: true }];
+  const k = text.indexOf(' → ');
+  if (walkRow) words.push({ t: nbsp(text) });
+  else if (k >= 0) words.push({ t: nbsp(text.slice(0, k)), hi: true }, { t: nbsp(text.slice(k + 1)) });
+  else words.push({ t: nbsp(text), hi: true });
+  const pale = !!right && right !== 'SUPPRIMÉ' && !/^(marge |très juste$)/.test(right);
+  const def = LAYOUTS.steps;
+  const r = segRow(words, 0, right === undefined ? undefined : nbsp(right), def, pale);
+  const out: Seg[] = [];
+  for (const [x0, content] of [
+    [def.a.x, r.a],
+    [def.b.x, r.b],
+  ] as const) {
+    for (const run of content.matchAll(/\S+(?: \S+)*/g)) {
+      const from = x0 + textWidth(content.slice(0, run.index));
+      out.push({ from, to: from + textWidth(run[0]), text: run[0] });
+    }
+  }
+  if (r.c.trim()) out.push({ from: def.c.x + textWidth(r.c) - textWidth(r.c.trim()), to: def.c.x + textWidth(r.c), text: r.c.trim() });
+  return out.sort((p, q) => p.from - q.from);
 }
 
 /**
@@ -249,11 +289,14 @@ const PASSED = /^~?\d\d:\d\d$/;
  * 1.2.8 : une gare de tout le trajet d'un train (« ● Namur voie 6 ! ») : le repère et le nom au plus clair, la voie pâle
  * (modifiée, « ! » : au plus clair) ; une gare quittée tout en pâle.
  */
-function trainWords(left: string, right?: string): Word[] {
-  const gone = !!right && PASSED.test(right);
+function trainWords(left: string, right?: string, beforeBoarding: false | 'before' | 'boarding' = false): Word[] {
+  // 1.2.10 (PRD-1.2.10 § 3.1) : la gare de la montée et celles d'avant, pâles (sans action), comme une gare quittée ;
+  // la voie modifiée de la gare de montée reste au plus clair (contrôle usager)
+  const gone = !!beforeBoarding || (!!right && PASSED.test(right));
   const m = /^([●○]) (.+?)(?: (voie \S+(?: !)?))?$/.exec(left);
   if (!m) return [{ t: nbsp(left), hi: !gone }];
-  return [{ t: m[1], hi: !gone }, { t: nbsp(m[2]), hi: !gone }, ...(m[3] ? [{ t: nbsp(m[3]), hi: !gone && m[3].endsWith('!') }] : [])];
+  const platformHi = m[3]?.endsWith('!') && (beforeBoarding === 'boarding' || !gone);
+  return [{ t: m[1], hi: !gone }, { t: nbsp(m[2]), hi: !gone }, ...(m[3] ? [{ t: nbsp(m[3]), hi: !!platformHi }] : [])];
 }
 
 function segRowSegments(line: string, indentPx: number, words: (left: string, right?: string) => Word[] = versWords, paleRight?: RegExp): Seg[] {
@@ -400,7 +443,12 @@ function bands(s: LoggedScreen): Band[] | null {
     footLines = (note !== undefined ? 1 : 0) + (note !== undefined && hint === undefined ? 0 : 1);
   } else {
     hint = lines.pop();
-    note = lines.length && (board ? NOTE_BOARD : NOTE).test(lines[lines.length - 1]) ? lines.pop() : undefined;
+    // 1.2.10 (PRD-1.2.10 § 2) : « Favoris », la ligne du détail du favori choisi, fixe en bas au-dessus des aides
+    // (journalisée dans `detail`, espaces insécables comprises, alors que les lignes du journal en sont nettoyées),
+    // à la place de la note
+    const detail = (s as LoggedScreen & { detail?: unknown }).detail;
+    if (s.screen === 'favorites' && typeof detail === 'string' && lines[lines.length - 1] === detail.replace(/[\u00a0\u202f]/g, ' ')) note = lines.pop();
+    else note = lines.length && (board ? NOTE_BOARD : NOTE).test(lines[lines.length - 1]) ? lines.pop() : undefined;
     // ligne de note réservée (layout.ts, reserveNote) : partout sauf « Autres trajets », les menus et « Dans le train »
     const reserve = !['others', 'keepLine', 'followed', 'train', 'follows'].includes(s.screen);
     footLines = (reserve || note ? 1 : 0) + 1;
@@ -422,8 +470,14 @@ function bands(s: LoggedScreen): Band[] | null {
     // 1.2.4 : son heure dans la case, comme celles dessous
     const tp = top.split('   ');
     const st = LAYOUTS.stops;
-    const segs =
-      s.screen === 'stops' && tp.length > 1
+    // 1.2.10 (PRD-1.2.10 § 5) : écran du trajet, « Départ 07:05, dans 3 min » à gauche et « arrivée 08:54 » calé à droite
+    const departTop = s.screen === 'steps' && /^Départ /.test(top) && tp.length > 1;
+    const segs = departTop
+      ? [
+          { from: GEO.X_TEXT, to: GEO.X_TEXT + width(tp.slice(0, -1).join('   ')), text: tp.slice(0, -1).join('   ') },
+          { from: GEO.X_END - GEO.SAFETY - width(tp[tp.length - 1]) - 5, to: GEO.X_END - GEO.SAFETY, text: tp[tp.length - 1] },
+        ]
+      : s.screen === 'stops' && tp.length > 1
         ? [
             leadSeg(GEO.X_TEXT, st.a.lead ?? 0, st.b.x - (st.gap ?? GEO.GAP) - GEO.X_TEXT - GEO.SAFETY, tp[0]),
             { from: st.b.x, to: st.b.x + width(tp[1]), text: tp[1] },
@@ -448,7 +502,13 @@ function bands(s: LoggedScreen): Band[] | null {
       } else segs = homeSegments(l, underFavorites);
     } else if (s.screen === 'others') segs = othersSegments(l, i % 2 === 1);
     else if (board) segs = rowSegments(/\(SNCB\)( ★)?$/.test(s.title) ? 'boardTrain' : 'board', l);
-    else segs = rowSegments(s.screen, l, indented[i]);
+    else if (s.screen === 'trainRun') {
+      // 1.2.10 : rang de la gare dans le trajet (top + i) ; jusqu'à la gare du tableau (`gare`), tout est pâle
+      const x = s as LoggedScreen & { gare?: number; top?: number };
+      const k = (x.top ?? 0) + i;
+      const g = x.gare ?? -1;
+      segs = rowSegments(s.screen, l, false, k < g ? 'before' : k === g ? 'boarding' : false);
+    } else segs = rowSegments(s.screen, l, indented[i]);
     out.push({ y: rowsY + i * LINE_H, label: `ligne ${i + 1}`, text: l, segs });
   });
   if (note !== undefined) out.push({ y: footY, label: 'note', text: note, segs: [{ from: GEO.X_TEXT, to: GEO.X_TEXT + width(note), text: note }] });
@@ -459,7 +519,8 @@ function bands(s: LoggedScreen): Band[] | null {
 /**
  * Contrôle une capture. Renvoie la liste des écarts (vide : tout tient).
  */
-export function checkPixels(png: Buffer, s: LoggedScreen): string[] {
+export function checkPixels(png: Buffer, s: LoggedScreen, opts: { tol?: number } = {}): string[] {
+  const TOL = opts.tol ?? TOL_SIM;
   const all = bands(s);
   if (!all) return [];
   const { w, h, lit } = litMap(png);

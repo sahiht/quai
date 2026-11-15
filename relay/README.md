@@ -51,6 +51,10 @@ Source : `${BMC_BASE}/api/datasets/stibmivb/rt/WaitingTimes?where=pointid="6357"
 
 Alertes actives maintenant (ou sans période) qui concernent les lignes (`route_id`) ou les arrêts (`stop_id`) donnés, ou toutes si aucun filtre. Une alerte de tout le réseau (agence sans ligne ni arrêt) concerne tous les filtres. Pour la SNCB, un quai et sa gare correspondent (`8811601_2`, `8811601`, `S8811601`). `header` : textes par langue (`fr`, `nl`, `en`, `de`) ; une traduction sans langue est rangée dans la langue de l’opérateur (De Lijn : `nl`, sinon `fr`). `active` : périodes `[début, fin]` en secondes epoch, `0` pour une borne absente.
 
+Depuis la 1.2.10 (champs facultatifs, ignorés par les versions précédentes de l’appli) :
+- `until=<secondes epoch>` : aussi les alertes qui commencent avant cette heure (trajet plus tard), 48 h au plus après maintenant ; une heure passée vaut maintenant ; autre chose qu’un entier : 400 « Paramètre until invalide ».
+- `cause` et `effect` : noms de l’énumération GTFS-RT (`CONSTRUCTION`, `DETOUR`, `STOP_MOVED`…), seulement s’ils sont dans le flux ; `desc` : description par langue, 300 caractères au plus, quand elle diffère du titre ; `global: true` : alerte de tout le réseau (agence ou type de transport sans ligne ni arrêt). Le TEC publie ainsi des travaux locaux (« Binche | Travaux réfection rue Zéphirin Fontaine | Ligne E44 ») : l’appli ne les rattache plus d’office à tout trajet, elle lit la ligne et le lieu du titre (`app/src/core/alerts.ts`).
+
 Source : `${BMC_BASE}/api/gtfs/feed/{nmbssncb|delijn|tec}/rt/alert?format=protobuf` (toujours le portail BMC, même si `SNCB_RT_URL` est définie).
 
 ### `GET /api/geocode?q=texte&lang=fr|nl` (GeocodeResponse)

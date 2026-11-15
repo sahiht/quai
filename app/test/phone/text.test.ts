@@ -6,7 +6,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import type { Journey, JourneyLabel, Leg, PlanResult } from '../../src/core/api';
+import type { Journey, JourneyLabel, Leg } from '../../src/core/api';
 import { cardTitle, emptyState, summaryText, T, timesText, typo } from '../../src/phone/text';
 import { APP_VERSION, compareVersions } from '../../src/version';
 import { at, defaults, preset } from './helpers';

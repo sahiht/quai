@@ -60,7 +60,7 @@ Nouveau texte (`accessText`) :
 2. La gare ensuite, seulement si elle est utile : desservie par des IC (« IC » dans ses lignes), à la marche maximale ou moins et pas déjà citée : « ; gare de {nom} à {m} min ».
 3. Rien à 800 m : « Aucun arrêt à moins de 800 m » (inchangé).
 
-Exemples (instantané du 12/11) : Madou, « Métro Madou à 2 min à pied » (1.1.0 : « Bruxelles-Congrès à 11 min à pied, métro à 2 min ») ; avenue de l'Astronomie, « Métro Madou à 2 min à pied » ; Maison, « Bus TEC Namur Omalius à 5 min à pied ; gare de Namur à 8 min » ; Bureau, « Tram Anneessens à 3 min à pied » (Bruxelles-Chapelle, S1 seulement, n'est pas citée).
+Exemples (instantané du 12/11, lieux publics) : près d'une station de métro, « Métro Madou à 2 min à pied » (1.1.0 : « Bruxelles-Congrès à 11 min à pied, métro à 2 min ») ; près d'une gare, « Bus TEC Namur Omalius à 5 min à pied ; gare de Namur à 8 min » ; près d'un tram, « Tram Anneessens à 3 min à pied » (Bruxelles-Chapelle, S1 seulement, n'est pas citée).
 
 ## 7. Critères d'acceptation
 

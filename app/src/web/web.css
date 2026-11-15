@@ -49,6 +49,12 @@ body { min-height: 100vh; min-height: 100dvh; overscroll-behavior-y: none; }
   touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
 }
 .w-g-up, .w-g-down { font-size: 22px; color: var(--accent); }
+/* 1.2.10 : « Appui long » sous « Toucher » et « Double toucher » ; sur leur ligne quand la place le permet */
+.w-g-long { grid-column: 3 / 5; min-height: 44px; }
+@media (min-width: 480px) {
+  .w-gestures { grid-template-columns: 1fr 1fr 1.35fr 1.75fr 1.6fr; }
+  .w-g-long { grid-column: auto; min-height: 56px; }
+}
 @media (hover: hover) { .w-g:hover { border-color: var(--accent); } }
 .w-g:active { background: var(--accent-soft); border-color: var(--accent); }
 

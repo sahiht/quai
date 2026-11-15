@@ -3,7 +3,8 @@
  * Cache 20 s par voyage et par point d'arrêt ; une source en échec est signalée (`error`)
  * et l'appelant retombe sur l'horaire prévu.
  */
-import type { AlertsResponse, HealthResponse, Names, Op, RtResponse } from '../../../shared/types';
+import type { HealthResponse, Names, Op, RtResponse } from '../../../shared/types';
+import type { FeedAlert } from './alerts';
 import type { CoreStatus } from './api';
 import { normalizeId } from '../../../shared/types';
 import { normalizeForSearch } from '../../../shared/names';
@@ -66,7 +67,8 @@ function applyStibMessage(entry: StibEntry, text: string | undefined): StibEntry
   if (kind.noBoarding) entry.noBoarding = true;
   return entry;
 }
-export type AlertItem = AlertsResponse['alerts'][number];
+/** Alerte du relais (AlertsResponse ; 1.2.10 : cause, effet, description et portée, voir core/alerts.ts). */
+export type AlertItem = FeedAlert;
 
 const RT_TTL = 20_000;
 const ERROR_TTL = 15_000;
@@ -263,18 +265,23 @@ export class RealtimeClient {
     if (rt !== this.current.rt) this.current = { rt, since: t };
   }
 
-  /** Alertes d'un opérateur GTFS-RT (null si la source est en erreur). */
-  async alerts(op: Op, routes: readonly string[], stops: readonly string[]): Promise<AlertItem[] | null> {
+  /**
+   * Alertes d'un opérateur GTFS-RT (null si la source est en erreur). 1.2.10 : `until` (secondes epoch) : aussi celles
+   * qui commencent avant cette heure (trajet plus tard) ; l'appli juge ensuite chaque alerte (core/alerts.ts).
+   */
+  async alerts(op: Op, routes: readonly string[], stops: readonly string[], until?: number): Promise<AlertItem[] | null> {
     const now = this.now();
     const r = [...new Set(routes.filter(Boolean))].sort();
     const s = [...new Set(stops.filter(Boolean))].sort();
-    const key = `${op}|${r.join(',')}|${s.join(',')}`;
+    const u = until !== undefined && Number.isFinite(until) && until * 1000 > now ? Math.floor(until) : undefined;
+    const key = `${op}|${r.join(',')}|${s.join(',')}|${u ?? ''}`;
     const c = this.alertCache.get(key);
     if (c && now - c.at < ALERT_TTL && now >= c.at) return c.v;
     try {
       const q = [`op=${op}`];
       if (r.length) q.push(`routes=${r.map(encodeURIComponent).join(',')}`);
       if (s.length) q.push(`stops=${s.map(encodeURIComponent).join(',')}`);
+      if (u !== undefined) q.push(`until=${u}`);
       const body = await this.getJson(`/api/alerts?${q.join('&')}`);
       const v = parseAlerts(body);
       if (this.alertCache.size > 200) this.alertCache.clear();
@@ -459,13 +466,28 @@ function parseAlerts(body: unknown): AlertItem[] {
     if (Array.isArray(a.active)) {
       for (const r of a.active) if (Array.isArray(r)) active.push([numOrNull(r[0]) ?? 0, numOrNull(r[1]) ?? 0]);
     }
-    out.push({
+    const item: AlertItem = {
       id: String(a.id ?? ''),
       routes: Array.isArray(a.routes) ? a.routes.map((x) => normalizeId(String(x))) : [],
       stops: Array.isArray(a.stops) ? a.stops.map((x) => normalizeId(String(x))) : [],
       header,
       active,
-    });
+    };
+    // 1.2.10 : cause, effet (noms GTFS-RT), description, alerte de tout le réseau
+    if (typeof a.cause === 'string' && ENUM_NAME.test(a.cause)) item.cause = a.cause;
+    if (typeof a.effect === 'string' && ENUM_NAME.test(a.effect)) item.effect = a.effect;
+    if (isObj(a.desc)) {
+      const desc: NonNullable<AlertItem['desc']> = {};
+      for (const k of ['fr', 'nl', 'en', 'de'] as const) {
+        const v = a.desc[k];
+        if (typeof v === 'string' && v.trim()) desc[k] = v.trim().slice(0, 300);
+      }
+      if (Object.keys(desc).length) item.desc = desc;
+    }
+    if (a.global === true) item.global = true;
+    out.push(item);
   }
   return out;
 }
+
+const ENUM_NAME = /^[A-Z_]{2,40}$/;

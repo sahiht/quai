@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import type { AreaFile, AreaSummary, LineFile, LineIndex, LineTile, Meta, Mode, Names, Op, SearchFile, TileFile, TrainsDay } from '../../shared/types';
 import { normalizeId, tileKey } from '../../shared/types';
 import { ACRONYMS, prettyName, searchKey, searchWords } from '../../shared/names';
+import { decodeTile, isTileKey, isWalkIndex, isWalkTile, WALK_TILE, WALK_UNIT, type WalkIndex } from '../../app/src/core/walk/format';
 
 export const OPS: Op[] = ['sncb', 'stib', 'delijn', 'tec'];
 export const MODES: Mode[] = ['train', 'metro', 'tram', 'bus'];
@@ -43,6 +44,9 @@ export interface ValidationReport {
     /** 1.1 : fichiers de ligne et tuiles de lignes. */
     lines: number;
     lineTiles: number;
+    /** 1.2.10 : tuiles piétonnes (walk/) et leur taille totale en octets. */
+    walkTiles: number;
+    walkBytes: number;
   };
 }
 
@@ -98,6 +102,8 @@ export function validateData(dirArg: string): ValidationReport {
     trains: {},
     lines: 0,
     lineTiles: 0,
+    walkTiles: 0,
+    walkBytes: 0,
   };
   const report = (): ValidationReport => ({ dir, errors, warnings, stats });
 
@@ -219,7 +225,7 @@ export function validateData(dirArg: string): ValidationReport {
   }
   if (!existsSync(join(dir, 'LICENSE-DATA.txt'))) err('LICENSE-DATA.txt absent');
   for (const name of readdirSync(dir)) {
-    if (!['meta.json', 'LICENSE-DATA.txt', 'tiles', 'areas', 'search', 'trains', 'lines', 'linetiles'].includes(name)) warn(`fichier inattendu à la racine : ${name}`);
+    if (!['meta.json', 'LICENSE-DATA.txt', 'tiles', 'areas', 'search', 'trains', 'lines', 'linetiles', 'walk'].includes(name)) warn(`fichier inattendu à la racine : ${name}`);
   }
 
   /* ------------------------------ zones ------------------------------ */
@@ -745,7 +751,79 @@ export function validateData(dirArg: string): ValidationReport {
   /* ------------------------------ 1.1 : fichiers de ligne ------------------------------ */
   validateLines(dir, meta, feeds, areas, readJson, err, warn, stats);
 
+  /* ------------------------------ 1.2.10 : chemins à pied ------------------------------ */
+  validateWalk(dir, readJson, err, stats);
+
   return report();
+}
+
+/** 1.2.10 (PRD-1.2.10 § 3.8) : budget des tuiles piétonnes. */
+const WALK_MAX_TILE = 300 * 1024;
+const WALK_MAX_TOTAL = 80 * 1024 * 1024;
+
+/**
+ * 1.2.10 : dossier walk/ (facultatif : sans lui, l'appli retombe sur le chemin droit) : index.json et une tuile par
+ * fichier « {clé}.json », au format de app/src/core/walk/format.ts. Index valide (version AAAA-MM-JJ, taille des tuiles,
+ * unité, licence ODbL et attribution OpenStreetMap), chaque tuile décodable, de la version de l'index, à son nom,
+ * jamais une tuile coupée (listée dans split), 300 ko au plus ; nombre, taille totale et plus grosse tuile conformes
+ * à l'index ; 80 Mo au plus pour le tout.
+ */
+function validateWalk(dir: string, readJson: (rel: string) => unknown, err: (m: string) => void, stats: ValidationReport['stats']): void {
+  const wdir = join(dir, 'walk');
+  if (!existsSync(wdir)) return;
+  if (!statSync(wdir).isDirectory()) {
+    err('walk : fichier au lieu d’un dossier');
+    return;
+  }
+  const raw = readJson('walk/index.json');
+  if (!isWalkIndex(raw)) {
+    err(`walk/index.json : absent ou invalide (v 1, version, tile ${JSON.stringify(WALK_TILE)}, unit ${WALK_UNIT}, split attendus)`);
+    return;
+  }
+  const idx = raw as WalkIndex;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(idx.version)) err(`walk/index.json : version « ${idx.version} » au lieu d’une date AAAA-MM-JJ`);
+  if (!isStr(idx.builtAt) || Number.isNaN(Date.parse(idx.builtAt))) err(`walk/index.json : builtAt n’est pas une date ISO 8601 (${String(idx.builtAt)})`);
+  if (!isStr(idx.licence) || !/ODbL/.test(idx.licence)) err(`walk/index.json : licence ODbL absente (${String(idx.licence)})`);
+  if (!isStr(idx.attribution) || !/OpenStreetMap/.test(idx.attribution)) err(`walk/index.json : attribution OpenStreetMap absente (${String(idx.attribution)})`);
+  if (!isStr(idx.source) || !idx.source.trim()) err('walk/index.json : source absente');
+  for (const k of idx.split) if (!isTileKey(k)) err(`walk/index.json : clé coupée invalide « ${k} »`);
+  const split = new Set(idx.split);
+  let count = 0;
+  let total = 0;
+  let biggest = 0;
+  for (const name of readdirSync(wdir)) {
+    if (name === 'index.json') continue;
+    const rel = `walk/${name}`;
+    const key = name.replace(/\.json$/, '');
+    if (!name.endsWith('.json') || !isTileKey(key)) {
+      err(`${rel} : fichier inattendu (une tuile « {clé}.json » ou index.json)`);
+      continue;
+    }
+    const size = statSync(join(wdir, name)).size;
+    count++;
+    total += size;
+    biggest = Math.max(biggest, size);
+    if (size > WALK_MAX_TILE) err(`${rel} : ${Math.round(size / 1024)} ko, au-delà des 300 ko d’une tuile`);
+    if (split.has(key)) err(`${rel} : tuile coupée en 4 dans l’index (split), elle ne doit plus exister entière`);
+    const t = readJson(rel);
+    if (!isWalkTile(t)) {
+      err(`${rel} : tuile invalide (v, k, ver, names, w, s attendus)`);
+      continue;
+    }
+    if (t.k !== key) err(`${rel} : clé « ${t.k} » au lieu de « ${key} »`);
+    if (t.ver !== idx.version) err(`${rel} : version « ${t.ver} » au lieu de celle de l’index « ${idx.version} »`);
+    try {
+      decodeTile(t);
+    } catch (e) {
+      err(`${rel} : ${(e as Error).message}`);
+    }
+  }
+  stats.walkTiles = count;
+  stats.walkBytes = total;
+  if (isInt(idx.tiles) && idx.tiles !== count) err(`walk/index.json : ${idx.tiles} tuiles annoncées, ${count} trouvées`);
+  if (isInt(idx.bytes) && Math.abs(idx.bytes - total) > count) err(`walk/index.json : ${idx.bytes} octets annoncés, ${total} trouvés`);
+  if (isInt(idx.maxTileBytes) && Math.abs(idx.maxTileBytes - biggest) > 1) err(`walk/index.json : plus grosse tuile annoncée ${idx.maxTileBytes} octets, ${biggest} trouvée`);
+  if (total > WALK_MAX_TOTAL) err(`walk : ${(total / 1048576).toFixed(1)} Mo au total, au-delà des 80 Mo du budget`);
 }
 
 /** Grille simple pour chercher les zones à moins de 400 m (cellules de 0,005° × 0,0075°). */
@@ -1092,7 +1170,7 @@ function main(): void {
   if (args.includes('--json')) console.log(JSON.stringify(r, null, 2));
   else {
     console.log(`Validation de ${r.dir}`);
-    console.log(`  ${r.stats.files} fichiers lus, ${(r.stats.bytes / 1024).toFixed(1)} Ko ; zones ${JSON.stringify(r.stats.areas)} ; ${r.stats.deps} départs ; ${r.stats.patterns} motifs ; ${r.stats.tiles} tuiles ; ${r.stats.searchFiles} fichiers de recherche ; trains ${JSON.stringify(r.stats.trains)} ; ${r.stats.lines} fichiers de ligne, ${r.stats.lineTiles} tuiles de lignes`);
+    console.log(`  ${r.stats.files} fichiers lus, ${(r.stats.bytes / 1024).toFixed(1)} Ko ; zones ${JSON.stringify(r.stats.areas)} ; ${r.stats.deps} départs ; ${r.stats.patterns} motifs ; ${r.stats.tiles} tuiles ; ${r.stats.searchFiles} fichiers de recherche ; trains ${JSON.stringify(r.stats.trains)} ; ${r.stats.lines} fichiers de ligne, ${r.stats.lineTiles} tuiles de lignes ; ${r.stats.walkTiles} tuiles piétonnes (${(r.stats.walkBytes / 1024).toFixed(1)} Ko)`);
     for (const w of r.warnings) console.log(`  avertissement : ${w}`);
     for (const e of r.errors) console.log(`  ERREUR : ${e}`);
     console.log(r.errors.length ? `${r.errors.length} erreur(s), ${r.warnings.length} avertissement(s)` : `OK, aucune erreur (${r.warnings.length} avertissement(s))`);

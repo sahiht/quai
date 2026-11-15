@@ -21,8 +21,8 @@ import { createClock } from '../platform/clock';
 import { createKV } from '../platform/kv';
 import type { Platform } from '../platform/types';
 import { loadSettings, SettingsStore } from '../settings';
-import { describeContainers, GlassesCanvas } from './display';
-import { attachKeyboard, attachScreenGestures } from './gestures';
+import { describeContainers, GlassesCanvas, withCanvasImages } from './display';
+import { attachKeyboard, attachScreenGestures, GESTURES } from './gestures';
 import { createWebLocation, type WebLocationState } from './location';
 import { createWebGlassesPort } from './port';
 import { positionCard } from './position';
@@ -32,8 +32,6 @@ import { screenWakeLock } from './wakelock';
 
 /** Remplacé au build par vite.web.config.ts (adresses https validées, version de app.json). */
 declare const __QUAI_WEB__: { dataBase: string; relayBase: string; version: string };
-
-const GESTURES: readonly Gesture[] = ['up', 'down', 'tap', 'double'];
 
 async function main(): Promise<void> {
   const env = parseEnv(location.search, import.meta.env.DEV);
@@ -46,8 +44,9 @@ async function main(): Promise<void> {
   const initial: Panel = !settings.get().onboarded || /^#\/./.test(location.hash) ? 'reglages' : 'lunettes';
   const shell = mountShell(document.getElementById('w-root')!, initial);
 
-  const screen = new GlassesCanvas(shell.canvas, (cs) => shell.canvas.setAttribute('aria-label', `Écran des lunettes. ${describeContainers(cs)}`));
-  const port = createWebGlassesPort(screen);
+  const screen = new GlassesCanvas(shell.canvas, (cs, images) => shell.canvas.setAttribute('aria-label', `Écran des lunettes. ${describeContainers(cs, images)}`));
+  // 1.2.10 : images du guidage dessinées dans le canvas (pixels mêmes des lunettes)
+  const port = withCanvasImages(createWebGlassesPort(screen), screen);
   const loc = createWebLocation(clock.now);
   if (env.mockLat !== undefined && env.mockLon !== undefined) loc.useMock(env.mockLat, env.mockLon);
   const platform: Platform = { kind: 'web', glasses: port, kv, location: loc, closeWebView() {} };
@@ -120,7 +119,8 @@ async function main(): Promise<void> {
     positionPicker: () => picker(`w-pos-${Math.random().toString(36).slice(2, 7)}`),
   });
 
-  // Gestes : boutons, écran (glisser, toucher, double toucher, molette), clavier.
+  // Gestes : boutons (1.2.10 : « Appui long » compris), écran (glisser, toucher, double toucher, molette, doigt gardé),
+  // clavier.
   const emit = (g: Gesture): void => port.emit({ kind: 'gesture', gesture: g });
   shell.gestures.querySelectorAll<HTMLButtonElement>('button[data-g]').forEach((b) => {
     const g = b.dataset.g as Gesture;

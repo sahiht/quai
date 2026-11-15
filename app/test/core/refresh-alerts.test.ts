@@ -127,13 +127,14 @@ describe('alertes', () => {
     expect(j.alerts).toEqual([]);
   });
 
-  it('travaux (si activés) : « Travaux à Ottignies… » sur le trajet qui passe par Ottignies', async () => {
+  it('travaux (si activés) : « Travaux : retards possibles à Ottignies » sur le trajet qui passe par Ottignies', async () => {
     const env = makeEnv({ now: '2026-11-10T07:20' });
     const works: Settings = { ...env.preset, alerts: { ...env.preset.alerts, works: true, platform: false } };
     const j = await morning(env, works);
     expect(j.alerts).toHaveLength(1);
     expect(j.alerts[0].kind).toBe('works');
-    expect(nb(j.alerts[0].text)).toBe('Travaux à Ottignies : quelques minutes de retar…');
+    // 1.2.10 (PRD-1.2.10 § 6) : rédigé par core/alerts.ts, jamais coupé au milieu d'un mot (1.2.9 : « … de retar… »)
+    expect(nb(j.alerts[0].text)).toBe('Travaux : retards possibles à Ottignies');
     expect((await morning(env)).alerts.some((a) => a.kind === 'works')).toBe(false);
   });
 
@@ -141,8 +142,9 @@ describe('alertes', () => {
     const env = makeEnv({ now: '2026-11-10T12:10' });
     expect(await env.core.works('tec', ['N51'], [])).toEqual(['Ligne 51 déviée rue de Fer']);
     expect(await env.core.works('tec', ['N4'], ['N508aga'])).toEqual([]);
-    expect(await env.core.works('sncb', [], ['8811601'])).toEqual(['Travaux à Ottignies : quelques minutes de retard possibles']);
-    expect(await env.core.works('stib', ['2'], ['8041'])).toEqual(['Travaux : arrêt Botanique non desservi']);
+    // 1.2.10 : textes rédigés par core/alerts.ts pour la ligne du haut (après le « ! » des écrans)
+    expect((await env.core.works('sncb', [], ['8811601'])).map(nb)).toEqual(['Travaux : retards possibles à Ottignies']);
+    expect((await env.core.works('stib', ['2'], ['8041'])).map(nb)).toEqual(['Travaux : arrêt Botanique non desservi']);
     env.clock.set('2026-11-21T12:00');
     expect(await env.core.works('tec', ['N51'], [])).toEqual([]);
     env.server.scene = 'noRT';

@@ -122,15 +122,22 @@ describe('étapes : un message ne passe pas d’une page à l’autre (1.2.1 : �
     await t.gesture('down', 'tap');
     const st = await t.until((s) => s.screen === 'steps' && s.page === 1);
     expect(st.pages).toBe(1);
-    expect(st.lines.slice(-2).map(nb)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', nb(HINTS.stepsWalk)]);
+    // 1.2.10 (PRD-1.2.10 § 3.1) : un trajet entièrement à pied se guide aussi : « y aller »
+    expect(st.lines.slice(-2).map(nb)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', nb(HINTS.stepsGo)]);
     await t.gesture('down');
     expect(t.last()).toEqual(st);
     expect(t.screens().some((s) => s.screen === 'others')).toBe(false);
     t.c.stop();
   });
 
-  it('« Trajet suivi : … » reste sur sa page : la liste et le premier trajet gardent leur aide', async () => {
+  it('« Trajet suivi » (réglage du guidage éteint, PRD-1.2.10 § 3.5) reste sur sa page : la liste et le premier trajet gardent leur aide', async () => {
     const t = await setupController({ scenario: 's1' });
+    // « Me guider pendant un trajet » éteint (display.guide = false) : « y aller » fait suivre le trajet, toast « Trajet suivi »
+    const get = t.settings.get.bind(t.settings);
+    t.settings.get = () => {
+      const x = get();
+      return { ...x, display: { ...x.display, guide: false } };
+    };
     await t.until((s) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l)));
     await t.gesture('tap');
     await t.until((s) => s.screen === 'steps' && s.page === 1);
@@ -140,15 +147,16 @@ describe('étapes : un message ne passe pas d’une page à l’autre (1.2.1 : �
     await t.gesture('tap');
     await t.until((s) => s.screen === 'steps' && s.page === 2);
     await t.gesture('tap');
-    expect(nb(t.last().lines.at(-1)!)).toMatch(/^Trajet suivi : /);
-    expect(t.last().followed).toBe(true);
+    expect(nb(t.last().lines.at(-1)!)).toBe('Trajet suivi');
+    expect(t.last()).toMatchObject({ screen: 'steps', page: 2, followed: true });
+    expect(t.screens().some((x) => x.screen === 'guide')).toBe(false);
     await t.gesture('double');
     expect(t.last().screen).toBe('others');
     expect(nb(t.last().lines.at(-1)!)).toBe(nb(HINTS.others));
     await t.gesture('double');
     const s = await t.until((x) => x.screen === 'steps' && x.page === 1);
     expect(s.followed).toBe(false);
-    expect(nb(s.lines.at(-1)!)).toBe(nb(HINTS.stepsOther));
+    expect(nb(s.lines.at(-1)!)).toBe(nb(HINTS.stepsGo));
     t.c.stop();
   });
 });

@@ -11,6 +11,14 @@
  * détail d'une ligne) ; « Aller à… » rejoint « Favoris » ; ★ des départs : une gare dans « Gares », une ligne de
  * l'arrêt dans « Bus, tram, métro » (plus aucun arrêt favori créé) ; un trajet n'est suivi que sur demande (marque
  * `explicit` dans quai.trip) ; ouverture d'office à moins de 300 m des gares et lignes `near`.
+ *
+ * 1.2.10 (docs/v1.2.10/PRD-1.2.10.md § 3, § 4.2, § 4.3) : guidage de bout en bout. Lancé d'un toucher (« y aller » sur
+ * l'écran du trajet, « j'y descends » dans les arrêts d'un départ, bouton « Y aller » du téléphone), porté par le trajet
+ * suivi (`FollowedTrip.guide`, quai.trip). Boucle : le moteur (core/guide.ts) recalculé à chaque position (positions
+ * continues selon `state.location`), à `state.wakeAt` (60 s au plus) et au rafraîchissement du temps réel du trajet
+ * suivi ; chemin à pied demandé au cœur, nouveau trajet demandé quand le moteur le dit. Écran calme `guide` (moment, « Où
+ * tu en es », vide), menu de l'appui long (système dans l'appli Even, écran `menu` dans Quai Web). Le guidage ne dépend
+ * pas du premier plan : quitté, seul l'affichage attend.
  */
 import type {
   AreaSummary,
@@ -37,24 +45,29 @@ import type {
   PlanResult,
   Settings,
   StationPick,
+  Stopover,
   TripRequest,
 } from '../core/api';
 import { LABEL_TEXT, labelOf, type LineMatch } from '../core/api';
 import { MESSAGES, QuaiError } from '../core/errors';
 import { asTrip, endpointPoint, favoriteTitle, placeOf } from '../core/favorites';
+import { dismissMoment, guideStatusOf, guideStep, newGuideMemory, replanJourney, replanNone, rideJourney, rideOnJourney } from '../core/guide';
+import type { GuideFix, GuideKind, GuideMemory, GuideState, GuideStatus, LocationNeed, WalkRoute } from '../core/guide-types';
 import { shortAddress } from '../core/text';
 import { displayName, distanceM, mainMode } from '../core/util';
-import type { Mode } from '../../../shared/types';
-import type { Clock } from '../platform/clock';
+import type { Mode, Names, Op } from '../../../shared/types';
+import { normalizeForSearch } from '../../../shared/names';
+import { CLOCK_EVENT, type Clock } from '../platform/clock';
 import { deadline } from '../platform/queue';
-import type { Fix, Platform } from '../platform/types';
+import type { Fix, PageExtra, Platform } from '../platform/types';
 import { LIMITS, newId, type SettingsStore } from '../settings';
 import { APP_VERSION, compareVersions } from '../version';
-import { BOARD, HINTS, NB, SECTION, atTitle, catchable, lowerFirst, planHomeText, runningNext, shownMessage, towards, tripShort, upcoming, vehicleLong } from './format';
+import { BOARD, HINTS, NB, SECTION, atTitle, catchable, lowerFirst, planHomeText, runningNext, shownMessage, towards, tripName, tripShort, upcoming, vehicleLong } from './format';
 import { DEBOUNCE, GestureFilter, type HubSignal } from './gestures';
-import { geometry, layoutPage, shapeKey } from './layout';
+import { GUIDE_MENU, guideView, menuView, type GuideShow } from './guide-views';
+import { geometry, layoutPage } from './layout';
 import { anchorIndex, current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replace, replaceAt, reset, setSelection, type Gesture, type NavFrame, type NavState } from './nav';
-import type { AreaRef, GlassesView, Intent, Item, KeepLineRoute, LineRoute, OthersRoute, PageSpec, Route, StepsRoute, StopsRoute } from './types';
+import { MENU_IDS, type AreaRef, type ContainerSpec, type GlassesView, type Intent, type Item, type KeepLineRoute, type LineRoute, type MenuItem, type OthersRoute, type PageSpec, type Route, type StepsRoute, type StopsRoute } from './types';
 import { completeFollow, isFollowed, matchFollow, sameFollow, type LineFollow, type LineRun } from '../core/linerun';
 import {
   alreadyThereView,
@@ -92,6 +105,7 @@ import {
   othersView,
   recentKey,
   recentShown,
+  SAME_STOP_M,
   stationsView,
   stepsMessageView,
   departureKey,
@@ -106,6 +120,15 @@ import {
   type StopLine,
   type ViewCtx,
 } from './views';
+
+/** 1.2.10 : ce que le contrôleur donne au moteur (contrat de l'équipe A, lu sur la signature de guideStep). */
+type GuideInput = Parameters<typeof guideStep>[0];
+
+/**
+ * 1.2.10 : ViewCtx avec le trajet guidé (champ ajouté par l'équipe des écrans : l'écran du trajet guidé n'a plus
+ * « toucher : y aller »).
+ */
+type GuideCtx = ViewCtx & { guidedJourneyId?: string };
 
 export interface Freshness {
   ok: boolean;
@@ -149,11 +172,11 @@ export const WEB_DEBOUNCE: typeof DEBOUNCE = {
 export const TRIP_KEY = 'quai.trip';
 
 /**
- * Message de nouveautés « Quai 1.2.9 » : montré une fois à qui avait vu une version antérieure (PRD-1.2.9 § 4 ; 1.2.8
- * ou avant), jamais après une installation neuve, ni tant que l'appli n'est pas en 1.2.9. Ses lignes : newsLines
- * (views.ts).
+ * Message de nouveautés « Quai 1.2.10 » : montré une fois à qui avait vu une version antérieure (PRD-1.2.10 § 7 ; 1.2.9
+ * ou avant), jamais après une installation neuve, ni tant que l'appli n'est pas en 1.2.10. Son titre et ses lignes :
+ * NEWS_TITLE et newsLines (views.ts, équipe des écrans).
  */
-export const NEWS_SINCE = '1.2.9';
+export const NEWS_SINCE = '1.2.10';
 
 /**
  * Date du premier lancement (PRD-1.2.1 § 4.6), en ms : clé du stockage de l'appli sur le téléphone, hors du schéma des
@@ -205,6 +228,46 @@ const ANSWER_POOL = 2;
 /** Réponses des favoris qui ne sont pas à l'écran : recalculées au plus toutes les 5 min. */
 const WARM_MS = 5 * 60_000;
 
+/** 1.2.10 (PRD-1.2.10 § 3.1, § 3.3) : « Où tu en es » au lancement (15 s), puis au toucher sur l'écran vide (30 s). */
+const WHERE_LAUNCH_MS = 15_000;
+const WHERE_TAP_MS = 30_000;
+/** 1.2.10 (§ 3.7) : le moteur est recalculé au plus tard 60 s après le calcul précédent, au plus tôt 1 s après. */
+const GUIDE_WAKE_MAX_MS = 60_000;
+const GUIDE_WAKE_MIN_MS = 1_000;
+/** 1.2.10 : positions gardées pour le moteur : les 5 dernières minutes (300 au plus). */
+const FIX_KEEP_MS = 5 * 60_000;
+const FIX_KEEP_MAX = 300;
+/** 1.2.10 (§ 3.7) : positions continues selon le besoin du moteur (`state.location`). */
+export const WATCH_OPTS = {
+  high: { accuracy: 'high', intervalMs: 2_000, distanceM: 5 },
+  medium: { accuracy: 'medium', intervalMs: 30_000, distanceM: 50 },
+} as const;
+/** 1.2.10 : positions de plus de 75 m de précision ignorées pour les décisions de distance (PRD-1.2.10 § 3.7). */
+const FIX_ACCURACY_MAX_M = 75;
+/** 1.2.10 : chemin à pied impossible : nouvel essai pour la même étape au plus tôt 2 min après. */
+const ROUTE_RETRY_MS = 2 * 60_000;
+/**
+ * 1.2.10 (§ 3.8) : un chemin tout juste reçu n'est pas redemandé pour la même étape avant 10 s (le moteur ne le redemande
+ * qu'après 10 s hors du chemin).
+ */
+const ROUTE_FRESH_MS = 10_000;
+/** 1.2.10 : « j'y descends » : arrêts dont la position est cherchée après la descente (« Descends à … »). */
+const BEYOND_COORDS = 3;
+/** 1.2.10 (§ 3.7) : guidage enregistré à chaque changement, au plus toutes les 5 s (lancement, arrêt : tout de suite). */
+const GUIDE_SAVE_MS = 5_000;
+
+/** 1.2.10 : textes du guidage (toasts des lunettes, messages du téléphone à côté du bouton « Y aller »). */
+export const GUIDE_TEXT = {
+  /** Réglage « Me guider pendant un trajet » éteint (PRD-1.2.10 § 3.5). */
+  followed: 'Trajet suivi',
+  /** « Arrêter le guidage » (§ 3.4). */
+  stopped: 'Guidage arrêté',
+  launched: 'Guidage lancé sur les lunettes',
+  noFavorite: 'Ce favori n’existe plus.',
+  noRoute: 'Ce favori n’a pas de trajet.',
+  noTrip: 'Aucun trajet trouvé pour l’instant.',
+} as const;
+
 type Loaded = { ok: true; value: unknown; at: number } | { ok: false; error: string; at: number };
 
 /** Trajet suivi (M2), persistant (clé quai.trip) et inclus dans l'état d'arrière-plan. */
@@ -233,6 +296,34 @@ export interface FollowedTrip {
   index: number;
   /** Session d'étapes (StepsRoute.key). */
   key: string;
+  /**
+   * 1.2.10 (PRD-1.2.10 § 3.7) : guidage du trajet suivi (« Y aller », « J'y descends »). Absent : trajet suivi sans
+   * guidage (bouton « Lunettes » du téléphone, trajet gardé par la 1.2.9).
+   */
+  guide?: FollowedGuide;
+}
+
+/**
+ * 1.2.10 : guidage porté par le trajet suivi, persistant avec lui (quai.trip) : genre, mémoire du moteur gardée telle
+ * quelle (ses champs internes compris : moments effacés ou montrés, nouveau trajet demandé ; rien n'est rejoué à la
+ * reprise), chemin à pied en cours, arrêts du véhicule après la descente (« j'y descends »).
+ */
+export interface FollowedGuide {
+  kind: GuideKind;
+  mem: GuideMemory;
+  /** Chemin à pied de l'étape `leg` du trajet `journeyId` (state.needRoute satisfait), reçu à `at`. */
+  walk?: { leg: number; journeyId: string; route: WalkRoute; at: number };
+  /**
+   * Arrêts du véhicule après la descente (GuideInput.beyond : « Descends à … » s'il la dépasse) : « j'y descends », dès
+   * le lancement ; genre trip, lus au début de chaque étape à bord.
+   */
+  beyond?: Stopover[];
+  /**
+   * Genre trip : arrêts suivants du véhicule de chaque étape à bord du trajet `journeyId` (rang de l'étape → arrêts), lus
+   * au début de l'étape ; les 3 dernières étapes lues sont gardées (un véhicule pas encore quitté n'est pas oublié quand
+   * l'heure dit déjà le suivant).
+   */
+  beyondByLeg?: { journeyId: string; legs: Record<string, Stopover[]> };
 }
 
 /** État d'un trajet suivi : pas encore parti, en cours (M6.3), terminé. */
@@ -285,7 +376,7 @@ export function parseTrip(raw: unknown): FollowedTrip | null {
     if (t.v !== 1 || t.explicit !== true || !okJourney(t.journey) || typeof t.title !== 'string' || !Number.isFinite(t.leaveAt0)) return null;
     const journeys = (Array.isArray(t.journeys) ? t.journeys.filter(okJourney) : []).map(relabel);
     const index = journeys.findIndex((j) => j.id === t.journey.id);
-    return {
+    const out: FollowedTrip = {
       ...t,
       journey: relabel(t.journey),
       journeys: index >= 0 ? journeys : [relabel(t.journey)],
@@ -293,9 +384,40 @@ export function parseTrip(raw: unknown): FollowedTrip | null {
       key: typeof t.key === 'string' && t.key ? t.key : `trip-${t.journey.id}`,
       startedAt: Number.isFinite(t.startedAt) ? t.startedAt : 0,
     };
+    // 1.2.10 : le guidage, relu avec soin ; illisible : le trajet reste suivi, sans guidage (comme un trajet de la 1.2.9)
+    const guide = parseGuide(t.guide);
+    if (guide) out.guide = guide;
+    else delete out.guide;
+    return out;
   } catch {
     return null;
   }
+}
+
+/** 1.2.10 : lecture défensive de `FollowedTrip.guide` (null : absent ou illisible). */
+function parseGuide(x: unknown): FollowedGuide | null {
+  if (!x || typeof x !== 'object') return null;
+  const g = x as Partial<FollowedGuide>;
+  if (g.kind !== 'trip' && g.kind !== 'ride') return null;
+  const m = g.mem as Partial<GuideMemory> | undefined;
+  const memOk = !!m && typeof m === 'object' && m.v === 1 && Array.isArray(m.dismissed) && !!m.shown && typeof m.shown === 'object';
+  const out: FollowedGuide = { kind: g.kind, mem: memOk ? (m as GuideMemory) : newGuideMemory() };
+  const w = g.walk;
+  const pt = (p: unknown): boolean => !!p && typeof p === 'object' && Number.isFinite((p as LatLon).lat) && Number.isFinite((p as LatLon).lon);
+  if (w && typeof w === 'object' && Number.isInteger(w.leg) && typeof w.journeyId === 'string' && w.route && Array.isArray(w.route.coords) && w.route.coords.length >= 2 && w.route.coords.every(pt) && pt(w.route.to)) {
+    out.walk = { leg: w.leg, journeyId: w.journeyId, route: w.route, at: Number.isFinite(w.at) ? w.at : 0 };
+  }
+  const b = g.beyond;
+  const stopsOk = (b: unknown): b is Stopover[] =>
+    Array.isArray(b) && b.length > 0 && b.every((x) => !!x && typeof x === 'object' && !!x.name && typeof x.name.fr === 'string' && Number.isFinite(x.sched) && Number.isFinite(x.est));
+  if (stopsOk(b)) out.beyond = b;
+  const bl = g.beyondByLeg;
+  if (bl && typeof bl === 'object' && typeof bl.journeyId === 'string' && bl.legs && typeof bl.legs === 'object') {
+    const legs: Record<string, Stopover[]> = {};
+    for (const [k, v] of Object.entries(bl.legs)) if (/^\d+$/.test(k) && stopsOk(v)) legs[k] = v;
+    if (Object.keys(legs).length) out.beyondByLeg = { journeyId: bl.journeyId, legs };
+  }
+  return out;
 }
 
 /** Étape en véhicule en cours (départ passé, arrivée à venir), non supprimée ; -1 sinon. */
@@ -402,6 +524,8 @@ export class GlassesController implements GlassesApi {
   private autoDone = new Set<string>();
   private lastLog = '';
   private unsubscribe: (() => void) | null = null;
+  /** 1.2.10 (mode test) : abonnement à l'horloge simulée réglée par window.__quaiClock.set. */
+  private offClock: (() => void) | null = null;
   private pendingRestore: NavState | null = null;
   private pendingShow: NavState | null = null;
   private seq = 0;
@@ -444,9 +568,47 @@ export class GlassesController implements GlassesApi {
   private recents = new Map<string, { result: PlanResult | null; at: number }>();
   private recentsLoading: Promise<void> | null = null;
 
+  /* ------------------------------ 1.2.10 : guidage (PRD-1.2.10 § 3) ------------------------------ */
+
+  /** Dernier état calculé par le moteur pour le trajet suivi guidé. */
+  private guideState: GuideState | null = null;
+  /** Positions des 5 dernières minutes, de la plus ancienne à la plus récente. */
+  private fixes: GuideFix[] = [];
+  /** « Où tu en es » affiché jusqu'à cet instant (epoch ms), quand il n'y a pas de moment. */
+  private whereUntil = 0;
+  /** Positions continues en cours (besoin du moteur) et leur arrêt. */
+  private watchNeed: LocationNeed = 'off';
+  private watchStop: (() => void) | null = null;
+  /** Prochain recalcul du moteur. */
+  private guideTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Demande de chemin à pied en cours (une à la fois) et derniers échecs, par trajet et étape. */
+  private routeJob: string | null = null;
+  private routeSeq = 0;
+  private routeFail = new Map<string, number>();
+  /** Dernière demande de chemin par étape (`journey:leg`) : au plus une toutes les 10 s, quel que soit le chemin gardé. */
+  private routeAsked = new Map<string, number>();
+  /** Nouveau trajet demandé en cours (un à la fois) et demandes déjà traitées (trajet et raison). */
+  private replanJob: string | null = null;
+  private replanTried = new Set<string>();
+  /** Genre trip : arrêts suivants du véhicule déjà demandés, par étape (« journeyId:leg ») : une demande par étape. */
+  private beyondAsked = new Set<string>();
+  /** Abonnés de la carte « En cours » du téléphone, et dernier état qui leur a été donné. */
+  private guideListeners = new Set<(s: GuideStatus | null) => void>();
+  private guideSent = 'null';
+  /** Dernier rafraîchissement du temps réel du trajet suivi (en arrière-plan, le guidage le fait lui-même). */
+  private tripRefreshedAt = -Infinity;
+  /** Enregistrement du trajet suivi différé (guidage : au plus toutes les 5 s). */
+  private saveTimer: ReturnType<typeof setTimeout> | undefined;
+  private savedAt = -Infinity;
+  /** Lunettes connectées et portées (signal `device`) ; null : aucun signal encore. */
+  private deviceUp: boolean | null = null;
+  /** Réglage « Me guider pendant un trajet » au dernier changement des réglages. */
+  private guideWasOn: boolean;
+
   constructor(private d: ControllerDeps) {
     this.filter = new GestureFilter(d.web ? WEB_DEBOUNCE : DEBOUNCE);
     this.favSig = favSignature(d.settings.get());
+    this.guideWasOn = d.settings.get().display.guide !== false;
     d.settings.subscribe(() => this.onSettingsChanged());
   }
 
@@ -455,6 +617,7 @@ export class GlassesController implements GlassesApi {
   /** Démarre : page de chargement immédiate (jamais d'écran noir), puis écran d'ouverture. */
   async start(): Promise<void> {
     this.unsubscribe = this.d.platform.glasses.onSignal((s) => this.onSignal(s));
+    this.listenClock();
     this.d.core.onGeneration?.(() => this.generationChanged());
     await this.render(true);
     if (!this.d.configured) {
@@ -564,6 +727,9 @@ export class GlassesController implements GlassesApi {
     // Avant openingNav : la version vue (vide = nouvelle installation) n'est pas encore écrite.
     await this.loadFirstUse();
     this.checkTrip();
+    // 1.2.10 (PRD-1.2.10 § 3.7) : guidage repris (moteur, positions, minuterie) depuis l'heure et la position ; la mémoire
+    // du moteur, gardée avec le trajet, empêche de rejouer les moments passés
+    this.syncGuide();
     let resumed = false;
     if (this.pendingRestore) {
       this.nav = this.pendingRestore;
@@ -577,7 +743,8 @@ export class GlassesController implements GlassesApi {
       resumed = o.resumed;
     }
     this.ready = true;
-    if (resumed && this.trip) this.showToast(`Trajet en cours${NB}: ${lowerFirst(this.trip.title)}`, RESUME_MS);
+    // 1.2.10 : repris sur l'écran du guidage, « Où tu en es » le dit (pas de message en plus sur l'écran calme)
+    if (resumed && this.trip && !this.guideShown()) this.showToast(`Trajet en cours${NB}: ${lowerFirst(this.trip.title)}`, RESUME_MS);
     await this.render(true);
     this.startTimers();
     this.log('QUAI_READY');
@@ -695,6 +862,33 @@ export class GlassesController implements GlassesApi {
     this.clearTimers();
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.offClock?.();
+    this.offClock = null;
+    // 1.2.10 : positions continues et minuterie du guidage arrêtées ; un enregistrement différé est fait tout de suite
+    this.stopWatch();
+    clearTimeout(this.guideTimer);
+    this.guideTimer = undefined;
+    if (this.saveTimer) this.saveFollowed();
+  }
+
+  /**
+   * 1.2.10 (mode test seulement) : l'horloge simulée réglée par window.__quaiClock.set (CLOCK_EVENT, « pour qui veut
+   * recalculer tout de suite ») : les minuteries tournent en temps réel ; sans cela, après un saut de l'horloge, le
+   * guidage n'était recalculé qu'au réveil suivant (jusqu'à 60 s), et les positions poussées sans flux en service
+   * (position coupée plus de 10 min avant de partir) n'y arrivaient pas : pas de « Partir maintenant » à l'heure.
+   */
+  private listenClock(): void {
+    const w = globalThis as { addEventListener?: (t: string, f: () => void) => void; removeEventListener?: (t: string, f: () => void) => void };
+    if (!this.d.e2e || typeof w.addEventListener !== 'function') return;
+    const on = (): void => {
+      if (this.stopped || !this.ready || this.paused) return;
+      // le flux de position n'est pas touché ici : un flux relancé redonnerait la dernière position simulée, d'avant le
+      // saut, comme si elle était de maintenant (les positions de la nouvelle heure arrivent juste après)
+      if (this.trip?.guide) this.stepGuide({ keepWatch: true });
+      else void this.render();
+    };
+    w.addEventListener(CLOCK_EVENT, on);
+    this.offClock = () => w.removeEventListener?.(CLOCK_EVENT, on);
   }
 
   private startTimers(): void {
@@ -712,6 +906,8 @@ export class GlassesController implements GlassesApi {
       setTimeout(() => {
         if (this.stopped || this.paused) return;
         this.track();
+        // 1.2.10 : la carte « En cours » du téléphone suit aussi un trajet suivi sans guidage
+        this.notifyGuide();
         void this.render();
         this.scheduleClock();
       }, Math.max(200, this.d.clock.real(next))),
@@ -743,26 +939,58 @@ export class GlassesController implements GlassesApi {
         this.onGesture(s.gesture);
         return;
       case 'background':
-        // L'appli n'est plus affichée dans les lunettes : on suspend le rafraîchissement.
+        // L'appli n'est plus affichée dans les lunettes : on suspend le rafraîchissement de l'écran, l'affichage attend
+        // le retour. 1.2.10 : le guidage continue (positions, minuterie, temps réel du trajet suivi). Les doublons du
+        // matériel et la boîte de sortie (son « Non » arrive comme `foreground`) sont traités par la plateforme
+        // (glasses/gestures.ts : SignalDedup, ExitDialog).
         this.paused = true;
         this.clearTimers();
+        // la page peut être suspendue (Android) : un enregistrement en attente du trajet suivi (mémoire du guidage, moment
+        // effacé) est fait tout de suite
+        if (this.saveTimer) this.saveFollowed();
         return;
       case 'foreground':
+        // 1.2.10 : retour au premier plan, boîte de sortie affichée (page effacée par l'hôte) ou refusée : la page est
+        // reconstruite
         this.paused = false;
-        this.forceNext = true;
         this.startTimers();
+        // 1.2.10 : la page du moment présent, tout de suite (guidage recalculé), puis les données rafraîchies
+        this.stepGuide({ render: false });
+        void this.render(true);
         void this.refreshCurrent(true);
         return;
       case 'exit':
         this.stop();
         if (!s.abnormal) this.d.platform.closeWebView();
         return;
+      case 'menu':
+        // 1.2.10 : choix du menu système de l'appui long (pages du guidage, appli Even)
+        void this.runIntent({ kind: 'menu', id: s.id });
+        return;
+      case 'device': {
+        // 1.2.10 (PRD-1.2.10 § 3.7) : lunettes reconnectées ou remises : la page est reconstruite (images comprises)
+        const up = s.connected && s.wearing !== false;
+        const was = this.deviceUp;
+        this.deviceUp = up;
+        if (!up || was === true || !this.ready || this.paused) return;
+        this.stepGuide({ render: false });
+        void this.render(true);
+        return;
+      }
     }
   }
 
   onGesture(g: Gesture): void {
     const view = this.view;
     if (!view) return;
+    // 1.2.10 (PRD-1.2.10 § 3.4) : sur l'écran du guidage, l'appui long ouvre le menu (Quai Web ; l'appli Even a son menu
+    // système), le double toucher ramène à l'accueil (le guidage continue), glisser ne fait rien ; toucher : guideTap
+    if (current(this.nav).route.screen === 'guide' && g !== 'tap') {
+      if (g === 'long') void this.openGuideMenu();
+      else if (g === 'double') void this.guideHome();
+      else this.log(`QUAI_GESTURE ${g} sans effet sur guide`);
+      return;
+    }
     const { state, effect } = handleGesture(this.nav, g, view, this.capacity);
     this.nav = state;
     if (effect.kind === 'none') this.log(`QUAI_GESTURE ${g} sans effet sur ${view.layout}`);
@@ -776,7 +1004,8 @@ export class GlassesController implements GlassesApi {
       case 'exit':
         // Quai Web : il n'y a rien à fermer, la page reste ouverte ; 1.2.1 : sans message (PRD-1.2.1 § 4.5).
         if (this.d.web) return;
-        // Boîte de confirmation système ; le nettoyage se fait sur SYSTEM_EXIT_EVENT.
+        // Boîte de confirmation système ; le nettoyage se fait sur SYSTEM_EXIT_EVENT (1.2.10 : ses événements de premier
+        // plan inversés sont remis à l'endroit par la plateforme).
         void this.d.platform.glasses.exit(1);
         return;
       case 'intent':
@@ -804,6 +1033,13 @@ export class GlassesController implements GlassesApi {
         await this.goTo(i.key, i.to, i.label);
         return;
       case 'resume': {
+        // 1.2.10 : depuis l'écran du trajet d'un trajet guidé (ouvert par-dessus l'écran du guidage) : retour à celui-ci
+        const g = this.guideShown() ? this.nav.stack.findIndex((f) => f.route.screen === 'guide') : -1;
+        if (g >= 0) {
+          this.nav = { stack: this.nav.stack.slice(0, g + 1) };
+          await this.onRouteChanged();
+          return;
+        }
         const nav = this.resumeNav(this.nav, false);
         if (nav) {
           this.nav = nav;
@@ -848,6 +1084,18 @@ export class GlassesController implements GlassesApi {
         await this.onRouteChanged();
         return;
       }
+      case 'goGuide':
+        await this.goGuide();
+        return;
+      case 'alight':
+        await this.alight(i.index);
+        return;
+      case 'guideTap':
+        await this.guideTap();
+        return;
+      case 'menu':
+        await this.guideMenu(i.id);
+        return;
     }
   }
 
@@ -911,7 +1159,7 @@ export class GlassesController implements GlassesApi {
 
   /** Favori du trajet suivi quand il est en cours (« En cours » sur l'accueil). */
   private runningFavoriteId(): string | undefined {
-    return this.trip?.favoriteId && this.tripState() === 'running' ? this.trip.favoriteId : undefined;
+    return this.trip?.favoriteId && this.tripRunning() ? this.trip.favoriteId : undefined;
   }
 
   private validOrder(order: string[]): string[] {
@@ -1087,7 +1335,7 @@ export class GlassesController implements GlassesApi {
       if (this.nearbyLight.near) data.near = this.nearbyLight.near;
     }
     const t = this.trip;
-    if (t && this.tripState() === 'running') {
+    if (t && this.tripRunning()) {
       data.running = { title: t.title, next: runningNext(this.journeyOf(t.journey), this.d.clock.now()) };
       if (t.favoriteId) data.running.favoriteId = t.favoriteId;
     }
@@ -1109,25 +1357,66 @@ export class GlassesController implements GlassesApi {
     }
   }
 
-  /** Enregistre le trajet suivi (seulement s'il a changé). */
-  private saveFollowed(): void {
+  /**
+   * Enregistre le trajet suivi (seulement s'il a changé). 1.2.10 (PRD-1.2.10 § 3.7) : `soon` faux (mémoire du guidage,
+   * recalculée à chaque position) : au plus toutes les 5 s, le dernier état ; sinon tout de suite.
+   */
+  private saveFollowed(soon = true): void {
+    if (!soon) {
+      const wait = this.savedAt + GUIDE_SAVE_MS - this.d.clock.now();
+      if (wait > 0) {
+        this.saveTimer ??= setTimeout(() => {
+          this.saveTimer = undefined;
+          this.saveFollowed();
+        }, Math.max(50, this.d.clock.real(wait)));
+        return;
+      }
+    }
+    clearTimeout(this.saveTimer);
+    this.saveTimer = undefined;
     const raw = this.trip ? JSON.stringify(this.trip) : '';
     if (raw === this.tripSaved) return;
     this.tripSaved = raw;
+    this.savedAt = this.d.clock.now();
     void this.d.platform.kv.set(TRIP_KEY, raw).catch((e: unknown) => console.warn('[Quai] trajet suivi non enregistré', errText(e)));
   }
 
   private tripState(): TripPhase {
     const t = this.trip;
     if (!t) return 'ended';
-    return tripPhase(t, this.journeyOf(t.journey), this.d.clock.now(), this.here);
+    return tripPhase(t, this.journeyOf(t.journey), this.d.clock.now(), this.latestFix());
   }
 
-  /** Trajet terminé (arrivée plus 5 min, ou pas parti) : il n'est plus suivi. */
+  /**
+   * 1.2.10 : la position la plus récente : celle du rafraîchissement de 30 s, ou une position continue du guidage assez
+   * précise (75 m au plus).
+   */
+  private latestFix(): Pick<Fix, 'lat' | 'lon' | 'at'> | null {
+    let g: GuideFix | undefined;
+    for (let i = this.fixes.length - 1; i >= 0 && !g; i--) if ((this.fixes[i].accuracy ?? 0) <= FIX_ACCURACY_MAX_M) g = this.fixes[i];
+    const h = this.here;
+    return g && (!h || g.at > h.at) ? g : h;
+  }
+
+  /**
+   * Trajet suivi en cours (« En cours » sur l'accueil, reprise à l'ouverture). 1.2.10 : un trajet guidé l'est dès son
+   * lancement (le guidage tourne déjà) jusqu'à la fin que donne le moteur (`state.ended`).
+   */
+  private tripRunning(): boolean {
+    if (this.trip?.guide) return true;
+    return this.tripState() === 'running';
+  }
+
+  /**
+   * Trajet terminé (arrivée plus 5 min, ou pas parti) : il n'est plus suivi. 1.2.10 : un trajet guidé finit quand le
+   * moteur le dit (`state.ended` : « Tu y es » + 2 min, arrivée + 5 min, pas parti), jamais par cette règle seule.
+   */
   private checkTrip(): void {
-    if (this.trip && this.tripState() === 'ended') {
+    if (this.trip && !this.trip.guide && this.tripState() === 'ended') {
       this.trip = null;
       this.saveFollowed();
+      // 1.2.10 : fin du trajet, fin du guidage (positions, minuterie, carte « En cours » du téléphone)
+      this.guideGone();
     }
   }
 
@@ -1135,10 +1424,13 @@ export class GlassesController implements GlassesApi {
    * Fait d'un trajet le trajet suivi, toujours sur demande (1.2.2, PRD-1.2.2 § 6 : toucher « Suivre ce trajet »,
    * bouton « Lunettes » du téléphone) : il remplace le trajet suivi d'avant. Ouvrir un trajet ne le fait jamais suivre.
    */
-  private follow(j: Journey, s: { key: string; title: string; journeys: Journey[]; from?: Endpoint; to?: Endpoint; favoriteId?: string }): void {
+  private follow(j: Journey, s: TripSession, kind?: GuideKind, beyond?: Stopover[]): void {
     const here = this.hereLL();
     const start = j.legs[0]?.from;
     const index = Math.max(0, s.journeys.findIndex((x) => x.id === j.id));
+    // 1.2.10 : « J'y descends » part de l'arrêt de montée (s'il est connu), jamais de la position du moment : on peut
+    // déjà être à bord, et le trajet ne doit pas prendre fin pour « pas parti » (tripPhase)
+    const origin = kind === 'ride' ? (start && knownPoint(start) ? { lat: start.lat, lon: start.lon } : undefined) : here ?? (start ? { lat: start.lat, lon: start.lon } : undefined);
     this.trip = {
       v: 1,
       explicit: true,
@@ -1147,14 +1439,17 @@ export class GlassesController implements GlassesApi {
       ...(s.from ? { from: s.from } : {}),
       ...(s.to ? { to: s.to } : {}),
       ...(s.favoriteId ? { favoriteId: s.favoriteId } : {}),
-      origin: here ?? (start ? { lat: start.lat, lon: start.lon } : undefined),
+      origin,
       startedAt: this.d.clock.now(),
       leaveAt0: j.leaveAt,
       journeys: s.journeys,
       index,
       key: s.key,
+      // 1.2.10 : le guidage porté par le trajet suivi, mémoire neuve ; un nouveau guidage remplace le précédent
+      ...(kind ? { guide: { kind, mem: newGuideMemory(), ...(beyond?.length ? { beyond } : {}) } } : {}),
     };
     this.saveFollowed();
+    this.syncGuide();
   }
 
   /** « Suivre ce trajet » : la proposition affichée devient le trajet suivi, « Trajet suivi : IC 08:42 » (M2.4). */
@@ -1176,6 +1471,8 @@ export class GlassesController implements GlassesApi {
   private async unfollow(): Promise<void> {
     this.trip = null;
     this.saveFollowed();
+    // 1.2.10 : plus suivi, plus guidé
+    this.guideGone();
     if (current(this.nav).route.screen === 'followed' && this.nav.stack.length > 1) this.nav = pop(this.nav);
     await this.onRouteChanged();
     this.showToast('Suivi arrêté');
@@ -1188,14 +1485,16 @@ export class GlassesController implements GlassesApi {
   private resumeNav(base: NavState, onlyRunning: boolean): NavState | null {
     const t = this.trip;
     if (!t) return null;
-    if (onlyRunning && this.tripState() !== 'running') return null;
+    if (onlyRunning && !this.tripRunning()) return null;
+    // 1.2.10 (PRD-1.2.10 § 3.4, § 3.5) : trajet guidé : l'écran du guidage, « Où tu en es » d'abord (15 s) ; réglage
+    // éteint : l'écran du trajet, sans « Dans le train » automatique
+    if (t.guide && this.guideOn()) {
+      this.showWhere(WHERE_LAUNCH_MS);
+      return push(base, { screen: 'guide' });
+    }
     const j = this.journeyOf(t.journey);
-    const journeys = t.journeys.map((x) => (x.id === j.id ? j : x));
-    const steps: StepsRoute = { screen: 'steps', key: t.key, label: '', title: t.title, journeys, index: t.index };
-    if (t.from) steps.from = t.from;
-    if (t.to) steps.to = t.to;
-    if (t.favoriteId) steps.favoriteId = t.favoriteId;
-    let nav = push(base, steps);
+    let nav = push(base, this.tripStepsRoute(t));
+    if (t.guide) return nav;
     const now = this.d.clock.now();
     const i = rideInProgress(j, now);
     if (i >= 0) {
@@ -1208,6 +1507,17 @@ export class GlassesController implements GlassesApi {
     return nav;
   }
 
+  /** L'écran du trajet suivi : ses étapes, dans la session de ses propositions. */
+  private tripStepsRoute(t: FollowedTrip): StepsRoute {
+    const j = this.journeyOf(t.journey);
+    const journeys = t.journeys.map((x) => (x.id === j.id ? j : x));
+    const steps: StepsRoute = { screen: 'steps', key: t.key, label: '', title: t.title, journeys, index: t.index };
+    if (t.from) steps.from = t.from;
+    if (t.to) steps.to = t.to;
+    if (t.favoriteId) steps.favoriteId = t.favoriteId;
+    return steps;
+  }
+
   /** Rafraîchit le trajet suivi (temps réel) quand son départ approche ; le termine quand il est fini. */
   private async refreshTrip(): Promise<void> {
     this.checkTrip();
@@ -1218,13 +1528,23 @@ export class GlassesController implements GlassesApi {
     try {
       const j = await deadline(this.d.core.refresh(this.journeyOf(t.journey), this.settings(), { followed: true }), CORE_TIMEOUT_MS, 'trajet suivi trop lent');
       this.journeysById.set(j.id, j);
-      if (this.trip && this.trip.journey.id === j.id) {
-        this.trip = { ...this.trip, journey: j };
-        this.saveFollowed();
-      }
+      this.tripRefreshedAt = this.d.clock.now();
+      this.setFollowedJourney(j);
     } catch (e) {
       console.warn('[Quai] trajet suivi', errText(e));
     }
+  }
+
+  /**
+   * Trajet suivi rafraîchi (temps réel) : il remplace l'ancien et il est enregistré. 1.2.10 (PRD-1.2.10 § 3.7) : le
+   * moteur du guidage est recalculé à chaque rafraîchissement du temps réel du trajet suivi.
+   */
+  private setFollowedJourney(j: Journey): void {
+    if (!this.trip || this.trip.journey.id !== j.id) return;
+    this.trip = { ...this.trip, journey: j };
+    this.saveFollowed();
+    if (this.trip.guide) this.stepGuide();
+    else this.notifyGuide();
   }
 
   /**
@@ -1235,6 +1555,9 @@ export class GlassesController implements GlassesApi {
   private track(): void {
     const t = this.trip;
     if (!t || !this.ready) return;
+    // 1.2.10 (PRD-1.2.10 § 3.5) : un trajet guidé a l'écran du guidage à la place de ces écrans automatiques ; réglage
+    // « Me guider pendant un trajet » éteint : aucun écran ne change seul (pas de « Dans le train » automatique)
+    if (t.guide || !this.guideOn()) return;
     const j = this.journeyOf(t.journey);
     const f = current(this.nav);
     const r = f.route;
@@ -1294,7 +1617,8 @@ export class GlassesController implements GlassesApi {
    * repris.
    */
   private async resumeFavorite(id: string): Promise<boolean> {
-    if (this.trip?.favoriteId !== id || this.tripState() !== 'running') return false;
+    // 1.2.10 : un trajet guidé est en cours dès son lancement (son favori rouvre l'écran du guidage)
+    if (this.trip?.favoriteId !== id || !this.tripRunning()) return false;
     const nav = this.resumeNav(this.nav, false);
     if (!nav) return false;
     this.nav = nav;
@@ -1647,10 +1971,788 @@ export class GlassesController implements GlassesApi {
     await this.onRouteChanged();
   }
 
+  /**
+   * 1.2.10 : bouton « Y aller » d'un favori lieu ou trajet du téléphone (PRD-1.2.10 § 4.2) : son trajet, calculé comme à
+   * l'ouverture du favori (sa réponse si elle est fraîche et encore attrapable), devient le trajet suivi et guidé ;
+   * l'écran du guidage s'ouvre (réglage éteint : « Trajet suivi », rien d'autre). Rend le message affiché à côté du
+   * bouton.
+   */
+  async goFavorite(id: string): Promise<string> {
+    const s = this.settings();
+    const f = s.favorites.find((x) => x.id === id);
+    if (!f) return GUIDE_TEXT.noFavorite;
+    if (f.kind === 'stop') return GUIDE_TEXT.noRoute;
+    try {
+      await this.ensureInit();
+    } catch {
+      return this.initError ?? MESSAGES.dataUnreachable;
+    }
+    await this.loadTrip();
+    const title = favoriteTitle(f, s);
+    const { from, to } = asTrip(f);
+    const now = this.d.clock.now();
+    const a = this.answers.get(id);
+    const fresh = a && now - (this.answerAt.get(id) ?? 0) < 2 * REFRESH_MS ? a : undefined;
+    if (fresh?.state === 'here') return alreadyText(title);
+    const j0 = fresh?.state === 'ok' ? fresh.plan?.journeys[0] : undefined;
+    let journeys = j0 && catchable(j0, now) ? fresh?.plan?.journeys : undefined;
+    if (!journeys) {
+      const needsHere = from.type === 'here' || to.type === 'here';
+      const here = this.hereLL() ?? (needsHere ? await this.d.platform.location.current(6000) : null);
+      if (needsHere && !here) return MESSAGES.hereMissing;
+      try {
+        const ans = await deadline(this.d.core.answer(f, here, this.settings()), CORE_TIMEOUT_MS, `Pas de réseau${NB}: réessaie dans un instant.`);
+        this.setAnswer(ans);
+        if (ans.state === 'here') return alreadyText(title);
+        if (ans.state === 'noPosition') return MESSAGES.hereMissing;
+        journeys = (ans.plan?.journeys ?? []).filter((x) => catchable(x, this.d.clock.now()));
+      } catch (e) {
+        return errText(e);
+      }
+    }
+    if (!journeys?.length) return GUIDE_TEXT.noTrip;
+    this.startGuide('trip', journeys[0], { key: this.newKey(), title, journeys, from, to, favoriteId: f.id });
+    if (!this.guideOn()) {
+      this.showToast(GUIDE_TEXT.followed);
+      return GUIDE_TEXT.followed;
+    }
+    const route: Route = { screen: 'guide' };
+    await this.showNav(reset([{ screen: 'home' }, route]), route);
+    return GUIDE_TEXT.launched;
+  }
+
+  /** 1.2.10 : « Arrêter le guidage » de la carte « En cours » du téléphone (PRD-1.2.10 § 3.4). */
+  async stopGuide(): Promise<void> {
+    if (this.trip) this.endGuide('stopped');
+  }
+
+  /**
+   * 1.2.10 : état du guidage pour la carte « En cours » du téléphone (PRD-1.2.10 § 4.3) ; null : aucun trajet suivi. Un
+   * trajet suivi sans guidage (bouton « Lunettes », trajet de la 1.2.9) a aussi sa ligne « Maintenant » (`guided` faux).
+   */
+  guideStatus(): GuideStatus | null {
+    const t = this.trip;
+    if (!t) return null;
+    const j = this.journeyOf(t.journey);
+    const st = (t.guide && this.guideState?.journeyId === j.id ? this.guideState : null) ?? this.peekGuide(t, j);
+    const guided = !!t.guide && this.guideOn();
+    if (st) {
+      try {
+        return guideStatusOf(st, j, guideTitle(t, t.guide?.kind ?? 'trip'), guided, this.settings().lang);
+      } catch (e) {
+        console.warn('[Quai] carte « En cours »', errText(e));
+      }
+    }
+    return { kind: t.guide?.kind ?? 'trip', title: guideTitle(t, t.guide?.kind ?? 'trip'), arr: j.arr, now: '', guided };
+  }
+
+  /** 1.2.10 : la carte « En cours » du téléphone, prévenue à chaque changement de l'état du guidage. */
+  onGuide(cb: (s: GuideStatus | null) => void): () => void {
+    this.guideListeners.add(cb);
+    // l'abonné lit l'état présent (guideStatus) : seuls les changements suivants lui sont donnés
+    this.guideSent = JSON.stringify(this.guideStatus());
+    return () => {
+      this.guideListeners.delete(cb);
+    };
+  }
+
+  /* ------------------------------ 1.2.10 : guidage « Y aller » (PRD-1.2.10 § 3) ------------------------------ */
+
+  /** Réglage « Me guider pendant un trajet » (absent : allumé). */
+  private guideOn(): boolean {
+    return this.settings().display.guide !== false;
+  }
+
+  /** Le trajet suivi est guidé et le réglage allumé : l'écran du guidage, les positions continues, les imprévus. */
+  private guideShown(): boolean {
+    return !!this.trip?.guide && this.guideOn();
+  }
+
+  /** « Où tu en es » pendant `ms` (quand il n'y a pas de moment) ; la minuterie du guidage l'efface à l'heure. */
+  private showWhere(ms: number): void {
+    this.whereUntil = this.d.clock.now() + ms;
+    if (this.trip?.guide && this.guideState) this.scheduleGuideWake(this.guideState);
+  }
+
+  /** État propre au contrôleur, remis à zéro à chaque lancement et à la fin (les positions restent : elles sont vraies). */
+  private resetGuideRun(): void {
+    this.guideState = null;
+    this.whereUntil = 0;
+    this.routeJob = null;
+    this.routeFail.clear();
+    this.routeAsked.clear();
+    this.replanJob = null;
+    this.replanTried.clear();
+    this.beyondAsked.clear();
+  }
+
+  /**
+   * Lance un guidage (PRD-1.2.10 § 3.1) : le trajet devient le trajet suivi et porte le guidage ; un nouveau guidage
+   * remplace le précédent. Réglage allumé : « Où tu en es » d'abord (15 s).
+   */
+  private startGuide(kind: GuideKind, j: Journey, s: TripSession, beyond?: Stopover[]): void {
+    this.resetGuideRun();
+    if (this.guideOn()) this.showWhere(WHERE_LAUNCH_MS);
+    this.follow(j, s, kind, beyond);
+  }
+
+  /** Cadre de l'accueil de la pile (sa sélection gardée), ou un accueil neuf. */
+  private homeFrame(): NavFrame {
+    return this.nav.stack.find((f) => f.route.screen === 'home') ?? initNav({ screen: 'home' }).stack[0];
+  }
+
+  /**
+   * Après un lancement sur les lunettes : l'écran du guidage, l'accueil dessous (double toucher) ; réglage éteint
+   * (PRD-1.2.10 § 3.5) : le message « Trajet suivi », sans changer d'écran.
+   */
+  private async openGuide(): Promise<void> {
+    if (!this.guideOn()) {
+      this.showToast(GUIDE_TEXT.followed);
+      return;
+    }
+    this.nav = { stack: [this.homeFrame(), initNav({ screen: 'guide' }).stack[0]] };
+    await this.onRouteChanged();
+  }
+
+  /**
+   * « Y aller » sur l'écran d'un trajet (intention goGuide, PRD-1.2.10 § 3.1) : la proposition affichée est guidée de
+   * porte à porte. Déjà guidée : son écran du guidage. Plus attrapable (son premier véhicule est parti) : les
+   * propositions recalculées depuis les mêmes extrémités, la première (comme le bouton « Lunettes »).
+   */
+  private async goGuide(): Promise<void> {
+    const r = current(this.nav).route;
+    if (r.screen !== 'steps') return;
+    const list = routeJourneys(r);
+    if (!list?.length) return;
+    let journeys = list.map((x) => this.journeyOf(x));
+    let j = journeys[Math.min(Math.max(0, r.index ?? 0), journeys.length - 1)];
+    let key = r.key ?? routeKey(r);
+    const t = this.trip;
+    if (t?.guide && t.journey.id === j.id) {
+      if (this.guideOn()) this.showWhere(WHERE_LAUNCH_MS);
+      await this.openGuide();
+      return;
+    }
+    if (!catchable(j, this.d.clock.now()) && r.from && r.to) {
+      const fresh = await this.freshPlan(r.from, r.to);
+      if (fresh.length) {
+        journeys = fresh;
+        j = fresh[0];
+        key = this.newKey();
+      }
+    }
+    this.startGuide('trip', j, { key, title: this.stepsTitle(r), journeys, from: r.from, to: r.to, favoriteId: r.favoriteId });
+    await this.openGuide();
+  }
+
+  /**
+   * « J'y descends » dans les arrêts d'un départ (intention alight, PRD-1.2.10 § 3.1) : le véhicule seul est guidé, de
+   * l'arrêt du tableau jusqu'à l'arrêt touché (`index` : son rang dans les arrêts du départ, après la montée).
+   */
+  private async alight(index: number): Promise<void> {
+    const r = current(this.nav).route;
+    if (r.screen !== 'stops') return;
+    const hit = this.cache.get(routeKey(r));
+    if (!hit?.ok) return;
+    const { stops: ds, dep } = hit.value as { stops?: DepartureStops; dep?: Departure };
+    if (!ds || ds.state !== 'ok' || !ds.stops.length) return;
+    const board = Math.min(Math.max(0, ds.at ?? 0), ds.stops.length - 1);
+    if (!Number.isInteger(index) || index <= board || index >= ds.stops.length || ds.stops[index].cancelled) {
+      this.log(`QUAI_GESTURE j'y descends sans effet sur l'arrêt ${index}`);
+      return;
+    }
+    let j: Journey;
+    try {
+      j = rideJourney(dep ?? r.dep, ds, board, index);
+    } catch (e) {
+      console.warn('[Quai] j’y descends', errText(e));
+      return;
+    }
+    const title = towards(displayName(ds.stops[index].name, this.settings().lang));
+    // lancé tout de suite (à l'heure) ; la position des arrêts suit dès qu'elle est trouvée
+    this.startGuide('ride', j, { key: this.newKey(), title, journeys: [j] }, beyondOf(ds, index));
+    await this.openGuide();
+    void this.addStopCoords(j.id, ds, board, index);
+  }
+
+  /**
+   * « J'y descends » : position des arrêts du départ (de la montée à quelques arrêts après la descente), lue dans les
+   * données de la nuit après le lancement : arrêts de la ligne pour un bus, un tram, un métro (findLines, lineStops), gares
+   * par la recherche pour un train. Ajoutée au trajet guidé (même identifiant) et aux arrêts après la descente : descente
+   * constatée, « Descends au prochain arrêt », arrêt dépassé. Rien de trouvé : le guidage se fait à l'heure.
+   */
+  private async addStopCoords(jid: string, ds: DepartureStops, board: number, alight: number): Promise<void> {
+    let found: Map<string, LatLon>;
+    try {
+      found = await this.stopPoints(ds, board, alight);
+    } catch (e) {
+      console.warn('[Quai] position des arrêts', errText(e));
+      return;
+    }
+    const t = this.trip;
+    if (!found.size || !t?.guide || t.journey.id !== jid) return;
+    const j = withCoords(this.journeyOf(t.journey), found);
+    this.journeysById.set(j.id, j);
+    const guide: FollowedGuide = { ...t.guide };
+    if (guide.beyond) guide.beyond = guide.beyond.map((so) => withPoint(so, found));
+    this.trip = { ...t, journey: j, journeys: t.journeys.map((x) => (x.id === j.id ? j : x)), guide };
+    this.saveFollowed();
+    this.stepGuide();
+  }
+
+  /** Positions des arrêts `board` à `alight` (et quelques-uns après), par zone. */
+  private async stopPoints(ds: DepartureStops, board: number, alight: number): Promise<Map<string, LatLon>> {
+    const out = new Map<string, LatLon>();
+    const span = ds.stops.slice(board, Math.min(ds.stops.length, alight + 1 + BEYOND_COORDS));
+    const want = new Set(span.map((c) => c.areaId).filter((x): x is string => !!x));
+    if (!want.size) return out;
+    const core = this.d.core;
+    const near = this.hereLL();
+    if (ds.mode !== 'train') {
+      const m = (await deadline(core.findLines(ds.line, near), CORE_TIMEOUT_MS, 'lignes trop lentes')).find((x) => x.op === ds.op);
+      if (!m) return out;
+      for (const p of await deadline(core.lineStops(m, near), CORE_TIMEOUT_MS, 'arrêts de la ligne trop lents')) if (want.has(p.areaId) && knownPoint(p)) out.set(p.areaId, { lat: p.lat, lon: p.lon });
+      return out;
+    }
+    const lang = this.settings().lang;
+    for (const c of span) {
+      if (!c.areaId || out.has(c.areaId)) continue;
+      const items = await deadline(core.search(displayName(c.name, lang), near ?? undefined), CORE_TIMEOUT_MS, 'recherche trop lente').catch(() => []);
+      const it = items.find((x) => x.id === c.areaId);
+      if (it && knownPoint(it)) out.set(c.areaId, { lat: it.lat, lon: it.lon });
+    }
+    return out;
+  }
+
+  /**
+   * Toucher sur l'écran du guidage (intention guideTap, PRD-1.2.10 § 3.4) : écran vide → « Où tu en es » (30 s) ; un
+   * moment → effacé (il ne revient pas, Quai relance pour la suite) ; « Où tu en es » → effacé ; « Tu y es » → terminé.
+   */
+  private async guideTap(): Promise<void> {
+    if (!this.trip?.guide || current(this.nav).route.screen !== 'guide') return;
+    const st = this.stepGuide({ render: false });
+    const t = this.trip;
+    if (!t?.guide) return;
+    const now = this.d.clock.now();
+    const m = st?.moment;
+    if (m?.kind === 'arrived') {
+      this.endGuide('done');
+      return;
+    }
+    if (m) {
+      this.trip = { ...t, guide: { ...t.guide, mem: dismissMoment(t.guide.mem, m.id, now) } };
+      this.whereUntil = 0;
+      this.saveFollowed(false);
+    } else if (this.whereUntil > now) this.whereUntil = 0;
+    else this.showWhere(WHERE_TAP_MS);
+    this.stepGuide();
+  }
+
+  /** Double toucher sur l'écran du guidage (PRD-1.2.10 § 3.4) : l'accueil ; le guidage continue (« En cours »). */
+  private async guideHome(): Promise<void> {
+    const i = this.nav.stack.findIndex((f) => f.route.screen === 'home');
+    this.nav = i >= 0 ? { stack: this.nav.stack.slice(0, i + 1) } : initNav({ screen: 'home' });
+    await this.onRouteChanged();
+  }
+
+  /** Appui long sur l'écran du guidage (Quai Web, geste `long`) : le menu rendu par Quai, mêmes choix que le menu système. */
+  private async openGuideMenu(): Promise<void> {
+    if (!this.guideShown()) return;
+    this.nav = push(this.nav, { screen: 'menu', items: GUIDE_MENU.map((x) => ({ ...x })) });
+    await this.onRouteChanged();
+  }
+
+  /**
+   * Choix du menu de l'appui long (PRD-1.2.10 § 3.4) : « Arrêter le guidage » (fin immédiate, « Guidage arrêté »,
+   * l'accueil) ; « Voir tout le trajet » (l'écran du trajet guidé ; double toucher : retour au guidage).
+   */
+  private async guideMenu(id: number): Promise<void> {
+    const t = this.trip;
+    const top = current(this.nav).route.screen;
+    if (!t?.guide) {
+      // menu resté à l'écran après la fin du guidage : il se ferme
+      if (top === 'menu') {
+        this.nav = pop(this.nav);
+        await this.onRouteChanged();
+      }
+      return;
+    }
+    if (id === MENU_IDS.stopGuide) {
+      this.endGuide('stopped');
+      return;
+    }
+    if (id !== MENU_IDS.allSteps) return;
+    // depuis l'écran du menu (Quai Web), l'écran du trajet prend sa place ; depuis le menu système, il s'ouvre par-dessus
+    const steps = this.tripStepsRoute(t);
+    this.nav = top === 'menu' ? replace(this.nav, steps) : push(this.nav, steps);
+    await this.onRouteChanged();
+  }
+
+  /**
+   * Fin du guidage, et du trajet suivi qui le porte : « Tu y es » touché (`done`), fin donnée par le moteur ou fin du
+   * trajet (`ended`), « Arrêter le guidage » des lunettes ou du téléphone (`stopped` : « Guidage arrêté »). Les écrans
+   * du guidage laissent place à l'accueil.
+   */
+  private endGuide(reason: 'done' | 'ended' | 'stopped'): void {
+    const t = this.trip;
+    const top = current(this.nav).route;
+    const onGuide = top.screen === 'guide' || top.screen === 'menu' || (reason === 'stopped' && top.screen === 'steps' && !!t && top.key === t.key);
+    this.trip = null;
+    this.saveFollowed();
+    this.guideGone();
+    if (onGuide) this.nav = { stack: [this.homeFrame()] };
+    if (reason === 'stopped') this.showToast(GUIDE_TEXT.stopped);
+    else if (this.ready && onGuide) void this.onRouteChanged();
+  }
+
+  /** Plus de guidage : positions continues arrêtées, minuterie annulée, état oublié ; la carte « En cours » suit. */
+  private guideGone(): void {
+    this.stopWatch();
+    clearTimeout(this.guideTimer);
+    this.guideTimer = undefined;
+    this.resetGuideRun();
+    this.notifyGuide();
+  }
+
+  /** Le guidage suit le trajet suivi : recalculé s'il en porte un, arrêté sinon. */
+  private syncGuide(): void {
+    if (this.trip?.guide) this.stepGuide();
+    else this.guideGone();
+  }
+
+  /**
+   * Ce que le contrôleur donne au moteur : positions des 5 dernières minutes, chemin à pied de la marche, « Si tu le
+   * rates », arrêts après la descente (« j'y descends »).
+   */
+  private guideInput(t: FollowedTrip, g: FollowedGuide, j: Journey, now: number): GuideInput {
+    const walk = g.walk && g.walk.journeyId === j.id ? { leg: g.walk.leg, route: g.walk.route } : undefined;
+    const missed = missedOf(j, t.journeys.map((x) => this.journeyOf(x)));
+    return {
+      kind: g.kind,
+      journey: j,
+      title: guideTitle(t, g.kind),
+      now,
+      fixes: [...this.fixes],
+      settings: this.settings(),
+      startedAt: t.startedAt,
+      ...(walk ? { walk } : {}),
+      ...(t.origin ? { origin: t.origin } : {}),
+      ...(missed ? { missed } : {}),
+      ...this.beyondInput(g, j),
+    };
+  }
+
+  /** Arrêts suivants donnés au moteur : « j'y descends », `beyond` ; genre trip, ceux des étapes lues de ce trajet-là. */
+  private beyondInput(g: FollowedGuide, j: Journey): Pick<GuideInput, 'beyond' | 'beyondByLeg'> {
+    if (g.kind === 'trip') {
+      const bl = g.beyondByLeg;
+      if (!bl || bl.journeyId !== j.id) return {};
+      const out: Record<number, Stopover[]> = {};
+      for (const [k, v] of Object.entries(bl.legs)) out[Number(k)] = v;
+      return { beyondByLeg: out };
+    }
+    return g.beyond?.length ? { beyond: g.beyond } : {};
+  }
+
+  /**
+   * Genre trip (PRD-1.2.10 § 3.6, arrêt dépassé) : au début de chaque étape à bord, les arrêts du véhicule après la
+   * descente sont lus une fois (departureStops, comme « j'y descends ») et gardés avec le guidage le temps de l'étape :
+   * « Descends à Bruxelles-Central, 08:48 » et un nouveau trajet depuis cet arrêt, à son heure. Échec : rien (le guidage
+   * fait comme sans eux), pas de nouvel essai pour cette étape.
+   */
+  private askBeyond(st: GuideState): void {
+    const t = this.trip;
+    const g = t?.guide;
+    if (!t || !g || g.kind !== 'trip' || st.phase.kind !== 'ride' || !this.guideShown()) return;
+    const j = this.journeyOf(t.journey);
+    const k = st.phase.leg;
+    const key = `${j.id}:${k}`;
+    const l = j.legs[k];
+    const kept = g.beyondByLeg?.journeyId === j.id && !!g.beyondByLeg.legs[String(k)];
+    if (kept || this.beyondAsked.has(key) || l?.kind !== 'ride' || !l.from.areaId || !l.op || !l.mode) return;
+    this.beyondAsked.add(key);
+    void this.readBeyond(j, k).catch((e: unknown) => console.warn('[Quai] arrêts suivants du véhicule', errText(e)));
+  }
+
+  private async readBeyond(j: Journey, k: number): Promise<void> {
+    const l = j.legs[k];
+    const dep: Departure = {
+      op: l.op!,
+      mode: l.mode!,
+      line: l.line ?? '',
+      head: l.head ?? l.to.name,
+      sched: l.schedDep,
+      est: l.dep,
+      rt: !!l.rt,
+      delayMin: l.delayMin ?? 0,
+      cancelled: !!l.cancelled,
+      ...(l.tripId ? { tripId: l.tripId } : {}),
+      ...(l.fromStop ? { stopId: l.fromStop } : {}),
+      ...(l.fromSeq !== undefined ? { stopSeq: l.fromSeq } : {}),
+      ...(l.platform ? { platform: l.platform } : {}),
+    };
+    const ds = await deadline(this.d.core.departureStops(l.from.areaId!, dep), CORE_TIMEOUT_MS, 'arrêts trop lents');
+    if (ds.state !== 'ok' || !ds.stops.length) return;
+    const at = Math.min(Math.max(0, ds.at ?? 0), ds.stops.length - 1);
+    const to = l.to;
+    const alight = ds.stops.findIndex((c, i) => i > at && (to.areaId && c.areaId ? c.areaId === to.areaId : sameNames(c.name, to.name)));
+    if (alight < 0 || alight >= ds.stops.length - 1) return;
+    // positions des arrêts juste après la descente (nouveau trajet depuis l'arrêt suivant) ; introuvables : sans elles
+    const found = await this.stopPoints(ds, alight, alight).catch(() => new Map<string, LatLon>());
+    const coords = ds.stops.map((c) => (c.areaId ? (found.get(c.areaId) ?? null) : null));
+    const beyond = beyondOf(ds, alight, coords);
+    const cur = this.trip;
+    if (!cur?.guide || cur.journey.id !== j.id || cur.guide.kind !== 'trip') return;
+    // les 3 dernières étapes lues de ce trajet (un nouveau trajet repart de rien)
+    const prev = cur.guide.beyondByLeg?.journeyId === j.id ? cur.guide.beyondByLeg.legs : {};
+    const keep = Object.keys(prev).filter((x) => x !== String(k)).sort((a, b) => Number(a) - Number(b)).slice(-2);
+    const legs: Record<string, Stopover[]> = {};
+    for (const x of keep) legs[x] = prev[x];
+    legs[String(k)] = beyond;
+    this.trip = { ...cur, guide: { ...cur.guide, beyondByLeg: { journeyId: j.id, legs } } };
+    this.saveFollowed();
+    this.stepGuide();
+  }
+
+  /** État du moteur sans rien garder (trajet suivi sans guidage : ligne « Maintenant » du téléphone ; secours d'affichage). */
+  private peekGuide(t: FollowedTrip, j: Journey): GuideState | null {
+    const g: FollowedGuide = t.guide ?? { kind: 'trip', mem: newGuideMemory() };
+    try {
+      return guideStep(this.guideInput(t, g, j, this.d.clock.now()), g.mem).state;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Recalcule le moteur du guidage (PRD-1.2.10 § 3.7) : à chaque position, à `wakeAt` (60 s au plus), à chaque
+   * rafraîchissement du temps réel du trajet suivi, après un toucher. Ensuite : mémoire enregistrée (5 s au plus),
+   * positions continues selon le besoin du moteur, chemin à pied et nouveau trajet demandés, prochain recalcul, carte
+   * « En cours » du téléphone, écran du guidage s'il est affiché (`render` faux : pas de rendu).
+   */
+  private stepGuide(o: { render?: boolean; keepWatch?: boolean } = {}): GuideState | null {
+    const t = this.trip;
+    const g = t?.guide;
+    if (!t || !g || this.stopped) return null;
+    const now = this.d.clock.now();
+    const j = this.journeyOf(t.journey);
+    this.pruneFixes(now);
+    let res: { state: GuideState; mem: GuideMemory };
+    try {
+      res = guideStep(this.guideInput(t, g, j, now), g.mem);
+    } catch (e) {
+      console.warn('[Quai] guidage', errText(e));
+      this.scheduleGuideWake(null);
+      return this.guideState;
+    }
+    const prev = this.guideState;
+    const st = res.state;
+    this.guideState = st;
+    // un moment nouveau prend la place de « Où tu en es »
+    if (st.moment && st.moment.id !== prev?.moment?.id) this.whereUntil = 0;
+    // la mémoire du moteur, gardée telle quelle (au plus toutes les 5 s)
+    if (res.mem !== g.mem) {
+      this.trip = { ...t, guide: { ...g, mem: res.mem } };
+      this.saveFollowed(false);
+    }
+    if (st.ended) {
+      this.endGuide('ended');
+      return null;
+    }
+    if (!o.keepWatch) this.applyLocation(st.location);
+    if (st.needRoute) this.askRoute(st.needRoute);
+    this.maybeReplan(st);
+    this.askBeyond(st);
+    this.scheduleGuideWake(st);
+    this.notifyGuide();
+    if (o.render !== false && this.ready && current(this.nav).route.screen === 'guide') void this.render();
+    return st;
+  }
+
+  /** Prochain recalcul du moteur : à `wakeAt`, à la fin du moment ou de « Où tu en es », 60 s au plus tard. */
+  private scheduleGuideWake(st: GuideState | null): void {
+    clearTimeout(this.guideTimer);
+    this.guideTimer = undefined;
+    if (this.stopped || !this.trip?.guide) return;
+    const now = this.d.clock.now();
+    let at = now + GUIDE_WAKE_MAX_MS;
+    if (st && Number.isFinite(st.wakeAt)) at = Math.min(at, st.wakeAt);
+    // une fin déjà passée (« Descends » tenu par la position, véhicule en retard sans temps réel) ne compte pas : sinon
+    // le moteur serait recalculé chaque seconde jusqu'à la descente ; wakeAt suffit
+    if (st?.moment && Number.isFinite(st.moment.until) && st.moment.until > now) at = Math.min(at, st.moment.until);
+    if (this.whereUntil > now) at = Math.min(at, this.whereUntil);
+    this.guideTimer = setTimeout(() => void this.onGuideWake(), Math.max(100, this.d.clock.real(Math.max(GUIDE_WAKE_MIN_MS, at - now))));
+  }
+
+  private async onGuideWake(): Promise<void> {
+    this.guideTimer = undefined;
+    if (this.stopped || !this.trip?.guide) return;
+    // premier plan quitté : l'écran ne se rafraîchit plus, le temps réel du trajet suivi est relu ici (30 s au plus)
+    if (this.paused && this.d.clock.now() - this.tripRefreshedAt >= REFRESH_MS) await this.refreshTrip();
+    this.stepGuide();
+  }
+
+  /**
+   * Positions continues selon le besoin du moteur (PRD-1.2.10 § 3.7) : `high` (5 m, 2 s), `medium` (50 m, 30 s), `off`.
+   * Seulement pendant un trajet guidé ; réglage éteint (suivi sans message) : `medium` au plus. La position ne quitte
+   * jamais le téléphone.
+   */
+  private applyLocation(need: LocationNeed): void {
+    const capped: LocationNeed = !this.guideOn() && need === 'high' ? 'medium' : need;
+    const want: LocationNeed = this.trip?.guide && !this.stopped ? capped : 'off';
+    if (want === this.watchNeed) return;
+    this.stopWatch();
+    const loc = this.d.platform.location;
+    if (want === 'off' || !loc.watch) return;
+    try {
+      this.watchStop = loc.watch({ ...WATCH_OPTS[want] }, (f) => this.guideFix(f));
+      this.watchNeed = want;
+    } catch (e) {
+      console.warn('[Quai] positions continues', errText(e));
+    }
+  }
+
+  private stopWatch(): void {
+    const stop = this.watchStop;
+    this.watchStop = null;
+    this.watchNeed = 'off';
+    try {
+      stop?.();
+    } catch (e) {
+      console.warn('[Quai] arrêt des positions continues', errText(e));
+    }
+  }
+
+  /** Position pour le guidage (positions continues, ou rafraîchissement de 30 s) : gardée 5 min, puis le moteur. */
+  private guideFix(f: Fix): void {
+    if (this.stopped || !this.trip?.guide || f.source === 'manual') return;
+    if (!Number.isFinite(f.lat) || !Number.isFinite(f.lon) || !Number.isFinite(f.at)) return;
+    if (this.fixes.some((x) => x.at === f.at && x.lat === f.lat && x.lon === f.lon)) return;
+    const gf: GuideFix = { lat: f.lat, lon: f.lon, at: f.at };
+    if (f.accuracy !== undefined) gf.accuracy = f.accuracy;
+    if (f.speed !== undefined) gf.speed = f.speed;
+    if (f.heading !== undefined) gf.heading = f.heading;
+    this.fixes.push(gf);
+    if (this.fixes.length > 1 && this.fixes[this.fixes.length - 2].at > gf.at) this.fixes.sort((a, b) => a.at - b.at);
+    this.pruneFixes(this.d.clock.now());
+    this.stepGuide();
+  }
+
+  /** Positions des 5 dernières minutes, 300 au plus. */
+  private pruneFixes(now: number): void {
+    const keep = this.fixes.filter((x) => x.at >= now - FIX_KEEP_MS);
+    this.fixes = keep.length > FIX_KEEP_MAX ? keep.slice(-FIX_KEEP_MAX) : keep;
+  }
+
+  /**
+   * Chemin à pied demandé au cœur quand le moteur le dit (`state.needRoute` : marche en cours ou prochaine, ou chemin
+   * quitté plus de 30 m pendant 10 s), une demande à la fois ; impossible : nouvel essai pour la même étape 2 min après
+   * au plus tôt ; tout juste reçu : pas redemandé avant 10 s. Le moteur le reçoit au calcul suivant (`walk`).
+   */
+  private askRoute(ask: { leg: number; from: LatLon; to: LatLon }): void {
+    const t = this.trip;
+    const core = this.d.core;
+    if (!t?.guide || !core.walkRoute || this.routeJob || !this.guideShown()) return;
+    const jid = t.journey.id;
+    const key = `${jid}:${ask.leg}`;
+    const now = this.d.clock.now();
+    const failed = this.routeFail.get(key);
+    if (failed !== undefined && now - failed < ROUTE_RETRY_MS) return;
+    const w = t.guide.walk;
+    if (w && w.journeyId === jid && w.leg === ask.leg && now - w.at < ROUTE_FRESH_MS) return;
+    // Un seul chemin est gardé : deux marches qui se le disputent (le moteur, avec le chemin de l'une, demande celui de
+    // l'autre, et inversement) relançaient aussitôt une demande après chaque réponse, sans fin. Une demande par étape
+    // toutes les 10 s au plus, quel que soit le chemin gardé.
+    const asked = this.routeAsked.get(key);
+    if (asked !== undefined && now - asked < ROUTE_FRESH_MS) return;
+    this.routeAsked.set(key, now);
+    const job = `${key}#${++this.routeSeq}`;
+    this.routeJob = job;
+    void deadline(core.walkRoute(ask.from, ask.to), CORE_TIMEOUT_MS, 'chemin à pied trop lent')
+      .then((route) => {
+        if (this.routeJob !== job) return;
+        const cur = this.trip;
+        if (!cur?.guide || cur.journey.id !== jid) return;
+        if (!route) {
+          this.routeFail.set(key, this.d.clock.now());
+          return;
+        }
+        this.routeFail.delete(key);
+        this.trip = { ...cur, guide: { ...cur.guide, walk: { leg: ask.leg, journeyId: jid, route, at: this.d.clock.now() } } };
+        this.saveFollowed();
+      })
+      .catch((e: unknown) => {
+        if (this.routeJob === job) this.routeFail.set(key, this.d.clock.now());
+        console.warn('[Quai] chemin à pied', errText(e));
+      })
+      .finally(() => {
+        if (this.routeJob !== job) return;
+        this.routeJob = null;
+        this.stepGuide();
+      });
+  }
+
+  /**
+   * Nouveau trajet demandé par le moteur (`state.replan`, PRD-1.2.10 § 3.6) : correspondance ratée, véhicule supprimé ou
+   * raté, arrêt dépassé. La demande reste là, avec le même `at`, jusqu'au nouveau trajet : une recherche par demande, une à
+   * la fois, depuis `from` à partir de `at` (à bord : l'heure de la descente). Trouvé : adopté avec replanJourney (le
+   * moteur donne le moment « replan ») ; rien, ou le même trajet : replanNone (« Pas d'autre trajet trouvé », le guidage
+   * continue sur l'ancien).
+   */
+  private maybeReplan(st: GuideState): void {
+    const t = this.trip;
+    const g = t?.guide;
+    const req = st.replan;
+    if (!t || !g || !req || this.replanJob || !this.guideShown()) return;
+    const old = this.journeyOf(t.journey);
+    const key = `${old.id}|${req.reason}|${req.at}`;
+    if (this.replanTried.has(key)) return;
+    this.replanTried.add(key);
+    const job = `${key}#${++this.routeSeq}`;
+    this.replanJob = job;
+    void (g.kind === 'trip' ? this.replanTrip(t, old, req) : this.replanRide(old, req))
+      .catch((e: unknown) => {
+        console.warn('[Quai] nouveau trajet', errText(e));
+        return null;
+      })
+      .then((found) => {
+        if (this.replanJob !== job) return;
+        const cur = this.trip;
+        if (!cur?.guide || cur.journey.id !== old.id) return;
+        const now = this.d.clock.now();
+        // arrêt dépassé (genre trip) : le véhicule où l'on est resté garde son étape, jusqu'à l'arrêt suivant où
+        // commence le nouveau trajet (arrêts suivants lus pour ce trajet-là)
+        const beyond = cur.guide.kind === 'trip' ? this.beyondInput(cur.guide, old).beyondByLeg : undefined;
+        const j2 = found ? (found.kept ? found.j : replanJourney(old, found.j, now, beyond)) : null;
+        if (found && j2 && j2.id !== old.id) {
+          // le nouveau trajet (avec, devant, le véhicule où l'on est encore) ; sa session ; plus de chemin à pied gardé
+          const journeys = [j2, ...found.journeys.filter((x) => x.id !== found.j.id && x.id !== j2.id)];
+          const guide: FollowedGuide = { kind: cur.guide.kind, mem: cur.guide.mem };
+          if (found.beyond?.length) guide.beyond = found.beyond;
+          this.trip = { ...cur, journey: j2, journeys, index: 0, key: this.newKey(), guide, ...(found.title ? { title: found.title } : {}) };
+        } else this.trip = { ...cur, guide: { ...cur.guide, mem: replanNone(cur.guide.mem, now) } };
+        this.saveFollowed();
+      })
+      .finally(() => {
+        if (this.replanJob !== job) return;
+        this.replanJob = null;
+        this.stepGuide();
+      });
+  }
+
+  /** « Y aller » : un nouveau trajet depuis `from` à partir de `at`, jusqu'à la destination du trajet suivi. */
+  private async replanTrip(t: FollowedTrip, old: Journey, req: NonNullable<GuideState['replan']>): Promise<Replan | null> {
+    const to = t.to && t.to.type !== 'here' ? t.to : journeyEnd(old);
+    if (!to) return null;
+    const res = await deadline(this.d.core.route(replanFrom(req.from), to, req.at, this.settings(), { lat: req.from.lat, lon: req.from.lon }), CORE_TIMEOUT_MS, 'nouveau trajet trop lent');
+    const journeys = res.journeys.filter((x) => x.legs.length > 0);
+    return journeys.length ? { j: journeys[0], journeys } : null;
+  }
+
+  /**
+   * « J'y descends », véhicule raté ou supprimé (PRD-1.2.10 § 3.6) : le suivant de la même ligne vers la même destination,
+   * si le tableau de l'arrêt de montée le donne, jusqu'au même arrêt de descente (positions des arrêts reprises). Arrêt
+   * dépassé : le même véhicule jusqu'à l'arrêt suivant (rideOnJourney), sans rien chercher.
+   */
+  private async replanRide(old: Journey, req: NonNullable<GuideState['replan']>): Promise<Replan | null> {
+    if (req.reason === 'passed') {
+      // arrêt dépassé : rien à chercher ; le même véhicule jusqu'à l'arrêt suivant (arrêts suivants connus), suivi comme
+      // un trajet normal (« Descends au prochain arrêt », « Tu y es ») ; le titre devient cet arrêt
+      const kept = rideOnJourney(old, this.trip?.guide?.beyond ?? [], req.from, this.d.clock.now());
+      if (!kept) return null;
+      const to = kept.journey.legs[kept.journey.legs.length - 1].to;
+      return { j: kept.journey, journeys: [kept.journey], beyond: kept.beyond, kept: true, title: towards(displayName(to.name, this.settings().lang)) };
+    }
+    const leg = old.legs.find(isRide);
+    const areaId = req.from.areaId ?? leg?.from.areaId;
+    if (!leg || !areaId) return null;
+    const board = await deadline(this.d.core.board(areaId, { horizonMin: 90, limit: BOARD.limit }), CORE_TIMEOUT_MS, 'tableau trop lent');
+    const after = Math.max(req.at, this.d.clock.now());
+    const next = board.departures.find(
+      (d) => !d.cancelled && d.line === leg.line && (!leg.op || d.op === leg.op) && (!leg.head || sameNames(d.head, leg.head)) && d.sched > leg.schedDep && d.est >= after && (!leg.tripId || d.tripId !== leg.tripId),
+    );
+    if (!next) return null;
+    const ds = await deadline(this.d.core.departureStops(areaId, next), CORE_TIMEOUT_MS, 'arrêts trop lents');
+    if (ds.state !== 'ok' || !ds.stops.length) return null;
+    const at = Math.min(Math.max(0, ds.at ?? 0), ds.stops.length - 1);
+    const to = leg.to;
+    const alight = ds.stops.findIndex((c, i) => i > at && !c.cancelled && (to.areaId && c.areaId ? c.areaId === to.areaId : sameNames(c.name, to.name)));
+    if (alight < 0) return null;
+    // positions des arrêts déjà connues (trajet abandonné), par zone
+    const known = new Map<string, LatLon>();
+    for (const so of [...(leg.stops ?? []), ...(this.trip?.guide?.beyond ?? [])]) if (so.areaId && Number.isFinite(so.lat) && Number.isFinite(so.lon)) known.set(so.areaId, { lat: so.lat!, lon: so.lon! });
+    const coords = ds.stops.map((c) => (c.areaId ? known.get(c.areaId) ?? null : null));
+    const j = rideJourney(next, ds, at, alight, coords);
+    return { j, journeys: [j], beyond: beyondOf(ds, alight, coords) };
+  }
+
+  /** Carte « En cours » du téléphone : prévenue à chaque changement de l'état du guidage (onGuide). */
+  private notifyGuide(): void {
+    if (!this.guideListeners.size) return;
+    const s = this.guideStatus();
+    const key = JSON.stringify(s);
+    if (key === this.guideSent) return;
+    this.guideSent = key;
+    for (const cb of [...this.guideListeners]) {
+      try {
+        cb(s);
+      } catch (e) {
+        console.warn('[Quai] carte « En cours »', errText(e));
+      }
+    }
+  }
+
+  /**
+   * Écran du guidage ou du menu sans guidage à montrer (guidage fini, réglage éteint) : l'écran d'en dessous, ou
+   * l'accueil ; réglage éteint pendant un guidage : l'écran du trajet (PRD-1.2.10 § 3.5).
+   */
+  private fixGuideRoute(): void {
+    const top = current(this.nav).route.screen;
+    if ((top !== 'guide' && top !== 'menu') || this.guideShown()) return;
+    const rest = this.nav.stack.filter((f) => f.route.screen !== 'guide' && f.route.screen !== 'menu');
+    let nav: NavState = rest.length ? { stack: rest } : initNav({ screen: 'home' });
+    const t = this.trip;
+    if (t?.guide) nav = push(nav, this.tripStepsRoute(t));
+    this.nav = nav;
+  }
+
+  /**
+   * Écran du guidage (PRD-1.2.10 § 3.2, § 3.3) : le moment s'il y en a un, sinon « Où tu en es » s'il est demandé, sinon
+   * rien. Toucher : guideTap ; menu système de l'appui long sur ces pages (appli Even ; Quai Web : écran du menu).
+   */
+  private guideViewOf(ctx: ViewCtx): GlassesView {
+    const t = this.trip;
+    const j = t ? this.journeyOf(t.journey) : null;
+    const st = t && j ? (this.guideState?.journeyId === j.id ? this.guideState : this.peekGuide(t, j)) : null;
+    if (!t || !j || !st) return messageView(t?.title ?? 'Quai', [''], ctx);
+    const show: GuideShow = st.moment ? 'moment' : this.whereUntil > ctx.now ? 'where' : 'empty';
+    const v = guideView(st, show, j, ctx);
+    v.tap ??= { kind: 'guideTap' };
+    if (this.d.web) delete v.menu;
+    else if (!v.menu?.length) v.menu = GUIDE_MENU;
+    return v;
+  }
+
+  /** Écran du menu de l'appui long (Quai Web) : toucher = choisir, double toucher = retour au guidage. */
+  private menuViewOf(items: MenuItem[], ctx: ViewCtx): GlassesView {
+    const v = menuView(items, ctx);
+    v.items.forEach((it, i) => {
+      if (!it.action && items[i]) it.action = { kind: 'menu', id: items[i].id };
+    });
+    return v;
+  }
+
   /* ------------------------------ Réglages ------------------------------ */
 
   private onSettingsChanged(): void {
     const s = this.settings();
+    // 1.2.10 (PRD-1.2.10 § 3.5) : « Me guider pendant un trajet » changé : positions continues, écran du guidage (remplacé
+    // par l'écran du trajet quand il s'éteint) et carte « En cours » du téléphone suivent
+    const on = s.display.guide !== false;
+    if (on !== this.guideWasOn) {
+      this.guideWasOn = on;
+      this.syncGuide();
+    }
     // Les réponses dépendent des favoris et des réglages (filtres, marche maximale) : à recalculer.
     this.answerAt.clear();
     for (const id of [...this.answers.keys()]) if (!s.favorites.some((f) => f.id === id)) this.answers.delete(id);
@@ -1702,9 +2804,11 @@ export class GlassesController implements GlassesApi {
 
   private ctx(): ViewCtx {
     const f = this.freshNow();
-    const ctx: ViewCtx = { now: this.d.clock.now(), settings: this.settings() };
+    const ctx: GuideCtx = { now: this.d.clock.now(), settings: this.settings() };
     if (f && !f.ok) ctx.stale = f.message || `Horaires périmés${NB}: mise à jour de nuit en panne`;
     if (this.d.web) ctx.web = true;
+    // 1.2.10 : le trajet guidé, ou le trajet suivi quand le guidage est éteint (son écran du trajet n'a plus « y aller »)
+    if (this.trip && (this.trip.guide || !this.guideOn())) ctx.guidedJourneyId = this.trip.journey.id;
     if (this.meta) {
       try {
         ctx.rt = this.d.core.status().rt;
@@ -1760,6 +2864,8 @@ export class GlassesController implements GlassesApi {
     if (this.stopped) return;
     const prev = this.here;
     this.here = fix;
+    // 1.2.10 : le guidage la reçoit aussi (sans positions continues, c'est sa seule source)
+    if (this.ready) this.guideFix(fix);
     if (!this.ready || (prev && distanceM(prev, fix) <= MOVE_M)) return;
     this.positionChanged();
     const f = current(this.nav);
@@ -1883,9 +2989,12 @@ export class GlassesController implements GlassesApi {
         this.keepLines = { areaId: r.areaId, lines: found };
         return { lines };
       }
-      case 'stops':
-        // 1.2.3 (§ 2) : les arrêts du départ touché, de l'arrêt du tableau au terminus (voyage disparu : missing)
-        return { stops: await core.departureStops(r.areaId, await this.freshDeparture(r)) };
+      case 'stops': {
+        // 1.2.3 (§ 2) : les arrêts du départ touché, de l'arrêt du tableau au terminus (voyage disparu : missing) ;
+        // 1.2.10 : avec le départ à jour, celui que « j'y descends » fait suivre
+        const dep = await this.freshDeparture(r);
+        return { stops: await core.departureStops(r.areaId, dep), dep };
+      }
       case 'steps':
         return this.fetchSteps(r);
       case 'others':
@@ -1894,10 +3003,7 @@ export class GlassesController implements GlassesApi {
       case 'arrival': {
         const j = await core.refresh(this.journeyOf(r.journey), s, { followed: this.trip?.journey.id === r.journey.id });
         this.journeysById.set(j.id, j);
-        if (this.trip?.journey.id === j.id) {
-          this.trip = { ...this.trip, journey: j };
-          this.saveFollowed();
-        }
+        this.setFollowedJourney(j);
         return r.screen === 'arrival' ? this.arrivalDepartures(r, j) : { ok: true };
       }
       default:
@@ -2069,10 +3175,7 @@ export class GlassesController implements GlassesApi {
     const refreshOne = async (id: string, x: Journey): Promise<void> => {
       const fresh = await core.refresh(this.journeyOf(x), s, { followed: this.trip?.journey.id === id });
       this.journeysById.set(fresh.id, fresh);
-      if (this.trip?.journey.id === fresh.id) {
-        this.trip = { ...this.trip, journey: fresh };
-        this.saveFollowed();
-      }
+      this.setFollowedJourney(fresh);
     };
     for (const [id, x] of main) await refreshOne(id, x);
     // 1.2.5 : pendant la fenêtre de « Si tu le rates », les trajets de repli aussi (une suppression doit s'y voir) :
@@ -2090,10 +3193,7 @@ export class GlassesController implements GlassesApi {
       if (k === r.index) continue;
       const fresh = await this.d.core.refresh(this.journeyOf(j), s, { followed: this.trip?.journey.id === j.id });
       this.journeysById.set(fresh.id, fresh);
-      if (this.trip?.journey.id === fresh.id) {
-        this.trip = { ...this.trip, journey: fresh };
-        this.saveFollowed();
-      }
+      this.setFollowedJourney(fresh);
     }
     return { ok: true };
   }
@@ -2205,10 +3305,13 @@ export class GlassesController implements GlassesApi {
 
   /** Vue de l'écran courant ; lance le chargement si besoin. */
   buildView(): GlassesView {
+    this.fixGuideRoute();
     this.syncEntry();
     const f = current(this.nav);
     const r = f.route;
     const ctx = this.ctx();
+    if (r.screen === 'guide') return this.guideViewOf(ctx);
+    if (r.screen === 'menu') return this.menuViewOf(r.items, ctx);
     if (r.screen === 'message') {
       switch (r.kind) {
         case 'firstRun':
@@ -2336,10 +3439,14 @@ export class GlassesController implements GlassesApi {
 
   /* ------------------------------ Rendu ------------------------------ */
 
-  /** Rendu sérialisé ; `force` reconstruit la page (retour au premier plan, écran demandé). */
+  /**
+   * Rendu sérialisé ; `force` reconstruit la page (retour au premier plan, écran demandé). 1.2.10 (PRD-1.2.10 § 3.7) :
+   * premier plan quitté, l'affichage attend (le guidage, lui, continue) ; le retour reconstruit la page du moment.
+   */
   async render(force = false): Promise<void> {
     if (this.stopped) return;
     if (force) this.forceNext = true;
+    if (this.paused) return;
     if (this.rendering) {
       this.renderAgain = true;
       return;
@@ -2372,18 +3479,26 @@ export class GlassesController implements GlassesApi {
     const g = geometry(shown, !!toast);
     const frame = effectiveFrame(current(this.nav), view, g.capacity);
     const page = layoutPage(shown, frame, { toast });
+    // 1.2.10 : images et choix du menu système de la page (guidage), s'ils n'y sont pas déjà
+    if (view.images?.length && !page.images) page.images = view.images;
+    if (view.menu?.length && !page.menu) page.menu = view.menu;
     this.view = view;
     this.capacity = g.capacity;
     const glasses = this.d.platform.glasses;
     this.filter.notifyRender(performanceNow());
     let changed = true;
+    let built = true;
+    const before = this.page;
+    const extra = pageExtra(page);
     if (!this.page) {
       // createStartUpPageContainer une seule fois par WebView ; ensuite rebuildPageContainer.
-      if (this.d.pageStarted) await glasses.rebuild(page.containers);
-      else if (!(await glasses.start(page.containers))) await glasses.rebuild(page.containers);
-    } else if (force || shapeKey(page) !== shapeKey(this.page)) {
-      await glasses.rebuild(page.containers);
+      if (this.d.pageStarted) await glasses.rebuild(page.containers, extra);
+      else if (!(await glasses.start(page.containers, extra))) await glasses.rebuild(page.containers, extra);
+    } else if (force || pageShape(page) !== pageShape(this.page)) {
+      // 1.2.10 : des conteneurs d'image ou un menu système qui changent reconstruisent aussi la page
+      await glasses.rebuild(page.containers, extra);
     } else {
+      built = false;
       changed = false;
       for (const c of page.containers) {
         const old = this.page.containers.find((o) => o.id === c.id);
@@ -2393,6 +3508,21 @@ export class GlassesController implements GlassesApi {
       }
     }
     this.page = page;
+    // 1.2.10 (PRD-1.2.10 § 3.9) : les images de la page, une à la fois : toutes après sa construction, sinon celles qui
+    // changent dans leur conteneur (dessin seul) ; un envoi qui échoue laisse le texte seul (le guidage continue)
+    const toPaint = (page.images ?? []).filter((img) => built || JSON.stringify(before?.images?.find((o) => o.id === img.id)?.image) !== JSON.stringify(img.image));
+    if (toPaint.length && glasses.paint) {
+      changed = true;
+      for (const img of toPaint) {
+        let ok = false;
+        try {
+          ok = await glasses.paint(img);
+        } catch (e) {
+          console.warn('[Quai] image', img.name, errText(e));
+        }
+        if (!ok) this.log(`QUAI_IMAGE ${img.name} non dessinée`);
+      }
+    }
     this.filter.notifyRender(performanceNow());
     if (this.d.e2e) {
       // Espaces insécables (typographie française) normalisées pour faciliter les comparaisons des tests.
@@ -2441,6 +3571,8 @@ export class GlassesController implements GlassesApi {
         this.trip = parseTrip(s.trip);
         this.tripLoaded = true;
         this.saveFollowed();
+        // 1.2.10 : guidage repris, recalculé depuis l'heure et la position (avant d'être prêt : au démarrage)
+        if (this.ready) this.syncGuide();
       }
       if (!nav) return;
       if (!this.ready) {
@@ -2558,6 +3690,148 @@ function alreadyText(title: string): string {
 /** Départ du trajet suivi (pour savoir quand le rafraîchir). */
 function journeyStartMs(t: FollowedTrip): number {
   return Math.min(t.leaveAt0, t.journey.leaveAt);
+}
+
+/**
+ * 1.2.10 (PRD-1.2.10 § 3.2, § 5) : titre du guidage (écran du guidage, carte « En cours » du téléphone) : le nom du trajet
+ * (« Bureau » pour « Vers le bureau ») ; « j'y descends » : « Vers Bruxelles-Central ».
+ */
+function guideTitle(t: Pick<FollowedTrip, 'title'>, kind: GuideKind): string {
+  return kind === 'ride' ? t.title : tripName(t.title);
+}
+
+/** Session d'un trajet suivi : propositions, titre, extrémités, favori. */
+type TripSession = { key: string; title: string; journeys: Journey[]; from?: Endpoint; to?: Endpoint; favoriteId?: string };
+
+/**
+ * 1.2.10 : nouveau trajet trouvé : le premier, la session, et pour « j'y descends » les arrêts après la descente ;
+ * `kept` : le même véhicule prolongé (arrêt dépassé, genre ride), déjà complet, avec son titre.
+ */
+type Replan = { j: Journey; journeys: Journey[]; beyond?: Stopover[]; kept?: boolean; title?: string };
+
+/** 1.2.10 : une position ajoutée à un arrêt qui n'en a pas (zone connue). */
+function withPoint<T extends { areaId?: string; lat?: number; lon?: number }>(x: T, at: ReadonlyMap<string, LatLon>): T {
+  const p = x.areaId ? at.get(x.areaId) : undefined;
+  return p && !knownPoint({ lat: x.lat ?? 0, lon: x.lon ?? 0 }) ? { ...x, lat: p.lat, lon: p.lon } : x;
+}
+
+/** 1.2.10 : positions des arrêts ajoutées à un trajet, là où elles manquent (même identifiant : journeyId ne les compte pas). */
+function withCoords(j: Journey, at: ReadonlyMap<string, LatLon>): Journey {
+  return { ...j, legs: j.legs.map((l) => ({ ...l, from: withPoint(l.from, at), to: withPoint(l.to, at), ...(l.stops ? { stops: l.stops.map((so) => withPoint(so, at)) } : {}) })) };
+}
+
+/** 1.2.10 : arrêts d'un départ après la descente (GuideInput.beyond), avec leur position si elle est connue. */
+function beyondOf(ds: DepartureStops, alight: number, coords?: ReadonlyArray<LatLon | null | undefined>): Stopover[] {
+  return ds.stops.slice(alight + 1).map((c, k) => {
+    const so: Stopover = { name: c.name, sched: c.sched, est: c.est };
+    if (c.areaId) so.areaId = c.areaId;
+    const p = c.newPlatform || c.platform;
+    if (p) so.platform = p;
+    const q = coords?.[alight + 1 + k];
+    if (q && knownPoint(q)) {
+      so.lat = q.lat;
+      so.lon = q.lon;
+    }
+    return so;
+  });
+}
+
+/** 1.2.10 : images et menu d'une page, pour start et rebuild (absent : une page de texte seul). */
+function pageExtra(p: PageSpec): PageExtra | undefined {
+  if (!p.images?.length && !p.menu?.length) return undefined;
+  return { ...(p.images?.length ? { images: p.images } : {}), ...(p.menu?.length ? { menu: p.menu } : {}) };
+}
+
+/**
+ * 1.2.10 : forme d'une page, qui oblige à la reconstruire quand elle change : ses conteneurs de texte (place, taille,
+ * filet), ses conteneurs d'image (place, taille ; pas leur dessin : une autre image dans le même conteneur se dessine
+ * sans reconstruire, consigne de l'intégration) et son menu système. Comme shapeKey (layout.ts), le dessin des images en
+ * moins.
+ */
+function pageShape(p: PageSpec): string {
+  const cs = p.containers.map((c) => {
+    const b = (c as ContainerSpec & { border?: { width: number; level: number } }).border;
+    return `${c.id}:${c.x},${c.y},${c.w},${c.h}${b ? `/b${b.width}:${b.level}` : ''}`;
+  });
+  const imgs = (p.images ?? []).map((i) => `i${i.id}:${i.name}:${i.x},${i.y},${i.w},${i.h}`);
+  const menu = p.menu?.length ? [`m:${p.menu.map((m) => `${m.id}=${m.label}`).join(',')}`] : [];
+  return [...cs, ...imgs, ...menu].join('|');
+}
+
+/** 1.2.10 : un point connu (ni absent, ni 0,0 : arrêt sans coordonnées dans les arrêts d'un départ). */
+function knownPoint(p: { lat: number; lon: number }): boolean {
+  return Number.isFinite(p.lat) && Number.isFinite(p.lon) && !(p.lat === 0 && p.lon === 0);
+}
+
+/** 1.2.10 : réseau d'un identifiant de zone (« sncb:8814266 » : sncb). */
+function opOfArea(areaId: string): Op | undefined {
+  const op = areaId.split(':')[0];
+  return op === 'sncb' || op === 'stib' || op === 'delijn' || op === 'tec' ? op : undefined;
+}
+
+/** 1.2.10 : départ d'un nouveau trajet : l'arrêt donné par le moteur (zone connue), sinon là où l'on est. */
+function replanFrom(f: NonNullable<GuideState['replan']>['from']): Endpoint {
+  const op = f.areaId ? opOfArea(f.areaId) : undefined;
+  if (f.areaId && op && f.name && knownPoint(f)) return { type: 'area', areaId: f.areaId, op, name: f.name, lat: f.lat, lon: f.lon };
+  return { type: 'here' };
+}
+
+/** 1.2.10 : destination d'un trajet suivi sans extrémité gardée : l'arrivée de sa dernière étape. */
+function journeyEnd(j: Journey): Endpoint | null {
+  const to = j.legs[j.legs.length - 1]?.to;
+  if (!to || !knownPoint(to)) return null;
+  const op = to.areaId ? opOfArea(to.areaId) : undefined;
+  if (to.areaId && op) return { type: 'area', areaId: to.areaId, op, name: to.name, lat: to.lat, lon: to.lon };
+  return { type: 'address', label: to.name.fr, lat: to.lat, lon: to.lon };
+}
+
+/** 1.2.10 : même nom (casse, accents et ponctuation ignorés), en français ou en néerlandais. */
+function sameNames(a: Names, b: Names): boolean {
+  return normalizeForSearch(a.fr) === normalizeForSearch(b.fr) || (!!a.nl && !!b.nl && normalizeForSearch(a.nl) === normalizeForSearch(b.nl));
+}
+
+/** 1.2.10 (règle 1.2.5) : même arrêt ou même gare : même zone, ou même nom à 400 m au plus. */
+function sameStopOf(a: Journey['legs'][number]['from'], b: Journey['legs'][number]['from']): boolean {
+  if (a.areaId && b.areaId && a.areaId === b.areaId) return true;
+  return sameNames(a.name, b.name) && distanceM(a, b) <= SAME_STOP_M;
+}
+
+/**
+ * 1.2.10 : « Si tu le rates » donné au moteur (moment « leave » très juste, règle 1.2.5 de missLine) : parmi les autres
+ * propositions de la session, celles qui repartent plus tard du même arrêt (rien de supprimé ensuite), la première
+ * arrivée ; les minutes de plus se comptent entre les heures affichées.
+ */
+export function missedOf(j: Journey, journeys: readonly Journey[]): { arr: number; laterMin: number } | undefined {
+  const first = j.legs.find(isRide);
+  if (!first || first.cancelled) return undefined;
+  let best: number | undefined;
+  for (const x of journeys) {
+    if (x.id === j.id) continue;
+    const k = x.legs.findIndex((r) => r.kind === 'ride' && !r.cancelled && r.dep > first.dep && sameStopOf(r.from, first.from));
+    if (k < 0 || x.legs.slice(k).some((r) => r.kind === 'ride' && r.cancelled)) continue;
+    if (best === undefined || x.arr < best) best = x.arr;
+  }
+  return best === undefined ? undefined : { arr: best, laterMin: Math.floor(best / 60_000) - Math.floor(j.arr / 60_000) };
+}
+
+/** 1.2.10 : distance en mètres d'une position à un chemin (segments, projection locale : quelques kilomètres au plus). */
+export function pathDistanceM(p: LatLon, coords: readonly LatLon[]): number {
+  if (!coords.length) return Infinity;
+  const kx = 111_320 * Math.cos((p.lat * Math.PI) / 180);
+  const ky = 110_540;
+  const xy = (q: LatLon): [number, number] => [(q.lon - p.lon) * kx, (q.lat - p.lat) * ky];
+  if (coords.length === 1) return Math.hypot(...xy(coords[0]));
+  let best = Infinity;
+  for (let i = 1; i < coords.length; i++) {
+    const [ax, ay] = xy(coords[i - 1]);
+    const [bx, by] = xy(coords[i]);
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len = dx * dx + dy * dy;
+    const k = len > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len)) : 0;
+    best = Math.min(best, Math.hypot(ax + k * dx, ay + k * dy));
+  }
+  return best;
 }
 
 

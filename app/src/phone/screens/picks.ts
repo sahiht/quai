@@ -6,8 +6,8 @@
  * ligne : seulement si elle a un arrêt repère), le retrait confirmé dans la page, l'ordre (« Monter », « Descendre »,
  * comme pour les favoris), l'ajout ; LIMITS.stations gares, LIMITS.lines arrêts et LIMITS.lines lignes au plus.
  * 1.2.9 (PRD-1.2.9 § 2.2) : chacune a son écran (#/gares, #/arrets, #/lignes ; picksScreen) : la liste dans l'ordre
- * des lunettes, des rangées compactes qui se déplient, et l'ajout dessous (pick-add.ts). Les sections de l'ancien
- * accueil (stationsSection, linesSection, followsSection) restent jusqu'au nouvel accueil.
+ * des lunettes, des rangées compactes qui se déplient, et l'ajout dessous (pick-add.ts). 1.2.10 : les sections de
+ * l'ancien accueil sont retirées.
  * Règles d'ajout (withStation, withLine) partagées avec l'ajout (pick-add.ts) et « Un endroit ».
  */
 import type { LinePick, Mode, NameLang, Settings, StationPick } from '../../core/api';
@@ -15,7 +15,7 @@ import { lineKey } from '../../core/linepicks';
 import { displayName, kindLabel, OP_NAME } from '../../core/util';
 import { LIMITS, newId } from '../../settings';
 import { header, type PhoneCtx } from '../app';
-import { h, icon, ICON, liveRegion, svgNode } from '../dom';
+import { h, icon, liveRegion, svgNode } from '../dom';
 import { lineName, linePickTitle, lineGoneText, lineLimitText, rankText, removeLineText, removeStationText, removeStopText, stationGoneText, stationLimitText, stopGoneText, stopLimitText, T, typo } from '../text';
 import { autoNearVia, L, nearViaSub, orderText } from '../text-lists';
 import { nextId, switchRow } from '../ui';
@@ -166,7 +166,7 @@ export function followSub(f: LineFollow, lang: NameLang): string {
   return `${OP_NAME[f.op]} · ${ends}`;
 }
 
-/* ------------------------------ Sections de l'accueil ------------------------------ */
+/* ------------------------------ Rubriques ------------------------------ */
 
 /** Un élément d'une rubrique : une gare, un arrêt (ou une ligne à un arrêt, d'avant la 1.2.6), une ligne suivie. */
 export type Pickable = StationPick | LinePick | LineFollow;
@@ -176,7 +176,6 @@ interface SectionSpec<P extends Pickable> {
   title: string;
   empty: string;
   add: string;
-  addHash: string;
   max: number;
   limit: (max: number) => string;
   question: (name: string, p: P) => string;
@@ -188,8 +187,6 @@ interface SectionSpec<P extends Pickable> {
   complete?: (ctx: PhoneCtx, p: P, apply: (title: string, sub?: string) => void) => void;
   /** 1.2.4 : blocs de la section, chacun sous son intitulé et dans son ordre (« Arrêts », puis « Lignes »). */
   groups?: readonly PickGroup<P>[];
-  /** 1.2.6 : texte de « Ouvrir d’office à moins de 300 m » ; null : pas de case (une ligne sans arrêt repère). */
-  nearLabel?: (p: P, lang: NameLang) => string | null;
   /* 1.2.9 : écran de la rubrique (PRD-1.2.9 § 2.2). */
   /** Nom de la liste pour les lecteurs d'écran ; bouton de retrait d'une rangée dépliée (« Retirer cette gare »). */
   listLabel: string;
@@ -207,7 +204,6 @@ const STATIONS: SectionSpec<StationPick> = {
   title: 'Gares de train', // 1.2.6 : le mode dans le titre
   empty: T.noStation,
   add: T.addStation,
-  addHash: '#/gares/ajouter',
   max: LIMITS.stations,
   limit: stationLimitText,
   question: removeStationText,
@@ -230,7 +226,6 @@ const LINES: SectionSpec<LinePick> = {
   title: T.stopsTitle,
   empty: T.noStop,
   add: T.addStop,
-  addHash: '#/arrets/ajouter',
   max: LIMITS.lines,
   limit: stopLimitText,
   question: (name, p) => (p.line ? removeLineText(name) : removeStopText(name)),
@@ -258,7 +253,6 @@ const FOLLOWS: SectionSpec<LineFollow> = {
   title: T.followsTitle,
   empty: T.noFollows,
   add: T.addFollow,
-  addHash: '#/lignes/ajouter',
   max: LIMITS.lines,
   limit: lineLimitText,
   question: (name) => removeLineText(name),
@@ -271,7 +265,6 @@ const FOLLOWS: SectionSpec<LineFollow> = {
     apply(lineName(f), followSub(f, ctx.settings.get().lang));
     if (!f.routes.length) void completeLater(ctx, f);
   },
-  nearLabel: (f, lang) => (f.via ? `${T.pickNear} de ${displayName(f.via.name, lang)}` : null),
   listLabel: L.followsList,
   removeLabel: L.removeFollow,
   count: (s) => (s.follows ?? []).length,
@@ -283,164 +276,6 @@ const FOLLOWS: SectionSpec<LineFollow> = {
 /** Ce qui se voit d'une liste (ordre, noms, terminus) : un changement venu d'ailleurs (lunettes de Quai Web) la redessine. */
 const shape = (list: readonly Pickable[]): string =>
   JSON.stringify(list.map((p) => [p.id, 'areaId' in p ? p.areaId : '', 'line' in p ? p.line ?? '' : '', 'ends' in p ? (p.ends?.length ?? 0) : 0, 'mode' in p ? p.mode ?? '' : '']));
-
-function pickSection<P extends Pickable>(ctx: PhoneCtx, spec: SectionSpec<P>, focus: boolean): HTMLElement {
-  const headingId = `h-${spec.kind}`;
-  // 1.2.4 : une liste par bloc (« Arrêts », « Lignes »), chacune sous son intitulé ; une seule sans blocs (« Gares »).
-  const list = h('div', { class: 'pick-lists' });
-  const live = liveRegion();
-  let ordering = false;
-  let drawn = '';
-  const reorder = h('button', { type: 'button', class: 'btn btn-secondary btn-block' }, T.reorder);
-  const add = h('button', { type: 'button', class: 'btn btn-secondary btn-block', onclick: () => ctx.go(spec.addHash) }, svgNode(ICON.plus), h('span', null, spec.add));
-  const limit = h('p', { class: 'small muted', role: 'status' });
-  /** Confirmation de retrait ouverte (une seule à la fois). */
-  let openBox: (() => void) | null = null;
-
-  /** Retrait confirmé dans la page (S6) : la question et « Retirer », « Annuler » sous la ligne. */
-  const confirmRemove = (li: HTMLElement, p: P, title: () => string, trigger: HTMLButtonElement): void => {
-    openBox?.();
-    const qid = nextId('confirm');
-    const yes = h('button', { type: 'button', class: 'btn btn-danger-solid' }, T.removePick);
-    const no = h('button', { type: 'button', class: 'btn btn-secondary' }, T.cancel);
-    const box = h('div', { class: 'confirm', role: 'group', 'aria-labelledby': qid }, h('p', { id: qid, class: 'confirm-q' }, typo(spec.question(title(), p))), h('div', { class: 'confirm-actions' }, yes, no));
-    const close = (): void => {
-      box.remove();
-      trigger.hidden = false;
-      openBox = null;
-    };
-    openBox = close;
-    trigger.hidden = true;
-    li.appendChild(box);
-    no.focus();
-    no.addEventListener('click', () => {
-      close();
-      trigger.focus();
-    });
-    yes.addEventListener('click', async () => {
-      yes.disabled = true;
-      const name = title();
-      // rang à l'écran (1.2.4 : les blocs « Arrêts » puis « Lignes »), pas dans l'ordre des réglages
-      const at = [...list.querySelectorAll<HTMLElement>('.pick-row')].indexOf(li);
-      openBox = null;
-      await ctx.settings.update((x) => spec.set(x, spec.list(x).filter((y) => y.id !== p.id)));
-      paint();
-      live.say(typo(spec.gone(name, p)));
-      // Le curseur passe à la ligne suivante (ou à la précédente), sinon au bouton d'ajout.
-      const rows = [...list.querySelectorAll<HTMLElement>('.pick-row')];
-      (rows[Math.min(at, rows.length - 1)]?.querySelector<HTMLButtonElement>('.pick-main .btn') ?? add).focus();
-    });
-  };
-
-  const row = (p: P, i: number, all: P[]): HTMLLIElement => {
-    const s = ctx.settings.get();
-    let title = spec.name(p, s.lang);
-    const nameId = nextId('pick');
-    const t1 = h('span', { class: 't1', id: nameId }, title);
-    const t2 = h('span', { class: 't2', hidden: true });
-    const txt = h('span', { class: 'txt' }, t1, t2);
-    const labelled: [HTMLElement, string][] = [];
-    const rename = (better: string, sub?: string): void => {
-      title = better;
-      t1.textContent = better;
-      for (const [el, verb] of labelled) el.setAttribute('aria-label', `${verb} ${better}`);
-      if (sub) {
-        t2.textContent = sub;
-        t2.hidden = false;
-      }
-    };
-    if (ordering) {
-      const move = (dir: -1 | 1) => async () => {
-        await ctx.settings.update((x) => spec.set(x, spec.groups ? moveInGroup(spec.list(x), p.id, dir, spec.groups) : moveById(spec.list(x), p.id, dir)));
-        live.say(typo(rankText(title, i + dir + 1, all.length)));
-        paint({ id: p.id, dir });
-      };
-      const up = h('button', { type: 'button', class: 'btn btn-secondary btn-small', disabled: i === 0, onclick: move(-1) }, T.up);
-      const down = h('button', { type: 'button', class: 'btn btn-secondary btn-small', disabled: i === all.length - 1, onclick: move(1) }, T.down);
-      labelled.push([up, T.up], [down, T.down]);
-      rename(title);
-      spec.complete?.(ctx, p, rename);
-      return h('li', { class: 'order-row', 'data-id': p.id }, spec.icon(p, ctx), txt, h('span', { class: 'order-btns' }, up, down));
-    }
-    const remove = h('button', { type: 'button', class: 'btn btn-danger btn-small' }, T.removePick);
-    labelled.push([remove, T.removePick]);
-    const nearText = spec.nearLabel ? spec.nearLabel(p, s.lang) : T.pickNear;
-    const near = h('input', { type: 'checkbox', checked: !!p.near, 'aria-describedby': nameId });
-    near.addEventListener('change', () => void ctx.settings.update((x) => spec.set(x, withNear(spec.list(x), p.id, near.checked))));
-    const li = h('li', { class: 'pick-row', 'data-id': p.id }, h('div', { class: 'pick-main' }, spec.icon(p, ctx), txt, remove), nearText ? h('label', { class: 'pick-near' }, near, h('span', null, nearText)) : null);
-    remove.addEventListener('click', () => confirmRemove(li, p, () => title, remove));
-    rename(title);
-    spec.complete?.(ctx, p, rename);
-    // 1.2.6 : un arrêt montre ses lignes, chacune à sa couleur
-    if (spec.kind === 'lines' && !(p as LinePick).line) {
-      const lp = p as LinePick;
-      void linesAtStop(ctx, lp.areaId).then((ls) => {
-        if (ls.length) txt.append(badgeRow(ctx, lp.op, ls));
-      });
-    }
-    return li;
-  };
-
-  const paint = (moved?: { id: string; dir: -1 | 1 }): void => {
-    const items = spec.list(ctx.settings.get());
-    drawn = shape(items);
-    openBox = null;
-    const parts = spec.groups ? spec.groups.map((g) => ({ label: g.label, list: items.filter((p) => g.has(p)) })).filter((x) => x.list.length) : [{ label: '', list: items }];
-    // « Changer l'ordre » : dans un bloc d'au moins deux éléments
-    const movable = parts.some((x) => x.list.length > 1);
-    if (!movable) ordering = false;
-    const els: HTMLElement[] = [];
-    for (const part of parts) {
-      if (part.label) els.push(h('h3', { class: 'pick-group' }, part.label));
-      els.push(h('ul', { class: `list box pick-list${ordering ? ' ordering' : ''}` }, ...part.list.map((p, i) => row(p, i, part.list))));
-    }
-    if (!items.length) els.splice(0, els.length, h('ul', { class: 'list box pick-list' }, h('li', { class: 'small empty-row' }, spec.empty)));
-    list.replaceChildren(...els);
-    reorder.hidden = !movable;
-    reorder.textContent = ordering ? T.done : T.reorder;
-    reorder.classList.toggle('btn-primary', ordering);
-    reorder.classList.toggle('btn-secondary', !ordering);
-    const full = items.length >= spec.max;
-    add.hidden = ordering;
-    add.disabled = full;
-    limit.textContent = full && !ordering ? typo(spec.limit(spec.max)) : '';
-    limit.hidden = !limit.textContent;
-    if (moved) {
-      // Le curseur suit l'élément déplacé (même bouton, ou l'autre s'il est désormais grisé).
-      const li = list.querySelector<HTMLElement>(`[data-id="${CSS.escape(moved.id)}"]`);
-      const btns = li ? [...li.querySelectorAll<HTMLButtonElement>('button')] : [];
-      const same = btns[moved.dir < 0 ? 0 : 1];
-      (same && !same.disabled ? same : btns.find((b) => !b.disabled))?.focus();
-    }
-  };
-  reorder.addEventListener('click', () => {
-    ordering = !ordering;
-    live.say('');
-    paint();
-    if (!ordering) reorder.focus();
-  });
-  paint();
-
-  const section = h('section', { class: 'home-picks', 'aria-labelledby': headingId }, h('h2', { id: headingId, 'data-focus': focus }, spec.title), list, reorder, add, limit, live.el);
-  // Gare gardée ou retirée ailleurs (★ des départs dans les lunettes de Quai Web, à côté) : la liste suit.
-  const stop = ctx.settings.subscribe((s) => {
-    if (!section.isConnected) {
-      stop();
-      return;
-    }
-    if (shape(spec.list(s)) !== drawn) paint();
-  });
-  return section;
-}
-
-/** Section « Gares de train » de l'accueil ; `focus` : son titre reçoit le curseur (#/gares). */
-export const stationsSection = (ctx: PhoneCtx, focus = false): HTMLElement => pickSection(ctx, STATIONS, focus);
-
-/** Section « Arrêts de bus, tram, métro » de l'accueil (1.2.6 ; avant : « Bus, tram, métro ») ; `focus` : #/arrets. */
-export const linesSection = (ctx: PhoneCtx, focus = false): HTMLElement => pickSection(ctx, LINES, focus);
-
-/** 1.2.6 : section « Lignes de bus, tram, métro » de l'accueil ; `focus` : son titre reçoit le curseur (#/lignes). */
-export const followsSection = (ctx: PhoneCtx, focus = false): HTMLElement => pickSection(ctx, FOLLOWS, focus);
 
 /* ------------------------------ 1.2.9 : écrans Gares, Arrêts, Lignes ------------------------------ */
 

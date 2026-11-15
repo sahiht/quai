@@ -36,12 +36,12 @@ const stopAnswer = (fav: Favorite, departures: Departure[], now = NOW): Favorite
 });
 
 /**
- * Réponses de l'accueil cible, à l'heure de la demande : Bureau « maintenant » (arrivée 47 min plus tard), Mama « dans
+ * Réponses de l'accueil cible, à l'heure de la demande : Bureau « maintenant » (arrivée 47 min plus tard), Parc « dans
  * 4 min » (71 min), École à 21:07, Maison « tu y es » (règle 5, jamais sur l'accueil).
  */
 function answers(fav: Favorite, now: number): FavoriteAnswer | undefined {
   if (fav.id === 'fav-bureau') return tripAnswer(fav, door('j-bureau', now, now + 47 * MIN));
-  if (fav.id === 'fav-mama') return tripAnswer(fav, door('j-mama', now + 4 * MIN, now + 71 * MIN));
+  if (fav.id === 'fav-parc') return tripAnswer(fav, door('j-parc', now + 4 * MIN, now + 71 * MIN));
   if (fav.id === 'fav-ecole') return tripAnswer(fav, door('j-ecole', now + 20 * MIN, now + 50 * MIN));
   if (fav.id === 'fav-maison') return { favoriteId: fav.id, kind: 'trip', state: 'here', updatedAt: now };
   return undefined;
@@ -55,22 +55,22 @@ const sections = (calls?: string[]) => ({
     id === LINES.w.areaId ? lineBoardOf(id, 'Braine-l’Alleud Merbraine', 'W', [{ head: 'Bruxelles Midi', departures: [dep(n, 4), dep(n, 18)] }, { head: 'Braine-l’Alleud Gare', departures: [dep(n, 9)] }]) : undefined,
 });
 
-const FOUR = [PLACES.maison, PLACES.bureau, PLACES.mama, PLACES.ecole];
+const FOUR = [PLACES.maison, PLACES.bureau, PLACES.parc, PLACES.ecole];
 const full = (patch = {}) => settingsWith(FOUR, { stations: [STATIONS.braine], lines: [LINES.w], ...patch });
 const ready = (s: Screen) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l)) && s.lines.includes('Autour de moi   9 arrêts');
-const HOME = ['Favoris   4', 'Bureau   maintenant → 21:34', 'Mama   dans 4 min → 21:58', 'École   21:07 → 21:37', '', 'Autour de moi   9 arrêts', 'Gares de train   1 gare', 'Arrêts de bus, tram, métro   à choisir', 'Lignes de bus, tram, métro   1 ligne'];
+const HOME = ['Favoris   4', 'Bureau   maintenant → 21:34', 'Parc   dans 4 min → 21:58', 'École   21:07 → 21:37', '', 'Autour de moi   9 arrêts', 'Gares de train   1 gare', 'Arrêts de bus, tram, métro   à choisir', 'Lignes de bus, tram, métro   1 ligne'];
 /** 1.2.6 (PRD-1.2.6 § 1) : les trois rubriques, toujours là, en dernier. */
 const SECTIONS = ['Gares de train', 'Arrêts de bus, tram, métro', 'Lignes de bus, tram, métro'];
 const titleOf = (i: { a?: string; segs?: { t: string }[] }) => i.a || (i.segs ?? []).map((g) => g.t).join(' ');
 
 describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () => {
   it('« Favoris   4 », 3 favoris en retrait, ligne vide, « Autour de moi », « Gares » et « Bus, tram, métro » ; « Aller à… » n’existe plus', async () => {
-    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.9' }), core: (now) => stubCore(now, { answers, ...sections() }) });
+    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.10' }), core: (now) => stubCore(now, { answers, ...sections() }) });
     const s = await h.until((x) => ready(x) && x.shown?.length === 3 && x.lines.at(-1) === 'Lignes de bus, tram, métro   1 ligne');
     expect(s.title).toBe('Quai');
     // Quai déjà utilisé (mise à jour) : pas d'aide des gestes, pas de pied du tout (9 lignes sous le titre)
     expect(s.lines).toEqual(HOME);
-    expect(s.shown).toEqual(['fav-bureau', 'fav-mama', 'fav-ecole']);
+    expect(s.shown).toEqual(['fav-bureau', 'fav-parc', 'fav-ecole']);
     // curseur sur le premier favori montré : un toucher ouvre le trajet le plus probable
     expect(s.sel).toBe(1);
     expect(s.lines.join('\n')).not.toMatch(/Aller à|horaire prévu|~/);
@@ -83,7 +83,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
   });
 
   it('relief de la 1.2.1 : titres et textes de droite au plus clair, favoris en retrait au niveau 2', async () => {
-    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.9' }), core: (now) => stubCore(now, { answers, ...sections() }) });
+    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.10' }), core: (now) => stubCore(now, { answers, ...sections() }) });
     await h.until((x) => ready(x) && x.shown?.length === 3 && x.lines.at(-1) === 'Lignes de bus, tram, métro   1 ligne');
     const cs = h.sent();
     const by = (n: string) => cs.find((c) => c.name === n)!;
@@ -94,7 +94,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
     expect(rowsOf(by('colC')).map((l) => l.trim())).toEqual(['4', '', '', '', '', '9 arrêts', '1 gare', 'à choisir', '1 ligne']);
     expect(by('colC').level).toBe(4);
     const favs = rowsOf(by('colB'));
-    expect(favs.slice(1, 4).map((l) => l.replace(/ {2,}/g, ' | '))).toEqual(['Bureau | maintenant → 21:34', 'Mama | dans 4 min → 21:58', 'École | 21:07 → 21:37']);
+    expect(favs.slice(1, 4).map((l) => l.replace(/ {2,}/g, ' | '))).toEqual(['Bureau | maintenant → 21:34', 'Parc | dans 4 min → 21:58', 'École | 21:07 → 21:37']);
     expect(by('colB')).toMatchObject({ x: GEO.X_TEXT + HOME_INDENT, level: 2 });
     // les textes de droite des rubriques finissent au bord, comme les nombres et les réponses des favoris
     const edge = (c: { x: number }, line: string) => c.x + textWidth(line);
@@ -106,7 +106,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
   });
 
   it('toucher « Gares de train », « Arrêts… » et « Lignes… » ouvre leur écran ; la ligne vide ne se sélectionne pas', async () => {
-    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.9', lines: [LINES.w, LINES.gdnAll] }), core: (now) => stubCore(now, { answers, ...sections() }) });
+    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.10', lines: [LINES.w, LINES.gdnAll] }), core: (now) => stubCore(now, { answers, ...sections() }) });
     await h.until((x) => ready(x) && x.shown?.length === 3);
     // École, puis « Autour de moi » (la ligne vide est sautée), « Gares de train », « Arrêts… », « Lignes… »
     await h.gesture('down', 'down', 'down');
@@ -128,7 +128,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
     // aide des gestes passée : l'accueil n'a pas de ligne de pied ; une ligne ajoutée ferait sortir la dernière (revue)
     const kv = createKV(memoryBackend());
     await kv.set(FIRST_USE_KEY, String(NOW - 8 * 86_400_000));
-    const h = await setup({ now: NOW, kv, settings: settingsWith(FOUR, { seenVersion: '1.2.9' }), core: (now) => stubCore(now, { answers }) });
+    const h = await setup({ now: NOW, kv, settings: settingsWith(FOUR, { seenVersion: '1.2.10' }), core: (now) => stubCore(now, { answers }) });
     const s = await h.until((x) => ready(x) && x.shown?.length === 3);
     expect(s.lines.slice(-3)).toEqual(['Gares de train   à choisir', 'Arrêts de bus, tram, métro   à choisir', 'Lignes de bus, tram, métro   à choisir']);
     expect(s.title).toBe('Quai');
@@ -150,7 +150,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
 
   it('§ 1.3, Quai Web : le toucher ouvre directement l’ajout dans l’onglet Réglages (#/gares/ajouter, #/lignes/ajouter)', async () => {
     const opened: string[] = [];
-    const h = await setup({ now: NOW, web: true, opened, settings: settingsWith(FOUR, { seenVersion: '1.2.9' }), core: (now) => stubCore(now, { answers }) });
+    const h = await setup({ now: NOW, web: true, opened, settings: settingsWith(FOUR, { seenVersion: '1.2.10' }), core: (now) => stubCore(now, { answers }) });
     const s = await h.until((x) => ready(x) && x.shown?.length === 3);
     expect(s.lines.slice(-3)).toEqual(['Gares de train   à choisir', 'Arrêts de bus, tram, métro   à choisir', 'Lignes de bus, tram, métro   à choisir']);
     await h.gesture('down', 'down', 'down', 'down', 'tap', 'down', 'tap', 'down', 'tap');
@@ -161,7 +161,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
 
   it('PRD-1.2.4 § 3 : à droite, le contenu des rubriques ; l’accueil ne demande aucun départ de gare ni de ligne', async () => {
     const calls: string[] = [];
-    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.9', stations: [STATIONS.namur, STATIONS.braine] }), core: (now) => stubCore(now, { answers, ...sections(calls) }) });
+    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.2.10', stations: [STATIONS.namur, STATIONS.braine] }), core: (now) => stubCore(now, { answers, ...sections(calls) }) });
     const s = await h.until((x) => ready(x) && x.shown?.length === 3);
     expect(s.lines.slice(-3)).toEqual(['Gares de train   2 gares', 'Arrêts de bus, tram, métro   à choisir', 'Lignes de bus, tram, métro   1 ligne']);
     h.advance(30_000);
@@ -170,7 +170,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
     expect(calls.filter((c) => c.startsWith('board:') || c.startsWith('lineBoard:'))).toEqual([]);
     h.c.stop();
     // sans position : le même contenu, rien à calculer
-    const n = await setup({ now: NOW, pos: null, settings: full({ seenVersion: '1.2.9', stations: [STATIONS.namur, STATIONS.braine] }), core: (now) => stubCore(now, { answers, ...sections() }) });
+    const n = await setup({ now: NOW, pos: null, settings: full({ seenVersion: '1.2.10', stations: [STATIONS.namur, STATIONS.braine] }), core: (now) => stubCore(now, { answers, ...sections() }) });
     const ns = await n.until((x) => x.screen === 'home' && x.lines.includes('Autour de moi   sans position'));
     expect(ns.lines.slice(-3)).toEqual(['Gares de train   2 gares', 'Arrêts de bus, tram, métro   à choisir', 'Lignes de bus, tram, métro   1 ligne']);
     n.c.stop();
@@ -195,7 +195,7 @@ const placeIn = (fav: Favorite, now: number, leave: number, arr: number): Favori
 
 describe('REVUE-USAGE n° 1 : 3 favoris dans les situations de la revue, jamais de défilement', () => {
   const extra: Favorite = { kind: 'place', id: 'fav-autre', label: 'Piscine', lat: 50.7, lon: 4.4, propose: 'never' };
-  const four = (now: number): FavoriteEntry[] => [placeIn(PLACES.bureau, now, 0, 47), placeIn(PLACES.mama, now, 4, 71), placeIn(PLACES.ecole, now, 20, 50), placeIn(extra, now, 30, 60)];
+  const four = (now: number): FavoriteEntry[] => [placeIn(PLACES.bureau, now, 0, 47), placeIn(PLACES.parc, now, 4, 71), placeIn(PLACES.ecole, now, 20, 50), placeIn(extra, now, 30, 60)];
   const favs = [...FOUR, extra];
   const running = { title: 'Vers le bureau', next: 'IC 08:01 voie 3', favoriteId: 'fav-bureau' };
   const holiday = at('2026-11-11', 7, 31);
@@ -230,7 +230,7 @@ describe('REVUE-USAGE n° 1 : 3 favoris dans les situations de la revue, jamais 
 
   it('« En cours » remplace la ligne de son favori : « En cours : vers le bureau », pas de « Bureau » dessous', () => {
     const v = homeView({ favorites: four(NOW), nearbyCount: 9, gestureHelp: false, running }, ctxAt(NOW, favs));
-    expect(lines(v).slice(0, 5)).toEqual(['En cours : vers le bureau   IC 08:01 voie 3', 'Favoris   5', 'Mama   dans 4 min → 21:58', 'École   21:07 → 21:37', 'Piscine   21:17 → 21:47']);
+    expect(lines(v).slice(0, 5)).toEqual(['En cours : vers le bureau   IC 08:01 voie 3', 'Favoris   5', 'Parc   dans 4 min → 21:58', 'École   21:07 → 21:37', 'Piscine   21:17 → 21:47']);
     expect(v.items[0].action).toEqual({ kind: 'resume' });
   });
 
@@ -256,7 +256,7 @@ describe('REVUE-USAGE n° 1 : 3 favoris dans les situations de la revue, jamais 
   it('curseur à l’ouverture : sur « En cours » s’il y est, sinon sur le premier favori montré, sinon la 1re ligne', () => {
     const ctx = ctxAt(NOW, FOUR);
     expect(homeView({ favorites: [placeIn(PLACES.bureau, NOW, 0, 47)], nearbyCount: 9 }, ctx).initialSel).toBe(1);
-    expect(homeView({ favorites: [placeIn(PLACES.mama, NOW, 0, 47)], nearbyCount: 9, running }, ctx).initialSel).toBeUndefined();
+    expect(homeView({ favorites: [placeIn(PLACES.parc, NOW, 0, 47)], nearbyCount: 9, running }, ctx).initialSel).toBeUndefined();
     expect(homeView({ favorites: [], nearbyCount: 9 }, ctx).initialSel).toBeUndefined();
     expect(page(homeView({ favorites: [placeIn(PLACES.bureau, NOW, 0, 47)], nearbyCount: 9 }, ctx)).sel).toBe(1);
   });
@@ -286,7 +286,7 @@ describe('aide des gestes les 7 premiers jours, Quai Web', () => {
     const day8 = await setup({ now: NOW + 8 * 86_400_000, settings: day0.settings.get(), kv, core: (now) => stubCore(now, { answers, ...sections() }) });
     const s8 = await day8.until((x) => ready(x) && x.shown?.length === 3);
     expect(s8.lines.some((l) => l.startsWith('△▽'))).toBe(false);
-    // du premier favori : Mama, École, puis « Autour de moi », qui garde son aide
+    // du premier favori : Parc, École, puis « Autour de moi », qui garde son aide
     await day8.gesture('down', 'down', 'down', 'tap');
     expect((await day8.until((x) => x.screen === 'nearby')).lines.at(-1)).toBe('△▽ arrêt   toucher : départs   double : retour');
     day8.c.stop();

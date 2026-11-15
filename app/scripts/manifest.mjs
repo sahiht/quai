@@ -30,12 +30,12 @@ export function readManifestVersion(file, fallback = '1.0.0') {
 export const APP_VERSION = readManifestVersion(new URL('../app.json', import.meta.url));
 
 export const NETWORK_DESC =
-  'Télécharge les horaires préparés chaque nuit (GitHub Pages, par zones d’environ 2 km) ' +
+  'Télécharge les horaires et les chemins à pied préparés chaque nuit (GitHub Pages, par zones de 2 km) ' +
   'et, depuis ton relais personnel, le temps réel (retards, voies, suppressions), la pluie prévue sur une carte fixe de la Belgique et les adresses : ' +
   'seul le texte tapé est envoyé, jamais la position.';
 export const LOCATION_DESC =
-  'Trouve les arrêts proches et propose le bon trajet. La position exacte reste sur le téléphone : ' +
-  'l’appli ne télécharge que les horaires de ta zone (environ 2 km) et n’envoie jamais ta position au relais.';
+  'Trouve les arrêts proches, propose le bon trajet et te guide pendant le trajet. La position exacte reste sur le téléphone : ' +
+  'l’appli ne télécharge que les horaires et les chemins de ta zone (environ 2 km) et n’envoie jamais ta position au relais.';
 
 /** Erreur de configuration, message en français destiné à l'utilisateur. */
 export class ConfigError extends Error {}

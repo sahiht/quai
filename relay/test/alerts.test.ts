@@ -10,6 +10,9 @@ const SNCB_ALERT = {
   stops: ['8811601'],
   header: { fr: 'Travaux à Ottignies : quelques minutes de retard possibles', nl: 'Werken in Ottignies: enkele minuten vertraging mogelijk' },
   active: [[sec('2026-11-09T00:00:00+01:00'), sec('2026-11-15T23:59:00+01:00')]],
+  // 1.2.10 : cause et effet du flux (la description, identique au titre, n'est pas répétée)
+  cause: 'MAINTENANCE',
+  effect: 'SIGNIFICANT_DELAYS',
 };
 
 describe('/api/alerts (fixtures)', () => {
@@ -37,6 +40,8 @@ describe('/api/alerts (fixtures)', () => {
       stops: [],
       header: { fr: 'Ligne 51 déviée rue de Fer' },
       active: [[sec('2026-11-09T00:00:00+01:00'), sec('2026-11-20T23:59:00+01:00')]],
+      cause: 'CONSTRUCTION',
+      effect: 'DETOUR',
     }]);
     expect((await alerts('/api/alerts?op=tec&routes=N4')).body.alerts).toEqual([]);
   });
@@ -124,6 +129,96 @@ describe('/api/alerts : cas limites (flux construits)', () => {
       const r = await alerts(`/api/alerts${q}`);
       expect(r.status, q).toBe(400);
       expect(typeof r.body.error).toBe('string');
+    }
+  });
+});
+
+/**
+ * 1.2.10 (PRD-1.2.10 § 6) : formats réels du TEC (relevés le 12/11/2026 dans les réponses de Transitous, qui lisent le
+ * même flux GTFS-RT) : titre « Lieu | Cause | Lignes », cause et effet renseignés ; trois alertes sans ligne ni arrêt
+ * (agence seule : « Binche | Travaux réfection rue Zéphirin Fontaine | Ligne E44 » était posée sur tous les bus du TEC,
+ * le W de Waterloo compris), d'autres rattachées à leur ligne.
+ */
+describe('/api/alerts 1.2.10 : cause, effet, description, portée, alertes à venir', () => {
+  const NOW = 1794309000; // 2026-11-10T12:10:00+01:00 (horloge de makeCtx)
+  const tr = (text: string, language = 'fr') => ({ translation: [{ text, language }] });
+  const feed = {
+    header: header(),
+    entity: [
+      {
+        id: 'binche',
+        alert: {
+          activePeriod: [{ start: NOW - 86_400, end: NOW + 10 * 86_400 }],
+          informedEntity: [{ agencyId: 'TEC' }],
+          cause: 'CONSTRUCTION',
+          effect: 'DETOUR',
+          headerText: tr('Binche | Travaux réfection rue Zéphirin Fontaine | Ligne E44'),
+          descriptionText: tr('En raison des travaux, la ligne E44 est déviée sans arrêt perturbé.'),
+        },
+      },
+      {
+        id: 'ceroux',
+        alert: {
+          informedEntity: [{ routeId: 'gr:tec:B0039-23353' }],
+          cause: 'CONSTRUCTION',
+          effect: 'MODIFIED_SERVICE',
+          headerText: tr('Céroux | Travaux | Ligne 39'),
+          descriptionText: tr(`Suite aux travaux qui ont lieu Grand Rue et Route de Beaumont à Céroux, certains arrêts ne sont pas desservis. ${'Arrêts non desservis : Beaumont. '.repeat(12)}`),
+        },
+      },
+      {
+        id: 'demain',
+        alert: {
+          activePeriod: [{ start: NOW + 3 * 3600, end: NOW + 5 * 3600 }],
+          informedEntity: [{ stopId: 'gs:tec:Bwatgar1' }],
+          cause: 'CONSTRUCTION',
+          effect: 'STOP_MOVED',
+          headerText: tr('Waterloo | Travaux | Ligne W'),
+        },
+      },
+      { id: 'sans-cause', alert: { informedEntity: [{ routeId: 'N51' }], headerText: tr('Ligne 51 déviée rue de Fer') } },
+      { id: 'lointaine', alert: { activePeriod: [{ start: NOW + 3 * 86_400 }], informedEntity: [{ stopId: 'Bwatgar1' }], headerText: tr('Waterloo | Travaux | Ligne W') } },
+    ],
+  };
+  const route = feedRoute(feed);
+  const get = async (q: string) => (await alerts(`/api/alerts?op=tec${q}`, makeCtx({ route }))).body.alerts as (AlertsResponse['alerts'][number] & { cause?: string; effect?: string; desc?: Record<string, string>; global?: boolean })[];
+
+  it('alerte de l’agence seule : marquée global (l’appli décide), rendue pour tout filtre comme avant', async () => {
+    const r = await get('&routes=B0536-23747&stops=Bwatgar1');
+    const binche = r.find((a) => a.id === 'binche');
+    expect(binche).toMatchObject({ global: true, routes: [], stops: [], cause: 'CONSTRUCTION', effect: 'DETOUR' });
+    expect(binche?.header).toEqual({ fr: 'Binche | Travaux réfection rue Zéphirin Fontaine | Ligne E44' });
+    expect(binche?.desc).toEqual({ fr: 'En raison des travaux, la ligne E44 est déviée sans arrêt perturbé.' });
+    // une alerte rattachée à sa ligne n'est jamais « global »
+    expect((await get('&routes=B0039-23353')).find((a) => a.id === 'ceroux')?.global).toBeUndefined();
+  });
+
+  it('cause et effet seulement s’ils sont dans le flux ; description coupée à 300 caractères', async () => {
+    const all = await get('');
+    const ceroux = all.find((a) => a.id === 'ceroux');
+    expect(ceroux).toMatchObject({ cause: 'CONSTRUCTION', effect: 'MODIFIED_SERVICE', routes: ['B0039-23353'] });
+    expect(ceroux?.desc?.fr.length).toBe(300);
+    const plain = all.find((a) => a.id === 'sans-cause');
+    expect(plain && 'cause' in plain).toBe(false);
+    expect(plain && 'effect' in plain).toBe(false);
+    expect(plain && 'desc' in plain).toBe(false);
+  });
+
+  it('until : aussi les alertes qui commencent avant cette heure (48 h au plus) ; sans until : actives maintenant', async () => {
+    expect((await get('&stops=Bwatgar1')).map((a) => a.id)).toEqual(['binche']);
+    expect((await get(`&stops=Bwatgar1&until=${NOW + 2 * 3600}`)).map((a) => a.id)).toEqual(['binche']);
+    expect((await get(`&stops=Bwatgar1&until=${NOW + 4 * 3600}`)).map((a) => a.id)).toEqual(['binche', 'demain']);
+    // une heure passée vaut maintenant ; au-delà de 48 h, ramenée à 48 h
+    expect((await get(`&stops=Bwatgar1&until=${NOW - 3600}`)).map((a) => a.id)).toEqual(['binche']);
+    expect((await get(`&stops=Bwatgar1&until=${NOW + 400 * 86_400}`)).map((a) => a.id)).toEqual(['binche', 'demain']);
+    expect((await get(`&stops=Bwatgar1&until=${NOW + 4 * 86_400}`)).map((a) => a.id)).not.toContain('lointaine');
+  });
+
+  it('until invalide : 400 en français', async () => {
+    for (const q of ['&until=demain', '&until=-5', '&until=1.5']) {
+      const r = await alerts(`/api/alerts?op=tec${q}`, makeCtx({ route }));
+      expect(r.status, q).toBe(400);
+      expect(r.body.error).toMatch(/until/);
     }
   });
 });

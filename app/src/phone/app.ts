@@ -9,6 +9,7 @@
  * #/lignes/ajouter/ligne) ajoute une ligne, #/arrets/ajouter (et #/lignes/ajouter/arret) un arrêt.
  * 1.2.9 (PRD-1.2.9 § 2) : l'accueil en miroir de celui des lunettes ; #/reglages, les autres réglages derrière un seul
  * bouton (Affichage, Alertes, Données, Position et langue et Trajets reviennent à Réglages).
+ * 1.2.10 (PRD-1.2.10 § 4.4) : #/affichage/ouverture, « À l’ouverture de Quai » sur son écran (retour à Affichage).
  */
 import type { Core, GlassesApi, Meta } from '../core/api';
 import type { Freshness } from '../glasses/controller';
@@ -19,7 +20,7 @@ import { APP_VERSION, compareVersions } from '../version';
 import { h, ICON, svgNode } from './dom';
 import { alertsScreen } from './screens/alerts';
 import { dataScreen } from './screens/data';
-import { displayScreen } from './screens/display';
+import { displayScreen, openingScreen } from './screens/display';
 import { favoriteEditScreen, fixedTripScreen, newFavoriteScreen } from './screens/favorite-edit';
 import { favoritesScreen } from './screens/favorites';
 import { homeScreen } from './screens/home';
@@ -54,7 +55,7 @@ export interface PhoneCtx {
   /**
    * Bannière de l'accueil après la mise à jour (T1), une fois : visible si les réglages lus au lancement venaient
    * d'une version antérieure à NEWS_SINCE (seenVersion non vide), jusqu'à « OK ». Le téléphone n'écrit pas
-   * seenVersion pour elle : les lunettes s’en servent pour leur message « Quai 1.2.9 ».
+   * seenVersion pour elle : les lunettes s’en servent pour leur message « Quai 1.2.10 ».
    */
   news?: NewsState;
 }
@@ -93,7 +94,8 @@ const SCREENS: Record<string, Route> = {
   lignes: pickRoute('follows'),
   reglages: { screen: settingsScreen, grey: true, title: T.settings },
   trajets: { screen: tripsScreen, title: T.trips },
-  affichage: { screen: displayScreen, grey: true, title: 'Affichage' },
+  // 1.2.10 : #/affichage/ouverture : « À l’ouverture de Quai » sur son écran
+  affichage: { screen: (c, s) => (s[0] === 'ouverture' ? openingScreen(c) : displayScreen(c)), grey: true, title: (_c, s) => (s[0] === 'ouverture' ? T.opening : T.display) },
   alertes: { screen: alertsScreen, title: 'Alertes' },
   donnees: { screen: dataScreen, title: 'Données' },
   recherche: { screen: searchScreen, grey: true, title: 'Rechercher un trajet' },
@@ -126,8 +128,8 @@ export function parseHash(hash: string): { name: string; sub: string[]; params: 
   return { name: parts[0] ?? '', sub: parts.slice(1), params: new URLSearchParams(query) };
 }
 
-/** Version qui a apporté les nouveautés de la bannière (PRD-1.2.9 § 4) : la 1.2.9. */
-export const NEWS_SINCE = '1.2.9';
+/** Version qui a apporté les nouveautés de la bannière (PRD-1.2.10 § 7) : la 1.2.10. */
+export const NEWS_SINCE = '1.2.10';
 
 /** Bannière « Nouveau » de l'accueil : visible ou non, « OK », et ses lignes (newsLines). */
 export interface NewsState {
@@ -137,9 +139,9 @@ export interface NewsState {
 }
 
 /**
- * Bannière « Nouveau » : une fois, au passage d’une version antérieure à la 1.2.9 (réglages vus avant 1.2.9 au
- * lancement), jusqu’à « OK », comme le message « Quai 1.2.9 » des lunettes ; jamais après une installation neuve.
- * `app` : la version de l'appli.
+ * Bannière « Nouveau » : une fois, au passage d’une version antérieure à NEWS_SINCE (réglages vus avant elle au
+ * lancement), jusqu’à « OK », comme le message « Quai 1.2.10 » des lunettes ; jamais après une installation neuve, ni
+ * tant que l'appli (`app`) n'est pas elle-même dans cette version.
  */
 export function newsState(seenAtStart: string, since = NEWS_SINCE, app = APP_VERSION, web = false): NewsState {
   let shown = !!seenAtStart && compareVersions(seenAtStart, since) < 0 && compareVersions(app, since) >= 0;
