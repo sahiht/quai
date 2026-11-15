@@ -441,9 +441,10 @@ function bands(s: LoggedScreen): Band[] | null {
   } else {
     hint = lines.pop();
     // 1.2.10 (PRD-1.2.10 § 2) : « Favoris », la ligne du détail du favori choisi, fixe en bas au-dessus des aides
-    // (journalisée dans `detail`), à la place de la note
+    // (journalisée dans `detail`, espaces insécables comprises, alors que les lignes du journal en sont nettoyées),
+    // à la place de la note
     const detail = (s as LoggedScreen & { detail?: unknown }).detail;
-    if (s.screen === 'favorites' && typeof detail === 'string' && lines[lines.length - 1] === detail) note = lines.pop();
+    if (s.screen === 'favorites' && typeof detail === 'string' && lines[lines.length - 1] === detail.replace(/[\u00a0\u202f]/g, ' ')) note = lines.pop();
     else note = lines.length && (board ? NOTE_BOARD : NOTE).test(lines[lines.length - 1]) ? lines.pop() : undefined;
     // ligne de note réservée (layout.ts, reserveNote) : partout sauf « Autres trajets », les menus et « Dans le train »
     const reserve = !['others', 'keepLine', 'followed', 'train', 'follows'].includes(s.screen);

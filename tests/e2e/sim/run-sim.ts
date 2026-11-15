@@ -38,7 +38,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { APP, buildFixtureData, ROOT, run, startDataServer, startStack, type Proc, type Stack } from '../lib/stack';
+import { APP, buildFixtureData, buildWalkTiles, ROOT, run, startDataServer, startStack, type Proc, type Stack } from '../lib/stack';
 import { litPixels, Sim, startStatic, type Screen } from '../lib/sim';
 import { Chrome, type GlassesScreen, type Page } from './cdp';
 import { alphaIn, checkPixels, HOME_INDENT, levels, lineSegments, SEG_ROW, trainRowAlpha, truncatedLines } from './pixels';
@@ -485,6 +485,8 @@ function reliefIssues(kind: 'home' | 'others' | 'lines' | 'trainRun', s: Screen,
 
 let stack: Stack;
 let night: Proc;
+/** 1.2.10 : mêmes données avec les tuiles piétonnes de l'extrait OSM des fixtures (scénarios s1210 de Quai Web). */
+let walkNight: Proc | undefined;
 let web: { url: string; close(): Promise<void> };
 let webApp: { url: string; close(): Promise<void> };
 let sim: Sim;
@@ -869,7 +871,7 @@ async function s1(): Promise<void> {
     check(/^Bureau ! {3}dans [34] min → 08:58$/.test(s.lines[0] ?? ''), `Bureau « ${s.lines[0]} » (« ! » : voie modifiée, PRD-1.2.10 § 2)`);
     check(/^Vers Gand-Saint-Pierre {3}\d\d:\d\d → \d\d:\d\d$/.test(s.lines[1] ?? ''), `Gand « ${s.lines[1]} »`);
     check(s.lines[2] === 'Maison   tu y es', `« ${s.lines[2]} »`);
-    check(field<string>(s, 'detail') === 'IC 07:42 +2 voie 6 !, 1 changement' && bottom(s) === 'IC 07:42 +2 voie 6 !, 1 changement', `détail en bas « ${field<string>(s, 'detail')} » / « ${bottom(s)} » (PRD-1.2.10 § 2)`);
+    check(nbn(field<string>(s, 'detail')) === 'IC 07:42 +2 voie 6 !, 1 changement' && bottom(s) === 'IC 07:42 +2 voie 6 !, 1 changement', `détail en bas « ${field<string>(s, 'detail')} » / « ${bottom(s)} » (PRD-1.2.10 § 2)`);
     common(s, H.favorites);
     return { screen: s, tour: ['glasses-favorites.png', '« Favoris » (1.2.10) : une ligne par favori, le détail du favori choisi en bas ; « Maison   tu y es »'] };
   });
@@ -1822,7 +1824,7 @@ async function news(): Promise<void> {
       await sim.select(0);
       await sim.input('click');
       const p = await sim.waitScreen(is('favorites', (x) => loaded(x) && x.lines.length >= 4), 25_000, '« Favoris »');
-      check(/^Bureau ! {3}dans [34] min → 08:58$/.test(p.lines[0] ?? '') && p.lines.includes('Maison   tu y es') && p.lines.includes('Autre adresse   sur le téléphone') && field<string>(p, 'detail') === 'IC 07:42 +2 voie 6 !, 1 changement', `lieux devenus favoris (une ligne chacun, le détail en bas, PRD-1.2.10 § 2), « Autre adresse » : ${JSON.stringify(p.lines)}`);
+      check(/^Bureau ! {3}dans [34] min → 08:58$/.test(p.lines[0] ?? '') && p.lines.includes('Maison   tu y es') && p.lines.includes('Autre adresse   sur le téléphone') && nbn(field<string>(p, 'detail')) === 'IC 07:42 +2 voie 6 !, 1 changement', `lieux devenus favoris (une ligne chacun, le détail en bas, PRD-1.2.10 § 2), « Autre adresse » : ${JSON.stringify(p.lines)}`);
       common(p, H.favorites);
       return { screen: p };
     });
@@ -3962,7 +3964,7 @@ function ctx1210(): Ctx1210 {
     record: (r) => {
       results.push(r as StepResult);
     },
-    pageUrl: (params, webApp1210) => pageUrl(params, '', webApp1210 ? { app: webApp.url } : undefined),
+    pageUrl: (params, webApp1210) => pageUrl(params, '', webApp1210 ? { app: webApp.url, data: (walkNight ?? night).url } : undefined),
     preset: (file) => ({ reset: '1', preset: `${ipv4(web.url)}/${file}` }),
     withChrome,
     sim: () => sim,
@@ -4025,6 +4027,13 @@ async function main(): Promise<void> {
   cpSync(stack.dataDir, nightDir, { recursive: true });
   republish(nightDir, '2026-11-10T03:12:00.000Z');
   night = await startDataServer(nightDir);
+  // 1.2.10 : chemins à pied (moment « virage ») : copie des données de la nuit avec walk/, pour les scénarios s1210 de Quai Web
+  if ([...SCENARIOS].some(([id]) => id.startsWith('s1210') && only(id))) {
+    const walkDir = join(tmp, 'data-walk');
+    cpSync(nightDir, walkDir, { recursive: true });
+    await buildWalkTiles(walkDir);
+    walkNight = await startDataServer(walkDir);
+  }
   // Réglages de test, tous au format de la 1.1 (v2) : la 1.2.2 les migre au lancement (PRD-1.2 § 2.4, PRD-1.2.2 § 5).
   const p11 = JSON.parse(readFileSync(join(ROOT, 'fixtures', 'app', 'preset-1.1.json'), 'utf8')) as Record<string, unknown> & { places: Record<string, unknown>[] };
   const p120 = { ...p11, seenVersion: '1.2.0' };
@@ -4152,6 +4161,7 @@ async function main(): Promise<void> {
     await webApp.close();
     writeFileSync(join(OUT, 'sim-servers.log'), stack.logs());
     await night.stop();
+    await walkNight?.stop();
     await stack.stop();
     rmSync(tmp, { recursive: true, force: true });
   }

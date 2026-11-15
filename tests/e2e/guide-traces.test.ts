@@ -123,13 +123,13 @@ describe('oracle des textes du guidage (PRD § 3.2, § 3.3)', () => {
   it('« Où tu en es » : chaîne, à pied, à la gare', () => {
     expect(O.chainLine(J, 1)).toBe('● à pied ─ ◎ IC ─ ○ tram 3');
     const w = O.whereWalkLines(J, 0, 'Place Fontainas', 0);
-    expect(w[1]).toBe('À pied vers la voie 6');
+    expect(O.matches('À pied vers la voie 6', w[1]) && O.matches('À pied vers la gare de Namur', w[1])).toBe(true);
     expect(O.matches('IC à 07:44, marge 2 min', w[3])).toBe(true);
     expect(w[4]).toBe('arrivée ~08:58');
     const g = O.whereWaitLines(J, 1, 1);
     expect(g[1]).toBe('À la gare de Namur');
     expect(O.matches('IC dans 3 min, vers Bruxelles-Midi', g[2])).toBe(true);
-    expect(g[3]).toBe('voie 6');
+    expect(O.matches('voie 6 !', g[3]) && O.matches('voie 6', g[3])).toBe(true);
   });
 
   it('typographie : ni tiret long ni moyen, ni guillemet droit, ni conseil', () => {
