@@ -8,7 +8,8 @@
  * 1.2.6 (docs/v1.2.6/PRD-1.2.6.md § 4) : lignes suivies sans arrêt (`follows`) ; une ligne gardée à un arrêt (LinePick
  * avec `line`) y devient une ligne suivie, son arrêt gardé comme repère (`via`) ; `lines` ne garde que les arrêts.
  * 1.2.10 (docs/v1.2.10/PRD-1.2.10.md § 4.1) : `display.guide` (« Me guider pendant un trajet ») ; seul `false` est
- * enregistré, l'absence vaut « allumé ».
+ * enregistré, l'absence vaut « allumé ». § 6 (constat de l'équipe F) : deux lignes du même numéro gardées en 1.2.5 à des
+ * arrêts de régions différentes restent deux lignes suivies (sameFollow).
  */
 import type { Endpoint, Favorite, FavoritePlace, FavoriteStop, FavoriteTrip, KV, LineFilter, LinePick, NameLang, Place, Propose, RecentAddress, Settings, StationPick } from './core/api';
 import { DEFAULT_SETTINGS } from './core/api';
@@ -328,6 +329,28 @@ export function moveStops(favorites: readonly Favorite[], stations: StationPick[
 const HEX = /^[0-9A-F]{6}$/i;
 const FOLLOW_OPS: readonly LineFollow['op'][] = ['stib', 'delijn', 'tec'];
 
+/**
+ * 1.2.10 (PRD-1.2.10 § 6, vérification de l'équipe F) : région d'un arrêt repère : TEC, la lettre de l'arrêt (B Brabant
+ * wallon, C Charleroi, H Hainaut, L Liège-Verviers, N Namur, X Luxembourg) ; De Lijn, son premier chiffre (la
+ * province) ; ailleurs, aucune (une seule région).
+ */
+function region(areaId?: string): string {
+  const k = (areaId ?? '').replace(/^[a-z]+:/, '');
+  return areaId?.startsWith('tec:') ? k.charAt(0).toUpperCase() : areaId?.startsWith('delijn:') ? k.charAt(0) : '';
+}
+
+/**
+ * La même ligne suivie : même réseau, même numéro, une variante commune quand les deux sont connues (isFollowed) ;
+ * 1.2.10 : quand l'une ne les connaît pas encore (une ligne gardée à un arrêt en 1.2.5, pas encore complétée), des
+ * arrêts repères de la même région : deux W gardés à Waterloo et à Tournai restent deux lignes, à la migration comme
+ * à chaque relecture des réglages.
+ */
+function sameFollow(q: LineFollow, x: { op: string; line: string; routes?: readonly string[]; via?: { areaId: string } }): boolean {
+  if (!isFollowed(q, x)) return false;
+  if (q.routes.length && x.routes?.length) return true;
+  return !q.via || !x.via || region(q.via.areaId) === region(x.via.areaId);
+}
+
 /** 1.2.6 : une ligne suivie valide (réseau urbain, numéro, variantes connues, terminus, couleur, arrêt repère). */
 function lineFollow(r: unknown): LineFollow | null {
   if (!isObj(r) || typeof r.id !== 'string' || !r.id.trim() || typeof r.line !== 'string' || !r.line.trim()) return null;
@@ -407,14 +430,16 @@ export function validateSettings(input: unknown): Settings {
   const follows: LineFollow[] = [];
   for (const r of Array.isArray(x.follows) ? x.follows : []) {
     const f = lineFollow(r);
-    // contrôle qualité 1.2.6 : deux lignes du même numéro sans variante commune (deux régions) restent deux lignes
-    if (f && !follows.some((q) => q.id === f.id || isFollowed(q, f))) follows.push(f);
+    // contrôle qualité 1.2.6 : deux lignes du même numéro sans variante commune (deux régions) restent deux lignes ;
+    // 1.2.10 : variantes pas encore connues, arrêts repères de deux régions : aussi
+    if (f && !follows.some((q) => q.id === f.id || sameFollow(q, f))) follows.push(f);
     if (follows.length >= LIMITS.lines) break;
   }
   const picksWithLine = lines.filter((p) => p.line && p.op !== 'sncb');
   for (let i = lines.length - 1; i >= 0; i--) if (lines[i].line && lines[i].op !== 'sncb') lines.splice(i, 1);
   for (const p of picksWithLine) {
-    const known = follows.find((q) => isFollowed(q, { op: p.op, line: p.line ?? '' }));
+    // 1.2.10 (équipe F) : rattachée à une ligne suivie seulement si leurs arrêts repères sont de la même région
+    const known = follows.find((q) => sameFollow(q, { op: p.op, line: p.line ?? '', via: { areaId: p.areaId } }));
     if (known) {
       if (p.near && !known.near && known.via?.areaId === p.areaId) known.near = true;
       continue;
