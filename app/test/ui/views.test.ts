@@ -263,6 +263,8 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
       '~08:44 Tram 3 → Bourse   très juste',
       '08:49 à pied 9 min',
       'Fin du trajet. ▽ 2 autres trajets',
+      // 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action, entre la note et les aides ; cinq étapes tiennent encore sur la page
+      '▶ Retour au guidage',
       HINT_STEPS,
     ]);
     expect(page(v).sel).toBe(0);
@@ -293,7 +295,7 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     // Namur) en haut ; 6 min avant, le départ et l'arrivée prévue
     expect(l1[0]).toBe('Si tu le rates : arrivée 09:57, 59 min plus tard');
     expect(check(stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: 0, followedId: journeys[0].id, fresh: true }, ctxOf(at(7, 27), s)))[0]).toBe('Départ 07:33, dans 6 min   arrivée ~08:58');
-    expect(l1.slice(-2)).toEqual(['Fin du trajet. ▽ 2 autres trajets', HINT_STEPS]);
+    expect(l1.slice(-3)).toEqual(['Fin du trajet. ▽ 2 autres trajets', '▶ Y aller', HINT_STEPS]);
     // ▼ au bout : « Autres trajets », la raison ou les moyens en 2e ligne
     const list = othersView({ screen: 'others', key: 'k', title: 'Vers le bureau', journeys, index: 0 }, journeys, ctx);
     expect(nb(list.title)).toBe('Vers le bureau : autres trajets');
@@ -306,7 +308,7 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     const l3 = check(p3);
     expect(l3[0]).toBe('Départ 09:33   arrivée ~10:58');
     expect(l3.find((l) => l.startsWith('~09:42 IC'))).toMatch(/^~09:42 IC voie 4 → Bruxelles-Nord {3}\d\d:\d\d$/);
-    expect(l3.slice(-2)).toEqual(['Fin du trajet. ▽ autres trajets', HINT_OTHER]);
+    expect(l3.slice(-3)).toEqual(['Fin du trajet. ▽ autres trajets', '▶ Y aller', HINT_OTHER]);
     expect(page(p3).sel).toBe(-1);
     expect(p3.tap).toEqual({ kind: 'goGuide' });
     // la 1re proposition d'un trajet ouvert, pas suivi : « y aller » aussi, sans aide des gestes
@@ -314,10 +316,11 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     expect(open.titleRight).toBeUndefined();
     expect(open.tap).toEqual({ kind: 'goGuide' });
     expect(open.mark).toBeUndefined();
-    expect(check(open).at(-1)).toBe('Fin du trajet. ▽ 2 autres trajets');
+    // sans aide des gestes : la note, puis la ligne d'action (1.3.0) en dernier
+    expect(check(open).slice(-2)).toEqual(['Fin du trajet. ▽ 2 autres trajets', '▶ Y aller']);
     // une seule proposition : rien d'autre, dit au bout des étapes
     const one = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: journeys.slice(0, 1), index: 0 }, ctx);
-    expect(check(one).slice(-2)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', HINT_OTHER]);
+    expect(check(one).slice(-3)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', '▶ Y aller', HINT_OTHER]);
   });
 
   it('CA-S6.3 : repère sur l’étape en cours (1.2.10 : l’étape en cours n’a plus de colonne d’état)', async () => {
@@ -590,7 +593,7 @@ describe('scénario 3 : l’après-midi vers Gand (S3, 13:55)', () => {
     expect(lines[1]).toBe('14:10 IC voie 4 → Gand-Saint-Pierre   14:39');
     // 1.2.4 : à bord dès le départ, d'où il part
     expect(lines[2]).toBe('depuis Bruxelles-Central');
-    expect(lines.slice(-2)).toEqual(['Fin du trajet. ▽ 2 autres trajets', HINT_STEPS]);
+    expect(lines.slice(-3)).toEqual(['Fin du trajet. ▽ 2 autres trajets', '▶ Y aller', HINT_STEPS]);
     // les autres trajets : « Le suivant », même trajet plus tard (les moyens en 2e ligne)
     expect(check(othersView({ screen: 'others', key: 'g', title: 'Vers Gand-Saint-Pierre', journeys, index: 0 }, journeys, ctxOf(now, s))).slice(0, 4)).toEqual(['Le suivant   14:25 → 14:56', 'IC', 'Plus tard   14:40 → 15:09', 'IC']);
   });
@@ -663,7 +666,7 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     expect(v.titleRight).toBeUndefined();
     const lines = check(v);
     // 1.2.10 (PRD-1.2.10 § 5) : une rangée, la marche ; guidé : toucher revient au guidage (1.3.0 : ligne d'action)
-    expect(lines).toEqual(['Départ 10:00   arrivée 10:09', '10:00 à pied 9 min', 'Fin du trajet. Pas d’autre trajet pour l’instant', HINT_STEPS]);
+    expect(lines).toEqual(['Départ 10:00   arrivée 10:09', '10:00 à pied 9 min', 'Fin du trajet. Pas d’autre trajet pour l’instant', '▶ Retour au guidage', HINT_STEPS]);
     expect(v.tap).toEqual({ kind: 'resume' });
     expect(v.action).toBe('▶ Retour au guidage');
     expect(lines.join(' ')).not.toMatch(/direct/);
@@ -809,7 +812,7 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     // 1.2.10 (PRD-1.2.10 § 5) : le nom du trajet ; cinq étapes sur une page ; toucher : « y aller »
     expect(nb(v.title)).toBe('Bureau');
     expect(v.titleRight).toBeUndefined();
-    expect(check(v).slice(-2)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', HINT_OTHER]);
+    expect(check(v).slice(-3)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', '▶ Y aller', HINT_OTHER]);
     expect(v.tap).toEqual({ kind: 'goGuide' });
   });
 });

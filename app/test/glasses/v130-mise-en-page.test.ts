@@ -66,7 +66,11 @@ const badCuts = (v: GlassesView, p: PageSpec) => pageCuts(v, p).filter((c) => c.
 const STEPS_HINT = `△▽ étapes   double${NB}: retour`;
 const ACTIONS = ['▶ Y aller', '▶ Retour au guidage', '▶ Suivre ce trajet', '▶ Trajet suivi'];
 
-/** Écran du trajet de la 1.2.10 (proposition ouverte depuis « Autres trajets » : « Fin du trajet. ▽ autres trajets »). */
+/**
+ * Écran du trajet (proposition ouverte depuis « Autres trajets » : « Fin du trajet. ▽ autres trajets »). Depuis la fusion
+ * avec les écrans (équipe A), la vraie vue porte déjà sa ligne d'action (« ▶ Y aller ») : `{ action: undefined }` fait
+ * l'écran d'un toucher sans effet (la 1.2.10, sans ligne d'action).
+ */
 function stepsOf(j: Journey, patch: Partial<GlassesView> = {}): GlassesView {
   const v = stepsPage({ title: 'Vers Namur', label: '' }, { journeys: [j], index: 0, fresh: true, fromList: true }, ctx());
   return { ...v, hints: STEPS_HINT, ...patch };
@@ -149,7 +153,9 @@ describe('PRD-1.3.0 § 1 : ligne d’action, au plus clair, juste au-dessus des 
   });
 
   it('toucher sans effet : pas de ligne d’action, l’écran de la 1.2.10 ; la ligne qui paraît reconstruit la page', () => {
-    const without = page(stepsOf(ic));
+    // la vraie vue (équipe A) dit « ▶ Y aller » ; sans toucher, pas de ligne d'action
+    expect(stepsOf(ic).action).toBe('▶ Y aller');
+    const without = page(stepsOf(ic, { action: undefined, tap: undefined }));
     const withAction = page(stepsOf(ic, { action: '▶ Y aller' }));
     hardware(without);
     expect(container(without, 'colA').y).toBe(60);
@@ -162,8 +168,9 @@ describe('PRD-1.3.0 § 1 : ligne d’action, au plus clair, juste au-dessus des 
 
   it('▲▼ : une rangée de moins pour les étapes (la capacité de la navigation vient de geometry, ligne d’action comprise)', () => {
     const go = (v: GlassesView, g: 'up' | 'down', s: NavState = initNav({ screen: 'steps', label: '' })) => handleGesture(s, g, v, geometry(v).capacity);
-    const plain = stepsOf(long);
-    const acted = stepsOf(long, { action: '▶ Y aller' });
+    const plain = stepsOf(long, { action: undefined, tap: undefined });
+    const acted = stepsOf(long);
+    expect(acted.action).toBe('▶ Y aller');
     expect(plain.items).toHaveLength(6);
     // sans ligne d'action, les six étapes tiennent : ▼ est au bout (Autres trajets)
     expect(go(plain, 'down').effect).toEqual({ kind: 'edge', dir: 'down' });
