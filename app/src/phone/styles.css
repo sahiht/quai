@@ -162,8 +162,8 @@ input.switch:checked::after { left: 21px; }
 /* 1.1 : écrans */
 .screen { display: flex; flex-direction: column; gap: 16px; }
 .form-body { display: flex; flex-direction: column; gap: 14px; }
-/* 1.2 : formulaires d'un favori (lieu, arrêt, trajet fixe), mêmes espacements que les écrans de la 1.1 */
-.place-form, .stop-form, .trip-form, .place-choice { display: flex; flex-direction: column; gap: 16px; }
+/* 1.2 : formulaires d'un favori (lieu, trajet fixe), mêmes espacements que les écrans de la 1.1 */
+.place-form, .trip-form, .place-choice { display: flex; flex-direction: column; gap: 16px; }
 /* 1.2.1 : « Nouveau favori », deux choix de même taille en haut (comme « Lunettes | Réglages » de Quai Web) */
 .kinds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px; background: var(--seg); border-radius: 12px; }
 .kind { min-height: 56px; padding: 6px 8px; border: 0; border-radius: 9px; background: transparent; color: var(--body); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-align: center; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
@@ -181,9 +181,6 @@ input.switch:checked::after { left: 21px; }
 .field-note:empty { display: none; }
 .privacy { font-size: 12px; line-height: 17px; }
 .suggest .s1 { min-width: 0; overflow-wrap: anywhere; }
-.save-link { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-.save-link:empty { display: none; }
-.save-link .save-panel { align-self: stretch; }
 .shortcuts { display: flex; flex-wrap: wrap; gap: 8px; }
 .shortcut { min-height: 44px; padding: 0 14px; border: 1px solid var(--btn-border); border-radius: 22px; background: var(--card); color: var(--accent-ink); font-size: 14px; font-weight: 500; cursor: pointer; }
 .shortcut:hover { background: var(--accent-soft); }
@@ -320,8 +317,6 @@ button.add-link { border: 0; background: transparent; padding-left: 0; color: va
 .spot:empty { display: none; }
 .spot .t1 { font-size: 15px; line-height: 21px; font-weight: 500; }
 .spot .t2, .spot .t3 { font-size: 13px; line-height: 18px; color: var(--body); }
-.here-btn .cc { display: flex; flex-direction: column; align-items: flex-start; line-height: 18px; }
-.here-btn .sub { font-size: 13px; font-weight: 400; color: var(--muted); }
 .verify { font-size: 14px; line-height: 20px; }
 .verify strong { font-weight: 600; }
 .verify .btn { align-self: flex-start; }

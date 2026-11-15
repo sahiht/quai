@@ -31,7 +31,6 @@ const manyStops = (n: number): LinePick[] => Array.from({ length: n }, (_, i) =>
 const manyFollows = (n: number): LineFollow[] => Array.from({ length: n }, (_, i) => ({ id: `f${i}`, op: 'stib', mode: 'tram', line: String(i + 1), routes: [] }));
 const T3: LineFollow = { id: 'f-t3', op: 'stib', mode: 'tram', line: '3', routes: ['stib:T3-CHURCHILL', 'stib:T3-ESPLANADE'], ends: [{ fr: 'Churchill', nl: 'Churchill' }, { fr: 'Esplanade', nl: 'Esplanade' }] };
 const T4: LineFollow = { id: 'f-t4', op: 'stib', mode: 'tram', line: '4', routes: ['stib:T4-STALLE'], ends: [{ fr: 'Stalle (P)', nl: 'Stalle (P)' }] };
-const W: LineFollow = { id: 'f-w', op: 'tec', mode: 'bus', line: 'W', routes: [] };
 
 beforeEach(() => {
   resetAnswers();
