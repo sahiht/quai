@@ -140,13 +140,65 @@ export const LAYOUTS: Record<Layout, LayoutDef> = {
   nearby: { a: { x: X_TEXT, level: 4 }, b: { x: right(NEXT_W) - GAP - 64, w: 64, level: 3 }, c: { x: right(NEXT_W), w: NEXT_W, level: 4 } },
   board: { a: { x: X_TEXT, w: 52, level: 4 }, b: { x: X_TEXT + 52 + GAP, level: 3 }, c: { x: right(96), w: 96, align: 'right', level: 4 } },
   boardTrain: { a: { x: X_TEXT, w: 40, level: 4 }, b: { x: X_TEXT + 40 + GAP, level: 3 }, c: { x: right(TRAIN_CELL_W), w: TRAIN_CELL_W, lead: TIME_SLOT, level: 4 } },
-  steps: { a: { x: X_TEXT, w: TIME_W, align: 'right', level: 4 }, b: { x: X_TEXT + 70 + TIGHT, level: 3 }, c: { x: right(STATE_W), w: STATE_W, level: 4 }, gap: TIGHT },
+  /**
+   * Étapes. 1.2.10 (PRD-1.2.10 § 5) : rangées en mots clairs et pâles (segRow) : l'heure et le véhicule au plus clair
+   * (colonne a), l'arrêt de descente et la marche pâles (colonne b, qui commence après la case de l'heure, comme
+   * « depuis … » en 2e ligne) ; à droite l'heure d'arrivée pâle, ou la marge au plus clair (colonne c).
+   */
+  steps: { a: { x: X_TEXT, w: TIME_W, align: 'right', level: 4 }, b: { x: X_TEXT + 70 + TIGHT, level: 2 }, c: { x: right(STATE_W), w: STATE_W, level: 4 }, gap: TIGHT },
   train: { a: { x: X_TEXT, level: 4 }, b: { x: right(96) - GAP - TIME_W, w: TIME_W, align: 'right', level: 4 }, c: { x: right(96), w: 96, level: 3 } },
   arrival: { a: { x: X_TEXT, w: 96, level: 4 }, b: { x: X_TEXT + 96 + GAP, level: 3 }, c: { x: right(96), w: 96, align: 'right', level: 4 } },
   message: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(96), w: 96, level: 3 } },
-  /** 1.2.10 : guidage (provisoire : gabarit de message ; écrit par l'équipe des écrans, PRD-1.2.10 § 3.9). */
-  guide: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(96), w: 96, level: 3 } },
+  /**
+   * 1.2.10 (PRD-1.2.10 § 3.9) : guidage : trois conteneurs au même x, un par luminosité : au plus clair (l'action),
+   * normal, pâle. Chaque rangée met son texte dans le conteneur de sa luminosité (les deux autres vides) ; la chaîne de
+   * « Où tu en es » mêle les trois, placée au pixel par des espaces (guide-views.ts). x : GUIDE.TEXT_X à côté d'une
+   * image, sinon la marge habituelle (layoutGuide).
+   */
+  guide: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: X_TEXT, level: 2 } },
 };
+
+/**
+ * 1.2.10 (PRD-1.2.10 § 3.9) : écrans du guidage. Image de 144 × 144 à gauche, sur la grille des rangées (2e rangée sous
+ * le titre : 60 px), alignée sur la marge du titre ; texte à x = 196 à côté d'elle, centré verticalement sur elle.
+ * Conteneurs d'image : identifiants 9 à 12 (12 conteneurs au plus dont 8 de texte), un par emplacement.
+ */
+export const GUIDE = {
+  IMG_X: X_TEXT,
+  IMG_Y: GEO.TITLE_Y + LINE_H + 3 + LINE_H,
+  IMG_W: 144,
+  IMG_H: 144,
+  TEXT_X: 196,
+  /** Emplacement de l'image du moment (panneau, flèche) : identifiant et nom stables. */
+  IMAGE_ID: 9,
+  IMAGE_NAME: 'guide-image',
+  /** Largeur utile du texte à côté d'une image, et sans image. */
+  TEXT_W: X_END - 196 - GEO.SAFETY,
+  FULL_W: X_END - X_TEXT - GEO.SAFETY,
+  /**
+   * Rangées au plus d'un moment : quatre (« Si tu le rates »), une idée chacune, jamais de passage à la ligne : 108 px,
+   * dans la hauteur de l'image (144 px).
+   */
+  MAX_LINES: 4,
+} as const;
+
+/**
+ * 1.2.10 (PRD-1.2.10 § 2) : élément de « Favoris » : le détail dit dans la ligne du bas quand le curseur est sur lui
+ * (favoriteDetail, l'adresse complète d'une adresse récente). Absent : ligne du bas vide.
+ */
+export interface DetailItem extends Item {
+  detail?: string;
+}
+
+/**
+ * 1.2.10 (PRD-1.2.10 § 2) : bordure d'un conteneur (filet pâle au-dessus de la ligne du détail des favoris). Champ
+ * demandé au contrat (ContainerSpec.border) ; la plateforme le dessine (borderWidth, borderColor du SDK).
+ */
+export interface Border {
+  width: number;
+  level: Brightness;
+}
+export type BorderedContainer = ContainerSpec & { border?: Border };
 
 /** Largeurs utiles (au pixel) des colonnes des menus et des étapes, pour les tests de largeur (CA-M1.7). */
 export const WIDTHS = {
@@ -455,11 +507,13 @@ function segRowBright(segs: Seg[], indentPx: number, right: string | undefined, 
     x = cx + textWidth(out[key]);
     if (t !== word) break;
   }
-  return { ...out, c, log: shown.join(' ') + (r ? COL_SEP + r : '') };
+  // 1.2.10 : une heure alignée dans sa case (espaces de tête) se journalise sans elles
+  return { ...out, c, log: shown.map((t) => t.trim()).join(' ') + (r ? COL_SEP + r : '') };
 }
 
 /** Construit la page complète. `frame` = sélection et défilement courants. */
 export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {}): PageSpec {
+  if (v.layout === 'guide') return layoutGuide(v, opts);
   const def = LAYOUTS[v.layout];
   const message = v.layout === 'message';
   const items: Item[] = message
@@ -585,9 +639,15 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   }
 
   const foot: string[] = [];
+  // 1.2.10 (PRD-1.2.10 § 2) : « Favoris » : la ligne du bas dit le détail de l'élément sous le curseur (DetailItem)
+  const detailLine = v.layout === 'favorites' && !v.note;
+  const detail = detailLine ? ((items[sel] as DetailItem | undefined)?.detail ?? '') : '';
   // 1.2.8 : « ~ horaire prévu » seulement sous une page qui montre un « ~ » (notePlanned)
-  const noteSrc = v.note ?? (v.notePlanned && items.slice(from, to).some((it) => it.planned) ? v.notePlanned : '');
-  const noteText = noteSrc ? truncate(noteSrc, X_END - X_TEXT - GEO.SAFETY) : '';
+  const noteSrc = detailLine ? detail : v.note ?? (v.notePlanned && items.slice(from, to).some((it) => it.planned) ? v.notePlanned : '');
+  const noteText = noteSrc ? (detailLine ? truncateWordsPx(noteSrc, X_END - X_TEXT - GEO.SAFETY) : truncate(noteSrc, X_END - X_TEXT - GEO.SAFETY)) : '';
+  // journal QUAI_SCREEN (scénarios de bout en bout) : le texte exact de la ligne du détail, que seule la mise en page
+  // connaît (il suit le curseur) ; le contrôleur journalise view.log après la mise en page
+  if (detailLine && v.log) v.log.detail = noteText;
   if (g.noteLine) foot.push(noteText);
   const hintText = opts.toast ? truncate(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? truncate(v.hints, X_END - X_TEXT - GEO.SAFETY) : '';
   if (g.hintLine) foot.push(hintText);
@@ -613,10 +673,17 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   });
   const join = (l: string[]): string => l.join('\n').replace(/\s+$/, '');
 
+  // 1.2.10 (PRD-1.2.10 § 2) : sans ligne du haut, son conteneur devient le filet pâle au-dessus de la ligne du détail
+  // (1 px de haut, bordure de niveau 2), au milieu de l'espace entre la liste et le pied
+  const filet = detailLine && !topRow;
+  const filetY = Math.round((g.rowsY + rowsH + g.footY) / 2);
+  const topC: BorderedContainer = filet
+    ? { ...C(IDS.top, 'top', X_TEXT, filetY, X_END - X_TEXT, FOOT_MIN_H, '', 2), border: { width: 1, level: 2 } }
+    : C(IDS.top, 'top', X_TEXT, GEO.TITLE_Y + LINE_H, X_END - X_TEXT, LINE_H, topRow ? topRow.text : '', v.top?.strong ? 4 : 2);
   const containers: ContainerSpec[] = [
     C(IDS.title, 'title', X_TEXT, GEO.TITLE_Y, titleW, LINE_H, title, 4),
     C(IDS.clock, 'clock', X_END - GEO.CLOCK_W, GEO.TITLE_Y, GEO.CLOCK_W, LINE_H, padLeftTo(v.clock, GEO.CLOCK_W - GEO.SAFETY), 3),
-    C(IDS.top, 'top', X_TEXT, GEO.TITLE_Y + LINE_H, X_END - X_TEXT, LINE_H, topRow ? topRow.text : '', v.top?.strong ? 4 : 2),
+    topC,
     C(IDS.cursor, 'cursor', GEO.X_CURSOR, g.rowsY, GEO.W_CURSOR, rowsH, join(cursor), 4),
     C(IDS.colA, 'colA', def.a.x, g.rowsY, X_END - def.a.x, rowsH, join(colA), message ? 4 : def.a.level),
     C(IDS.colB, 'colB', def.b.x, g.rowsY, X_END - def.b.x, rowsH, join(colB), def.b.level),
@@ -624,7 +691,132 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     // 1.2.2 : pied vide (accueil sans aide ni jour férié) : 1 px, toujours les 8 mêmes conteneurs (REVUE-USAGE n° 1).
     C(IDS.foot, 'foot', X_TEXT, g.footY, X_END - X_TEXT, Math.max(FOOT_MIN_H, g.footLines * LINE_H), foot.join('\n'), opts.toast ? 4 : 2),
   ];
-  return { containers, lines, screen: v.screen, title: titleLog, clock: v.clock, top, visible: to - from, sel };
+  return withExtras({ containers, lines, screen: v.screen, title: titleLog, clock: v.clock, top, visible: to - from, sel }, v);
+}
+
+/** 1.2.10 : images et choix du menu de la vue, copiés dans la page (absents : aucun). */
+function withExtras(p: PageSpec, v: GlassesView): PageSpec {
+  if (v.images?.length) p.images = v.images.map((i) => ({ ...i, image: { ...i.image } }));
+  if (v.menu?.length) p.menu = v.menu.map((m) => ({ ...m }));
+  return p;
+}
+
+/**
+ * 1.2.10 (PRD-1.2.10 § 1, principe 7) : un texte coupé à `maxPx` sans jamais couper un mot : il finit au dernier mot
+ * entier qui tient, suivi de « … » ; faute de place pour un seul mot, après le dernier trait d'union, la dernière barre
+ * ou la dernière apostrophe qui tient (« Comines/… », « Bruxelles-… ») ; un premier morceau seul trop long est coupé
+ * au caractère (aucune autre issue). L'espace insécable lie ses deux mots (« 40 m », « arrêt : ») : jamais séparés.
+ */
+export function truncateWords(text: string, maxPx: number): string {
+  const t = truncate(text, Number.MAX_SAFE_INTEGER);
+  if (textWidth(t) <= maxPx) return t;
+  const words = t.split(' ');
+  for (let k = words.length - 1; k >= 1; k--) {
+    const head = words.slice(0, k).join(' ').replace(/[\s,;:·]+$/, '');
+    if (head && textWidth(`${head}…`) <= maxPx) return `${head}…`;
+  }
+  // un seul mot ne tient pas : ses morceaux (« Comines/komen » → « Comines/ », « Bruxelles-Aéroport » → « Bruxelles- »)
+  const first = words[0];
+  for (let i = first.length - 1; i > 0; i--) {
+    if (!/[-/’']/.test(first[i - 1])) continue;
+    const head = first.slice(0, i);
+    if (textWidth(`${head}…`) <= maxPx) return `${head}…`;
+  }
+  return truncate(t, maxPx);
+}
+const truncateWordsPx = truncateWords;
+
+/**
+ * 1.2.10 (PRD-1.2.10 § 3.2, § 3.9) : page du guidage. Titre et heure pâles ; rangées (Item.a au plus clair, b normal,
+ * c pâle, déjà mesurées et placées par guide-views.ts) à x = 196 à côté d'une image et centrées sur elle, sinon à la
+ * marge, sous le titre ; aides dans le pied, sans ligne réservée quand il n'y en a pas (écran vide : rien du tout).
+ * Les mêmes 8 conteneurs de texte ; la forme ne change qu'avec l'image, le nombre de rangées ou les aides : les
+ * chiffres qui bougent (distance, minutes) se mettent à jour sans reconstruire la page.
+ */
+function layoutGuide(v: GlassesView, opts: LayoutOptions): PageSpec {
+  const image = v.images?.[0];
+  const x = image ? GUIDE.TEXT_X : X_TEXT;
+  const w = X_END - x;
+  const maxPx = w - GEO.SAFETY;
+  const g = geometry({ top: undefined, note: undefined, reserveNote: false, hints: v.hints, compactFoot: true }, !!opts.toast);
+  // jamais plus de rangées que l'écran n'en tient entre le titre et le pied (la vue en donne six au plus)
+  const items = v.items.slice(0, g.capacity);
+  const n = items.length;
+  const centered = image ? Math.round(image.y + image.h / 2 - (n * LINE_H) / 2) : g.rowsY;
+  const rowsY = Math.min(Math.max(g.rowsY, centered), g.footY - Math.max(1, n) * LINE_H);
+  const rowsH = Math.max(1, n) * LINE_H;
+  // le texte est déjà placé (espaces de tête comprises) : seule la fin est coupée si elle dépassait
+  const keep = (s: string | undefined): string => {
+    if (!s) return '';
+    if (textWidth(s) <= maxPx) return s;
+    const lead = /^[  ]*/.exec(s)?.[0] ?? '';
+    return lead + truncateWordsPx(s.slice(lead.length), maxPx - textWidth(lead));
+  };
+  const colA: string[] = [];
+  const colB: string[] = [];
+  const colC: string[] = [];
+  const lines: string[] = [];
+  for (const it of items) {
+    const a = keep(it.a);
+    const b = keep(it.b);
+    const c = keep(it.c);
+    colA.push(a);
+    colB.push(b);
+    colC.push(c);
+    // journal : la rangée telle qu'elle se lit (un seul texte, ou la chaîne composée des trois)
+    lines.push(guideRowLog(a, b, c));
+  }
+  const hintText = opts.toast ? truncate(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? truncate(v.hints, X_END - X_TEXT - GEO.SAFETY) : '';
+  if (hintText) lines.push(hintText);
+  const title = v.title ? truncate(v.title, TITLE_W - GEO.SAFETY) : '';
+  const C = (id: number, name: string, cx: number, y: number, cw: number, h: number, content: string, level: Brightness): ContainerSpec => ({
+    id,
+    name,
+    x: cx,
+    y,
+    w: cw,
+    h,
+    content: fitBytes(nonEmpty(content)),
+    level,
+    capture: id === IDS.title,
+  });
+  const join = (l: string[]): string => l.join('\n').replace(/\s+$/, '');
+  const containers: ContainerSpec[] = [
+    C(IDS.title, 'title', X_TEXT, GEO.TITLE_Y, TITLE_W, LINE_H, title, 2),
+    C(IDS.clock, 'clock', X_END - GEO.CLOCK_W, GEO.TITLE_Y, GEO.CLOCK_W, LINE_H, v.clock ? padLeftTo(v.clock, GEO.CLOCK_W - GEO.SAFETY) : '', 2),
+    C(IDS.top, 'top', X_TEXT, GEO.TITLE_Y + LINE_H, X_END - X_TEXT, LINE_H, '', 2),
+    C(IDS.cursor, 'cursor', GEO.X_CURSOR, g.rowsY, GEO.W_CURSOR, LINE_H, '', 4),
+    C(IDS.colA, 'colA', x, rowsY, w, rowsH, join(colA), LAYOUTS.guide.a.level),
+    C(IDS.colB, 'colB', x, rowsY, w, rowsH, join(colB), LAYOUTS.guide.b.level),
+    C(IDS.colC, 'colC', x, rowsY, w, rowsH, join(colC), LAYOUTS.guide.c.level),
+    C(IDS.foot, 'foot', X_TEXT, g.footY, X_END - X_TEXT, Math.max(FOOT_MIN_H, g.footLines * LINE_H), hintText, opts.toast ? 4 : 2),
+  ];
+  return withExtras({ containers, lines, screen: v.screen, title, clock: v.clock, top: 0, visible: n, sel: -1 }, v);
+}
+
+/** 1.2.10 : journal d'une rangée du guidage : ses textes dans l'ordre où ils se lisent (de gauche à droite). */
+function guideRowLog(a: string, b: string, c: string): string {
+  const parts = [a, b, c].filter((s) => s.trim());
+  if (parts.length <= 1) return (parts[0] ?? '').trim();
+  // rangée composée (chaîne) : chaque caractère visible à sa colonne, les espaces mesurées remises en une seule
+  const chars: string[] = [];
+  for (const s of [a, b, c]) {
+    let px = 0;
+    for (const ch of s) {
+      if (ch !== ' ' && ch !== ' ') chars.push(`${String(px).padStart(5, '0')}${ch}`);
+      px += textWidth(ch === ' ' ? ' ' : ch);
+    }
+  }
+  chars.sort();
+  let out = '';
+  let last = -1;
+  for (const k of chars) {
+    const px = Number(k.slice(0, 5));
+    if (last >= 0 && px - last >= SPACE_W - 1) out += ' ';
+    out += k.slice(5);
+    last = px + textWidth(k.slice(5));
+  }
+  return out;
 }
 
 /**
@@ -639,6 +831,14 @@ function composeTop(t: NonNullable<GlassesView['top']>, def: LayoutDef): { text:
   }
   const [a, b, c] = t.cols;
   const gap = def.gap ?? GAP;
+  if (!b && !t.lead) {
+    // 1.2.10 (PRD-1.2.10 § 5) : deux textes seulement : a à la marge, c aligné au bord (« Départ 07:05, dans 3 min »,
+    // « arrivée 08:54 »), a coupé au mot avant c
+    const r = c ? truncate(c, full) : '';
+    const l = truncateWordsPx(a, Math.max(0, full - (r ? textWidth(r) + gap : 0)));
+    const row = spread(l, r, full, gap);
+    return { text: row.text, log: [row.left, row.right].filter(Boolean).join(COL_SEP) };
+  }
   const aRoom = def.b.x - gap - X_TEXT - GEO.SAFETY;
   // 1.2.4 : l'heure en tête, alignée comme celles des lignes dessous (Col.lead)
   const cell = t.lead && def.a.lead ? leadCell(t.lead, a, undefined, def.a.lead, aRoom) : null;
@@ -653,7 +853,17 @@ function composeTop(t: NonNullable<GlassesView['top']>, def: LayoutDef): { text:
 /** Hauteur d'un pied sans ligne (la documentation du SDK permet 0 ; 1 px évite un champ omis par protobuf). */
 export const FOOT_MIN_H = 1;
 
-/** Clé de forme : si elle change, il faut reconstruire la page (rebuildPageContainer). */
+/**
+ * Clé de forme : si elle change, il faut reconstruire la page (rebuildPageContainer). 1.2.10 : aussi la bordure d'un
+ * conteneur, chaque image (emplacement et dessin : une autre image reconstruit la page) et les choix du menu système ;
+ * seuls les textes changent : mise à jour sans clignotement.
+ */
 export function shapeKey(p: PageSpec): string {
-  return p.containers.map((c) => `${c.id}:${c.x},${c.y},${c.w},${c.h}`).join('|');
+  const cs = p.containers.map((c) => {
+    const b = (c as BorderedContainer).border;
+    return `${c.id}:${c.x},${c.y},${c.w},${c.h}${b ? `/b${b.width}:${b.level}` : ''}`;
+  });
+  const imgs = (p.images ?? []).map((i) => `i${i.id}:${i.x},${i.y},${i.w},${i.h}:${JSON.stringify(i.image)}`);
+  const menu = p.menu?.length ? [`m:${p.menu.map((m) => `${m.id}=${m.label}`).join(',')}`] : [];
+  return [...cs, ...imgs, ...menu].join('|');
 }

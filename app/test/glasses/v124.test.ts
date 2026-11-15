@@ -1,7 +1,8 @@
 /**
- * Quai 1.2.4, côté lunettes (docs/v1.2.4/PRD-1.2.4.md § 1 et § 4) : l'arrêt ou la gare où aller, en entier ; pages
- * des étapes comptées en lignes ; heures alignées à droite dans leur case (le « ~ » d'un horaire prévu dépasse à
- * gauche) ; aides en triangles vides. Des gares, des arrêts et des lieux publics seulement.
+ * Quai 1.2.4, côté lunettes (docs/v1.2.4/PRD-1.2.4.md § 1 et § 4) : pages des étapes comptées en lignes ; heures
+ * alignées à droite dans leur case (le « ~ » d'un horaire prévu dépasse à gauche) ; aides en triangles vides. 1.2.10
+ * (PRD-1.2.10 § 5) : une rangée par étape (l'arrêt de descente, la marche en minutes ; « depuis … » pour un trajet qui
+ * commence à bord). Des gares, des arrêts et des lieux publics seulement.
  */
 import { describe, expect, it } from 'vitest';
 import { textWidth } from '../../src/glasses/font';
@@ -39,50 +40,44 @@ describe('PRD-1.2.4 § 1 : l’arrêt ou la gare où aller, en entier', () => {
     { walk: 2 },
   ]);
 
-  it('départ à pied : « Partir à pied vers l’arrêt (7 min) », puis le nom de l’arrêt en entier sur la ligne suivante', () => {
-    const v = steps(j);
-    const l = lines(v);
-    expect(l[0]).toMatch(/^13:\d\d {3}Partir à pied vers l’arrêt \(7 min\)/);
-    expect(l[1]).toBe('Braine-l’Alleud Route de Mont-Saint-Jean');
-    expect(l[2]).toBe('13:32   Bus W vers Braine-l’Alleud, Gare');
-    // le nom dans la colonne du texte des étapes, jamais coupé
-    expect(v.items[0]).toMatchObject({ b: 'Partir à pied vers l’arrêt', b2: 'Braine-l’Alleud Route de Mont-Saint-Jean' });
-    expect(nb(v.items[0].bTail ?? '')).toBe(' (7 min)');
+  it('1.2.10 : une rangée par étape : l’heure, le véhicule et « → » l’arrêt de descente, l’arrivée ou la marge ; la marche en minutes', () => {
+    const l = lines(steps(j));
+    expect(l.slice(0, 7)).toEqual([
+      'Départ 13:25, dans 1 min   arrivée 14:29',
+      '13:25 à pied 7 min',
+      '13:32 Bus W → Braine-l’Alleud, Gare   13:41',
+      '13:41 à pied 1 min',
+      '14:01 IC voie 2 → Bruxelles-Midi   14:16',
+      '14:16 à pied 3 min',
+      '14:22 Métro 2 → Madou   marge 3 min',
+    ]);
     expect(l.join('\n')).not.toContain('…');
-    // une marche courte qui tient garde sa ligne
-    expect(l).toContain('13:41   À pied vers Braine-l’Alleud (1 min)');
   });
 
-  it('vers une gare : « vers la gare », puis son nom ; une marche trop longue pour sa ligne : le nom dessous, en entier', () => {
-    const train = journey('t', [{ walk: 12, to: 'Bruxelles-Central' }, { ride: 'IC', mode: 'train', dep: T(14, 10), arr: T(14, 39), from: 'Bruxelles-Central', to: 'Gand-Saint-Pierre', platform: '4' }]);
-    expect(lines(steps(train)).slice(0, 2)).toEqual([expect.stringMatching(/Partir à pied vers la gare \(12 min\)/), 'Bruxelles-Central']);
+  it('un arrêt de descente trop long : coupé au mot avant l’heure d’arrivée, jamais l’heure', () => {
     const long = journey('l', [
       { walk: 4, to: 'Bruxelles-Central' },
-      { ride: 'IC', mode: 'train', dep: T(14, 0), arr: T(14, 20), from: 'Bruxelles-Central', to: 'Louvain-la-Neuve' },
-      { walk: 6, to: 'Louvain-la-Neuve Place des Sciences, quai central' },
-      { ride: 'E3', mode: 'bus', dep: T(14, 30), arr: T(14, 50), from: 'Louvain-la-Neuve Place des Sciences, quai central', to: 'Braine-l’Alleud Côté du Collège' },
+      { ride: 'E3', mode: 'bus', dep: T(14, 30), arr: T(14, 50), from: 'Louvain-la-Neuve', to: 'Comines/komen Chaussée de Wervicq/Werviksesteenweg' },
       { walk: 2 },
     ]);
-    const v = steps(long);
-    const at2 = v.items.findIndex((x) => x.b2 === 'Louvain-la-Neuve Place des Sciences, quai central');
-    expect(v.items[at2]).toMatchObject({ b: 'À pied vers l’arrêt du bus' });
-    expect(nb(v.items[at2].bTail ?? '')).toBe(' (6 min)');
-    const shown = lines({ ...v, items: v.items.slice(at2) });
-    expect(shown.slice(0, 2)).toEqual(['14:20   À pied vers l’arrêt du bus (6 min)', 'Louvain-la-Neuve Place des Sciences, quai central']);
+    const row = lines(steps(long))[2];
+    expect(row).toMatch(/^14:30 Bus E3 → Comines\/komen .*[a-z]…   14:50$/);
+    expect(row).not.toMatch(/ …/);
   });
 
   it('à bord dès le départ (trajet fixe depuis une gare) : « depuis Bruxelles-Central »', () => {
     const fixed = journey('f', [{ ride: 'IC', mode: 'train', dep: T(14, 10), arr: T(14, 39), from: 'Bruxelles-Central', to: 'Gand-Saint-Pierre', platform: '4', head: 'Bruges' }]);
-    expect(lines(steps(fixed)).slice(0, 3)).toEqual([expect.stringMatching(/^14:10 {3}IC vers Bruges, voie 4/), 'depuis Bruxelles-Central', '14:39   Arrivée à Gand-Saint-Pierre']);
+    expect(lines(steps(fixed)).slice(0, 3)).toEqual(['Départ 14:10, dans 46 min   arrivée 14:39', '14:10 IC voie 4 → Gand-Saint-Pierre   14:39', 'depuis Bruxelles-Central']);
   });
 
   it('pages comptées en lignes : ▼ montre la première étape cachée, jamais une étape sautée ; ▲ revient au début', () => {
     const v = steps(j);
     const cap = geometry(v).capacity;
-    // 1re page : la marche (2 lignes), puis une étape par ligne ; ▼ : à partir de la 1re cachée
+    // 1re page : une étape par ligne ; ▼ : à partir de la 1re cachée
     const first = visibleRange(v.items, 0, cap).to;
-    expect(first).toBe(cap - 1);
-    expect(nb(v.note ?? '')).toBe(`▽ suite du trajet : ${v.items.length - first} étapes`);
+    expect(first).toBe(cap);
+    const hidden = v.items.length - first;
+    expect(nb(v.note ?? '')).toBe(`▽ suite du trajet : ${hidden} étape${hidden > 1 ? 's' : ''}`);
     const nav = initNav({ screen: 'steps', key: 'k', title: 'Vers le bureau', from: { type: 'here' }, to: { type: 'place', placeId: 'b' } } as never);
     const down = handleGesture(nav, 'down', v, cap);
     const top = down.state.stack.at(-1)!.top;
@@ -103,9 +98,12 @@ describe('PRD-1.2.4 § 4 : heures alignées à droite, « ~ » à gauche ; aides
       { walk: 2 },
     ]);
     planned.legs[1].rt = false;
-    const e = edges(container(steps(planned), 'colA', -1));
-    expect(e.map((x) => x.text)).toEqual(['13:57', '~14:01', '14:16', '14:18']);
-    for (const x of e) expect(Math.abs(x.right - e[0].right)).toBeLessThanOrEqual(2);
+    // 1.2.10 : l'heure seule dans la colonne a d'une marche, suivie du véhicule pour un véhicule : on mesure la fin des
+    // chiffres de l'heure dans sa case (STEP_TIME_PX)
+    const a = container(steps(planned), 'colA', -1);
+    const ends = a.content.split('\n').filter((l) => l.trim()).map((l) => ({ text: (/~?\d\d:\d\d/.exec(l) ?? [''])[0], end: a.x + textWidth(l.slice(0, (/\d\d:\d\d/.exec(l)?.index ?? 0) + 5)) }));
+    expect(ends.map((x) => x.text)).toEqual(['13:57', '~14:01', '14:16']);
+    for (const x of ends) expect(Math.abs(x.end - ends[0].end)).toBeLessThanOrEqual(2);
     expect(LAYOUTS.steps.a.align).toBe('right');
   });
 

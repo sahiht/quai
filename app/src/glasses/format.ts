@@ -5,10 +5,11 @@
  */
 import type { Departure, FavoriteAnswer, Journey, Leg, LineDeparture, NameLang, PlanResult, Settings, StopCall } from '../core/api';
 import { meansText, rideName } from '../core/means';
-import { NB as CORE_NB, dayWord as coreDayWord, timeText, vers } from '../core/text';
+import { NB as CORE_NB, dayWord as coreDayWord, placeNoun, timeText, vers } from '../core/text';
 import { OP_NAME, displayName, hhmm, lineLabel, mainMode, minutesUntil } from '../core/util';
 import type { AreaSummary, Mode, Names, Op } from '../../../shared/types';
 import { textWidth, truncate } from './font';
+import { truncateWords } from './layout';
 
 /** Espace insécable : devant « : ; ! ? » et entre un nombre et son unité. */
 export const NB = CORE_NB;
@@ -24,10 +25,23 @@ export const HINTS = {
    * ses arrêts (la ligne ★ en tête garde ou retire la gare, ou ouvre « garder une ligne »).
    */
   board: `△▽ départs   toucher${NB}: arrêts   double${NB}: retour`,
-  /** 1.2.3 (§ 2) : les arrêts d'un départ ; toucher un arrêt : son tableau. */
-  stops: `△▽ arrêts   toucher${NB}: départs   double${NB}: retour`,
-  /** 1.2.8 : tout le trajet d'un train ; toucher une gare : ses départs. */
-  trainRun: `△▽ gares   toucher${NB}: départs   double${NB}: retour`,
+  /**
+   * 1.2.3 (§ 2) : les arrêts d'un départ. 1.2.10 (PRD-1.2.10 § 3.1) : toucher un arrêt après la montée, « j'y descends »
+   * (le tableau de l'arrêt reste dans Gares, Arrêts, Autour de moi).
+   */
+  stops: `△▽ arrêts   toucher${NB}: j’y descends   double${NB}: retour`,
+  /** 1.2.8 : tout le trajet d'un train ; 1.2.10 : même liste, mêmes aides que les arrêts d'un départ (§ 3.1). */
+  trainRun: `△▽ arrêts   toucher${NB}: j’y descends   double${NB}: retour`,
+  /** 1.2.10 (PRD-1.2.10 § 5) : écran du trajet : toucher lance le guidage de la proposition affichée. */
+  stepsGo: `△▽ étapes   toucher${NB}: y aller   double${NB}: retour`,
+  /** 1.2.10 : trajet guidé (écran calme allumé) : toucher revient à l'écran du guidage. */
+  stepsGuided: `△▽ étapes   toucher${NB}: guidage   double${NB}: retour`,
+  /** 1.2.10 (§ 3.2, § 3.3) : un moment du guidage ou « Où tu en es ». */
+  guide: `toucher${NB}: effacer   appui long${NB}: arrêter`,
+  /** 1.2.10 : « Tu y es ». */
+  guideEnd: `toucher${NB}: terminer`,
+  /** 1.2.10 (§ 3.4) : menu de l'appui long rendu par Quai (Quai Web). */
+  menu: `△▽ choisir   toucher${NB}: valider   double${NB}: retour`,
   /** 1.2.2 : « {arrêt} : garder une ligne ». */
   keepLine: `△▽ choisir   toucher${NB}: ★ garder ou retirer   double${NB}: retour`,
   favorites: `△▽ choisir   toucher${NB}: ouvrir   double${NB}: retour`,
@@ -912,4 +926,110 @@ export const NOTE_RT_KEPT = `Temps réel coupé${NB}: derniers retards connus ~`
 export function departureWait(d: Departure, now: number, markPlanned: boolean): string {
   const day = laterDay(d, now);
   return `${day ? `${day} ` : ''}${minutesText(d, now, markPlanned)}`;
+}
+
+/* ------------------------------ 1.2.10 (PRD-1.2.10) ------------------------------ */
+
+/** 1.2.10 : coupe au mot (layout.ts : une seule règle pour les vues et la mise en page). */
+export { truncateWords };
+
+/**
+ * 1.2.10 : un texte en trois parties dont seule celle du milieu (un nom) est raccourcie, au mot : « Prochain arrêt : »
+ * et « , 07:16 » restent entiers. Sans place pour le nom, la fin seule.
+ */
+export function fitName(head: string, name: string, tail: string, maxPx: number): string {
+  const full = `${head}${name}${tail}`;
+  if (textWidth(full) <= maxPx) return full;
+  const room = maxPx - textWidth(head) - textWidth(tail);
+  const n = room > 0 ? truncateWords(name, room) : '';
+  return n ? `${head}${n}${tail}` : truncateWords(full, maxPx);
+}
+
+/**
+ * 1.2.10 (PRD-1.2.10 § 5) : le nom d'un trajet, titre de son écran : « Bureau » pour « Vers le bureau », « Maison »,
+ * « École », « Gand-Saint-Pierre », « Rue Neuve 1 », « Chez Karim ». Un nom déjà nu reste tel quel.
+ */
+export function tripName(title: string): string {
+  const t = title.trim();
+  const m = /^Vers\s+(.*)$/.exec(t);
+  if (!m) return t;
+  // article ajouté par vers() (minuscule) : retiré ; un nom propre qui commence par « La », « Le » (« La Louvière ») reste
+  const rest = m[1].replace(/^(le|la|les)\s+/, '').replace(/^l[’']/, '');
+  return upperFirst(rest);
+}
+
+/** 1.2.10 : un titre de trajet sous la forme « Vers le bureau » (vers() du cœur), qu'il soit nu (« Bureau ») ou non. */
+function versForm(title: string): string {
+  const t = title.trim();
+  return /^Vers\s/.test(t) ? t : vers(placeNoun(t));
+}
+
+/** 1.2.10 (§ 3.2, § 3.3) : « vers le bureau », « vers Gand-Saint-Pierre », « vers chez Karim » (la marche finale). */
+export function towardTitle(title: string): string {
+  return lowerFirst(versForm(title));
+}
+
+/** 1.2.10 (§ 3.2) : « jusqu’au bureau », « jusqu’à la maison », « jusqu’à l’école », « jusque chez Karim ». */
+export function untilTitle(title: string): string {
+  const at = atTitle(versForm(title));
+  return /^chez\s/i.test(at) ? `jusque ${at}` : `jusqu’${at}`;
+}
+
+/** 1.2.10 : un train (ou un véhicule de la SNCB qui n'est pas un bus de remplacement). */
+export function isTrainRef(v: { op?: Op; mode?: Mode }): boolean {
+  return v.mode === 'train' || (v.op === 'sncb' && v.mode !== 'bus');
+}
+
+/**
+ * 1.2.10 (§ 3.2, board) : l'attente d'un bus, d'un tram ou d'un métro qu'on va prendre : « dans 1 min », « dans 6 min »,
+ * au-delà de 10 min « à 07:12 » ; « imminent » seulement avec le temps réel ; sans lui, « ~ » devant le nombre ou
+ * l'heure (« dans ~1 min », « à ~07:12 »).
+ */
+export function boardWait(depAt: number, rt: boolean, now: number, markPlanned: boolean): string {
+  const m = minutesUntil(depAt, now);
+  const mark = plannedMark(rt, markPlanned);
+  if (m > 10) return `à ${mark}${hhmm(depAt)}`;
+  if (m < 1 && rt) return 'imminent';
+  return `dans ${mark}${minText(Math.max(1, m))}`;
+}
+
+/** 1.2.10 (§ 3.2, turn) : mots d'un virage, « à gauche », « légèrement à droite », « franchement à gauche ». */
+export const TURN_WORDS = {
+  left: 'à gauche',
+  right: 'à droite',
+  slightLeft: 'légèrement à gauche',
+  slightRight: 'légèrement à droite',
+  sharpLeft: 'franchement à gauche',
+  sharpRight: 'franchement à droite',
+  straight: 'tout droit',
+  uturn: 'Fais demi-tour',
+} as const;
+
+/**
+ * 1.2.10 (§ 3.2, turn) : distance d'un virage arrondie : moins de 100 m par 10 m, au-delà par 50 m ; 10 m ou moins :
+ * null (« maintenant »).
+ */
+export function turnDistance(distM: number): number | null {
+  if (!(distM > 10)) return null;
+  return distM < 100 ? Math.max(20, Math.round(distM / 10) * 10) : Math.round(distM / 50) * 50;
+}
+
+/** 1.2.10 : « à gauche dans 40 m », « à gauche maintenant », « Fais demi-tour ». */
+export function turnText(turn: keyof typeof TURN_WORDS, distM: number): string {
+  if (turn === 'uturn') return TURN_WORDS.uturn;
+  const d = turnDistance(distM);
+  return d === null ? `${TURN_WORDS[turn]} maintenant` : `${TURN_WORDS[turn]} dans ${d}${NB}m`;
+}
+
+/** 1.2.10 (§ 3.2, arrived) : « à l’heure », « 3 min de retard », « 2 min d’avance ». */
+export function diffText(diffMin: number): string {
+  const n = Math.round(diffMin);
+  if (n > 0) return `${minText(n)} de retard`;
+  if (n < 0) return `${minText(-n)} d’avance`;
+  return 'à l’heure';
+}
+
+/** 1.2.10 : écart en minutes, « 33 min », « 1 h », « 1 h 05 » (comme « Si tu le rates »). */
+export function laterText(min: number): string {
+  return min < 60 ? minText(min) : min % 60 === 0 ? `${min / 60}${NB}h` : durationText(min);
 }
