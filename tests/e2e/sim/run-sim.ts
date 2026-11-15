@@ -429,7 +429,8 @@ function reliefIssues(kind: 'home' | 'others' | 'lines' | 'trainRun', s: Screen,
     // 1.2.10 (PRD-1.2.10 § 3.1) : la gare de la montée (celle du tableau) et celles d'avant, pâles et sans action
     const gare = field<number>(s, 'gare') ?? -1;
     const top = field<number>(s, 'top') ?? 0;
-    for (const [k, l] of rows.entries()) {
+    // rang dans la liste : sans la ligne du haut (« ● : le train arrive »)
+    for (const [k, l] of rows.filter((x) => /^ligne \d/.test(x.label)).entries()) {
       const r = trainRowAlpha(png, s, l.text);
       if (!r) continue;
       n++;
