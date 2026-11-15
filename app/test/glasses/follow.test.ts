@@ -27,8 +27,8 @@ function answers(fav: Favorite, now: number): FavoriteAnswer | undefined {
 const steps = (s: Screen) => s.screen === 'steps' && s.page !== undefined;
 const homeReady = (s: Screen) => s.screen === 'home' && s.shown?.length === 2 && !s.lines.some((l) => / …$/.test(l));
 const open = (patch = {}, kv = createKV(memoryBackend())) =>
-  setup({ now: NOW, kv, settings: settingsWith([PLACES.bureau, PLACES.ecole], { seenVersion: '1.2.10', ...patch }), core: (now) => stubCore(now, { answers }) });
-const HINT_GO = '△▽ étapes   toucher : y aller   double : retour';
+  setup({ now: NOW, kv, settings: settingsWith([PLACES.bureau, PLACES.ecole], { seenVersion: '1.3.0', ...patch }), core: (now) => stubCore(now, { answers }) });
+const HINT_GO = '△▽ étapes   double : retour';
 
 describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
   it('ouvrir un favori ne le suit pas : « Suivre ce trajet » ; au départ, pas de « En cours » ni de « Dans le train »', async () => {
@@ -65,7 +65,7 @@ describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
     const off = { ...c, guidedJourneyId: 'j-bureau', settings: settingsWith([PLACES.bureau], { display: { ...settingsWith([]).display, guide: false } }) };
     const followed = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0, fresh: true }, off);
     expect(tapIntent(followed, 0)).toEqual({ kind: 'open', route: { screen: 'followed' } });
-    expect(nb(followed.hints)).toBe('△▽ étapes   toucher : ne plus suivre   double : retour');
+    expect(nb(followed.hints)).toBe('△▽ étapes   double : retour');
   });
 
   it('sans aide des gestes (réglage) : aucune aide, le toucher lance toujours le guidage', async () => {
@@ -121,7 +121,7 @@ describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
     // suivi (guidé, écran calme allumé par défaut) : toucher revient au guidage
     expect(s).toMatchObject({ followed: true, sel: 0 });
     expect(nb(s.title)).toBe('Bureau');
-    expect(s.lines.at(-1)).toBe('△▽ étapes   toucher : guidage   double : retour');
+    expect(s.lines.at(-1)).toBe('△▽ étapes   double : retour');
     await h.settle();
     expect(JSON.parse((await h.kv.get(TRIP_KEY))!).explicit).toBe(true);
     h.c.stop();

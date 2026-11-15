@@ -1,6 +1,6 @@
 /**
- * Quai 1.2.10, écrans refaits (docs/v1.2.10/PRD-1.2.10.md § 2 et § 5) : « Favoris » d'une ligne chacun (« ! », la
- * ligne du détail en bas sous un filet pâle, sept favoris à l'écran) et l'écran du trajet plus facile à lire (le nom du
+ * Quai 1.2.10, écrans refaits (docs/v1.2.10/PRD-1.2.10.md § 2 et § 5) : « Favoris » d'une ligne chacun (« ! » ; 1.3.0,
+ * PRD-1.3.0 § 7 : le détail en accordéon, plus de ligne du détail en bas) et l'écran du trajet plus facile à lire (le nom du
  * trajet, « Départ … » et « arrivée … », une rangée par étape). Chaque texte mesuré au pixel avec les noms les plus
  * longs des vraies données ; jamais un mot coupé. Lieux publics seulement.
  */
@@ -10,7 +10,8 @@ import { toTextProperty } from '../../src/platform/even';
 import { guideView } from '../../src/glasses/guide-views';
 import type { Favorite, FavoriteAnswer, Journey, RecentAddress } from '../../src/core/api';
 import { textWidth } from '../../src/glasses/font';
-import { GEO, WIDTHS, layoutPage, shapeKey, type BorderedContainer } from '../../src/glasses/layout';
+import { GEO, WIDTHS, layoutPage, type BorderedContainer, type DetailItem } from '../../src/glasses/layout';
+import { EXPAND_PX } from '../../src/glasses/format';
 import { favoriteTrouble, favoritesView, stepsPage, stepsTopLine, TROUBLE_MARK, type ViewCtx } from '../../src/glasses/views';
 import { MIN, PLACES, at, container, journey, lines, nb, overflowing, page, rowsOf, settingsWith } from './helpers';
 
@@ -36,27 +37,26 @@ const ic = (id: string, p: Partial<Journey['legs'][number]> = {}): Journey => {
 const ctx = (patch: Partial<ViewCtx> = {}, favs: Favorite[] = [PLACES.bureau]): ViewCtx => ({ now: NOW, settings: settingsWith(favs), ...patch });
 const HINT = '△▽ choisir   toucher : ouvrir   double : retour';
 
-describe('PRD-1.2.10 § 2 : « Favoris », une ligne par favori, le détail en bas', () => {
-  it('sept favoris à l’écran avec la ligne du détail et les aides ; un filet pâle (bordure de niveau 2) entre la liste et le détail', () => {
+describe('PRD-1.2.10 § 2 et PRD-1.3.0 § 7 : « Favoris », une ligne par favori, le détail en accordéon', () => {
+  it('neuf favoris : une ligne chacun, les aides ; 1.3.0 : accordéon, plus de ligne du détail réservée en bas ; rien ne dépasse', () => {
     const favs = Array.from({ length: 9 }, (_, i) => place(`f${i}`, `Lieu ${i + 1}`));
     const v = favoritesView({ entries: favs.map((fav, i) => ({ fav, answer: ok(fav, door(`j${i}`, NOW + (i + 2) * MIN, NOW + 70 * MIN)) })) }, ctx({}, favs));
+    expect(v.accordion).toBe(true);
+    expect(v.reserveNote).toBeUndefined();
+    expect(v.note).toBeUndefined();
     const p = page(v);
-    expect(p.visible).toBe(7);
     expect(overflowing(p)).toEqual([]);
-    expect(p.lines.slice(0, 2).map(nb)).toEqual(['Lieu 1   dans 2 min → 08:41', 'Lieu 2   dans 3 min → 08:41']);
-    expect(p.lines.slice(-2).map(nb)).toEqual(['bus W 07:38, direct', HINT]);
-    // le filet : le conteneur de la ligne du haut, 1 px, entre la dernière rangée (y = 222) et le pied (y = 231)
-    const filet = container(p, 'top') as BorderedContainer;
-    expect(filet).toMatchObject({ x: 28, w: 544, h: 1, level: 2, border: { width: 1, level: 2 } });
-    expect(filet.y).toBeGreaterThan(222);
-    expect(filet.y + filet.h).toBeLessThanOrEqual(231);
-    expect(container(p, 'foot')).toMatchObject({ y: 231, h: 54, level: 2 });
-    // toujours huit conteneurs de texte ; la bordure compte dans la forme de la page
+    expect(p.lines.slice(0, 1).map(nb)).toEqual(['Lieu 1   dans 2 min → 08:41']);
+    expect(nb(p.lines.at(-1)!)).toBe(HINT);
+    // l'ancienne ligne du détail (1.2.10) n'est plus dite
+    expect(p.lines.map(nb)).not.toContain('bus W 07:38, direct');
+    // chaque favori a son accordéon : la marche puis le bus, les changements
+    expect((v.items[0] as DetailItem).expand?.map((l) => nb(l.text))).toEqual(['à pied 5 min, puis bus W 07:38', 'direct']);
+    // toujours huit conteneurs de texte
     expect(p.containers).toHaveLength(8);
-    expect(shapeKey(p)).toContain('/b1:2');
   });
 
-  it('la ligne du détail suit le curseur sans reconstruire la page ; « ~ » au début d’une heure prévue ; rien pour « tu y es »', () => {
+  it('l’accordéon de chaque rangée : « ~ » au début d’une heure prévue (planned), la voie modifiée et son souci ; rien pour « tu y es » ni « Autre adresse »', () => {
     const favs = [PLACES.bureau, PLACES.ecole, PLACES.maison];
     const answers: Record<string, FavoriteAnswer> = {
       'fav-bureau': ok(PLACES.bureau, ic('j-ic', { delayMin: 2, newPlatform: '6' })),
@@ -64,24 +64,19 @@ describe('PRD-1.2.10 § 2 : « Favoris », une ligne par favori, le détail en b
       'fav-maison': { favoriteId: 'fav-maison', kind: 'trip', state: 'here', updatedAt: NOW },
     };
     const v = favoritesView({ entries: favs.map((fav) => ({ fav, answer: answers[fav.id] })) }, ctx({}, favs));
-    const at = (sel: number) => layoutPage(v, { sel, top: 0 });
-    expect(rowsOf(container(at(0), 'foot'))[0]).toBe('IC 07:42 +2 voie 6 !, direct');
-    expect(rowsOf(container(at(1), 'foot'))[0]).toBe('bus W ~07:45, direct');
-    expect(rowsOf(container(at(2), 'foot'))[0].trim()).toBe('');
-    // « Autre adresse » : vide
-    expect(rowsOf(container(at(3), 'foot'))[0].trim()).toBe('');
+    const expand = v.items.map((i) => (i as DetailItem).expand?.map((l) => ({ ...l, text: nb(l.text) })));
+    expect(expand).toEqual([
+      [{ text: 'à pied 7 min, puis IC 07:42 +2 voie 6 !' }, { text: 'voie 6 au lieu de 4, direct' }],
+      [{ text: 'à pied 5 min, puis bus W ~07:45', planned: true }, { text: 'direct' }],
+      undefined,
+      undefined,
+    ]);
     // pas de note à part
     expect(lines(v).join('\n')).not.toContain('horaire prévu');
-    // même forme d'un favori à l'autre : seuls les textes changent
-    expect(new Set([0, 1, 2, 3].map((s) => shapeKey(at(s)))).size).toBe(1);
-    // journal QUAI_SCREEN : le texte exact de la ligne du détail, celui du curseur (les champs existants gardés)
-    at(1);
-    expect(v.log).toMatchObject({ order: ['fav-bureau', 'fav-ecole', 'fav-maison'], detail: 'bus W ~07:45, direct' });
-    at(2);
-    expect(v.log?.detail).toBe('');
+    expect(v.log).toMatchObject({ order: ['fav-bureau', 'fav-ecole', 'fav-maison'] });
     // « ! » : la voie change ; le nom au plus clair, « ! » collé par une espace insécable
     expect(v.items[0].a).toBe(`Bureau${TROUBLE_MARK}`);
-    expect(TROUBLE_MARK).toBe(' !');
+    expect(TROUBLE_MARK).toBe('\u00a0!');
     expect(v.items[1].a).toBe('École');
   });
 
@@ -98,20 +93,21 @@ describe('PRD-1.2.10 § 2 : « Favoris », une ligne par favori, le détail en b
     expect(favoriteTrouble(undefined, NOW)).toBe(false);
   });
 
-  it('adresses récentes : l’adresse complète dans la ligne du détail ; horaires périmés : leur message en haut, pas de filet', () => {
+  it('adresses récentes : l’adresse complète dans l’accordéon ; horaires périmés : leur message en haut, sans filet', () => {
     const recent: RecentAddress[] = [{ label: 'Place Saint-Lambert 1, 4000 Liège', lat: 50.6451, lon: 5.5734, at: 1 }];
     const s = settingsWith([PLACES.bureau], { recent });
     const v = favoritesView({}, { now: NOW, settings: s });
-    expect(rowsOf(container(layoutPage(v, { sel: 1, top: 0 }), 'foot'))[0]).toBe('Place Saint-Lambert 1, 4000 Liège');
+    expect((v.items[1] as DetailItem).expand).toEqual([{ text: 'Place Saint-Lambert 1, 4000 Liège' }]);
     const stale = favoritesView({}, { now: NOW, settings: s, stale: 'Horaires du 10/11 : mise à jour en attente' });
     const p = layoutPage(stale, { sel: 1, top: 0 });
     expect(container(p, 'top')).toMatchObject({ y: 30, h: 27, level: 4 });
     expect((container(p, 'top') as BorderedContainer).border).toBeUndefined();
     expect(nb(p.lines[0])).toBe('Horaires du 10/11 : mise à jour en attente');
-    expect(rowsOf(container(p, 'foot'))[0]).toBe('Place Saint-Lambert 1, 4000 Liège');
+    // le pied n'a plus que les aides
+    expect(rowsOf(container(p, 'foot'))).toEqual([HINT]);
   });
 
-  it('noms les plus longs : le nom coupé au mot avant « ! », la réponse entière, le détail coupé au mot ; rien ne dépasse', () => {
+  it('noms les plus longs : le nom coupé au mot avant « ! », la réponse entière, l’accordéon coupé au mot ; rien ne dépasse', () => {
     for (const name of LONG) {
       const fav = place('f', name);
       const j = { ...door('j', NOW + 3 * MIN, NOW + 70 * MIN, { line: '163b4', to: name }), alerts: [{ kind: 'works' as const, text: 'Travaux', at: NOW }] };
@@ -123,11 +119,14 @@ describe('PRD-1.2.10 § 2 : « Favoris », une ligne par favori, le détail en b
         const row = nb(p.lines[0]);
         expect(row).toMatch(/ !   dans 3 min → 08:41$/);
         expect(row).not.toMatch(/ …/);
-        const detail = rowsOf(container(p, 'foot'))[0];
-        expect(textWidth(detail)).toBeLessThanOrEqual(WIDTHS.full);
-        if (detail.endsWith('…')) expect(detail).not.toMatch(/ …$/);
+        for (const l of (v.items[sel] as DetailItem).expand ?? []) {
+          expect(textWidth(l.text)).toBeLessThanOrEqual(EXPAND_PX);
+          if (l.text.endsWith('…')) expect(l.text).not.toMatch(/ …$/);
+        }
       }
       expect(textWidth(v.items[0].a)).toBeLessThanOrEqual(WIDTHS.wideLeft);
+      // le souci (travaux) en tête de la 2e ligne
+      expect(nb((v.items[0] as DetailItem).expand![1].text)).toBe('Travaux, direct');
     }
   });
 });
@@ -157,7 +156,7 @@ describe('PRD-1.2.10 § 5 : l’écran du trajet, plus facile à lire', () => {
       '07:56 IC voie 3 → Bruxelles-Central   marge 4 min',
       '08:48 à pied 6 min',
       'Fin du trajet. Pas d’autre trajet pour l’instant',
-      '△▽ étapes   toucher : y aller   double : retour',
+      '△▽ étapes   double : retour',
     ]);
     expect(v.tap).toEqual({ kind: 'goGuide' });
     const p = page(v);
@@ -233,7 +232,7 @@ describe('PRD-1.2.10 § 5 : l’écran du trajet, plus facile à lire', () => {
 });
 
 describe('pages acceptées par le SDK (validateEvenHubPageContainer)', () => {
-  it('« Favoris » avec son filet de 1 px, et les trois pages du guidage', () => {
+  it('« Favoris » (1.3.0 : en accordéon), et les trois pages du guidage', () => {
     const sdk = (p: ReturnType<typeof page>) => {
       const sdkPage = { containerTotalNum: p.containers.length, textObject: p.containers.map(toTextProperty) };
       return validateEvenHubPageContainer(sdkPage);

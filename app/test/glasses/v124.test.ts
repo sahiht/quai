@@ -218,7 +218,7 @@ describe('PRD-1.2.4 § 4 : heures alignées à droite, « ~ » à gauche ; aides
 
   it('aides et bas d’écran : « △▽ » (le curseur « ▶ » reste plein)', () => {
     for (const h of Object.values(HINTS)) expect(h).not.toMatch(/[▲▼]/);
-    expect(nb(HINTS.board)).toBe('△▽ départs   toucher : arrêts   double : retour');
+    expect(nb(HINTS.board)).toBe('△▽ départs   toucher : où descendre   double : retour');
     const v = steps(journey('x', [{ walk: 3, to: 'Gare du Nord' }, { ride: '3', mode: 'tram', dep: T(13, 40), arr: T(13, 50), from: 'Gare du Nord', to: 'Bourse' }, { walk: 1 }]));
     expect(v.note ?? '').not.toMatch(/[▲▼]/);
     const b = boardView(boardOf('sncb:8863008', 'Namur', [trainAt(NOW, 10)]), ctx(), { kept: false });
