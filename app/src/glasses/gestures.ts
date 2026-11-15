@@ -16,6 +16,13 @@
  *  - état des lunettes (onDeviceStatusChanged) : signal `device`, seulement quand la connexion ou le port changent ;
  *  - doublons du micrologiciel (even-g2-notes, page-lifecycle) : un événement système répété 50 à 100 ms plus tard ;
  *  - boîte de sortie (shutDownPageContainer(1)) : 4 quand elle s'affiche, 5 si l'on répond « Non », 7 si « Oui ».
+ *
+ * 1.3.0 (PRD-1.3.0 § 6.2, § 6.3) :
+ *  - mesure du capteur de mouvement (sysEvent de type 8, IMU_DATA_REPORT, ou sans type, avec imuData) : signal `imu`,
+ *    jamais un geste, même avec une enveloppe voisine sans type ; une mesure dont une coordonnée manque ou n'est pas un
+ *    nombre est écartée ; les mesures ne passent pas par le dédoublonnage (SignalDedup) ;
+ *  - état des lunettes : batterie (entier de 1 à 100) et charge, lunettes connectées seulement ; un changement de
+ *    batterie ou de charge fait aussi un signal `device` (connexion et port inchangés : à comparer avant d'agir).
  */
 import type { EvenHubEvent } from '@evenrealities/even_hub_sdk';
 import type { Gesture } from './nav';
@@ -28,9 +35,16 @@ export type HubSignal =
   /** 1.2.10 : choix du menu système de l'appui long (menuItemClickEvent), identifiant MenuItem.id. */
   | { kind: 'menu'; id: number }
   /** 1.2.10 : lunettes reconnectées ou remises (onDeviceStatusChanged) : la page est reconstruite. */
-  /** 1.3.0 (PRD-1.3.0 § 6.3) : `battery` : batterie des lunettes, 0 à 100, si l'hôte la donne */
-  | { kind: 'device'; connected: boolean; wearing?: boolean; battery?: number }
-  /** 1.3.0 (PRD-1.3.0 § 6.2) : mesure du capteur de mouvement des lunettes (imuControl ouvert), valeurs brutes */
+  /**
+   * 1.3.0 (PRD-1.3.0 § 6.3) : `battery` : batterie des lunettes, 0 à 100, si l'hôte la donne (en pratique un entier de 1 à
+   * 100, lunettes connectées seulement ; absente : inconnue) ; `charging` : en charge, si l'hôte le dit (lunettes
+   * connectées seulement). Un signal arrive aussi quand seules la batterie ou la charge changent.
+   */
+  | { kind: 'device'; connected: boolean; wearing?: boolean; battery?: number; charging?: boolean }
+  /**
+   * 1.3.0 (PRD-1.3.0 § 6.2) : mesure du capteur de mouvement des lunettes (imuControl ouvert), valeurs brutes ; `at` :
+   * heure de réception (horloge de l'appli, en ms, comme Fix.at). Jamais un geste ; aucune n'est gardée.
+   */
   | { kind: 'imu'; x: number; y: number; z: number; at: number };
 
 const CLICK = 0;
@@ -44,6 +58,8 @@ const SYSTEM_EXIT = 7;
 /** 1.2.10 : début et fin d'un appui long (SDK 0.0.14+). */
 const LONG_PRESS = 9;
 const LONG_RELEASE = 10;
+/** 1.3.0 : mesure du capteur de mouvement (OsEventTypeList.IMU_DATA_REPORT). */
+const IMU_DATA = 8;
 
 /** Type d'un envoi : CLICK par défaut, uniquement si l'enveloppe existe. */
 function typeOf(env?: { eventType?: number | string }): number | null {
@@ -60,8 +76,31 @@ export function menuItemId(v: unknown): number | null {
   return Number.isInteger(n) && n > 0 && n <= 0xffff_ffff ? n : null;
 }
 
-/** Traduit un événement du SDK en signal (ou null si sans intérêt : audio, IMU, appui long…). */
-export function readHubEvent(e: EvenHubEvent): HubSignal | null {
+/** 1.3.0 : coordonnée d'une mesure du capteur : nombre fini (le SDK convertit déjà les textes numériques), sinon null. */
+function axis(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 1.3.0 (PRD-1.3.0 § 6.2) : mesure du capteur de mouvement (imuData du SDK) → signal `imu` reçu à `at` ; null si elle
+ * manque ou si une coordonnée manque ou n'est pas un nombre (une coordonnée absente n'est pas prise pour 0 : un faux 0
+ * ferait croire à un grand mouvement).
+ */
+export function readImu(data: unknown, at: number): HubSignal | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as { x?: unknown; y?: unknown; z?: unknown };
+  const x = axis(d.x);
+  const y = axis(d.y);
+  const z = axis(d.z);
+  return x === null || y === null || z === null ? null : { kind: 'imu', x, y, z, at };
+}
+
+/**
+ * Traduit un événement du SDK en signal (ou null si sans intérêt : audio, appui long…). 1.3.0 : `at`, heure de
+ * réception (horloge de l'appli), datée sur les mesures du capteur de mouvement.
+ */
+export function readHubEvent(e: EvenHubEvent, at: number = Date.now()): HubSignal | null {
   // 1.2.10 : un choix du menu système (il n'arrive jamais avec un geste)
   if (e.menuItemClickEvent) {
     const id = menuItemId(e.menuItemClickEvent.itemID);
@@ -72,6 +111,9 @@ export function readHubEvent(e: EvenHubEvent): HubSignal | null {
   const list = typeOf(e.listEvent);
   // 1.2.10 : l'appui long appartient au menu système ; une enveloppe voisine sans type ne doit pas en faire un toucher.
   if ([sys, text, list].some((t) => t === LONG_PRESS || t === LONG_RELEASE)) return null;
+  // 1.3.0 : mesure du capteur de mouvement (type 8 ; le SDK laisse parfois le type vide, avec imuData) : jamais un geste,
+  // même invalide ou avec une enveloppe voisine sans type
+  if (sys === IMU_DATA || (sys === CLICK && e.sysEvent?.imuData != null)) return readImu(e.sysEvent?.imuData, at);
   // Ordre : types explicites d'abord, CLICK (valeur par défaut) en dernier.
   if (sys === DOUBLE || text === DOUBLE || list === DOUBLE) return { kind: 'gesture', gesture: 'double' };
   if (sys === SYSTEM_EXIT) return { kind: 'exit', abnormal: false };
@@ -89,24 +131,55 @@ export function readHubEvent(e: EvenHubEvent): HubSignal | null {
 
 /* ------------------------------ 1.2.10 : état des lunettes ------------------------------ */
 
-/** État des lunettes tel que Quai s'en sert (DeviceStatus du SDK : connectType, isWearing). */
+/**
+ * État des lunettes tel que Quai s'en sert (DeviceStatus du SDK : connectType, isWearing ; 1.3.0 : batteryLevel,
+ * isCharging).
+ */
 export interface DeviceState {
   connected: boolean;
   wearing?: boolean;
-}
-
-/** Lecture défensive d'un DeviceStatus (« connected » seulement compte comme connecté) ; null si illisible. */
-export function readDeviceStatus(s: unknown): DeviceState | null {
-  if (!s || typeof s !== 'object') return null;
-  const o = s as { connectType?: unknown; isWearing?: unknown };
-  if (typeof o.connectType !== 'string') return null;
-  const connected = o.connectType === 'connected';
-  return typeof o.isWearing === 'boolean' ? { connected, wearing: o.isWearing } : { connected };
+  /** 1.3.0 : batterie, entier de 1 à 100, lunettes connectées seulement (absente : inconnue) */
+  battery?: number;
+  /** 1.3.0 : en charge, lunettes connectées seulement */
+  charging?: boolean;
 }
 
 /**
- * Signal `device` dédoublonné : l'hôte pousse aussi la batterie et la charge ; seul un changement de connexion ou de
- * port en fait un signal. Le premier état reçu passe (au pire une reconstruction de trop, jamais une de moins).
+ * 1.3.0 (PRD-1.3.0 § 6.3) : batterie lue dans DeviceStatus.batteryLevel : entier de 1 à 100, ou undefined (inconnue).
+ * 0 compte comme inconnue : le SDK met 0 quand l'hôte ne donne pas la batterie (DeviceStatus.fromJson), et des lunettes
+ * à 0 % sont éteintes ; une valeur hors de 0 à 100 aussi.
+ */
+export function readBattery(v: unknown): number | undefined {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  if (!Number.isFinite(n)) return undefined;
+  const b = Math.round(n);
+  return b >= 1 && b <= 100 ? b : undefined;
+}
+
+/**
+ * Lecture défensive d'un DeviceStatus (« connected » seulement compte comme connecté) ; null si illisible. 1.3.0 :
+ * batterie et charge seulement si les lunettes sont connectées (sinon l'hôte garde une valeur ancienne ou par défaut).
+ */
+export function readDeviceStatus(s: unknown): DeviceState | null {
+  if (!s || typeof s !== 'object') return null;
+  const o = s as { connectType?: unknown; isWearing?: unknown; batteryLevel?: unknown; isCharging?: unknown };
+  if (typeof o.connectType !== 'string') return null;
+  const connected = o.connectType === 'connected';
+  const d: DeviceState = { connected };
+  if (typeof o.isWearing === 'boolean') d.wearing = o.isWearing;
+  if (connected) {
+    const battery = readBattery(o.batteryLevel);
+    if (battery !== undefined) d.battery = battery;
+    if (typeof o.isCharging === 'boolean') d.charging = o.isCharging;
+  }
+  return d;
+}
+
+/**
+ * Signal `device` dédoublonné : l'hôte pousse le même état plusieurs fois ; seul un changement en fait un signal. Le
+ * premier état reçu passe (au pire une reconstruction de trop, jamais une de moins). 1.3.0 (PRD-1.3.0 § 6.3) : un
+ * changement de batterie (au pour cent près) ou de charge fait aussi un signal, pour que le contrôleur ait toujours la
+ * batterie du moment ; la connexion et le port y sont inchangés (le contrôleur compare avant de reconstruire la page).
  */
 export class DeviceSignals {
   private last: string | null = null;
@@ -114,7 +187,7 @@ export class DeviceSignals {
   next(status: unknown): HubSignal | null {
     const d = readDeviceStatus(status);
     if (!d) return null;
-    const key = `${d.connected}|${d.wearing ?? ''}`;
+    const key = `${d.connected}|${d.wearing ?? ''}|${d.battery ?? ''}|${d.charging ?? ''}`;
     if (key === this.last) return null;
     this.last = key;
     return { kind: 'device', ...d };
@@ -129,7 +202,8 @@ export const SIGNAL_DUPLICATE_MS = 600;
 /**
  * Doublons des signaux du cycle de vie (premier plan, arrière-plan, sortie) et du menu. Un signal identique au précédent
  * de même famille, moins de `windowMs` après lui, est écarté ; une vraie suite (arrière-plan puis premier plan, même
- * rapprochés) passe toujours. Les gestes ont leur propre anti-rebond (GestureFilter, dans le contrôleur).
+ * rapprochés) passe toujours. Les gestes ont leur propre anti-rebond (GestureFilter, dans le contrôleur). 1.3.0 : les
+ * mesures du capteur (`imu`, 10 par seconde) passent toujours, sans rien changer à la mémoire des autres familles.
  */
 export class SignalDedup {
   private lastSys: { key: string; t: number } | null = null;
@@ -141,6 +215,7 @@ export class SignalDedup {
     switch (s.kind) {
       case 'gesture':
       case 'device':
+      case 'imu':
         return true;
       case 'menu': {
         if (this.lastMenu && this.lastMenu.id === s.id && t - this.lastMenu.t < this.windowMs) return false;

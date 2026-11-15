@@ -2,6 +2,9 @@
  * Quai Web : port des lunettes (GlassesPort) au-dessus du canvas. Mêmes appels que le SDK Even
  * (page de départ, reconstruction, mise à jour d'un conteneur), mêmes signaux (gestes, premier plan,
  * arrière-plan) ; il n'y a rien à quitter.
+ *
+ * 1.3.0 (PRD-1.3.0 § 6) : pas de lunettes, donc ni capteur de mouvement (`imu` rend toujours faux, ouvrir comme fermer)
+ * ni état des lunettes (aucun signal `device`, pas de batterie).
  */
 import type { HubSignal } from '../glasses/gestures';
 import type { ContainerSpec } from '../glasses/types';
@@ -40,6 +43,10 @@ export function createWebGlassesPort(screen: { paint(cs: readonly ContainerSpec[
     },
     async exit() {
       /* rien à fermer sur le web : le contrôleur affiche un message à la place */
+    },
+    async imu() {
+      // 1.3.0 : pas de capteur de mouvement sans lunettes
+      return false;
     },
     emit(s) {
       for (const l of [...listeners]) l(s);

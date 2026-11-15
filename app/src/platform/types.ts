@@ -26,6 +26,13 @@ export interface GlassesPort {
   /**
    * 1.3.0 (PRD-1.3.0 § 6.2) : capteur de mouvement des lunettes (imuControl) : ouvert, une mesure toutes les `paceMs`
    * (100 à 1000, par 100) en signal `imu` ; fermé. Faux si l'hôte refuse (le rappel des messages se passe alors du capteur).
+   *
+   * Précisions (appli Even, platform/even.ts) : ouvrir prend l'allure permise la plus proche (sans `paceMs` : 100) et rend
+   * vrai seulement si l'hôte accepte ; chaque ouverture est transmise (changer d'allure : rouvrir). Les signaux `imu`
+   * n'arrivent qu'entre imu(true) et imu(false), jamais après une ouverture refusée. Fermer est toujours sûr, même deux
+   * fois ou sans avoir ouvert : vrai quand le capteur est fermé (rien n'est envoyé s'il l'est déjà), faux si l'hôte n'a
+   * pas confirmé (un nouvel appel réessaie). Un seul capteur : la dernière demande gagne. Jamais d'exception.
+   * Sans capteur (Quai Web, navigateur, hôte sans imuControl) : faux, toujours.
    */
   imu?(on: boolean, paceMs?: number): Promise<boolean>;
 }
