@@ -485,6 +485,21 @@ describe('arrêt dépassé', () => {
     expect(s.replan).toBeUndefined();
     expect(s.journeyId).toBe('jre1');
   });
+
+  it('nouveau trajet cherché depuis la position (il commence par une marche depuis « Ma position ») : jamais « Descends à Ma position »', () => {
+    const r = guide(prdTrip());
+    ride71(r);
+    step(r, at('08:49'), fix(beyond(350), at('08:49')));
+    expect(kindOf(step(r, at('08:49:20'), fix(beyond(450), at('08:49:20'))))).toBe('passed');
+    // le cœur part de { type: 'here' } : première étape à pied depuis « Ma position » (sans zone)
+    const here = { name: N('Ma position', 'Mijn positie'), ...beyond(450) };
+    const cim = { name: N('Cimetière d’Ixelles'), ...offset(P.flagey, 300, -900), areaId: 'stib:3520' };
+    const back = rideLeg({ op: 'stib', mode: 'bus', line: '71', head: 'De Brouckère', stops: [{ p: cim, t: at('08:55') }, { p: S.flagey, t: at('09:00') }] });
+    r.j = journeyOf([walkLeg(here, cim, at('08:51'), 4), back, walkLeg(S.flagey, S.etangs, at('09:00'), 6)], 'jre2');
+    const mo = m(step(r, at('08:50'), fix(beyond(700), at('08:50'))).moment, 'passed');
+    expect(mo.getOff).toEqual({ fr: '', nl: '' });
+    expect(mo.arr).toBe(at('09:06'));
+  });
 });
 
 describe('véhicule raté', () => {

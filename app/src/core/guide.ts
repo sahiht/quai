@@ -790,11 +790,14 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
       getOff = next.name;
       at = next.est;
     } else if (re.swap?.jid === jid && legs[0]) {
-      // nouveau trajet : il commence là où descendre (ou par le même véhicule, jusqu'à là où descendre)
+      // nouveau trajet : il commence là où descendre (ou par le même véhicule, jusqu'à là où descendre) ; cherché depuis
+      // la position (« Ma position », sans zone), sa marche de départ ne dit pas où descendre : rien plutôt qu'un faux nom
       const l0 = legs[0];
       const same = l0.kind === 'ride' && !!re.tripId && l0.tripId === re.tripId;
-      getOff = same ? l0.to.name : l0.from.name;
-      at = same ? l0.arr : l0.dep;
+      if (same || l0.kind === 'ride' || l0.from.areaId) {
+        getOff = same ? l0.to.name : l0.from.name;
+        at = same ? l0.arr : l0.dep;
+      }
     }
     const passedName = re.passed;
     out.push({
