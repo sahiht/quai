@@ -4,8 +4,10 @@
  * à l'accueil après avoir lancé un trajet, le curseur était sur « En cours » et un toucher reprenait le trajet. En
  * 1.2.1, « Favoris » occupe la 1re ligne : le curseur gardait son rang et tombait sur « Favoris » (un toucher ouvrait
  * la liste de tous les favoris au lieu du trajet), au retour comme quand « En cours » paraissait sous les yeux.
- * 1.2.2 : un trajet n'est suivi que sur demande (« Suivre ce trajet ») ; « En cours » remplace la ligne de son favori
- * (REVUE-USAGE n° 1) : le curseur qui était sur ce favori passe sur « En cours », et y revient à la fin du trajet.
+ * 1.2.2 : un trajet n'est suivi que sur demande ; « En cours » remplace la ligne de son favori (REVUE-USAGE n° 1) : le
+ * curseur qui était sur ce favori passe sur « En cours », et y revient à la fin du trajet. 1.2.10 : « Suivre ce
+ * trajet » devient « y aller » (le guidage, équipe C2) ; ici, le trajet est suivi par le bouton « Lunettes » du
+ * téléphone, ouvert depuis l'accueil.
  */
 import { describe, expect, it } from 'vitest';
 import type { Favorite, FavoriteAnswer, Journey } from '../../src/core/api';
@@ -18,10 +20,10 @@ function door(id: string, leave: number, arr: number): Journey {
   return journey(id, [{ walk: 5 }, { ride: 'W', mode: 'bus', dep: leave + 5 * MIN, arr: arr - 4 * MIN, from: 'Arrêt', to: 'Gare' }, { walk: 4 }], { label: 'short', reason: 'Le plus court : direct, à pied 5 + 4 min' });
 }
 
-/** Bureau : départ conseillé `bureauIn` minutes après le début du test ; Mama : 10 min. */
+/** Bureau : départ conseillé `bureauIn` minutes après le début du test ; École : 10 min. */
 function answers(bureauIn: number) {
   return (fav: Favorite, now: number): FavoriteAnswer | undefined => {
-    const j = fav.id === 'fav-bureau' ? door('j-bureau', NOW + bureauIn * MIN, NOW + (bureauIn + 47) * MIN) : fav.id === 'fav-mama' ? door('j-mama', NOW + 10 * MIN, NOW + 71 * MIN) : undefined;
+    const j = fav.id === 'fav-bureau' ? door('j-bureau', NOW + bureauIn * MIN, NOW + (bureauIn + 47) * MIN) : fav.id === 'fav-ecole' ? door('j-ecole', NOW + 10 * MIN, NOW + 71 * MIN) : undefined;
     return j ? { favoriteId: fav.id, kind: 'trip', state: 'ok', plan: { journeys: [j] }, updatedAt: now } : undefined;
   };
 }
@@ -30,24 +32,26 @@ function answers(bureauIn: number) {
 const selected = (s: Screen): string => s.lines.filter((l) => l !== '' && !l.startsWith('△▽'))[s.sel];
 const ready = (s: Screen) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l));
 
-/** Ouvre le trajet du bureau depuis l'accueil et le suit (1.2.2 : un toucher de plus, « Suivre ce trajet »). */
-async function followBureau(h: Awaited<ReturnType<typeof setup>>): Promise<void> {
-  await h.gesture('tap');
-  await h.until((s) => s.screen === 'steps' && s.page !== undefined);
-  await h.gesture('tap');
+/**
+ * Suit le trajet du bureau depuis l'accueil : 1.2.10, le bouton « Lunettes » du téléphone (le toucher « y aller » des
+ * lunettes lance le guidage, branché par le contrôleur), la réponse du favori telle qu'elle est.
+ */
+async function followBureau(h: Awaited<ReturnType<typeof setup>>, bureauIn: number): Promise<void> {
+  const j = door('j-bureau', NOW + bureauIn * MIN, NOW + (bureauIn + 47) * MIN);
+  await h.c.showTrip({ title: 'Vers le bureau', from: { type: 'here' }, to: { type: 'place', placeId: 'fav-bureau' }, favoriteId: 'fav-bureau', result: { journeys: [j] }, index: 0 });
   await h.until((s) => s.screen === 'steps' && s.followed === true);
 }
 
 describe('accueil : le curseur ne tombe jamais sur « Favoris » quand « En cours » paraît', () => {
   it('retour à l’accueil après avoir suivi un trajet : le curseur sur « En cours », un toucher reprend le trajet', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau, PLACES.mama]), core: (now) => stubCore(now, { answers: answers(0) }) });
+    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau, PLACES.ecole]), core: (now) => stubCore(now, { answers: answers(0) }) });
     const home = await h.until((s) => ready(s) && s.shown?.length === 2);
     expect(selected(home)).toMatch(/^Bureau {3}maintenant → /);
-    await followBureau(h);
+    await followBureau(h, 0);
     await h.gesture('double');
     const back = await h.until((s) => ready(s) && s.lines[0].startsWith('En cours'));
     // « En cours » remplace la ligne du bureau : pas de « Bureau » dessous
-    expect(back.lines.slice(0, 3)).toEqual(['En cours : vers le bureau   W 20:52', 'Favoris   2', 'Mama   dans 10 min → 21:58']);
+    expect(back.lines.slice(0, 3)).toEqual(['En cours : vers le bureau   W 20:52', 'Favoris   2', 'École   dans 10 min → 21:58']);
     expect(selected(back)).toBe('En cours : vers le bureau   W 20:52');
     // un toucher reprend le trajet, pas la liste de tous les favoris
     await h.gesture('tap');
@@ -56,9 +60,9 @@ describe('accueil : le curseur ne tombe jamais sur « Favoris » quand « En cou
   });
 
   it('« En cours » paraît pendant qu’on regarde l’accueil, puis disparaît : le curseur suit la ligne qui remplace la sienne', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau, PLACES.mama]), core: (now) => stubCore(now, { answers: answers(4) }) });
+    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau, PLACES.ecole]), core: (now) => stubCore(now, { answers: answers(4) }) });
     await h.until((s) => ready(s) && s.shown?.length === 2);
-    await followBureau(h);
+    await followBureau(h, 4);
     await h.gesture('double');
     // le trajet suivi ne part que dans 4 min : pas encore « En cours » ; le curseur sur « Bureau »
     const before = await h.until((s) => ready(s) && s.shown?.length === 2);
@@ -82,9 +86,9 @@ describe('accueil : le curseur ne tombe jamais sur « Favoris » quand « En cou
   });
 
   it('le curseur sur « En cours » à la fin du trajet : il passe sur le favori qui reprend sa ligne, jamais sur « Favoris »', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau, PLACES.mama]), core: (now) => stubCore(now, { answers: answers(0) }) });
+    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau, PLACES.ecole]), core: (now) => stubCore(now, { answers: answers(0) }) });
     await h.until((s) => ready(s) && s.shown?.length === 2);
-    await followBureau(h);
+    await followBureau(h, 0);
     await h.gesture('double');
     const running = await h.until((s) => ready(s) && s.lines[0].startsWith('En cours'));
     expect(selected(running)).toMatch(/^En cours/);
