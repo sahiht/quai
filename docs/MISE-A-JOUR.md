@@ -8,7 +8,7 @@ Ce guide sert à chaque nouvelle version de Quai. La dernière est la 1.2.10. Il
 - Déjà dans le train, le bus, le tram ou le métro ? Dans Gares, Arrêts, Lignes ou Autour de moi, ouvre le départ, puis touche la gare ou l'arrêt où tu descends : « j'y descends ». Quai te prévient 1 minute avant.
 - Pendant le guidage : touche une fois pour voir où tu en es, ou pour effacer le message. Appui long : le menu, avec « Arrêter le guidage » et « Voir tout le trajet ».
 - À pied, le vrai chemin, rue par rue, d'après OpenStreetMap (toute la Belgique). Il est calculé sur le téléphone : ta position ne le quitte pas. Hors de Belgique, la marche est indiquée en ligne droite.
-- Un seul réglage, dans Affichage : « Me guider pendant un trajet ». Éteint, Quai montre le trajet comme avant, sans guidage.
+- Un seul réglage, sur le téléphone, dans « Réglages » (« Pendant un trajet ») : « Me guider pendant un trajet », allumé au départ. Éteint, Quai montre le trajet comme avant, sans guidage.
 - Favoris : une ligne chacun, le détail du favori choisi en bas. Les étapes d'un trajet : une ligne par étape.
 - Les alertes ne parlent plus que de ton trajet (ses lignes, ses arrêts, ses heures), écrites en clair.
 - Sur le téléphone, Affichage tient sur un seul écran ; la carte « En cours » montre le guidage et permet de l'arrêter.
@@ -149,7 +149,7 @@ Sur le téléphone, ouvre Quai : l'accueil montre « Dans tes lunettes » et, en
 | Une ligne dit « introuvable » | Elle n'est plus dans les horaires du jour (ligne renumérotée ou supprimée) : retire-la et ajoute la nouvelle sur le téléphone, rubrique « Lignes de bus, tram, métro ». |
 | Pas de ● sur le trajet d'un train | Le temps réel de ce train manque (ses heures ont un « ~ ») : le ● ne s'affiche que d'après le temps réel, jamais deviné. |
 | Une ligne sans couleur sur le téléphone | Son réseau ne publie pas de couleur pour elle : sa pastille reste neutre, rien d'autre ne change. |
-| Le guidage ne montre rien | C'est voulu : l'écran reste vide tant qu'il n'y a rien à faire. Touche une fois pour voir où tu en es. S'il ne se passe rien du tout, vérifie dans « Réglages », puis « Affichage », que « Me guider pendant un trajet » est allumé. |
+| Le guidage ne montre rien | C'est voulu : l'écran reste vide tant qu'il n'y a rien à faire. Touche une fois pour voir où tu en es. S'il ne se passe rien du tout, vérifie sur le téléphone, dans « Réglages », que « Me guider pendant un trajet » est allumé. |
 | Le guidage s'arrête quand le téléphone est verrouillé | La position de l'appli Even n'est pas sur « Toujours » (voir plus haut, « Pour que le guidage marche bien »). |
 | Pas de virages à pied | Pas de vrai chemin pour cette marche (hors de Belgique, ou les chemins à pied de la semaine pas encore prêts) : Quai montre le temps restant et la direction de l'arrêt. Sur le téléphone, « Réglages », puis « Données » : la carte « Chemins à pied » dit la date des données OpenStreetMap. |
 | Jamais de « pluie » sur les marches | Il ne pleut pas assez (0,3 mm sur un quart d'heure, probabilité de 60 % ou plus), ou la marche dure moins de 5 minutes. Sur le téléphone, « Réglages » puis « Données » : la carte « Météo » doit dire « Disponible » ; « Coupée dans Affichage » : rallume « Pluie pendant la marche ». |
