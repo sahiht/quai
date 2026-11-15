@@ -557,11 +557,6 @@ export class GlassesController implements GlassesApi {
   private fixes: GuideFix[] = [];
   /** « Où tu en es » affiché jusqu'à cet instant (epoch ms), quand il n'y a pas de moment. */
   private whereUntil = 0;
-  /**
-   * « Où tu en es » du lancement (PRD-1.2.10 § 3.1) : il passe d'abord, même devant un moment déjà dû (voie modifiée
-   * connue d'avance) ; le moment vient ensuite, à la fin des 15 s ou au premier toucher.
-   */
-  private whereFirst = false;
   /** Positions continues en cours (besoin du moteur) et leur arrêt. */
   private watchNeed: LocationNeed = 'off';
   private watchStop: (() => void) | null = null;
@@ -2027,26 +2022,16 @@ export class GlassesController implements GlassesApi {
     return !!this.trip?.guide && this.guideOn();
   }
 
-  /**
-   * « Où tu en es » pendant `ms` (quand il n'y a pas de moment ; `first` : lancement, il passe aussi devant un moment) ;
-   * la minuterie du guidage l'efface à l'heure.
-   */
-  private showWhere(ms: number, first = false): void {
+  /** « Où tu en es » pendant `ms` (quand il n'y a pas de moment) ; la minuterie du guidage l'efface à l'heure. */
+  private showWhere(ms: number): void {
     this.whereUntil = this.d.clock.now() + ms;
-    this.whereFirst = first;
     if (this.trip?.guide && this.guideState) this.scheduleGuideWake(this.guideState);
-  }
-
-  /** « Où tu en es » du lancement encore affiché (il passe devant un moment). */
-  private whereFirstNow(now = this.d.clock.now()): boolean {
-    return this.whereFirst && this.whereUntil > now;
   }
 
   /** État propre au contrôleur, remis à zéro à chaque lancement et à la fin (les positions restent : elles sont vraies). */
   private resetGuideRun(): void {
     this.guideState = null;
     this.whereUntil = 0;
-    this.whereFirst = false;
     this.routeJob = null;
     this.routeFail.clear();
     this.replanJob = null;
@@ -2059,7 +2044,7 @@ export class GlassesController implements GlassesApi {
    */
   private startGuide(kind: GuideKind, j: Journey, s: TripSession, beyond?: Stopover[]): void {
     this.resetGuideRun();
-    if (this.guideOn()) this.showWhere(WHERE_LAUNCH_MS, true);
+    if (this.guideOn()) this.showWhere(WHERE_LAUNCH_MS);
     this.follow(j, s, kind, beyond);
   }
 
@@ -2096,7 +2081,7 @@ export class GlassesController implements GlassesApi {
     let key = r.key ?? routeKey(r);
     const t = this.trip;
     if (t?.guide && t.journey.id === j.id) {
-      if (this.guideOn()) this.showWhere(WHERE_LAUNCH_MS, true);
+      if (this.guideOn()) this.showWhere(WHERE_LAUNCH_MS);
       await this.openGuide();
       return;
     }
@@ -2202,13 +2187,6 @@ export class GlassesController implements GlassesApi {
     if (!t?.guide) return;
     const now = this.d.clock.now();
     const m = st?.moment;
-    // « Où tu en es » du lancement à l'écran (devant un moment) : le toucher l'efface, le moment paraît (pas effacé)
-    if (this.whereFirstNow(now)) {
-      this.whereUntil = 0;
-      this.whereFirst = false;
-      this.stepGuide();
-      return;
-    }
     if (m?.kind === 'arrived') {
       this.endGuide('done');
       return;
@@ -2350,8 +2328,8 @@ export class GlassesController implements GlassesApi {
     const prev = this.guideState;
     const st = res.state;
     this.guideState = st;
-    // un moment nouveau prend la place de « Où tu en es », sauf au lancement (PRD § 3.1 : « Où tu en es » d'abord)
-    if (st.moment && st.moment.id !== prev?.moment?.id && !this.whereFirstNow(now)) this.whereUntil = 0;
+    // un moment nouveau prend la place de « Où tu en es »
+    if (st.moment && st.moment.id !== prev?.moment?.id) this.whereUntil = 0;
     // la mémoire du moteur, gardée telle quelle (au plus toutes les 5 s)
     if (res.mem !== g.mem) {
       this.trip = { ...t, guide: { ...g, mem: res.mem } };
@@ -2610,7 +2588,7 @@ export class GlassesController implements GlassesApi {
     const j = t ? this.journeyOf(t.journey) : null;
     const st = t && j ? (this.guideState?.journeyId === j.id ? this.guideState : this.peekGuide(t, j)) : null;
     if (!t || !j || !st) return messageView(t?.title ?? 'Quai', [''], ctx);
-    const show: GuideShow = this.whereFirstNow(ctx.now) ? 'where' : st.moment ? 'moment' : this.whereUntil > ctx.now ? 'where' : 'empty';
+    const show: GuideShow = st.moment ? 'moment' : this.whereUntil > ctx.now ? 'where' : 'empty';
     const v = guideView(st, show, j, ctx);
     v.tap ??= { kind: 'guideTap' };
     if (this.d.web) delete v.menu;

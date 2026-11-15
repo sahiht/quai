@@ -13,7 +13,7 @@ import type { Core, Endpoint, Journey, LatLon } from '../../src/core/api';
 import type { WalkRoute } from '../../src/core/guide-types';
 import { TRIP_KEY, parseTrip } from '../../src/glasses/controller';
 import type { ImageSpec, Intent } from '../../src/glasses/types';
-import { IC, P, S, at, firstWalkRoute, journeyOf, offset, prdTrip, walkLeg } from '../core/guide-fixtures';
+import { P, at, firstWalkRoute, offset, prdTrip } from '../core/guide-fixtures';
 import { views } from './controller-guide-doubles';
 import { busStops, cleanupKit, guideSetup, type Kit, type KitOptions } from './controller-guide-kit';
 import { MIN, dep, settingsWith } from './helpers';
@@ -93,28 +93,6 @@ describe('vrai moteur : de l’heure de partir au premier virage', () => {
   });
 });
 
-describe('vrai moteur : lancement (PRD § 3.1)', () => {
-  it('voie modifiée connue au lancement : « Où tu en es » d’abord (15 s), « Voie modifiée » ensuite ; un toucher sur « Où tu en es » montre le moment sans l’effacer', async () => {
-    // à pied jusqu'à la gare, puis l'IC de 07:30 voie 6 au lieu de 4
-    const j = journeyOf([walkLeg(S.guilleminsBus, S.guillemins, at('07:20'), 5), IC({ icPlatform: '4', icNewPlatform: '6' })], 'jvoie', at('07:20'));
-    const h = await launched({ now: at('07:10'), journey: j, pos: P.guilleminsBus });
-    expect(h.last()).toMatchObject({ screen: 'guide', show: 'where' });
-    await h.settle(10_000);
-    expect(h.last().show).toBe('where');
-    await h.settle(6_000);
-    expect(shown(h)).toBe('platform');
-    // relancé : « Où tu en es » d'abord ; un toucher l'efface et laisse paraître le moment (pas effacé)
-    const k = await launched({ now: at('07:10'), journey: { ...j, id: 'jvoie2' }, pos: P.guilleminsBus });
-    expect(k.last().show).toBe('where');
-    await k.gesture('tap');
-    expect(shown(k)).toBe('platform');
-    expect(k.c.followed!.guide!.mem.dismissed).toEqual([]);
-    await k.gesture('tap');
-    expect(k.last().show).not.toBe('moment');
-    expect(k.c.followed!.guide!.mem.dismissed).toEqual([expect.stringMatching(/^platform:/)]);
-  });
-});
-
 describe('vrai moteur : imprévus et fin', () => {
   function routing(list: (now: number) => Journey[]) {
     const asked: { from: Endpoint; after: number }[] = [];
@@ -134,13 +112,10 @@ describe('vrai moteur : imprévus et fin', () => {
     await h.settle();
     expect(r.asked).toHaveLength(1);
     expect(h.c.followed!.journey.id).toBe('jnew');
-    // PRD § 3.1 : « Où tu en es » d'abord (15 s), puis le moment
-    expect(h.last().show).toBe('where');
-    await h.settle(15_500);
     expect(shown(h)).toBe('replan');
     expect(h.last().moment).toMatch(/^replan:jprd:cancelled:3:jnew$/);
-    // une seule recherche ; 60 s après le nouveau trajet le moment est fini, le guidage suit le nouveau trajet
-    await h.settle(46_000);
+    // une seule recherche ; 60 s plus tard le moment est fini, le guidage suit le nouveau trajet
+    await h.settle(61_000);
     expect(r.asked).toHaveLength(1);
     expect(shown(h)).not.toBe('replan');
     expect(parseTrip(await h.kv.get(TRIP_KEY))?.journey.id).toBe('jnew');

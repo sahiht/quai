@@ -70,14 +70,12 @@ describe('PRD-1.2.10 § 3.1 : « y aller » sur l’écran du trajet', () => {
     expect(h.last()).toMatchObject({ screen: 'guide', show: 'empty' });
   });
 
-  it('un moment déjà dû au lancement vient après « Où tu en es » (PRD § 3.1 : « Où tu en es » d’abord, 15 s)', async () => {
+  it('un moment dès le lancement passe avant « Où tu en es » (« Partir maintenant » si l’heure de partir est passée)', async () => {
     engine.script = (input) => ({ moment: moment('leave', `leave:${input.journey.id}`, input.now, input.now + 3 * MIN, { walkMin: 5, toward: { fr: 'Merbraine', nl: 'Merbraine' } }) });
     const h = await guideSetup({ settings: settings(), stub: { answers } });
     await openSteps(h);
     await intent(h, { kind: 'goGuide' });
     await h.settle();
-    expect(h.last()).toMatchObject({ screen: 'guide', show: 'where' });
-    await h.settle(15_500);
     expect(h.last()).toMatchObject({ screen: 'guide', show: 'moment', moment: 'leave:j-bureau' });
   });
 
