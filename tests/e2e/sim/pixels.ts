@@ -120,7 +120,7 @@ const roomTo = (def: { c: { x: number }; gap?: number }, x: number): number => d
 const roomIn = (c: { x: number; w?: number }): number => Math.min(c.w ?? 0, GEO.X_END - c.x) - GEO.SAFETY;
 
 /** Segments attendus d'une ligne de liste selon le gabarit (colonnes séparées par 3 espaces dans le journal). */
-function rowSegments(screen: string, line: string, indented = false): Seg[] {
+function rowSegments(screen: string, line: string, indented = false, beforeBoarding = false): Seg[] {
   const parts = line.split('   ');
   if (MENU[screen]) {
     const def = LAYOUTS[MENU[screen]];
@@ -135,7 +135,7 @@ function rowSegments(screen: string, line: string, indented = false): Seg[] {
   if (screen === 'trainRun') {
     // 1.2.8 : tout le trajet d'un train : une gare par rangée, son passage calé à droite ; une gare quittée (son heure
     // seule) tout en pâle, l'heure comprise, à la même place
-    return segRowSegments(line, 0, trainWords, PASSED);
+    return segRowSegments(line, 0, (left, right) => trainWords(left, right, beforeBoarding), beforeBoarding ? /./ : PASSED);
   }
   if (screen === 'lines' || screen === 'follows') {
     // intitulés, noms d'arrêts et titres de lignes à la marge ; leurs lignes en retrait (espaces de 5 px, subIndent),
@@ -289,8 +289,9 @@ const PASSED = /^~?\d\d:\d\d$/;
  * 1.2.8 : une gare de tout le trajet d'un train (« ● Namur voie 6 ! ») : le repère et le nom au plus clair, la voie pâle
  * (modifiée, « ! » : au plus clair) ; une gare quittée tout en pâle.
  */
-function trainWords(left: string, right?: string): Word[] {
-  const gone = !!right && PASSED.test(right);
+function trainWords(left: string, right?: string, beforeBoarding = false): Word[] {
+  // 1.2.10 (PRD-1.2.10 § 3.1) : la gare de la montée et celles d'avant, toutes pâles (sans action), comme une gare quittée
+  const gone = beforeBoarding || (!!right && PASSED.test(right));
   const m = /^([●○]) (.+?)(?: (voie \S+(?: !)?))?$/.exec(left);
   if (!m) return [{ t: nbsp(left), hi: !gone }];
   return [{ t: m[1], hi: !gone }, { t: nbsp(m[2]), hi: !gone }, ...(m[3] ? [{ t: nbsp(m[3]), hi: !gone && m[3].endsWith('!') }] : [])];
@@ -499,7 +500,11 @@ function bands(s: LoggedScreen): Band[] | null {
       } else segs = homeSegments(l, underFavorites);
     } else if (s.screen === 'others') segs = othersSegments(l, i % 2 === 1);
     else if (board) segs = rowSegments(/\(SNCB\)( ★)?$/.test(s.title) ? 'boardTrain' : 'board', l);
-    else segs = rowSegments(s.screen, l, indented[i]);
+    else if (s.screen === 'trainRun') {
+      // 1.2.10 : rang de la gare dans le trajet (top + i) ; jusqu'à la gare du tableau (`gare`), tout est pâle
+      const x = s as LoggedScreen & { gare?: number; top?: number };
+      segs = rowSegments(s.screen, l, false, (x.top ?? 0) + i <= (x.gare ?? -1));
+    } else segs = rowSegments(s.screen, l, indented[i]);
     out.push({ y: rowsY + i * LINE_H, label: `ligne ${i + 1}`, text: l, segs });
   });
   if (note !== undefined) out.push({ y: footY, label: 'note', text: note, segs: [{ from: GEO.X_TEXT, to: GEO.X_TEXT + width(note), text: note }] });
