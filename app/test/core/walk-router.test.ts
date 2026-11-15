@@ -183,6 +183,20 @@ describe('Core.walkRoute', () => {
     for (const u of e.server.calls) for (const p of pos) expect(u).not.toContain(p);
   });
 
+  it('walkIndex (carte « Chemins à pied » de l’écran Données) : date des données et nombre de tuiles ; null sinon', async () => {
+    const e = env();
+    expect(await e.core.walkIndex!()).toBeNull();
+    const f = env();
+    f.server.overrides.set('/quai/data/walk/index.json', () => new Response(JSON.stringify({ ...indexOf({ version: '2026-11-09' }), tiles: 7612 }), { status: 200 }));
+    expect(await f.core.walkIndex!()).toEqual({ date: '2026-11-09', tiles: 7612 });
+    const g = env();
+    g.server.overrides.set('/quai/data/walk/index.json', () => new Response('{"v":1}', { status: 200 }));
+    await expect(g.core.walkIndex!()).resolves.toBeNull();
+    const h = env();
+    h.server.networkDown = true;
+    await expect(h.core.walkIndex!()).resolves.toBeNull();
+  });
+
   it('serveur en panne pendant le chargement d’une tuile : null, jamais d’exception', async () => {
     const e = env();
     e.server.overrides.set('/quai/data/walk/index.json', () => new Response(JSON.stringify(indexOf()), { status: 200 }));

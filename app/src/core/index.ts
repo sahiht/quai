@@ -259,6 +259,16 @@ export function createCore(opts: CoreOptions): Core {
       }
     },
 
+    /** 1.2.10 : date des chemins à pied publiés (écran Données), par le même client que les autres données. */
+    async walkIndex(): Promise<{ date: string; tiles?: number } | null> {
+      try {
+        const i = await data.walkIndex();
+        return i ? { date: i.version, tiles: i.tiles } : null;
+      } catch {
+        return null;
+      }
+    },
+
     async nearby(lat: number, lon: number, radiusM: number, o?: { light?: boolean }): Promise<NearbyItem[]> {
       const meta = await ensure();
       const list = await areasAround(lat, lon, radiusM);
