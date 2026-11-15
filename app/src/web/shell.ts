@@ -12,7 +12,7 @@ export const WIDE_QUERY = '(min-width: 1024px)';
 export interface Shell {
   root: HTMLElement;
   canvas: HTMLCanvasElement;
-  /** Barre des gestes (boutons data-g="up|down|tap|double"). */
+  /** Barre des gestes (boutons data-g="up|down|tap|double|long" ; 1.2.10 : « Appui long »). */
   gestures: HTMLElement;
   /** Sous la barre des gestes (rubrique Position). */
   extra: HTMLElement;
@@ -51,12 +51,14 @@ export function mountShell(host: HTMLElement, initial: Panel): Shell {
     button('down', '▼', 'Glisser vers le bas'),
     button('tap', 'Toucher'),
     button('double', 'Double toucher'),
+    button('long', 'Appui long'),
   );
   const help = h(
     'p',
     { class: 'w-help' },
     h('span', null, 'Sur l’écran : glisse vers le haut ou le bas, touche une ou deux fois.'),
-    h('span', { class: 'w-help-keys' }, ' Clavier : ↑ ↓, Entrée = toucher, Échap = double toucher.'),
+    h('span', null, ' Appui long : garde le doigt posé.'),
+    h('span', { class: 'w-help-keys' }, ' Clavier : ↑ ↓, Entrée = toucher, Échap = double toucher. L = appui long.'),
   );
   const extra = h('div', { class: 'w-extra' });
   const lunettes = h(
