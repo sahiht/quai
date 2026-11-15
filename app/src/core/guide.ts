@@ -160,6 +160,8 @@ interface Pending {
   tripId?: string;
   /** genre ride, arrêt dépassé : aucun recalcul demandé */
   local?: boolean;
+  /** véhicule où l'on est (montée constatée), retrouvé dans le nouveau trajet s'il le garde (replanJourney) */
+  onBoard?: { tripId?: string; schedDep: number; at: number };
   /** aucun autre trajet trouvé (replanNone), epoch ms */
   none?: number;
   /** nouveau trajet adopté par le contrôleur */
@@ -561,7 +563,13 @@ function replanFrom(c: Ctx, loc: Loc, k: number): { from: Pending['from']; at: n
 function pending(c: Ctx, loc: Loc, reason: ReplanReason, k: number): Pending {
   const l = c.legs[k];
   const { from, at } = replanFrom(c, loc, k);
-  return { reason, jid: c.j.id, leg: k, t: c.now, from, at, lost: { vehicle: vehicleRef(l), depAt: l.schedDep }, oldArr: c.j.arr };
+  const p: Pending = { reason, jid: c.j.id, leg: k, t: c.now, from, at, lost: { vehicle: vehicleRef(l), depAt: l.schedDep }, oldArr: c.j.arr };
+  const b = c.m.boarded;
+  if (b && boardedOn(c.m, b.leg) && loc.phase.kind === 'ride' && loc.phase.leg === b.leg) {
+    const r = c.legs[b.leg];
+    p.onBoard = { ...(r.tripId ? { tripId: r.tripId } : {}), schedDep: r.schedDep, at: b.at };
+  }
+  return p;
 }
 
 /** Arrêt de descente dépassé (à bord, plus de 300 m au-delà, en s'éloignant, après son heure). */
@@ -744,7 +752,9 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
     const lost = re.lost;
     const reason = re.reason as 'missed' | 'cancelled' | 'late';
     if (re.swap && re.swap.jid === jid) {
-      const k = nextRide(legs, 0);
+      // premier véhicule du nouveau trajet (pas celui où l'on est encore, gardé devant par replanJourney)
+      let k = nextRide(legs, 0);
+      while (k >= 0 && (boardedOn(m, k) || legs[k].dep < re.at - GUIDE.boardAfterMs)) k = nextRide(legs, k + 1);
       const r = k >= 0 ? legs[k] : undefined;
       const swapAt = re.swap.at;
       out.push({
@@ -1159,8 +1169,15 @@ function adopt(m: Mem, j: Journey, now: number): void {
   prune(m, j.id);
   if (m.jid === j.id) return;
   if (m.jid !== undefined) {
-    if (m.re && m.re.jid === m.jid && m.re.jid !== j.id && !m.re.swap && m.re.none === undefined) m.re.swap = { jid: j.id, at: now };
+    let keep: Mem['boarded'];
+    if (m.re && m.re.jid === m.jid && m.re.jid !== j.id && !m.re.swap && m.re.none === undefined) {
+      m.re.swap = { jid: j.id, at: now };
+      const ob = m.re.onBoard;
+      const k = ob ? j.legs.findIndex((l) => l.kind === 'ride' && l.schedDep === ob.schedDep && (l.tripId ?? '') === (ob.tripId ?? '')) : -1;
+      if (ob && k >= 0) keep = { leg: k, at: ob.at };
+    }
     delete m.boarded;
+    if (keep) m.boarded = keep;
     delete m.alighted;
     delete m.arrivedAt;
     delete m.arrivedByFix;
@@ -1241,6 +1258,28 @@ export function guideStep(input: GuideInput, mem: GuideMemory): { state: GuideSt
   const need = ended ? undefined : needRouteOf(c, loc);
   if (need) state.needRoute = need;
   return { state, mem: m };
+}
+
+/* ------------------------------ Nouveau trajet ------------------------------ */
+
+/**
+ * Nouveau trajet après une demande `state.replan` : encore dans un véhicule de l'ancien trajet (recalcul depuis sa
+ * descente, correspondance ratée), les étapes jusqu'à ce véhicule compris restent devant le nouveau trajet (« Descends »
+ * de ce véhicule, chaîne de « Où tu en es ») ; sinon le nouveau trajet tel quel.
+ */
+export function replanJourney(old: Journey, fresh: Journey, now: number): Journey {
+  const start = fresh.legs[0]?.from;
+  if (!start) return fresh;
+  for (let k = 0; k < old.legs.length; k++) {
+    const l = old.legs[k];
+    if (l.kind !== 'ride' || l.cancelled || now >= l.arr || now < l.dep - GUIDE.boardAfterMs) continue;
+    const same = (!!l.to.areaId && l.to.areaId === start.areaId) || (knownPoint(l.to) && knownPoint(start) && distanceM(l.to, start) <= 50);
+    if (!same) continue;
+    const legs = [...old.legs.slice(0, k + 1), ...fresh.legs];
+    const rides = legs.filter(isRide);
+    return { ...fresh, id: journeyId(legs), legs, dep: old.dep, arr: fresh.arr, leaveAt: old.leaveAt, transfers: Math.max(0, rides.length - 1), rt: rides.every((x) => x.rt === true) };
+  }
+  return fresh;
 }
 
 /* ------------------------------ Genre ride (« J'y descends ») ------------------------------ */

@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Moment } from '../../src/core/guide-types';
-import { dismissMoment, GUIDE, guideStep, newGuideMemory, replanNone, type GuideInput } from '../../src/core/guide';
+import { dismissMoment, GUIDE, guideStep, newGuideMemory, replanJourney, replanNone, type GuideInput } from '../../src/core/guide';
 import {
   at,
   BUS6,
@@ -569,6 +569,39 @@ describe('temps réel : retards, correspondance, suppression, voie', () => {
     const s = step(r, at('07:15'));
     expect(s.phase).toEqual({ kind: 'wait', leg: 1 });
     expect(s.replan).toEqual({ from: { lat: P.gramme.lat, lon: P.gramme.lon, areaId: 'tec:LGgram', name: N('Monument Gramme') }, reason: 'missed', at: at('07:15') });
+  });
+
+  it('correspondance ratée à bord : replanJourney garde le bus 6 ; « Nouveau trajet : IC 08:02 », puis « Descends » du bus 6', () => {
+    const old = prdTrip({ bus6Delay: 9 });
+    const r = guide(old);
+    step(r, at('07:21:20'), fix(toward(P.gramme, P.leman, 150), at('07:21:20'), { speed: 8 }));
+    expect(r.mem.boarded?.leg).toBe(1);
+    const s = step(r, at('07:22'), fix(toward(P.gramme, P.leman, 400), at('07:22'), { speed: 7 }));
+    expect(s.replan).toMatchObject({ reason: 'missed', at: at('07:29'), from: { areaId: 'tec:LGguil' } });
+    const ic2 = rideLeg({ op: 'sncb', mode: 'train', line: 'IC', cat: 'IC', head: 'Ostende', platform: '3', stops: [{ p: S.guillemins, t: at('08:02'), platform: '3' }, { p: S.central, t: at('08:59') }] });
+    const b71 = rideLeg({ op: 'stib', mode: 'bus', line: '71', head: 'Delta', stops: [{ p: S.gareCentrale, t: at('09:04') }, { p: S.flagey, t: at('09:18') }] });
+    const fresh = journeyOf([walkLeg(S.guilleminsBus, S.guillemins, at('07:29'), 3), ic2, walkLeg(S.central, S.gareCentrale, at('08:59'), 3), b71, walkLeg(S.flagey, S.etangs, at('09:18'), 6)], 'jfresh');
+    const j2 = replanJourney(old, fresh, at('07:22:10'));
+    expect(j2.legs.slice(0, 2)).toEqual(old.legs.slice(0, 2));
+    expect(j2.legs).toHaveLength(7);
+    expect(j2).toMatchObject({ dep: old.dep, leaveAt: old.leaveAt, arr: at('09:24'), transfers: 2 });
+    expect(j2.id).not.toBe(old.id);
+    r.j = j2;
+    const t = step(r, at('07:22:20'), fix(toward(P.gramme, P.leman, 500), at('07:22:20'), { speed: 7 }));
+    expect(t.phase).toMatchObject({ kind: 'ride', leg: 1 });
+    expect(r.mem.boarded).toEqual({ leg: 1, at: at('07:21:20') });
+    expect(m(t.moment, 'replan')).toMatchObject({ reason: 'late', next: { vehicle: { op: 'sncb', mode: 'train', line: 'IC', cat: 'IC' }, depAt: at('08:02'), platform: '3' }, arr: at('09:24'), laterMin: 30 });
+    expect(t.replan).toBeUndefined();
+    expect(t.where.chain.map((x) => `${x.label}:${x.state}`)).toEqual(['à pied:done', 'bus 6:now', 'IC:next', 'bus 71:next']);
+    expect(kindOf(step(r, at('07:25:40'), fix(toward(P.leman, P.guilleminsBus, 150), at('07:25:40'), { speed: 7 })))).toBe('alight');
+  });
+
+  it('replanJourney : pas dans un véhicule de l’ancien trajet, le nouveau tel quel', () => {
+    const old = prdTrip();
+    const fresh = journeyOf([BUS6()], 'jx');
+    expect(replanJourney(old, fresh, at('07:14:40'))).toBe(fresh);
+    const empty = { ...fresh, id: 'jvide', legs: [] };
+    expect(replanJourney(old, empty, at('07:14:40'))).toBe(empty);
   });
 
   it('cause disparue avant le nouveau trajet (temps réel revu) : demande et message retirés', () => {
