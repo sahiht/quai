@@ -253,6 +253,11 @@ describe('PRD § 3.2 : les moments', () => {
       'arrivée 09:14, 15 min plus tard',
     ]);
     expect(rp({ next: { vehicle: IC, depAt: T(9, 2) }, arr: T(10, 31), laterMin: 92 }).lines[2]).toBe('arrivée 10:31, 1 h 32 plus tard');
+    // contrôle technique du 15/11 : nouveau trajet à pied seul : il est dit, avec son arrivée ; pas encore connu : la perte seule
+    const onFoot = rp({ reason: 'late', lost: { vehicle: BUS71, depAt: T(8, 34) }, arr: T(8, 58), laterMin: 6 });
+    expect(onFoot.lines).toEqual(['Correspondance ratée : bus 71 de 08:34', 'Nouveau trajet : à pied', 'arrivée 08:58, 6 min plus tard', HINT]);
+    expect(levels(onFoot.p).pale[2]).toBe('arrivée 08:58, 6 min plus tard');
+    expect(rp({}).lines).toEqual(['Ton IC de 07:30 est parti', HINT]);
     // « J'y descends » : le prochain du même véhicule, s'il est connu (§ 3.6)
     expect(rp({ lost: { vehicle: BUS6, depAt: T(7, 12) }, next: { vehicle: BUS6, depAt: T(7, 24) } }, 'ride').lines).toEqual(['Ton bus 6 de 07:12 est parti', 'Prochain : bus 6 à 07:24', HINT]);
     expect(rp({ lost: { vehicle: BUS6, depAt: T(7, 12) } }, 'ride').lines).toEqual(['Ton bus 6 de 07:12 est parti', HINT]);

@@ -220,7 +220,11 @@ function replanMoment(m: Extract<Moment, { kind: 'replan' }>, ride: boolean, ctx
   const lines: GLine[] = [MAIN(head)];
   if (m.none) lines.push(L('norm', GUIDE_TEXT.none));
   else if (!m.next) {
-    // nouveau trajet pas encore connu : la perte seule
+    // nouveau trajet à pied seul (son arrivée connue, contrôle technique du 15/11) ; pas encore connu : la perte seule
+    if (!ride && m.arr !== undefined) {
+      lines.push(L('norm', `Nouveau trajet${NB}: à pied`));
+      lines.push(L('pale', `arrivée ${hhmm(m.arr)}${m.laterMin ? `, ${laterText(m.laterMin)} plus tard` : ''}`));
+    }
   } else if (ride) {
     // « J'y descends » : le prochain passage du même véhicule, si le tableau de l'arrêt le donne (§ 3.6)
     lines.push(L('norm', `Prochain${NB}: ${vehicle(m.next.vehicle)} à ${hhmm(m.next.depAt)}`));
