@@ -304,10 +304,13 @@ describe('PRD-1.2.10 § 3.7 : persistance et reprise', () => {
     const t = parseTrip(JSON.stringify({ ...base, guide: { kind: 'ride', mem: { v: 2 }, walk: { leg: 0, journeyId: 'j-x', route: { coords: [{ lat: 1 }] } } } }))!;
     expect(t.guide).toEqual({ kind: 'ride', mem: { v: 1, dismissed: [], shown: {} } });
     const route = walkRouteOf(SPOTS.flagey, SPOTS.merbraine);
-    const ok = parseTrip(JSON.stringify({ ...base, guide: { kind: 'trip', mem: { v: 1, dismissed: ['a'], shown: { a: 1 } }, walk: { leg: 0, journeyId: 'j-x', route, at: NOW }, replanned: { reason: 'missed', at: NOW, from: j, none: true } } }))!;
-    expect(ok.guide).toEqual({ kind: 'trip', mem: { v: 1, dismissed: ['a'], shown: { a: 1 } }, walk: { leg: 0, journeyId: 'j-x', route, at: NOW }, replanned: { reason: 'missed', at: NOW, from: j, none: true } });
-    const bad = parseTrip(JSON.stringify({ ...base, guide: { kind: 'trip', mem: { v: 1, dismissed: [], shown: {} }, replanned: { reason: 'oups', at: NOW, from: j } } }))!;
-    expect(bad.guide?.replanned).toBeUndefined();
+    // la mémoire du moteur est gardée telle quelle, ses champs internes compris ; arrêts après la descente relus
+    const mem = { v: 1, dismissed: ['a'], shown: { a: 1 }, jid: 'j-x', re: { reason: 'missed', jid: 'j-x', at: NOW } };
+    const beyond = [{ name: { fr: 'Fragnée', nl: 'Fragnée' }, areaId: 'tec:Fragnee', sched: NOW, est: NOW }];
+    const ok = parseTrip(JSON.stringify({ ...base, guide: { kind: 'ride', mem, walk: { leg: 0, journeyId: 'j-x', route, at: NOW }, beyond } }))!;
+    expect(ok.guide).toEqual({ kind: 'ride', mem, walk: { leg: 0, journeyId: 'j-x', route, at: NOW }, beyond });
+    const bad = parseTrip(JSON.stringify({ ...base, guide: { kind: 'trip', mem: { v: 1, dismissed: [], shown: {} }, beyond: [{ name: 'Fragnée' }] } }))!;
+    expect(bad.guide?.beyond).toBeUndefined();
     // 1.2.9 : un trajet sans `guide` est relu tel quel
     const plain: FollowedTrip | null = parseTrip(JSON.stringify(base));
     expect(plain && 'guide' in plain).toBe(false);

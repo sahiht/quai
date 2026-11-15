@@ -148,6 +148,66 @@ describe('PRD-1.2.10 § 3.1 : « j’y descends » dans les arrêts d’un dépa
     expect(h.last()).toMatchObject({ screen: 'guide', show: 'where' });
   });
 
+  it('arrêts après la descente donnés au moteur (« Descends à … ») ; positions des arrêts trouvées ensuite (arrêts de la ligne), même trajet', async () => {
+    // positions publiques des arrêts du bus 6 (Liège), par zone des arrêts du départ
+    const ids = busStops(NOW).stops.map((c) => c.areaId!);
+    const coords = [
+      { lat: 50.6408, lon: 5.5869 },
+      { lat: 50.6331, lon: 5.5781 },
+      { lat: 50.6245, lon: 5.5669 },
+      { lat: 50.6201, lon: 5.5712 },
+    ];
+    const pts: Record<string, { lat: number; lon: number }> = Object.fromEntries(ids.map((id, i) => [id, coords[i]]));
+    const [gramme, , guillemins, fragnee] = ids;
+    const asked: string[] = [];
+    const h = await guideSetup({
+      settings: settings(),
+      stub: { departureStops: (_a, _d, now) => busStops(now) },
+      coreExtra: () => ({
+        findLines: async (q: string) => (asked.push(`findLines:${q}`), [{ op: 'delijn', mode: 'bus', line: '6', ends: [], routes: ['x'] }, { op: 'tec', mode: 'bus', line: '6', ends: [], routes: ['tec-6'] }]),
+        lineStops: async (m: { op: string; routes: string[] }) => (asked.push(`lineStops:${m.op}:${m.routes.join()}`), Object.entries(pts).map(([areaId, p]) => ({ areaId, name: { fr: areaId, nl: areaId }, ...p }))),
+      }),
+    });
+    await openStops(h);
+    await intent(h, { kind: 'alight', index: 2 });
+    await h.settle();
+    const t = h.c.followed!;
+    expect(t.guide!.beyond).toEqual([expect.objectContaining({ name: { fr: 'Fragnée', nl: 'Fragnée' }, areaId: fragnee, lat: pts[fragnee].lat })]);
+    expect(asked).toEqual(['findLines:6', 'lineStops:tec:tec-6']);
+    // même identifiant : le moteur garde sa mémoire ; montée et descente ont leur position
+    const leg = engine.last().input.journey.legs[0];
+    expect(engine.last().input.journey.id).toBe(t.journey.id);
+    expect(leg.from).toMatchObject({ lat: pts[gramme].lat, lon: pts[gramme].lon });
+    expect(leg.to).toMatchObject({ lat: pts[guillemins].lat, lon: pts[guillemins].lon });
+    expect(engine.last().input.beyond?.[0]).toMatchObject({ lat: pts[fragnee].lat });
+    expect(parseTrip(await h.kv.get(TRIP_KEY))?.journey.legs[0].to.lat).toBe(pts[guillemins].lat);
+  });
+
+  it('positions introuvables (ligne absente, recherche en panne) : guidage à l’heure, rien ne casse', async () => {
+    const h = await guideSetup({
+      settings: settings(),
+      stub: { departureStops: (_a, _d, now) => busStops(now) },
+      coreExtra: () => ({ findLines: async () => [], lineStops: () => Promise.reject(new Error('jamais')) }),
+    });
+    await openStops(h);
+    await intent(h, { kind: 'alight', index: 2 });
+    await h.settle();
+    expect(h.c.followed?.journey.legs[0].to.lat).toBe(0);
+    expect(h.last().screen).toBe('guide');
+    cleanupKit();
+    engine.reset();
+    const b = await guideSetup({
+      settings: settings(),
+      stub: { departureStops: (_a, _d, now) => busStops(now) },
+      coreExtra: () => ({ findLines: () => Promise.reject(new Error('données absentes')) }),
+    });
+    await openStops(b);
+    await intent(b, { kind: 'alight', index: 2 });
+    await b.settle();
+    expect(b.c.followed?.guide?.kind).toBe('ride');
+    expect(b.c.followed?.journey.legs[0].to.lat).toBe(0);
+  });
+
   it('l’arrêt de la montée, un arrêt d’avant, un arrêt supprimé ou hors de la liste : rien', async () => {
     const h = await guideSetup({
       settings: settings(),
@@ -172,7 +232,18 @@ describe('PRD-1.2.10 § 3.1 : « j’y descends » dans les arrêts d’un dépa
       const s = busStops(now);
       return { ...s, op: 'sncb' as const, mode: 'train' as const, line: 'IC', at: 1 };
     };
-    const h = await guideSetup({ settings: settings(), stub: { departureStops: (_a, _d, now) => run(now) } });
+    const searched: string[] = [];
+    const h = await guideSetup({
+      settings: settings(),
+      stub: { departureStops: (_a, _d, now) => run(now) },
+      coreExtra: () => ({
+        search: async (q: string) => {
+          searched.push(q);
+          const id = `tec:${q.replace(/\W+/g, '')}`;
+          return q === 'Fragnée' ? [{ id: 'x', op: 'sncb', n: { fr: q, nl: q }, modes: ['train'], lat: 1, lon: 1, kindLabel: 'gare SNCB' }, { id, op: 'sncb', n: { fr: q, nl: q }, modes: ['train'], lat: 50.6201, lon: 5.5712, kindLabel: 'gare SNCB' }] : [];
+        },
+      }),
+    });
     await h.c.show({ screen: 'stops', areaId: 'sncb:8814001', dep: train(NOW) });
     await h.until(stopsReady);
     await intent(h, { kind: 'alight', index: 1 });
@@ -180,6 +251,10 @@ describe('PRD-1.2.10 § 3.1 : « j’y descends » dans les arrêts d’un dépa
     await intent(h, { kind: 'alight', index: 3 });
     await h.settle();
     expect(engine.rides[0]).toMatchObject({ board: 1, alight: 3 });
+    // un train : les gares par la recherche (de la gare du tableau à quelques gares après la descente)
+    expect(searched).toEqual(['Place Général Leman', 'Gare des Guillemins', 'Fragnée']);
+    expect(h.c.followed!.journey.legs[0].to).toMatchObject({ lat: 50.6201, lon: 5.5712 });
+    expect(h.c.followed!.journey.legs[0].from).toMatchObject({ lat: 0, lon: 0 });
   });
 
   it('hors des arrêts d’un départ, ou arrêts pas encore chargés : rien', async () => {
@@ -286,7 +361,7 @@ describe('PRD-1.2.10 § 3.1 : un nouveau guidage remplace le précédent', () =>
 });
 
 describe('PRD-1.2.10 § 3.5 : réglage « Me guider pendant un trajet » éteint', () => {
-  it('« y aller » fait suivre le trajet : « Trajet suivi », l’écran ne change pas, aucune position continue', async () => {
+  it('« y aller » fait suivre le trajet : « Trajet suivi », l’écran ne change pas, positions au plus medium', async () => {
     engine.script = () => ({ location: 'high', moment: moment('board', 'board:x', NOW, NOW + 10 * MIN) });
     const h = await guideSetup({ settings: off(), stub: { answers } });
     await openSteps(h);
@@ -295,7 +370,7 @@ describe('PRD-1.2.10 § 3.5 : réglage « Me guider pendant un trajet » éteint
     expect(h.c.followed?.guide?.kind).toBe('trip');
     expect(h.last().screen).toBe('steps');
     expect(nb(h.last().lines.at(-1)!)).toBe('Trajet suivi');
-    expect(h.watches).toHaveLength(0);
+    expect(h.watches.map((w) => w.opts.accuracy)).toEqual(['medium']);
     expect(views.calls).toHaveLength(0);
   });
 

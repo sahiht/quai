@@ -120,11 +120,14 @@ describe('PRD-1.2.10 § 3.7 : positions continues selon le besoin du moteur', ()
     expect(engine.calls.some((c) => c.input.fixes.some((f) => f.lat === SPOTS.merbraine.lat))).toBe(true);
   });
 
-  it('réglage éteint : jamais de positions continues', async () => {
+  it('réglage éteint (suivi sans message) : positions continues au plus medium', async () => {
     out = { location: 'high' };
     const h = await guided({ settings: settings({ display: { ...settingsWith([]).display, guide: false } }) });
     expect(h.c.followed?.guide).toBeDefined();
-    expect(h.watches).toHaveLength(0);
+    expect(h.watches).toHaveLength(1);
+    expect(h.watches[0].opts).toEqual({ accuracy: 'medium', intervalMs: 30_000, distanceM: 50 });
+    await engineSays(h, { location: 'off' });
+    expect(h.watching()).toBeUndefined();
   });
 });
 
@@ -204,15 +207,20 @@ describe('PRD-1.2.10 § 3.7 : recalcul à wakeAt et au temps réel', () => {
     expect(engine.calls.length).toBeGreaterThan(n);
   });
 
-  it('trajet fini par la règle de la 1.2.x (arrivée + 5 min) : le guidage s’arrête aussi', async () => {
+  it('un trajet guidé finit quand le moteur le dit (state.ended), pas par la règle de la 1.2.x seule', async () => {
     out = { location: 'medium' };
     const h = await guided();
     const w = h.watching()!;
+    // arrivée + 5 min passée : tant que le moteur ne dit pas « fini » (encore en route d'après la position), il continue
     await h.settle(81 * MIN);
     await h.c.refreshCurrent();
     await h.settle();
+    expect(h.c.followed?.guide).toBeDefined();
+    expect(w.stopped).toBe(false);
+    await engineSays(h, { location: 'medium', ended: true });
     expect(h.c.followed).toBeNull();
     expect(w.stopped).toBe(true);
+    expect(await h.kv.get(TRIP_KEY)).toBeFalsy();
   });
 });
 
@@ -269,71 +277,44 @@ describe('PRD-1.2.10 § 3.8 : chemin à pied', () => {
     expect(asks.every((t, i) => i === 0 || t - asks[i - 1] >= 2 * MIN)).toBe(true);
   });
 
-  it('hors du chemin plus de 30 m pendant 10 s : nouveau chemin depuis là, sans message ; près du chemin : rien', async () => {
+  it('chemin quitté (le moteur redemande un chemin depuis la position) : nouveau chemin, sans message ; jamais deux en 10 s', async () => {
     const asks: [LatLon, LatLon][] = [];
-    const route = walkRouteOf(SPOTS.flagey, { lat: SPOTS.flagey.lat + 0.004, lon: SPOTS.flagey.lon });
+    const route = walkRouteOf(SPOTS.flagey, SPOTS.merbraine);
     const h = await guided({
       walkRoute: async (from, to) => {
         asks.push([from, to]);
-        return asks.length === 1 ? route : walkRouteOf(from, to);
+        return asks.length === 1 ? route : walkRouteOf(from, to, 'osm', Date.now());
       },
     });
-    out = { location: 'high', phase: { kind: 'walk', leg: 0 }, needRoute: { leg: 0, from: route.from, to: route.to } };
-    await engineSays(h, out);
-    out = { location: 'high', phase: { kind: 'walk', leg: 0 } };
+    await engineSays(h, { location: 'high', phase: { kind: 'walk', leg: 0 }, needRoute: { leg: 0, from: route.from, to: route.to } });
     expect(asks).toHaveLength(1);
-    const on = { lat: SPOTS.flagey.lat + 0.001, lon: SPOTS.flagey.lon + 0.0001 };
+    // le moteur constate 10 s hors du chemin : il redemande depuis la position
     const away = { lat: SPOTS.flagey.lat + 0.001, lon: SPOTS.flagey.lon + 0.0008 };
-    // sur le chemin (8 m) : rien
-    for (let i = 0; i < 8; i++) {
-      await h.push(on);
-      await h.settle(2_000);
-    }
+    await h.settle(3_000);
+    out = { location: 'high', phase: { kind: 'walk', leg: 0 }, needRoute: { leg: 0, from: away, to: route.to } };
+    await h.push(away);
+    // tout juste reçu (moins de 10 s) : pas encore
     expect(asks).toHaveLength(1);
-    // 56 m à côté, mais pas 10 s : rien ; une position imprécise ne compte pas
-    await h.push(away);
-    await h.settle(4_000);
-    await h.push(away, { accuracy: 120 });
-    await h.settle(4_000);
-    await h.push(on);
-    await h.settle(4_000);
-    await h.push(away);
-    expect(asks).toHaveLength(1);
-    await h.settle(6_000);
-    await h.push(away);
-    await h.settle(4_100);
+    await h.settle(7_500);
     await h.push(away);
     await h.settle();
     expect(asks).toHaveLength(2);
     expect(asks[1]).toEqual([away, route.to]);
     expect(h.c.followed!.guide!.walk!.route.from).toEqual(away);
+    expect(engine.last().input.walk?.route.from).toEqual(away);
+    // le moteur le redemande aussitôt (encore hors du chemin) : pas avant 10 s
+    await h.push(away);
+    await h.settle(2_000);
+    await h.push(away);
+    expect(asks).toHaveLength(2);
     expect(h.last().show).not.toBe('moment');
   });
 
-  it('chemin droit (sans données) : pas de nouveau chemin hors du chemin ; cœur sans chemin à pied : rien demandé', async () => {
-    const asks: number[] = [];
-    const straight = walkRouteOf(SPOTS.flagey, { lat: SPOTS.flagey.lat + 0.004, lon: SPOTS.flagey.lon }, 'straight');
-    const h = await guided({
-      walkRoute: async () => {
-        asks.push(1);
-        return straight;
-      },
-    });
-    out = { location: 'high', phase: { kind: 'walk', leg: 0 }, needRoute: { leg: 0, from: straight.from, to: straight.to } };
-    await engineSays(h, out);
-    out = { location: 'high', phase: { kind: 'walk', leg: 0 } };
-    const away = { lat: SPOTS.flagey.lat + 0.001, lon: SPOTS.flagey.lon + 0.002 };
-    for (let i = 0; i < 10; i++) {
-      await h.push(away);
-      await h.settle(2_000);
-    }
-    expect(asks).toHaveLength(1);
-    cleanupKit();
-    engine.reset();
-    engine.script = (() => out) as Script;
-    const b = await guided();
-    await engineSays(b, { needRoute: need });
+  it('cœur sans chemin à pied : rien demandé, le moteur guide sans chemin', async () => {
+    const h = await guided();
+    await engineSays(h, { needRoute: need });
     expect(engine.last().input.walk).toBeUndefined();
+    expect(h.last().screen).toBe('guide');
   });
 
   it('réglage éteint : aucun chemin demandé', async () => {
@@ -352,15 +333,15 @@ describe('PRD-1.2.10 § 3.8 : chemin à pied', () => {
 
 describe('PRD-1.2.10 § 3.6 : nouveau trajet', () => {
   const nord = { lat: 50.8605, lon: 4.3615 };
-  const replan = (reason: 'missed' | 'cancelled' | 'passed', from: Partial<LatLon & { areaId: string; name: { fr: string; nl: string } }> = {}) => ({
-    replan: { from: { ...nord, areaId: 'sncb:8812005', name: { fr: 'Bruxelles-Nord', nl: 'Brussel-Noord' }, ...from }, reason, at: NOW },
+  const replan = (reason: 'missed' | 'cancelled' | 'passed', from: Partial<LatLon & { areaId: string; name: { fr: string; nl: string } }> = {}, at = NOW + 3 * MIN) => ({
+    replan: { from: { ...nord, areaId: 'sncb:8812005', name: { fr: 'Bruxelles-Nord', nl: 'Brussel-Noord' }, ...from }, reason, at },
   });
 
   function routing(list: (now: number) => Journey[]) {
-    const asked: { from: Endpoint; to: Endpoint; here: LatLon | null | undefined }[] = [];
+    const asked: { from: Endpoint; to: Endpoint; after: number; here: LatLon | null | undefined }[] = [];
     const coreExtra = (now: () => number): Partial<Core> => ({
-      async route(from: Endpoint, to: Endpoint, _after: number, _s: unknown, here?: LatLon | null) {
-        asked.push({ from, to, here });
+      async route(from: Endpoint, to: Endpoint, after: number, _s: unknown, here?: LatLon | null) {
+        asked.push({ from, to, after, here });
         const journeys = list(now());
         return journeys.length ? { journeys } : { journeys, empty: 'noTrip' as const };
       },
@@ -368,8 +349,8 @@ describe('PRD-1.2.10 § 3.6 : nouveau trajet', () => {
     return { asked, coreExtra };
   }
 
-  it('genre trip : depuis l’arrêt donné par le moteur jusqu’à la destination ; le guidage bascule sur le premier trajet', async () => {
-    const r = routing((now) => [door('j-new', now + 1 * MIN, now + 60 * MIN), door('j-new-2', now + 11 * MIN, now + 70 * MIN)]);
+  it('genre trip : depuis `from` à partir de `at`, jusqu’à la destination ; adopté avec replanJourney, la mémoire du moteur gardée', async () => {
+    const r = routing((now) => [door('j-new', now + 4 * MIN, now + 60 * MIN), door('j-new-2', now + 14 * MIN, now + 70 * MIN)]);
     const h = await guided({ coreExtra: r.coreExtra });
     const mem0 = h.c.followed!.guide!.mem;
     const key0 = h.c.followed!.key;
@@ -377,19 +358,18 @@ describe('PRD-1.2.10 § 3.6 : nouveau trajet', () => {
     await h.c.refreshCurrent();
     await h.settle();
     expect(r.asked).toHaveLength(1);
+    expect(r.asked[0]).toMatchObject({ after: NOW + 3 * MIN, here: nord, to: { type: 'place', placeId: 'fav-bureau' } });
     expect(r.asked[0].from).toEqual({ type: 'area', areaId: 'sncb:8812005', op: 'sncb', name: { fr: 'Bruxelles-Nord', nl: 'Brussel-Noord' }, lat: nord.lat, lon: nord.lon });
-    expect(r.asked[0].to).toEqual({ type: 'place', placeId: 'fav-bureau' });
-    expect(r.asked[0].here).toEqual(nord);
+    expect(engine.swaps).toEqual([expect.objectContaining({ old: 'j-bureau', fresh: 'j-new' })]);
     const t = h.c.followed!;
     expect(t.journey.id).toBe('j-new');
     expect(t.journeys.map((j) => j.id)).toEqual(['j-new', 'j-new-2']);
     expect(t.key).not.toBe(key0);
     expect(t).toMatchObject({ title: 'Vers le bureau', favoriteId: 'fav-bureau', guide: { kind: 'trip', mem: mem0 } });
-    // le moteur reçoit le nouveau trajet et l'issue (ce qui est perdu), pour le moment « replan »
-    const input = engine.last().input;
-    expect(input.journey.id).toBe('j-new');
-    expect(input.replanned).toMatchObject({ reason: 'missed', from: { id: 'j-bureau' } });
-    expect(input.replanned?.none).toBeUndefined();
+    expect(t.guide!.walk).toBeUndefined();
+    // le moteur reçoit le nouveau trajet (il donne lui-même le moment « replan »)
+    expect(engine.last().input.journey.id).toBe('j-new');
+    expect(engine.nones).toEqual([]);
     expect(parseTrip(await h.kv.get(TRIP_KEY))?.journey.id).toBe('j-new');
     // le moteur ne demande plus rien : pas d'autre recherche
     await h.settle(61_000);
@@ -401,7 +381,72 @@ describe('PRD-1.2.10 § 3.6 : nouveau trajet', () => {
     expect(r.asked).toHaveLength(2);
   });
 
-  it('une seule demande par trajet et par raison, une à la fois', async () => {
+  it('la demande reste là avec le même `at` : une seule recherche, une à la fois ; une autre demande (autre `at`) : une autre', async () => {
+    let release: () => void = () => {};
+    const asked: number[] = [];
+    const h = await guided({
+      coreExtra: (now) => ({
+        route: (_f: Endpoint, _t: Endpoint, after: number) => {
+          asked.push(after);
+          return new Promise((r) => (release = () => r({ journeys: [] })));
+        },
+      }),
+    });
+    await engineSays(h, replan('missed'));
+    await engineSays(h, replan('missed'));
+    await engineSays(h, replan('cancelled', {}, NOW + 9 * MIN));
+    expect(asked).toEqual([NOW + 3 * MIN]);
+    release();
+    await h.settle();
+    // rien trouvé pour la première ; la seconde (autre cause, autre `at`) part au calcul suivant
+    await engineSays(h, replan('cancelled', {}, NOW + 9 * MIN));
+    expect(asked).toEqual([NOW + 3 * MIN, NOW + 9 * MIN]);
+    await engineSays(h, replan('missed'));
+    expect(asked).toHaveLength(2);
+  });
+
+  it('rien trouvé : replanNone (« Pas d’autre trajet trouvé ») ; le guidage continue sur l’ancien trajet ; pas de nouvel essai', async () => {
+    const r = routing(() => []);
+    const h = await guided({ coreExtra: r.coreExtra });
+    await engineSays(h, replan('cancelled'));
+    await h.settle();
+    expect(h.c.followed!.journey.id).toBe('j-bureau');
+    expect(engine.nones).toHaveLength(1);
+    expect(engine.swaps).toEqual([]);
+    // la mémoire marquée par replanNone est celle que le moteur reçoit ensuite, et celle qui est gardée
+    expect((engine.last().mem as { noneAt?: number }).noneAt).toBe(engine.nones[0]);
+    await h.settle(6_000);
+    expect((parseTrip(await h.kv.get(TRIP_KEY))?.guide?.mem as { noneAt?: number }).noneAt).toBe(engine.nones[0]);
+    await engineSays(h, replan('cancelled'));
+    expect(r.asked).toHaveLength(1);
+  });
+
+  it('le même trajet retrouvé : replanNone aussi', async () => {
+    const r = routing(() => [door('j-bureau', NOW + 2 * MIN, NOW + 75 * MIN)]);
+    const h = await guided({ coreExtra: r.coreExtra });
+    await engineSays(h, replan('late' as 'missed'));
+    await h.settle();
+    expect(engine.nones).toHaveLength(1);
+    expect(h.c.followed!.journey.id).toBe('j-bureau');
+  });
+
+  it('sans zone connue : depuis la position ; trajet sans destination gardée : l’arrivée de sa dernière étape', async () => {
+    const r = routing((now) => [door('j-new', now + MIN, now + 60 * MIN)]);
+    const h = await guideSetup({ settings: settings(), coreExtra: r.coreExtra });
+    await h.until(homeReady);
+    const j = door('j-x', NOW + 2 * MIN, NOW + 60 * MIN);
+    j.legs[j.legs.length - 1].to = { name: { fr: 'Flagey', nl: 'Flagey' }, lat: SPOTS.flagey.lat, lon: SPOTS.flagey.lon };
+    await h.c.show({ screen: 'steps', key: 'k-x', label: '', title: 'Vers Flagey', journeys: [j], index: 0 });
+    await h.settle();
+    await intent(h, { kind: 'goGuide' });
+    await h.settle();
+    await engineSays(h, { replan: { from: { lat: 50.85, lon: 4.36 }, reason: 'passed', at: NOW + 5 * MIN } });
+    await h.settle();
+    expect(r.asked[0]).toMatchObject({ from: { type: 'here' }, to: { type: 'address', label: 'Flagey', lat: SPOTS.flagey.lat, lon: SPOTS.flagey.lon }, here: { lat: 50.85, lon: 4.36 }, after: NOW + 5 * MIN });
+    expect(h.c.followed!.journey.id).toBe('j-new');
+  });
+
+  it('arrêté pendant la recherche, ou réglage éteint : rien n’est adopté ni cherché', async () => {
     let release: () => void = () => {};
     const asked: number[] = [];
     const h = await guided({
@@ -413,59 +458,17 @@ describe('PRD-1.2.10 § 3.6 : nouveau trajet', () => {
       }),
     });
     await engineSays(h, replan('missed'));
-    await engineSays(h, replan('missed'));
-    await engineSays(h, replan('cancelled'));
-    expect(asked).toHaveLength(1);
-    release();
-    await h.settle();
-    expect(h.c.followed!.journey.id).toBe('j-new');
-  });
-
-  it('rien trouvé : le guidage continue sur l’ancien trajet, le moteur le sait (none) ; pas de nouvel essai pour la même raison', async () => {
-    const r = routing(() => []);
-    const h = await guided({ coreExtra: r.coreExtra });
-    await engineSays(h, replan('cancelled'));
-    await h.settle();
-    expect(h.c.followed!.journey.id).toBe('j-bureau');
-    expect(engine.last().input.replanned).toMatchObject({ reason: 'cancelled', none: true, from: { id: 'j-bureau' } });
-    await engineSays(h, replan('cancelled'));
-    expect(r.asked).toHaveLength(1);
-    // l'issue est donnée 2 min, puis oubliée (aussi dans quai.trip)
-    out = {};
-    await h.settle(100_000);
-    expect(engine.last().input.replanned).toBeDefined();
-    await h.settle(61_000);
-    expect(engine.last().input.replanned).toBeUndefined();
-    await h.settle(6_000);
-    expect(parseTrip(await h.kv.get(TRIP_KEY))?.guide?.replanned).toBeUndefined();
-  });
-
-  it('arrêt dépassé, sans zone connue : depuis la position ; trajet sans destination gardée : l’arrivée de sa dernière étape', async () => {
-    const r = routing((now) => [door('j-new', now + MIN, now + 60 * MIN)]);
-    const h = await guideSetup({ settings: settings(), coreExtra: r.coreExtra });
-    await h.until(homeReady);
-    const j = door('j-x', NOW + 2 * MIN, NOW + 60 * MIN);
-    j.legs[j.legs.length - 1].to = { name: { fr: 'Flagey', nl: 'Flagey' }, lat: SPOTS.flagey.lat, lon: SPOTS.flagey.lon };
-    await h.c.show({ screen: 'steps', key: 'k-x', label: '', title: 'Vers Flagey', journeys: [j], index: 0 });
-    await h.settle();
-    await intent(h, { kind: 'goGuide' });
-    await h.settle();
-    await engineSays(h, { replan: { from: { lat: 50.85, lon: 4.36 }, reason: 'passed', at: NOW } });
-    await h.settle();
-    expect(r.asked[0]).toMatchObject({ from: { type: 'here' }, to: { type: 'address', label: 'Flagey', lat: SPOTS.flagey.lat, lon: SPOTS.flagey.lon }, here: { lat: 50.85, lon: 4.36 } });
-    expect(h.c.followed!.journey.id).toBe('j-new');
-  });
-
-  it('arrêté pendant la recherche : la réponse est ignorée', async () => {
-    let release: () => void = () => {};
-    const h = await guided({
-      coreExtra: (now) => ({ route: () => new Promise((r) => (release = () => r({ journeys: [door('j-new', now() + MIN, now() + 60 * MIN)] }))) }),
-    });
-    await engineSays(h, replan('missed'));
     await h.c.stopGuide();
     release();
     await h.settle();
     expect(h.c.followed).toBeNull();
+    expect(engine.swaps).toEqual([]);
+    cleanupKit();
+    engine.reset();
+    engine.script = (() => out) as Script;
+    const b = await guided({ settings: settings({ display: { ...settingsWith([]).display, guide: false } }), coreExtra: () => ({ route: async () => (asked.push(2), { journeys: [] }) }) });
+    await engineSays(b, replan('missed'));
+    expect(asked).toEqual([1]);
   });
 
   describe('genre ride (« j’y descends »)', () => {
@@ -494,27 +497,30 @@ describe('PRD-1.2.10 § 3.6 : nouveau trajet', () => {
       return h;
     }
 
-    it('véhicule raté : le suivant de la même ligne vers la même destination, jusqu’au même arrêt', async () => {
+    it('véhicule raté : le suivant de la même ligne vers la même destination, jusqu’au même arrêt ; arrêts après la descente gardés', async () => {
       const h = await ride((now) => [six(now, -2, { tripId: 't1' }), six(now, 9, { tripId: 't9', head: { fr: 'Ans', nl: 'Ans' } }), six(now, 12, { tripId: 't2' })]);
-      await engineSays(h, replan('missed', { areaId: 'tec:MonumentGramme', name: { fr: 'Monument Gramme', nl: 'Monument Gramme' } }));
+      await engineSays(h, replan('missed', { areaId: 'tec:MonumentGramme', name: { fr: 'Monument Gramme', nl: 'Monument Gramme' } }, NOW + 6 * MIN));
       await h.settle();
       const last = engine.rides.at(-1)!;
       expect(last).toMatchObject({ dep: { tripId: 't2' }, board: 0, alight: 2 });
+      expect(last.coords).toHaveLength(4);
+      expect(engine.swaps).toHaveLength(1);
       expect(h.c.followed!.journey.id).toBe(`ride:6:${last.dep.est}:2`);
       expect(h.c.followed!.title).toBe('Vers Gare des Guillemins');
-      expect(engine.last().input.replanned).toMatchObject({ reason: 'missed', from: { id: expect.stringMatching(/^ride:6:/) } });
+      expect(h.c.followed!.guide!.beyond?.map((x) => x.name.fr)).toEqual(['Fragnée']);
+      expect(engine.last().input.beyond?.map((x) => x.name.fr)).toEqual(['Fragnée']);
     });
 
-    it('pas de suivant au tableau : none ; arrêt dépassé : rien à demander (le moteur dit « Descends à … »)', async () => {
+    it('pas de suivant au tableau : replanNone ; arrêt dépassé : rien à chercher (le moteur dit « Descends à … »)', async () => {
       const h = await ride((now) => [six(now, -2, { tripId: 't1' }), six(now, 30, { cancelled: true, tripId: 't3' })]);
       await engineSays(h, replan('cancelled'));
       await h.settle();
-      expect(engine.last().input.replanned).toMatchObject({ reason: 'cancelled', none: true });
+      expect(engine.nones).toHaveLength(1);
       const n = engine.rides.length;
-      await engineSays(h, replan('passed'));
+      await engineSays(h, replan('passed', {}, NOW + 8 * MIN));
       await h.settle();
       expect(engine.rides.length).toBe(n);
-      expect(engine.last().input.replanned?.reason).toBe('cancelled');
+      expect(engine.nones).toHaveLength(1);
     });
   });
 });

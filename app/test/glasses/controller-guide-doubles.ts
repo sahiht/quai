@@ -4,14 +4,14 @@
  * moteur rend (`engine.script`) et vérifient ce que le contrôleur en fait ; ils ne dépendent ni du vrai moteur ni des
  * vrais écrans (signatures du contrat seulement). Aucun import de ces deux modules ici (types seulement).
  */
-import type { Departure, DepartureStops, Journey, Leg, NameLang } from '../../src/core/api';
-import type { GuideMemory, GuideState, Moment } from '../../src/core/guide-types';
+import type { Departure, DepartureStops, Journey, LatLon, Leg, NameLang } from '../../src/core/api';
+import type { GuideMemory, GuideState, GuideStatus, Moment } from '../../src/core/guide-types';
 import { hhmm } from '../../src/core/util';
 import type { GlassesView, ImageSpec, MenuItem } from '../../src/glasses/types';
 import type { ViewCtx } from '../../src/glasses/views';
 
 /** Ce que le contrôleur donne au moteur (signature de guideStep). */
-export type GuideInputLike = Parameters<typeof import('../../src/core/guide').guideStep>[0] & { replanned?: { reason: string; at: number; from: Journey; none?: true } };
+export type GuideInputLike = Parameters<typeof import('../../src/core/guide').guideStep>[0];
 
 /** Ce que le moteur double rend : l'état (complété par défaut) et, au besoin, la mémoire. */
 export type Script = (input: GuideInputLike, mem: GuideMemory) => Partial<GuideState> & { mem?: GuideMemory };
@@ -21,8 +21,11 @@ export const engine = {
   calls: [] as { input: GuideInputLike; mem: GuideMemory }[],
   /** Moments effacés par dismissMoment. */
   dismissed: [] as string[],
-  /** Trajets « j'y descends » construits par rideJourney. */
-  rides: [] as { dep: Departure; board: number; alight: number }[],
+  /** Trajets « j'y descends » construits par rideJourney (positions des arrêts comprises). */
+  rides: [] as { dep: Departure; board: number; alight: number; coords?: ReadonlyArray<LatLon | null | undefined> }[],
+  /** Nouveaux trajets adoptés (replanJourney) et recherches sans résultat (replanNone). */
+  swaps: [] as { old: string; fresh: string; now: number }[],
+  nones: [] as number[],
   script: null as Script | null,
   /** Lève une erreur au prochain calcul (moteur en panne). */
   throwNext: false,
@@ -30,6 +33,8 @@ export const engine = {
     this.calls = [];
     this.dismissed = [];
     this.rides = [];
+    this.swaps = [];
+    this.nones = [];
     this.script = null;
     this.throwNext = false;
   },
@@ -81,8 +86,8 @@ export const guideModule = {
     engine.dismissed.push(id);
     return { ...mem, dismissed: [...mem.dismissed, id] };
   },
-  rideJourney(dep: Departure, stops: DepartureStops, board: number, alight: number): Journey {
-    engine.rides.push({ dep, board, alight });
+  rideJourney(dep: Departure, stops: DepartureStops, board: number, alight: number, coords?: ReadonlyArray<LatLon | null | undefined>): Journey {
+    engine.rides.push({ dep, board, alight, ...(coords ? { coords } : {}) });
     const a = stops.stops[board];
     const b = stops.stops[alight];
     const leg: Leg = {
@@ -106,6 +111,18 @@ export const guideModule = {
   },
   guideNowText(state: GuideState, journey: Journey, _lang: NameLang): string {
     return `${state.phase.kind} ${journey.id}`;
+  },
+  guideStatusOf(state: GuideState, journey: Journey, title: string, guided: boolean, lang: NameLang): GuideStatus {
+    return { kind: state.kind, title, arr: journey.arr, now: guideModule.guideNowText(state, journey, lang), guided };
+  },
+  /** Le moteur double note la recherche sans résultat dans sa mémoire (`noneAt`), comme le vrai la garde. */
+  replanNone(mem: GuideMemory, now: number): GuideMemory {
+    engine.nones.push(now);
+    return { ...mem, noneAt: now } as GuideMemory;
+  },
+  replanJourney(old: Journey, fresh: Journey, now: number): Journey {
+    engine.swaps.push({ old: old.id, fresh: fresh.id, now });
+    return fresh;
   },
 };
 
