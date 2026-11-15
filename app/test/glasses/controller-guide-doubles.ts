@@ -4,7 +4,7 @@
  * moteur rend (`engine.script`) et vérifient ce que le contrôleur en fait ; ils ne dépendent ni du vrai moteur ni des
  * vrais écrans (signatures du contrat seulement). Aucun import de ces deux modules ici (types seulement).
  */
-import type { Departure, DepartureStops, Journey, LatLon, Leg, NameLang } from '../../src/core/api';
+import type { Departure, DepartureStops, Journey, LatLon, Leg, NameLang, Stopover } from '../../src/core/api';
 import type { GuideMemory, GuideState, GuideStatus, Moment } from '../../src/core/guide-types';
 import { hhmm } from '../../src/core/util';
 import type { GlassesView, ImageSpec, MenuItem } from '../../src/glasses/types';
@@ -26,6 +26,8 @@ export const engine = {
   /** Nouveaux trajets adoptés (replanJourney) et recherches sans résultat (replanNone). */
   swaps: [] as { old: string; fresh: string; now: number }[],
   nones: [] as number[],
+  /** « J'y descends », arrêt dépassé : le même véhicule prolongé jusqu'à l'arrêt suivant (rideOnJourney). */
+  kept: [] as { old: string; to?: string; now: number }[],
   script: null as Script | null,
   /** Lève une erreur au prochain calcul (moteur en panne). */
   throwNext: false,
@@ -35,6 +37,7 @@ export const engine = {
     this.rides = [];
     this.swaps = [];
     this.nones = [];
+    this.kept = [];
     this.script = null;
     this.throwNext = false;
   },
@@ -123,6 +126,15 @@ export const guideModule = {
   replanJourney(old: Journey, fresh: Journey, now: number): Journey {
     engine.swaps.push({ old: old.id, fresh: fresh.id, now });
     return fresh;
+  },
+  /** Le véhicule prolongé jusqu'à l'arrêt `to` s'il est dans les arrêts suivants (même zone), sinon rien. */
+  rideOnJourney(old: Journey, beyond: readonly Stopover[], to: LatLon & { areaId?: string }, now: number): { journey: Journey; beyond: Stopover[] } | null {
+    engine.kept.push({ old: old.id, ...(to.areaId ? { to: to.areaId } : {}), now });
+    const i = beyond.findIndex((s) => !!s.areaId && s.areaId === to.areaId);
+    if (i < 0) return null;
+    const s = beyond[i];
+    const leg: Leg = { ...old.legs[0], to: { name: s.name, lat: to.lat, lon: to.lon, ...(s.areaId ? { areaId: s.areaId } : {}) }, arr: s.est, schedArr: s.sched };
+    return { journey: { ...old, id: `${old.id}+${s.areaId}`, legs: [leg], arr: s.est }, beyond: beyond.slice(i + 1) };
   },
 };
 

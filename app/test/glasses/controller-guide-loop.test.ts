@@ -528,7 +528,7 @@ describe('PRD-1.2.10 § 3.6 : nouveau trajet', () => {
       expect(engine.last().input.beyond?.map((x) => x.name.fr)).toEqual(['Fragnée']);
     });
 
-    it('pas de suivant au tableau : replanNone ; arrêt dépassé : rien à chercher (le moteur dit « Descends à … »)', async () => {
+    it('pas de suivant au tableau : replanNone ; arrêt dépassé : rien à chercher au tableau, arrêt pas dans les arrêts suivants gardés : replanNone (le moteur garde « Descends à … »)', async () => {
       const h = await ride((now) => [six(now, -2, { tripId: 't1' }), six(now, 30, { cancelled: true, tripId: 't3' })]);
       await engineSays(h, replan('cancelled'));
       await h.settle();
@@ -537,7 +537,30 @@ describe('PRD-1.2.10 § 3.6 : nouveau trajet', () => {
       await engineSays(h, replan('passed', {}, NOW + 8 * MIN));
       await h.settle();
       expect(engine.rides.length).toBe(n);
-      expect(engine.nones).toHaveLength(1);
+      expect(engine.kept).toHaveLength(1);
+      expect(engine.nones).toHaveLength(2);
+    });
+
+    it('arrêt dépassé, l’arrêt suivant dans les arrêts suivants gardés : le même bus prolongé jusqu’à lui (rideOnJourney), adopté sans rien chercher, titre « Vers Fragnée »', async () => {
+      const h = await ride((now) => [six(now, -2, { tripId: 't1' })]);
+      const n = engine.rides.length;
+      const next = h.c.followed!.guide!.beyond![0];
+      const old = h.c.followed!.journey.id;
+      // le moteur demande tant que le trajet est l'ancien (le vrai moteur se tait une fois le nouveau adopté)
+      const ask = replan('passed', { lat: 50.62, lon: 5.57, areaId: next.areaId, name: next.name }, next.est);
+      engine.script = ((input) => (input.journey.id === old ? ask : {})) as Script;
+      await h.c.refreshCurrent();
+      await h.settle();
+      expect(engine.rides.length).toBe(n);
+      expect(engine.nones).toEqual([]);
+      expect(engine.kept).toHaveLength(1);
+      const t = h.c.followed!;
+      expect(t.journey.legs[0]).toMatchObject({ to: { name: { fr: 'Fragnée' } }, arr: next.est });
+      expect(t.title).toBe('Vers Fragnée');
+      // plus d'arrêt gardé après Fragnée
+      expect(t.guide?.kind).toBe('ride');
+      expect(t.guide?.beyond ?? []).toEqual([]);
+      expect(engine.last().input.journey.id).toBe(t.journey.id);
     });
   });
 });

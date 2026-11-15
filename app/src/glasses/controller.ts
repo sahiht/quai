@@ -51,7 +51,7 @@ import type {
 import { LABEL_TEXT, labelOf, type LineMatch } from '../core/api';
 import { MESSAGES, QuaiError } from '../core/errors';
 import { asTrip, endpointPoint, favoriteTitle, placeOf } from '../core/favorites';
-import { dismissMoment, guideStatusOf, guideStep, newGuideMemory, replanJourney, replanNone, rideJourney } from '../core/guide';
+import { dismissMoment, guideStatusOf, guideStep, newGuideMemory, replanJourney, replanNone, rideJourney, rideOnJourney } from '../core/guide';
 import type { GuideFix, GuideKind, GuideMemory, GuideState, GuideStatus, LocationNeed, WalkRoute } from '../core/guide-types';
 import { shortAddress } from '../core/text';
 import { displayName, distanceM, mainMode } from '../core/util';
@@ -2604,8 +2604,6 @@ export class GlassesController implements GlassesApi {
     const g = t?.guide;
     const req = st.replan;
     if (!t || !g || !req || this.replanJob || !this.guideShown()) return;
-    // « J'y descends », arrêt dépassé : le moteur dit seulement « Descends à … » (rien à chercher)
-    if (g.kind === 'ride' && req.reason === 'passed') return;
     const old = this.journeyOf(t.journey);
     const key = `${old.id}|${req.reason}|${req.at}`;
     if (this.replanTried.has(key)) return;
@@ -2622,13 +2620,16 @@ export class GlassesController implements GlassesApi {
         const cur = this.trip;
         if (!cur?.guide || cur.journey.id !== old.id) return;
         const now = this.d.clock.now();
-        const j2 = found ? replanJourney(old, found.j, now) : null;
+        // arrêt dépassé (genre trip) : le véhicule où l'on est resté garde son étape, jusqu'à l'arrêt suivant où
+        // commence le nouveau trajet (arrêts suivants lus pour ce trajet-là)
+        const beyond = cur.guide.kind === 'trip' ? this.beyondInput(cur.guide, old).beyondByLeg : undefined;
+        const j2 = found ? (found.kept ? found.j : replanJourney(old, found.j, now, beyond)) : null;
         if (found && j2 && j2.id !== old.id) {
           // le nouveau trajet (avec, devant, le véhicule où l'on est encore) ; sa session ; plus de chemin à pied gardé
           const journeys = [j2, ...found.journeys.filter((x) => x.id !== found.j.id && x.id !== j2.id)];
           const guide: FollowedGuide = { kind: cur.guide.kind, mem: cur.guide.mem };
           if (found.beyond?.length) guide.beyond = found.beyond;
-          this.trip = { ...cur, journey: j2, journeys, index: 0, key: this.newKey(), guide };
+          this.trip = { ...cur, journey: j2, journeys, index: 0, key: this.newKey(), guide, ...(found.title ? { title: found.title } : {}) };
         } else this.trip = { ...cur, guide: { ...cur.guide, mem: replanNone(cur.guide.mem, now) } };
         this.saveFollowed();
       })
@@ -2650,9 +2651,18 @@ export class GlassesController implements GlassesApi {
 
   /**
    * « J'y descends », véhicule raté ou supprimé (PRD-1.2.10 § 3.6) : le suivant de la même ligne vers la même destination,
-   * si le tableau de l'arrêt de montée le donne, jusqu'au même arrêt de descente (positions des arrêts reprises).
+   * si le tableau de l'arrêt de montée le donne, jusqu'au même arrêt de descente (positions des arrêts reprises). Arrêt
+   * dépassé : le même véhicule jusqu'à l'arrêt suivant (rideOnJourney), sans rien chercher.
    */
   private async replanRide(old: Journey, req: NonNullable<GuideState['replan']>): Promise<Replan | null> {
+    if (req.reason === 'passed') {
+      // arrêt dépassé : rien à chercher ; le même véhicule jusqu'à l'arrêt suivant (arrêts suivants connus), suivi comme
+      // un trajet normal (« Descends au prochain arrêt », « Tu y es ») ; le titre devient cet arrêt
+      const kept = rideOnJourney(old, this.trip?.guide?.beyond ?? [], req.from, this.d.clock.now());
+      if (!kept) return null;
+      const to = kept.journey.legs[kept.journey.legs.length - 1].to;
+      return { j: kept.journey, journeys: [kept.journey], beyond: kept.beyond, kept: true, title: towards(displayName(to.name, this.settings().lang)) };
+    }
     const leg = old.legs.find(isRide);
     const areaId = req.from.areaId ?? leg?.from.areaId;
     if (!leg || !areaId) return null;
@@ -3693,8 +3703,11 @@ function guideTitle(t: Pick<FollowedTrip, 'title'>, kind: GuideKind): string {
 /** Session d'un trajet suivi : propositions, titre, extrémités, favori. */
 type TripSession = { key: string; title: string; journeys: Journey[]; from?: Endpoint; to?: Endpoint; favoriteId?: string };
 
-/** 1.2.10 : nouveau trajet trouvé : le premier, la session, et pour « j'y descends » les arrêts après la descente. */
-type Replan = { j: Journey; journeys: Journey[]; beyond?: Stopover[] };
+/**
+ * 1.2.10 : nouveau trajet trouvé : le premier, la session, et pour « j'y descends » les arrêts après la descente ;
+ * `kept` : le même véhicule prolongé (arrêt dépassé, genre ride), déjà complet, avec son titre.
+ */
+type Replan = { j: Journey; journeys: Journey[]; beyond?: Stopover[]; kept?: boolean; title?: string };
 
 /** 1.2.10 : une position ajoutée à un arrêt qui n'en a pas (zone connue). */
 function withPoint<T extends { areaId?: string; lat?: number; lon?: number }>(x: T, at: ReadonlyMap<string, LatLon>): T {

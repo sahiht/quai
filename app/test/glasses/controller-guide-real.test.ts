@@ -9,12 +9,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../src/glasses/guide-views', async () => (await import('./controller-guide-doubles')).viewsModule);
 
-import type { Core, Departure, DepartureStops, Endpoint, Journey, LatLon } from '../../src/core/api';
+import type { Core, Departure, DepartureStops, Endpoint, Journey, LatLon, SearchItem } from '../../src/core/api';
 import type { WalkRoute } from '../../src/core/guide-types';
 import { TRIP_KEY, parseTrip } from '../../src/glasses/controller';
 import { CLOCK_EVENT } from '../../src/platform/clock';
 import type { ImageSpec, Intent } from '../../src/glasses/types';
-import { P, at, firstWalkRoute, offset, prdTrip } from '../core/guide-fixtures';
+import { P, at, firstWalkRoute, lerp, offset, prdTrip, toward } from '../core/guide-fixtures';
 import { createKV, memoryBackend } from '../../src/platform/kv';
 import { views } from './controller-guide-doubles';
 import { busStops, cleanupKit, guideSetup, type Kit, type KitOptions } from './controller-guide-kit';
@@ -196,6 +196,56 @@ describe('vrai moteur : arrêts suivants du véhicule (genre trip, arrêt dépas
     expect(Object.keys(legs)).toEqual(['3', '5']);
     expect(legs['3'][0].name.fr).toBe('Bruxelles-Midi');
     expect(legs['5'][0].name.fr).toBe('Cimetière d’Ixelles');
+  });
+
+  it('arrêt dépassé (Bruxelles-Central), arrêts suivants lus : le nouveau trajet garde l’IC jusqu’à Bruxelles-Midi ; « Descends au prochain arrêt » la dernière minute ; jamais « Partir maintenant »', async () => {
+    const midi = { lat: 50.8357, lon: 4.3359 }; // gare de Bruxelles-Midi
+    const places: Record<string, LatLon> = { 'sncb:8813003': P.central, 'sncb:8814001': midi, 'sncb:8892007': { lat: 51.0357, lon: 3.7106 } };
+    const asked: { from: Endpoint; after: number }[] = [];
+    const coreExtra = (): Partial<Core> => ({
+      departureStops: async () => icStops(),
+      async search(q: string) {
+        const ds = icStops().stops.find((x) => x.name.fr === q);
+        const p = ds?.areaId ? places[ds.areaId] : undefined;
+        return p && ds?.areaId ? [{ id: ds.areaId, op: 'sncb', n: ds.name, modes: ['train'], lat: p.lat, lon: p.lon, kindLabel: 'gare SNCB' } as SearchItem] : [];
+      },
+      async route(from: Endpoint, _to: Endpoint, after: number) {
+        if (from.type !== 'area' || from.areaId !== 'sncb:8814001') return { journeys: [prdTrip()] };
+        asked.push({ from, after });
+        // depuis Bruxelles-Midi : à pied jusqu'aux étangs d'Ixelles
+        const w = { kind: 'walk' as const, from: { name: N2('Bruxelles-Midi', 'Brussel-Zuid'), ...midi, areaId: 'sncb:8814001' }, to: { name: N2('Étangs d’Ixelles'), ...P.etangs }, dep: after, arr: after + 40 * MIN, schedDep: after, schedArr: after + 40 * MIN, walkMin: 40 };
+        return { journeys: [{ id: 'jmidi', legs: [w], dep: after, arr: after + 40 * MIN, leaveAt: after, transfers: 0, rt: true, alerts: [] }] };
+      },
+    });
+    const h = await launched({ now: at('07:24'), pos: P.guillemins, coreExtra });
+    // à la gare, puis dans l'IC (montée constatée), arrêts suivants lus au début de l'étape
+    await h.push(P.guillemins, { speed: 0 });
+    await h.settle(7 * MIN);
+    await h.push(toward(P.guillemins, P.ans, 300), { speed: 20 });
+    await h.settle(MIN);
+    expect(h.c.followed!.guide!.beyondByLeg?.legs['3'].map((x) => [x.name.fr, x.lat])).toEqual([['Bruxelles-Midi', midi.lat], ['Gand-Saint-Pierre', 51.0357]]);
+    await h.settle(at('08:26:30') - h.clock.now());
+    // l'IC passe Bruxelles-Central sans que la personne descende, et file vers Bruxelles-Midi
+    await h.push(lerp(P.nord, P.central, 0.8), { speed: 12 });
+    await h.settle(at('08:27:30') - h.clock.now());
+    await h.push(P.central, { speed: 12 });
+    await h.settle(30_000);
+    await h.push(toward(P.central, midi, 400), { speed: 12 });
+    await h.settle(30_000);
+    await h.push(toward(P.central, midi, 700), { speed: 12 });
+    await h.settle();
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ from: { type: 'area', areaId: 'sncb:8814001' }, after: at('08:31') });
+    const j2 = h.c.followed!.journey;
+    expect(j2.legs.map((l) => l.kind)).toEqual(['walk', 'ride', 'walk', 'ride', 'walk']);
+    expect(j2.legs[3]).toMatchObject({ line: 'IC', schedDep: at('07:30'), to: { name: { fr: 'Bruxelles-Midi' }, areaId: 'sncb:8814001' }, arr: at('08:31') });
+    expect(j2.legs[4].from.areaId).toBe('sncb:8814001');
+    expect(shown(h)).toBe('passed');
+    // la dernière minute avant Bruxelles-Midi : « Descends au prochain arrêt » de l'IC gardé
+    await h.settle(at('08:30:05') - h.clock.now());
+    await h.push(toward(P.central, midi, 1_500), { speed: 12 });
+    expect(h.last().moment).toBe(`alight:${j2.id}:3`);
+    expect(h.screens().some((x) => x.screen === 'guide' && /^leave:/.test(x.moment ?? ''))).toBe(false);
   });
 
   it('guidage arrêté pendant la lecture : la réponse est oubliée', async () => {

@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Journey, LatLon, Leg } from '../../src/core/api';
-import { guideStep, newGuideMemory, type GuideInput } from '../../src/core/guide';
+import { guideStep, newGuideMemory, replanJourney, rideOnJourney, type GuideInput } from '../../src/core/guide';
 import type { GuideFix, GuideMemory, GuideState } from '../../src/core/guide-types';
 import { settings } from './guide-fixtures';
 
@@ -66,11 +66,16 @@ function replay(j = s1210Journey(), extra: Partial<GuideInput> = {}) {
   let mem: GuideMemory = newGuideMemory();
   const fixes: GuideFix[] = [];
   let last!: GuideState;
+  let journey = j;
+  let more = extra;
+  /** genres des moments montrés, dans l'ordre */
+  const seen: string[] = [];
   const at = (now: number, pts: [number, LatLon, number, number?][] = []): GuideState => {
     const one = () => {
-      const r = guideStep({ kind: 'trip', journey: j, title: 'Place Fontainas', now, fixes: fixes.filter((f) => now - f.at <= 300_000 && f.at <= now), settings: settings(), startedAt: T('07:20'), origin: P.ange, ...extra }, mem);
+      const r = guideStep({ kind: 'trip', journey, title: 'Place Fontainas', now, fixes: fixes.filter((f) => now - f.at <= 300_000 && f.at <= now), settings: settings(), startedAt: T('07:20'), origin: P.ange, ...more }, mem);
       mem = r.mem;
       last = r.state;
+      if (r.state.moment && seen[seen.length - 1] !== r.state.moment.kind) seen.push(r.state.moment.kind);
     };
     if (!pts.length) one();
     for (const [t, p, speed, accuracy] of pts) {
@@ -79,7 +84,12 @@ function replay(j = s1210Journey(), extra: Partial<GuideInput> = {}) {
     }
     return last;
   };
-  return { at, mem: () => mem as GuideMemory & { boarded?: { leg: number }; alighted?: { leg: number } } };
+  /** le contrôleur adopte un nouveau trajet (la mémoire continue) */
+  const use = (j2: Journey, extra2: Partial<GuideInput> = {}) => {
+    journey = j2;
+    more = extra2;
+  };
+  return { at, use, seen, mem: () => mem as GuideMemory & { boarded?: { leg: number }; alighted?: { leg: number } } };
 }
 
 describe('s1210 : correspondance très juste à Bruxelles-Nord (IC puis tram 3)', () => {
@@ -138,6 +148,78 @@ describe('s1210 : arrêt dépassé à Bruxelles-Nord (l’IC repart vers Bruxell
     const s = g.at(T('08:45'), [[T('08:44:30'), lerp(P.nord, P.central, 0.3), 5.6], [T('08:45'), lerp(P.nord, P.central, 0.4), 5.6]]);
     expect(s.moment).toMatchObject({ kind: 'passed', passed: N('Bruxelles-Nord'), getOff: N('Bruxelles-Central', 'Brussel-Centraal'), at: T('08:48') });
     expect(s.replan).toEqual({ from: { lat: P.central.lat, lon: P.central.lon, areaId: 'sncb:8813003', name: N('Bruxelles-Central', 'Brussel-Centraal') }, reason: 'passed', at: T('08:48') });
+  });
+
+  it('arrêts suivants connus : le nouveau trajet garde l’IC jusqu’à Bruxelles-Central ; « Descends au prochain arrêt » la dernière minute, puis la marche ; jamais « Partir maintenant » dans le train', () => {
+    const central = { name: N('Bruxelles-Central', 'Brussel-Centraal'), sched: T('08:46'), est: T('08:48'), areaId: 'sncb:8813003', lat: P.central.lat, lon: P.central.lon, platform: '3' };
+    const midi = { name: N('Bruxelles-Midi', 'Brussel-Zuid'), sched: T('08:52'), est: T('08:54'), areaId: 'sncb:8814001' };
+    const j = s1210Journey();
+    const beyondByLeg = { 1: [central, midi] };
+    const g = replay(j, { beyondByLeg });
+    g.at(T('07:46'), [[T('07:45:30'), lerp(P.namur, P.gembloux, 90 / 780), 19.7], [T('07:46'), lerp(P.namur, P.gembloux, 120 / 780), 19.7]]);
+    g.at(T('08:41:30'), [[T('08:41:30'), lerp(P.schuman, P.nord, 240 / 270), 8.9]]);
+    g.at(T('08:43'), [[T('08:42'), P.nord, 0], [T('08:43'), P.nord, 0]]);
+    g.at(T('08:44'), [[T('08:43:30'), lerp(P.nord, P.central, 0.1), 5.6], [T('08:44'), lerp(P.nord, P.central, 0.2), 5.6]]);
+    const s = g.at(T('08:45'), [[T('08:44:30'), lerp(P.nord, P.central, 0.3), 5.6], [T('08:45'), lerp(P.nord, P.central, 0.4), 5.6]]);
+    expect(s.replan).toMatchObject({ reason: 'passed', from: { areaId: 'sncb:8813003' }, at: T('08:48') });
+    // nouveau trajet trouvé depuis Bruxelles-Central à 08:48 : 13 min à pied jusqu'à la place Fontainas
+    const fresh: Journey = { id: 'jcentral', legs: [walk(end('Bruxelles-Central', P.central, 'sncb:8813003'), end('Place Fontainas', P.fontainas), T('08:48'), 13)], dep: T('08:48'), arr: T('09:01'), leaveAt: T('08:48'), transfers: 0, rt: true, alerts: [] };
+    const j2 = replanJourney(j, fresh, T('08:45:05'), beyondByLeg);
+    expect(j2.legs.map((l) => l.kind)).toEqual(['walk', 'ride', 'walk']);
+    expect(j2.legs[1]).toMatchObject({ tripId: 'ic2112', schedDep: T('07:42'), dep: T('07:44'), to: { name: N('Bruxelles-Central', 'Brussel-Centraal'), areaId: 'sncb:8813003' }, arr: T('08:48'), schedArr: T('08:46') });
+    expect(j2.legs[1].stops?.map((x) => x.name.fr)).toEqual(['Namur', 'Gembloux', 'Ottignies', 'Bruxelles-Luxembourg', 'Bruxelles-Schuman', 'Bruxelles-Nord', 'Bruxelles-Central']);
+    expect(j2).toMatchObject({ arr: T('09:01'), dep: j.dep, transfers: 0 });
+    // adopté par le contrôleur (les arrêts suivants repartent de rien avec le nouveau trajet) : toujours à bord de l'IC
+    g.use(j2);
+    let t = g.at(T('08:45:05'), [[T('08:45:05'), lerp(P.nord, P.central, 0.45), 5.6]]);
+    expect(t.phase).toMatchObject({ kind: 'ride', leg: 1 });
+    expect(g.mem().boarded?.leg).toBe(1);
+    expect(t.moment).toMatchObject({ kind: 'passed', passed: N('Bruxelles-Nord'), getOff: N('Bruxelles-Central', 'Brussel-Centraal'), at: T('08:48'), arr: T('09:01') });
+    expect(t.replan).toBeUndefined();
+    expect(g.at(T('08:46'), [[T('08:46'), lerp(P.nord, P.central, 0.6), 5.6]]).moment?.kind).toBe('passed');
+    // la dernière minute : « Descends au prochain arrêt », Bruxelles-Central 08:48, ensuite 13 min à pied
+    t = g.at(T('08:47:05'), [[T('08:47:05'), lerp(P.nord, P.central, 0.85), 5.6]]);
+    expect(t.moment).toMatchObject({ kind: 'alight', leg: 1, stop: N('Bruxelles-Central', 'Brussel-Centraal'), at: T('08:48'), then: { kind: 'walk', min: 13, last: true } });
+    // descente à Bruxelles-Central, puis à pied vers la place Fontainas
+    g.at(T('08:48:20'), [[T('08:48'), P.central, 0], [T('08:48:20'), P.central, 0.4]]);
+    expect(g.mem().alighted?.leg).toBe(1);
+    t = g.at(T('08:49:30'), [[T('08:49:30'), lerp(P.central, P.fontainas, 0.12), 1.3]]);
+    expect(t.phase).toEqual({ kind: 'walk', leg: 2 });
+    expect(g.seen).not.toContain('leave');
+    expect(g.seen.slice(-2)).toEqual(['passed', 'alight']);
+  });
+
+  it('« j’y descends » (genre ride), Bruxelles-Nord dépassé, arrêts suivants connus : le même IC jusqu’à Bruxelles-Central, « Descends au prochain arrêt » la dernière minute, puis « Tu y es »', () => {
+    const central = { name: N('Bruxelles-Central', 'Brussel-Centraal'), sched: T('08:46'), est: T('08:48'), areaId: 'sncb:8813003', lat: P.central.lat, lon: P.central.lon };
+    const midi = { name: N('Bruxelles-Midi', 'Brussel-Zuid'), sched: T('08:52'), est: T('08:54'), areaId: 'sncb:8814001' };
+    const ic = s1210Journey().legs[1];
+    const j: Journey = { id: 'jride', legs: [ic], dep: ic.dep, arr: ic.arr, leaveAt: ic.dep, transfers: 0, rt: true, alerts: [] };
+    const g = replay(j, { kind: 'ride', title: 'Vers Bruxelles-Nord', beyond: [central, midi] });
+    g.at(T('07:46'), [[T('07:45:30'), lerp(P.namur, P.gembloux, 90 / 780), 19.7], [T('07:46'), lerp(P.namur, P.gembloux, 120 / 780), 19.7]]);
+    g.at(T('08:41:30'), [[T('08:41:30'), lerp(P.schuman, P.nord, 240 / 270), 8.9]]);
+    // à quai à Bruxelles-Nord (immobile : la descente semble faite, « Tu y es »), puis le train repart : resté à bord
+    expect(g.at(T('08:43'), [[T('08:42'), P.nord, 0], [T('08:43'), P.nord, 0]]).moment?.kind).toBe('arrived');
+    expect(g.at(T('08:44'), [[T('08:43:30'), lerp(P.nord, P.central, 0.1), 5.6], [T('08:44'), lerp(P.nord, P.central, 0.2), 5.6]]).phase).toMatchObject({ kind: 'ride', leg: 0 });
+    const s = g.at(T('08:45'), [[T('08:44:30'), lerp(P.nord, P.central, 0.3), 5.6], [T('08:45'), lerp(P.nord, P.central, 0.4), 5.6]]);
+    expect(s.ended).toBe(false);
+    expect(s.moment).toMatchObject({ kind: 'passed', passed: N('Bruxelles-Nord'), getOff: N('Bruxelles-Central', 'Brussel-Centraal'), at: T('08:48') });
+    // rien à chercher : le contrôleur prolonge le même véhicule jusqu'à l'arrêt suivant
+    expect(s.replan).toEqual({ from: { lat: P.central.lat, lon: P.central.lon, areaId: 'sncb:8813003', name: N('Bruxelles-Central', 'Brussel-Centraal') }, reason: 'passed', at: T('08:48') });
+    const kept = rideOnJourney(j, [central, midi], s.replan!.from, T('08:45:05'));
+    expect(kept?.journey.legs).toHaveLength(1);
+    expect(kept?.journey.legs[0]).toMatchObject({ tripId: 'ic2112', from: { name: N('Namur') }, to: { name: N('Bruxelles-Central', 'Brussel-Centraal') }, arr: T('08:48') });
+    expect(kept?.journey.arr).toBe(T('08:48'));
+    expect(kept?.beyond.map((x) => x.name.fr)).toEqual(['Bruxelles-Midi']);
+    g.use(kept!.journey, { kind: 'ride', title: 'Vers Bruxelles-Central', beyond: kept!.beyond });
+    let t = g.at(T('08:45:05'), [[T('08:45:05'), lerp(P.nord, P.central, 0.45), 5.6]]);
+    expect(t.phase).toMatchObject({ kind: 'ride', leg: 0 });
+    expect(t.moment).toMatchObject({ kind: 'passed', getOff: N('Bruxelles-Central', 'Brussel-Centraal'), at: T('08:48') });
+    expect(t.moment).not.toHaveProperty('arr');
+    expect(t.replan).toBeUndefined();
+    t = g.at(T('08:47:05'), [[T('08:47:05'), lerp(P.nord, P.central, 0.85), 5.6]]);
+    expect(t.moment).toMatchObject({ kind: 'alight', leg: 0, stop: N('Bruxelles-Central', 'Brussel-Centraal'), at: T('08:48'), then: { kind: 'none' } });
+    t = g.at(T('08:48:20'), [[T('08:48'), P.central, 0], [T('08:48:20'), P.central, 0.4]]);
+    expect(t.moment).toMatchObject({ kind: 'arrived', title: 'Vers Bruxelles-Central' });
   });
 
   it('arrêts suivants d’une autre étape seulement (beyondByLeg) : ignorés', () => {
