@@ -646,6 +646,9 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   // 1.2.8 : « ~ horaire prévu » seulement sous une page qui montre un « ~ » (notePlanned)
   const noteSrc = detailLine ? detail : v.note ?? (v.notePlanned && items.slice(from, to).some((it) => it.planned) ? v.notePlanned : '');
   const noteText = noteSrc ? (detailLine ? truncateWordsPx(noteSrc, X_END - X_TEXT - GEO.SAFETY) : truncate(noteSrc, X_END - X_TEXT - GEO.SAFETY)) : '';
+  // journal QUAI_SCREEN (scénarios de bout en bout) : le texte exact de la ligne du détail, que seule la mise en page
+  // connaît (il suit le curseur) ; le contrôleur journalise view.log après la mise en page
+  if (detailLine && v.log) v.log.detail = noteText;
   if (g.noteLine) foot.push(noteText);
   const hintText = opts.toast ? truncate(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? truncate(v.hints, X_END - X_TEXT - GEO.SAFETY) : '';
   if (g.hintLine) foot.push(hintText);

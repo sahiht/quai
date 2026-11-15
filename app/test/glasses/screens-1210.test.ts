@@ -71,6 +71,11 @@ describe('PRD-1.2.10 § 2 : « Favoris », une ligne par favori, le détail en b
     expect(lines(v).join('\n')).not.toContain('horaire prévu');
     // même forme d'un favori à l'autre : seuls les textes changent
     expect(new Set([0, 1, 2, 3].map((s) => shapeKey(at(s)))).size).toBe(1);
+    // journal QUAI_SCREEN : le texte exact de la ligne du détail, celui du curseur (les champs existants gardés)
+    at(1);
+    expect(v.log).toMatchObject({ order: ['fav-bureau', 'fav-ecole', 'fav-maison'], detail: 'bus W ~07:45, direct' });
+    at(2);
+    expect(v.log?.detail).toBe('');
     // « ! » : la voie change ; le nom au plus clair, « ! » collé par une espace insécable
     expect(v.items[0].a).toBe(`Bureau${TROUBLE_MARK}`);
     expect(TROUBLE_MARK).toBe(' !');

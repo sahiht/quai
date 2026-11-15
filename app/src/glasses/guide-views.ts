@@ -420,7 +420,7 @@ export function guideView(state: GuideState, show: GuideShow, journey: Journey, 
   const moment = show === 'moment' ? state.moment : null;
   const gestureHints = ctx.settings.display.gestureHints;
   if (show === 'empty' || (show === 'moment' && !moment)) {
-    v.log = { guide: 'empty', journey: state.journeyId };
+    v.log = guideLog(v, 'empty', null, state);
     return v;
   }
   v.title = state.where.title;
@@ -431,7 +431,7 @@ export function guideView(state: GuideState, show: GuideShow, journey: Journey, 
     v.items = layoutLines(mv.lines, maxPx, GUIDE.MAX_LINES).map((r) => rowItem(r.t, r.lv));
     if (mv.image) v.images = [guideImage(mv.image)];
     v.hints = gestureHints ? mv.hints : '';
-    v.log = { guide: 'moment', moment: moment.kind, id: moment.id, journey: state.journeyId };
+    v.log = guideLog(v, 'moment', moment, state);
     return v;
   }
   const maxPx = GUIDE.FULL_W;
@@ -442,8 +442,22 @@ export function guideView(state: GuideState, show: GuideShow, journey: Journey, 
   for (const r of layoutLines(lines, maxPx, 8 - rows.length)) rows.push(rowItem(r.t, r.lv));
   v.items = rows;
   v.hints = gestureHints ? HINTS.guide : '';
-  v.log = { guide: 'where', journey: state.journeyId };
+  v.log = guideLog(v, 'where', null, state);
   return v;
+}
+
+/**
+ * Journal QUAI_SCREEN de l'écran du guidage (scénarios de bout en bout) : ce qui est montré (`show`), le moment (sorte
+ * et identifiant, ou null), chaque image (place, taille, sorte) et les choix du menu de l'appui long.
+ */
+function guideLog(v: GlassesView, show: GuideShow, m: Moment | null, s: GuideState): Record<string, unknown> {
+  return {
+    show,
+    moment: m ? { kind: m.kind, id: m.id } : null,
+    images: (v.images ?? []).map((i) => ({ x: i.x, y: i.y, w: i.w, h: i.h, kind: i.image.kind })),
+    menu: (v.menu ?? []).map((x) => ({ id: x.id, label: x.label })),
+    journey: s.journeyId,
+  };
 }
 
 /** L'image du moment, à son emplacement (identifiant et nom stables : la page la remplace sans en créer d'autre). */

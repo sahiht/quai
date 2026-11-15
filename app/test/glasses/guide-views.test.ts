@@ -99,6 +99,8 @@ describe('PRD § 3.2 : écran calme, l’écran vide', () => {
         { id: MENU_IDS.stopGuide, label: 'Arrêter le guidage' },
         { id: MENU_IDS.allSteps, label: 'Voir tout le trajet' },
       ]);
+      // journal QUAI_SCREEN : rien de montré, le menu
+      expect(v.log).toEqual({ show: 'empty', moment: null, images: [], menu: GUIDE_MENU, journey: 'j1' });
     }
     expect(GUIDE_MENU.map((m) => new TextEncoder().encode(m.label).length).every((n) => n <= 32)).toBe(true);
   });
@@ -126,6 +128,8 @@ describe('PRD § 3.2 : les moments', () => {
     expect(container(p, 'colC').level).toBe(2);
     expect(v.tap).toEqual({ kind: 'guideTap' });
     expect(v.menu).toEqual(GUIDE_MENU);
+    // journal QUAI_SCREEN : le moment, son image, le menu
+    expect(v.log).toEqual({ show: 'moment', moment: { kind: 'leave', id: 'leave:j1' }, images: [{ x: 28, y: 60, w: 144, h: 144, kind: 'sign' }], menu: GUIDE_MENU, journey: 'j1' });
   });
 
   it('leave : train « jusqu’à la gare de Namur », sans temps réel « ~07:12 », très juste et « Si tu le rates » (règle 1.2.5)', () => {
@@ -309,6 +313,7 @@ describe('PRD § 3.3 : « Où tu en es »', () => {
     const { v, p, lines } = shown(null, 'where');
     expect(lines).toEqual(['◎ à pied ─ ○ bus 6 ─ ○ IC', 'À pied vers l’arrêt du bus 6', '260 m, 4 min', 'bus 6 à 07:12, marge 2 min', 'arrivée 08:54', HINT]);
     expect(v.images).toBeUndefined();
+    expect(v.log).toMatchObject({ show: 'where', moment: null, images: [] });
     // sous le titre, à la marge
     expect(container(p, 'colA')).toMatchObject({ x: 28, y: 33 });
     const lv = levels(p);
