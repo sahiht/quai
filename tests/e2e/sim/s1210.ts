@@ -397,12 +397,13 @@ async function s1210go(ctx: Ctx): Promise<void> {
       const w = await waitGuide(r, '« Où tu en es » à pied', (s) => isGuide(s) && /^À pied vers /.test(O.norm(s.lines[1])));
       expectLines(w, O.whereWalkLines(j, 0, title, 0), '« Où tu en es » à pied (§ 3.3)');
       momentCommon(w, title);
-      await dismiss(r, '« Où tu en es » à pied');
-      return { screen: w, shot: { kind: 'guide', image: false } };
+      return { screen: w, shot: { kind: 'guide', image: !!(w.images as unknown[] | undefined)?.length } };
     });
     let ic = -1;
     await gstep(r, 'guide-a-l-arret', async () => {
       ic = rideLeg(j, 0);
+      const cur0 = r.page.lastScreen();
+      if (cur0 && isGuide(cur0) && !isEmpty(cur0)) await dismiss(r, '« Où tu en es » à pied');
       // à 60 m de la gare, départ dans 15 min ou moins : « board » (§ 3.2), voie modifiée au plus clair
       let s: GlassesScreen | undefined;
       for (let t = T('07:40'); t <= T('07:43:30') && !s; t += 10_000) {
@@ -411,7 +412,7 @@ async function s1210go(ctx: Ctx): Promise<void> {
       }
       check(s, `moment « board » de l’${O.vehicle(j.legs[ic])} jamais affiché en arrivant à la gare : dernier écran ${show(r.page.lastScreen())}`);
       const want = O.boardLines(j, ic, T('07:41'));
-      expectLines(s, want.filter((w) => w !== 'voie modifiée'), '« À l’arrêt » / monter (§ 3.2, board)', ['voie modifiée', /^\d+ min à pied jusqu’au quai, marge \d+ min$/]);
+      expectLines(s, want, '« À l’arrêt » / monter (§ 3.2, board)');
       if (want.includes('voie modifiée')) check(s.lines.some((l) => O.norm(l) === 'voie modifiée' || O.norm(l).endsWith(', voie modifiée')), `« voie modifiée » absent du moment « board » : ${show(s)}`);
       momentCommon(s, title);
       return { screen: s, shot: { kind: 'guide', image: true } };
@@ -423,10 +424,11 @@ async function s1210go(ctx: Ctx): Promise<void> {
       const w = await waitGuide(r, '« Où tu en es » à la gare', (s) => isGuide(s) && /^À (la gare de|l’arrêt) /.test(O.norm(s.lines[1])));
       expectLines(w, O.whereWaitLines(j, ic, 1), '« Où tu en es » à la gare (§ 3.3)');
       momentCommon(w, title);
-      await dismiss(r, '« Où tu en es » à la gare');
-      return { screen: w, shot: { kind: 'guide', image: false } };
+      return { screen: w, shot: { kind: 'guide', image: !!(w.images as unknown[] | undefined)?.length } };
     });
     await gstep(r, 'guide-prochain-arret', async () => {
+      const cur0 = r.page.lastScreen();
+      if (cur0 && isGuide(cur0) && !isEmpty(cur0)) await dismiss(r, '« Où tu en es » à la gare');
       const l = j.legs[ic];
       const k = stopIndex(l, 'Gembloux');
       check(k > 0, `Gembloux absent des arrêts de l’IC : ${JSON.stringify(l.stops?.map((s) => s.name.fr))}`);
@@ -445,10 +447,11 @@ async function s1210go(ctx: Ctx): Promise<void> {
       const l = j.legs[ic];
       expectLines(w, O.whereRideLines(j, ic, stopIndex(l, 'Ottignies'), 1, 'trip'), '« Où tu en es » à bord (§ 3.3)');
       momentCommon(w, title);
-      await dismiss(r, '« Où tu en es » à bord');
-      return { screen: w, shot: { kind: 'guide', image: false } };
+      return { screen: w, shot: { kind: 'guide', image: !!(w.images as unknown[] | undefined)?.length } };
     });
     await gstep(r, 'guide-prochain-arret-regle', async () => {
+      const cur0 = r.page.lastScreen();
+      if (cur0 && isGuide(cur0) && !isEmpty(cur0)) await dismiss(r, '« Où tu en es » à bord');
       // au plus un « Prochain arrêt » toutes les 10 min, jamais dans les 5 min avant la descente (§ 3.2)
       const l = j.legs[ic];
       const seen: string[] = [];
@@ -483,12 +486,13 @@ async function s1210go(ctx: Ctx): Promise<void> {
         s = r.page.screens().slice(r.mark).find((x) => isGuide(x) && /^(dans ~?\d+ min|imminent|à ~?\d\d:\d\d)$/.test(O.norm(x.lines[0])));
       }
       check(s, `moment « board » du ${O.vehicle(j.legs[tram])} jamais affiché à la correspondance : ${show(r.page.lastScreen())}`);
-      expectLines(s, O.boardLines(j, tram, T('08:43:30')).filter((w) => typeof w === 'string' || !/quai/.test(String(w))), 'correspondance : monter dans le tram (§ 3.2, board)', [/^\d+ min à pied jusqu’au quai, marge \d+ min$/]);
+      expectLines(s, O.boardLines(j, tram, T('08:43:30')), 'correspondance : monter dans le tram (§ 3.2, board)');
       momentCommon(s, title);
       return { screen: s, shot: { kind: 'guide', image: true } };
     });
     await gstep(r, 'guide-descente-tram', async () => {
-      for (const t of [T('08:44:40'), T('08:46'), T('08:48:05')]) await goTo(r, tr, t);
+      // le PRD attend que le tram quitte l'arrêt d'avant la descente (De Brouckère, 08:48) : une position après son départ
+      for (const t of [T('08:44:40'), T('08:46'), T('08:48:05'), T('08:48:25'), T('08:48:40')]) await goTo(r, tr, t);
       const s = await moment(r, 'Descends au prochain arrêt (tram)', 'Descends au prochain arrêt', 8_000);
       expectLines(s, O.alightLines(j, tram), '« Descends au prochain arrêt » (tram, ensuite : à pied)');
       momentCommon(s, title);

@@ -144,7 +144,8 @@ export function boardLines(j: OJourney, leg: number, now: number): Want[] {
   if (l.head) out.push(`vers ${l.head.fr}`);
   out.push(stopsPhrase(stopsToAlight(l)));
   const prev = j.legs[leg - 1];
-  if (prev && prev.kind === 'walk' && leg > 1) out.push(/^\d+ min à pied jusqu’au quai, marge \d+ min$/);
+  // correspondance : « 3 min à pied jusqu'au quai, marge 6 min » (train) ; « 2 min à pied jusqu'à l'arrêt, très juste »
+  if (prev && prev.kind === 'walk' && leg > 1) out.push(isTrain(l) ? /^\d+ min à pied jusqu’au quai, (marge \d+ min|très juste)$/ : /^\d+ min à pied jusqu’à l’arrêt, (marge \d+ min|très juste)$/);
   return out;
 }
 
