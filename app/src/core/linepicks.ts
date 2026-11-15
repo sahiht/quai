@@ -24,14 +24,15 @@ import { holidayName } from './means';
 import { mapPool } from './net';
 import type { RealtimeClient } from './realtime';
 import { headKey, headScore } from './rtmerge';
-import { distanceM, localDate } from './util';
+import { addDays } from './freshness';
+import { DAY_START_HOUR } from './text';
+import { brusselsParts, distanceM } from './util';
 
 /** findLines : 8 lignes au plus. */
 export const LINES_MAX = 8;
 /** lineBoard : 3 sens au plus (une ligne qui se sépare juste après l'arrêt). */
 export const DIRECTIONS_MAX = 3;
 /** Heure de début de la journée de service (comme les trains et les textes : 04:00). */
-const DAY_START_MS = 4 * 3_600_000;
 /** Premières zones suivantes comparées pour ranger deux motifs dans le même sens. */
 const FIRST_NEXT = 3;
 /** AreaFile.patterns[].next : 60 zones au plus (pipeline) ; un motif aussi long est tronqué. */
@@ -581,7 +582,9 @@ export async function linesNearIn(src: LineData, near: LatLon, stops: readonly {
 
 /** Jour de service de `now` dans `dates` (meta.serviceDates) : avant 04:00, celui de la veille ; -1 s'il n'y est pas. */
 export function serviceDayIndex(dates: readonly string[], now: number): number {
-  return dates.indexOf(localDate(now - DAY_START_MS));
+  // 1.2.10 : heure locale de Bruxelles (et non 4 h de temps absolu) : juste aussi pendant l'heure du changement d'heure.
+  const p = brusselsParts(now);
+  return dates.indexOf(p.h < DAY_START_HOUR ? addDays(p.date, -1) : p.date);
 }
 
 /**

@@ -329,6 +329,19 @@ export function drawContainers(ctx: Ctx2D & Partial<Pick<CanvasRenderingContext2
     ctx.globalAlpha = LEVEL_ALPHA[c.level] ?? 1;
     c.content.split('\n').forEach((line, i) => drawLine(ctx, line, c.x, c.y + i * LINE_H + BASELINE));
     ctx.restore();
+    // 1.2.10 : bordure (filet du détail des favoris), dessinée hors de la découpe du texte, comme l'appli Even.
+    if (c.border && c.border.width > 0) {
+      ctx.save();
+      ctx.globalAlpha = LEVEL_ALPHA[c.border.level] ?? 1;
+      const bw = c.border.width;
+      ctx.fillRect(c.x, c.y, c.w, bw);
+      ctx.fillRect(c.x, c.y + Math.max(bw, c.h) - bw, c.w, bw);
+      if (c.h > 2 * bw) {
+        ctx.fillRect(c.x, c.y, bw, c.h);
+        ctx.fillRect(c.x + c.w - bw, c.y, bw, c.h);
+      }
+      ctx.restore();
+    }
   }
   drawImages(ctx, images, color);
   ctx.restore();

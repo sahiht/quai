@@ -57,14 +57,20 @@ export async function detectEvenHost(timeoutMs = 1500): Promise<boolean> {
   return hasEvenHost();
 }
 
+/**
+ * 1.2.10 : couleur de bordure du SDK (gris de 0 à 16 pour un conteneur texte, d'après even-g2-notes : 5 discret,
+ * 13 vif) pour chaque luminosité de Quai.
+ */
+export const BORDER_COLOR: Record<ContainerSpec['level'], number> = { 0: 2, 1: 4, 2: 6, 3: 10, 4: 13 };
+
 export function toTextProperty(c: ContainerSpec): TextContainerProperty {
   return new TextContainerProperty({
     xPosition: c.x,
     yPosition: c.y,
     width: c.w,
     height: c.h,
-    borderWidth: 0,
-    borderColor: 0,
+    borderWidth: c.border ? c.border.width : 0,
+    borderColor: c.border ? BORDER_COLOR[c.border.level] : 0,
     borderRadius: 0,
     paddingLength: 0,
     containerID: c.id,

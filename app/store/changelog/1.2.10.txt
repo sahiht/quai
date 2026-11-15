@@ -1,0 +1,3 @@
+« Y aller » : Quai te guide de porte à porte, avec un écran calme qui ne s’allume que quand tu dois agir (partir, tourner, monter, descendre), et le vrai chemin à pied.
+Train ou bus déjà pris : dans la liste de ses arrêts, touche celui où tu descends (« j’y descends »).
+Favoris : une ligne chacun, le détail du favori choisi en bas ; le trajet s’écrit en une ligne par étape, et seules les alertes de ton trajet s’affichent.
