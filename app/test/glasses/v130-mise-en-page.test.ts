@@ -401,6 +401,17 @@ describe('PRD-1.3.0 § 5 : le compteur des balayages (rangées coupées au milie
     const old = { ...p, lines: [p.lines[0], `163b   ${truncate(LONG[0], room)}   5 min`, `163b   ${truncate('Bruxelles-Central', 120)}   7 min`] };
     expect(truncate(LONG[0], room)).not.toBe(truncateWords(LONG[0], room));
     expect(pageCuts(v, old).map((c) => c.kind)).toEqual(['mid', 'mid']);
+    // deux noms voisins au même début (balayage des vraies données, De Lijn 589) : chaque rangée jugée sur son propre nom
+    const near = ['Meensel-Kiezegem Meensel Gemeentehuis', 'Meensel-Kiezegem Meenselbaan'];
+    const run: LineRun = {
+      op: 'delijn', mode: 'bus', line: '589', heads: [N('Gare de Tirlemont')], dir: 0, rtError: false, state: 'ok',
+      stops: near.map((n, i) => ({ areaId: `delijn:m${i}`, name: N(n), lat: 50.9, lon: 4.9, next: [] })),
+    };
+    const lv = lineRunView({ screen: 'lineRun', follow: 'f', dir: 0 }, { id: 'f', op: 'delijn', mode: 'bus', line: '589', routes: [] }, run, ctx());
+    const lp = layoutPage(lv, { sel: 1, top: 0 });
+    hardware(lp);
+    expect(lp.lines.map(nb)[0]).toMatch(/^○ Meensel-Kiezegem Meensel…   /);
+    expect(pageCuts(lv, lp).map((c) => [c.kind, c.full])).toEqual([['word', `○ ${near[0]}`]]);
     // un « … » qui fait partie du texte (calcul en cours, « + … ») n'est pas une coupe
     const busy: GlassesView = { ...othersLike(1), items: [{ a: 'Bureau', c: '…', b2: 'bus 36 + IC + …, 13 min plus tôt' }] };
     expect(pageCuts(busy, page(busy))).toEqual([]);
@@ -482,6 +493,9 @@ describe('PRD-1.3.0 § 7 : favoris en accordéon, la rangée du curseur ouverte'
       const f = effectiveFrame(current(s), v, cap);
       const p = layoutPage(v, f);
       hardware(p);
+      // la navigation garde le défilement que montre la page (hauteurs réelles des deux côtés) : ▲ après ▼ ne saute pas
+      expect(current(s).top).toBe(p.top);
+      expect(f.top).toBe(p.top);
       const cursor = rowsOf(container(p, 'cursor'));
       const r = cursor.indexOf('▶');
       expect(r).toBeGreaterThanOrEqual(0);

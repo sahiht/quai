@@ -9,7 +9,7 @@
  * n'est pas une coupe.
  */
 import { truncate } from '../../src/glasses/font';
-import { expandLines } from '../../src/glasses/layout';
+import { expandLines, layoutPage } from '../../src/glasses/layout';
 import type { GlassesView, Item, PageSpec, Seg } from '../../src/glasses/types';
 
 /** `word` : au mot ; `mid` : au milieu d'un mot ; `first` : un premier mot seul trop long ; `unknown` : texte entier introuvable. */
@@ -51,19 +51,17 @@ export function itemTexts(it: Item): string[] {
   return out.filter((x): x is string => !!x && !!x.trim());
 }
 
-/**
- * Coupes des rangées d'une page : chaque « … » collé à un texte, comparé aux textes entiers des éléments affichés (et de
- * la ligne du haut, de la note, de la ligne d'action et des aides). Le plus long début qui correspond l'emporte.
- */
-export function pageCuts(v: GlassesView, p: PageSpec): Cut[] {
-  const own = [...v.items.slice(p.top, p.top + Math.max(1, p.visible)).flatMap(itemTexts), v.top?.text, ...(v.top?.cols ?? []), v.note, v.notePlanned, v.hints, v.action];
-  const cands = [...new Set(own.filter((x): x is string => !!x && !!x.trim()).map(norm))];
+/** Un « … » collé à un texte (une coupe possible) ; seul ou après une espace (« + … », calcul en cours) : pas une coupe. */
+const glued = (line: string): boolean => /\S…/.test(line.replace(NBSP, ' '));
+
+/** Coupes de rangées dont les textes entiers sont `texts` ; `row0` : rang de la première dans le journal de la page. */
+function lineCuts(lines: readonly string[], texts: readonly (string | undefined)[], row0: number): Cut[] {
+  const cands = [...new Set(texts.filter((x): x is string => !!x && !!x.trim()).map(norm))];
   const out: Cut[] = [];
-  p.lines.forEach((raw, row) => {
+  lines.forEach((raw, i) => {
     const line = raw.replace(NBSP, ' ');
     for (let k = line.indexOf('…'); k >= 0; k = line.indexOf('…', k + 1)) {
       const before = line.slice(0, k);
-      // « … » seul (calcul en cours) ou après une espace (« + … ») : pas une coupe
       if (!before.trim() || /\s$/.test(before)) continue;
       let found: Cut | null = null;
       for (let s = 0; s < before.length && !found; s++) {
@@ -71,11 +69,39 @@ export function pageCuts(v: GlassesView, p: PageSpec): Cut[] {
         const shown = before.slice(s);
         if (!shown.trim()) break;
         const full = cands.find((f) => f.length > shown.length && f.startsWith(shown));
-        if (full) found = { row, line: raw, shown, full, kind: cutKind(shown, full) };
+        if (full) found = { row: row0 + i, line: raw, shown, full, kind: cutKind(shown, full) };
       }
-      out.push(found ?? { row, line: raw, shown: before, full: '', kind: 'unknown' });
+      out.push(found ?? { row: row0 + i, line: raw, shown: before, full: '', kind: 'unknown' });
     }
   });
+  return out;
+}
+
+/**
+ * Coupes des rangées d'une page. Chaque rangée n'est comparée qu'aux textes entiers de son élément : l'élément remis en
+ * page seul (même gabarit, même curseur pour l'accordéon) donne exactement ses lignes, dans l'ordre de la page ; la ligne
+ * du haut et le pied (note, ligne d'action, aides) aux textes de la vue. Deux noms voisins au même début
+ * (« Meensel-Kiezegem Meensel Gemeentehuis », « Meensel-Kiezegem Meenselbaan ») ne se confondent pas.
+ */
+export function pageCuts(v: GlassesView, p: PageSpec): Cut[] {
+  if (!p.lines.some(glued)) return [];
+  const viewTexts = [v.top?.text, ...(v.top?.cols ?? []), v.note, v.notePlanned, v.hints, v.action];
+  // écran de message (lignes recoupées à la largeur) ou du guidage : les textes de toute la vue
+  if (v.layout === 'message' || v.layout === 'guide') return lineCuts(p.lines, [...viewTexts, ...v.items.flatMap(itemTexts)], 0);
+  const out: Cut[] = [];
+  let k = 0;
+  if (v.top?.text) {
+    out.push(...lineCuts(p.lines.slice(0, 1), viewTexts, 0));
+    k = 1;
+  }
+  for (let i = p.top; i < p.top + p.visible; i++) {
+    const it = v.items[i];
+    const alone: GlassesView = { ...v, items: [it], top: undefined, note: undefined, notePlanned: undefined, reserveNote: false, hints: '', action: undefined, compactFoot: true, scroll: false, mark: undefined, paged: false, initialSel: undefined, initialTop: undefined, accordion: !!v.accordion && i === p.sel, log: undefined };
+    const n = layoutPage(alone, { sel: 0, top: 0 }).lines.length;
+    out.push(...lineCuts(p.lines.slice(k, k + n), itemTexts(it), k));
+    k += n;
+  }
+  out.push(...lineCuts(p.lines.slice(k), viewTexts, k));
   return out;
 }
 
