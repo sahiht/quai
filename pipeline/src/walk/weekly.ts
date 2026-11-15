@@ -202,11 +202,14 @@ export async function weeklyWalk(o: WeeklyOptions): Promise<WeeklyResult> {
     new PbfFile(pbf).close();
     const next = join(o.cacheDir, 'next');
     const r = await buildWalk({ input: pbf, out: next, stopsDir: o.stopsDir, log, now: () => now });
-    // échange : les anciennes tuiles ne disparaissent qu'une fois les nouvelles en place
+    // échange : il reste toujours un jeu de tuiles valide (tiles ou tiles.old) jusqu'à ce que les nouvelles soient en place
     const old = join(o.cacheDir, 'tiles.old');
-    await rm(old, { recursive: true, force: true });
-    if (await readTiles(tilesDir)) await rename(tilesDir, old);
-    else await rm(tilesDir, { recursive: true, force: true });
+    if (await readTiles(tilesDir)) {
+      await rm(old, { recursive: true, force: true });
+      await rename(tilesDir, old);
+    } else {
+      await rm(tilesDir, { recursive: true, force: true });
+    }
     await rename(next, tilesDir);
     await rm(old, { recursive: true, force: true });
     await rm(pbf, { force: true });

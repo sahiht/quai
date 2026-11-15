@@ -80,6 +80,7 @@ export class WalkRouter {
     if (index.version !== this.version) {
       this.version = index.version;
       this.tiles.clear();
+      this.failedAt.clear();
       this.graph = null;
     }
     const split = new Set(index.split);

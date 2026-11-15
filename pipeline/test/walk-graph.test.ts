@@ -226,6 +226,14 @@ describe('coupe des tuiles et raccord', () => {
     expect(ids(b)).toEqual(expect.arrayContaining(ids(a)));
   });
 
+  it('segment de plus de 30 km (erreur de dessin) : ce tronçon seul est écarté', () => {
+    const n = { ...cross, 7: ll(2000, -20_000, edge), 8: ll(2000, 20_000, edge) } as Record<number, [number, number]>;
+    const logs: string[] = [];
+    const { tiles } = build(n, [{ id: 300, nodes: [1, 2, 3], tags: { highway: 'footway' } }, { id: 301, nodes: [7, 8], tags: { highway: 'track' } }], { log: (m) => logs.push(m) });
+    expect([...tiles.keys()].sort()).toEqual(['2541_145', '2542_145']);
+    expect(logs.some((m) => m.includes('voie 301 écartée'))).toBe(true);
+  });
+
   it('même extrait, mêmes tuiles octet pour octet', () => {
     const w: XmlWay[] = [{ id: 300, nodes: [1, 2, 3], tags: { highway: 'footway' } }];
     expect(build(cross, w).built.files).toEqual(build(cross, w).built.files);

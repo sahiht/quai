@@ -227,6 +227,7 @@ export function buildTiles(g: WalkGraph, o: TileBuildOptions): BuiltTiles {
   if (o.keepEdge) log(`Chemins à pied : ${kept} tronçons à moins de ${o.nearStopsM ?? '?'} m d'un arrêt`);
 
   const files: BuiltTiles['files'] = [];
+  const skipped = new Set<number>();
   const split: string[] = [];
   const overLimit: string[] = [];
   let splitSeq = 0;
@@ -266,9 +267,14 @@ export function buildTiles(g: WalkGraph, o: TileBuildOptions): BuiltTiles {
       const ids = at.map((c, i) => {
         let k = 0;
         while (i - k - 1 >= 0 && at[i - k - 1].seg === c.seg) k++;
-        if (k > 15 || pos[c.seg] > 4095) throw new Error(`voie ${d.wayId[w]} : coupe hors limites`);
-        return -((d.wayId[w] * 4096 + pos[c.seg]) * 16 + k);
+        return k > 15 || pos[c.seg] > 4095 ? NaN : -((d.wayId[w] * 4096 + pos[c.seg]) * 16 + k);
       });
+      // segment de plus de 30 km (erreur de dessin) : tronçon écarté plutôt que toute la construction
+      if (ids.some(Number.isNaN)) {
+        if (!skipped.has(e)) log(`Chemins à pied : voie ${d.wayId[w]} écartée (segment trop long pour les tuiles)`);
+        skipped.add(e);
+        continue;
+      }
       const parts = splitPolyline(pts, at);
       const a = d.refs[g.edgeA[e]];
       const b = d.refs[g.edgeB[e]];
