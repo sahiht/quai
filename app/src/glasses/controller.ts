@@ -313,8 +313,13 @@ export interface FollowedGuide {
   mem: GuideMemory;
   /** Chemin à pied de l'étape `leg` du trajet `journeyId` (state.needRoute satisfait), reçu à `at`. */
   walk?: { leg: number; journeyId: string; route: WalkRoute; at: number };
-  /** « J'y descends » : arrêts du véhicule après la descente (GuideInput.beyond : « Descends à … » s'il la dépasse). */
+  /**
+   * Arrêts du véhicule après la descente (GuideInput.beyond : « Descends à … » s'il la dépasse) : « j'y descends », dès
+   * le lancement ; genre trip, lus au début de chaque étape à bord.
+   */
   beyond?: Stopover[];
+  /** Genre trip : l'étape dont `beyond` donne les arrêts suivants (« journeyId:leg ») ; absent : « j'y descends ». */
+  beyondFor?: string;
 }
 
 /** État d'un trajet suivi : pas encore parti, en cours (M6.3), terminé. */
@@ -399,7 +404,10 @@ function parseGuide(x: unknown): FollowedGuide | null {
     out.walk = { leg: w.leg, journeyId: w.journeyId, route: w.route, at: Number.isFinite(w.at) ? w.at : 0 };
   }
   const b = g.beyond;
-  if (Array.isArray(b) && b.length && b.every((x) => !!x && typeof x === 'object' && !!x.name && typeof x.name.fr === 'string' && Number.isFinite(x.sched) && Number.isFinite(x.est))) out.beyond = b;
+  if (Array.isArray(b) && b.length && b.every((x) => !!x && typeof x === 'object' && !!x.name && typeof x.name.fr === 'string' && Number.isFinite(x.sched) && Number.isFinite(x.est))) {
+    out.beyond = b;
+    if (typeof g.beyondFor === 'string' && /^.+:\d+$/.test(g.beyondFor)) out.beyondFor = g.beyondFor;
+  }
   return out;
 }
 
@@ -573,6 +581,8 @@ export class GlassesController implements GlassesApi {
   /** Nouveau trajet demandé en cours (un à la fois) et demandes déjà traitées (trajet et raison). */
   private replanJob: string | null = null;
   private replanTried = new Set<string>();
+  /** Genre trip : arrêts suivants du véhicule déjà demandés, par étape (« journeyId:leg ») : une demande par étape. */
+  private beyondAsked = new Set<string>();
   /** Abonnés de la carte « En cours » du téléphone, et dernier état qui leur a été donné. */
   private guideListeners = new Set<(s: GuideStatus | null) => void>();
   private guideSent = 'null';
@@ -2064,6 +2074,7 @@ export class GlassesController implements GlassesApi {
     this.routeAsked.clear();
     this.replanJob = null;
     this.replanTried.clear();
+    this.beyondAsked.clear();
   }
 
   /**
@@ -2318,8 +2329,70 @@ export class GlassesController implements GlassesApi {
       ...(walk ? { walk } : {}),
       ...(t.origin ? { origin: t.origin } : {}),
       ...(missed ? { missed } : {}),
-      ...(g.beyond?.length ? { beyond: g.beyond } : {}),
+      ...this.beyondInput(g, j),
     };
+  }
+
+  /** Arrêts suivants donnés au moteur : « j'y descends », toujours ; genre trip, ceux de l'étape lue, de ce trajet-là. */
+  private beyondInput(g: FollowedGuide, j: Journey): Pick<GuideInput, 'beyond' | 'beyondLeg'> {
+    if (!g.beyond?.length) return {};
+    if (g.beyondFor === undefined) return { beyond: g.beyond };
+    const i = g.beyondFor.lastIndexOf(':');
+    if (g.beyondFor.slice(0, i) !== j.id) return {};
+    return { beyond: g.beyond, beyondLeg: Number(g.beyondFor.slice(i + 1)) };
+  }
+
+  /**
+   * Genre trip (PRD-1.2.10 § 3.6, arrêt dépassé) : au début de chaque étape à bord, les arrêts du véhicule après la
+   * descente sont lus une fois (departureStops, comme « j'y descends ») et gardés avec le guidage le temps de l'étape :
+   * « Descends à Bruxelles-Central, 08:48 » et un nouveau trajet depuis cet arrêt, à son heure. Échec : rien (le guidage
+   * fait comme sans eux), pas de nouvel essai pour cette étape.
+   */
+  private askBeyond(st: GuideState): void {
+    const t = this.trip;
+    const g = t?.guide;
+    if (!t || !g || g.kind !== 'trip' || st.phase.kind !== 'ride' || !this.guideShown()) return;
+    const j = this.journeyOf(t.journey);
+    const k = st.phase.leg;
+    const key = `${j.id}:${k}`;
+    const l = j.legs[k];
+    if (g.beyondFor === key || this.beyondAsked.has(key) || l?.kind !== 'ride' || !l.from.areaId || !l.op || !l.mode) return;
+    this.beyondAsked.add(key);
+    void this.readBeyond(j, k, key).catch((e: unknown) => console.warn('[Quai] arrêts suivants du véhicule', errText(e)));
+  }
+
+  private async readBeyond(j: Journey, k: number, key: string): Promise<void> {
+    const l = j.legs[k];
+    const dep: Departure = {
+      op: l.op!,
+      mode: l.mode!,
+      line: l.line ?? '',
+      head: l.head ?? l.to.name,
+      sched: l.schedDep,
+      est: l.dep,
+      rt: !!l.rt,
+      delayMin: l.delayMin ?? 0,
+      cancelled: !!l.cancelled,
+      ...(l.tripId ? { tripId: l.tripId } : {}),
+      ...(l.fromStop ? { stopId: l.fromStop } : {}),
+      ...(l.fromSeq !== undefined ? { stopSeq: l.fromSeq } : {}),
+      ...(l.platform ? { platform: l.platform } : {}),
+    };
+    const ds = await deadline(this.d.core.departureStops(l.from.areaId!, dep), CORE_TIMEOUT_MS, 'arrêts trop lents');
+    if (ds.state !== 'ok' || !ds.stops.length) return;
+    const at = Math.min(Math.max(0, ds.at ?? 0), ds.stops.length - 1);
+    const to = l.to;
+    const alight = ds.stops.findIndex((c, i) => i > at && (to.areaId && c.areaId ? c.areaId === to.areaId : sameNames(c.name, to.name)));
+    if (alight < 0 || alight >= ds.stops.length - 1) return;
+    // positions des arrêts juste après la descente (nouveau trajet depuis l'arrêt suivant) ; introuvables : sans elles
+    const found = await this.stopPoints(ds, alight, alight).catch(() => new Map<string, LatLon>());
+    const coords = ds.stops.map((c) => (c.areaId ? (found.get(c.areaId) ?? null) : null));
+    const beyond = beyondOf(ds, alight, coords);
+    const cur = this.trip;
+    if (!cur?.guide || cur.journey.id !== j.id || cur.guide.kind !== 'trip') return;
+    this.trip = { ...cur, guide: { ...cur.guide, beyond, beyondFor: key } };
+    this.saveFollowed();
+    this.stepGuide();
   }
 
   /** État du moteur sans rien garder (trajet suivi sans guidage : ligne « Maintenant » du téléphone ; secours d'affichage). */
@@ -2370,6 +2443,7 @@ export class GlassesController implements GlassesApi {
     if (!o.keepWatch) this.applyLocation(st.location);
     if (st.needRoute) this.askRoute(st.needRoute);
     this.maybeReplan(st);
+    this.askBeyond(st);
     this.scheduleGuideWake(st);
     this.notifyGuide();
     if (o.render !== false && this.ready && current(this.nav).route.screen === 'guide') void this.render();

@@ -9,12 +9,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../src/glasses/guide-views', async () => (await import('./controller-guide-doubles')).viewsModule);
 
-import type { Core, Endpoint, Journey, LatLon } from '../../src/core/api';
+import type { Core, Departure, DepartureStops, Endpoint, Journey, LatLon } from '../../src/core/api';
 import type { WalkRoute } from '../../src/core/guide-types';
 import { TRIP_KEY, parseTrip } from '../../src/glasses/controller';
 import { CLOCK_EVENT } from '../../src/platform/clock';
 import type { ImageSpec, Intent } from '../../src/glasses/types';
 import { P, at, firstWalkRoute, offset, prdTrip } from '../core/guide-fixtures';
+import { createKV, memoryBackend } from '../../src/platform/kv';
 import { views } from './controller-guide-doubles';
 import { busStops, cleanupKit, guideSetup, type Kit, type KitOptions } from './controller-guide-kit';
 import { MIN, dep, settingsWith } from './helpers';
@@ -124,6 +125,71 @@ describe('vrai moteur : horloge simulée du mode test (window.__quaiClock.set)',
       g.removeEventListener = saved.remove;
       g.dispatchEvent = saved.dispatch;
     }
+  });
+});
+
+describe('vrai moteur : arrêts suivants du véhicule (genre trip, arrêt dépassé)', () => {
+  const N2 = (fr: string, nl = fr) => ({ fr, nl });
+  /** Arrêts de l'IC du trajet du PRD, de Liège-Guillemins à Gand-Saint-Pierre (Bruxelles-Central : la descente). */
+  function icStops(): DepartureStops {
+    const c = (areaId: string, name: string, hm: string) => ({ areaId, name: N2(name), sched: at(hm), est: at(hm), rt: true, delayMin: 0 });
+    return {
+      op: 'sncb', mode: 'train', line: 'IC', head: N2('Ostende', 'Oostende'), anyPlanned: false, state: 'ok', at: 0,
+      stops: [c('sncb:8841004', 'Liège-Guillemins', '07:30'), c('sncb:8841202', 'Ans', '07:37'), c('sncb:8833001', 'Louvain', '08:05'), c('sncb:8812005', 'Bruxelles-Nord', '08:22'), c('sncb:8813003', 'Bruxelles-Central', '08:27'), c('sncb:8814001', 'Bruxelles-Midi', '08:31'), c('sncb:8892007', 'Gand-Saint-Pierre', '09:00')],
+    };
+  }
+
+  it('lus une fois au début de l’étape à bord, gardés avec le guidage (pas relus à chaque position ni à la reprise) ; échec : comme avant', async () => {
+    const asked: { areaId: string; dep: Departure }[] = [];
+    const kv = createKV(memoryBackend());
+    let fail = false;
+    const coreExtra = (): Partial<Core> => ({
+      async departureStops(areaId: string, dep: Departure) {
+        asked.push({ areaId, dep });
+        if (fail) throw new Error('réseau');
+        return icStops();
+      },
+    });
+    const h = await launched({ now: at('07:20'), pos: null, coreExtra, kv });
+    await h.settle(5 * MIN);
+    expect(asked).toEqual([]);
+    // 07:31 : à bord de l'IC (étape 3, d'après l'heure) : une lecture, depuis Liège-Guillemins, ce voyage-là
+    await h.settle(7 * MIN);
+    expect(asked).toHaveLength(1);
+    expect(asked[0].areaId).toBe('sncb:8841004');
+    expect(asked[0].dep).toMatchObject({ op: 'sncb', mode: 'train', line: 'IC', sched: at('07:30') });
+    const g = h.c.followed!.guide!;
+    expect(g.beyondFor).toBe('jprd:3');
+    expect(g.beyond?.map((x) => x.name.fr)).toEqual(['Bruxelles-Midi', 'Gand-Saint-Pierre']);
+    // positions et minutes qui passent : pas de nouvelle lecture
+    for (let i = 0; i < 5; i++) {
+      await h.push(offset(P.ans, 2_000 * i, 0), { speed: 30 });
+      await h.settle(30_000);
+    }
+    expect(asked).toHaveLength(1);
+    // reprise (page rechargée) pendant l'étape : les arrêts suivants sont relus avec le trajet suivi, pas redemandés
+    h.c.stop();
+    cleanupKit();
+    const b = await guideSetup({ now: at('07:50'), settings: settings(), kv, pos: null, coreExtra });
+    await b.settle(2 * MIN);
+    expect(asked).toHaveLength(1);
+    expect(b.c.followed!.guide!.beyond?.[0].name.fr).toBe('Bruxelles-Midi');
+    // l'étape suivante (bus 71) : nouvelle lecture ; échec réseau : rien gardé pour elle, le guidage continue, une seule fois
+    fail = true;
+    await b.settle(45 * MIN);
+    expect(asked.map((x) => x.areaId)).toEqual(['sncb:8841004', 'stib:1180']);
+    expect(b.c.followed?.guide?.beyondFor).toBe('jprd:3');
+  });
+
+  it('guidage arrêté pendant la lecture : la réponse est oubliée', async () => {
+    let answer: (v: DepartureStops) => void = () => undefined;
+    const coreExtra = (): Partial<Core> => ({ departureStops: () => new Promise<DepartureStops>((r) => (answer = r)) });
+    const h = await launched({ now: at('07:29'), pos: null, coreExtra });
+    await h.settle(2 * MIN);
+    await h.c.stopGuide();
+    answer(icStops());
+    await h.settle(100);
+    expect(h.c.followed).toBeNull();
   });
 });
 
