@@ -33,12 +33,6 @@ export const HINTS = {
   stops: `△▽ arrêts   toucher${NB}: j’y descends   double${NB}: retour`,
   /** 1.2.8 : tout le trajet d'un train ; 1.2.10 : même liste, mêmes aides que les arrêts d'un départ (§ 3.1). */
   trainRun: `△▽ arrêts   toucher${NB}: j’y descends   double${NB}: retour`,
-  /**
-   * 1.2.10 (PRD-1.2.10 § 5) : écran du trajet, toucher « y aller » ; trajet guidé, toucher « guidage ». 1.3.0
-   * (PRD-1.3.0 § 1) : le toucher est dit par la ligne d'action (ACTION) : mêmes aides que `steps` dans tous les cas.
-   */
-  stepsGo: `△▽ étapes   double${NB}: retour`,
-  stepsGuided: `△▽ étapes   double${NB}: retour`,
   /** 1.2.10 (§ 3.2, § 3.3) : un moment du guidage ou « Où tu en es ». */
   guide: `toucher${NB}: effacer   appui long${NB}: arrêter`,
   /** 1.2.10 : « Tu y es ». */
@@ -743,7 +737,8 @@ export function favoriteDetail(a: FavoriteAnswer | undefined, now: number, setti
   const plat = isTrainRef(r) && !r.cancelled ? platformText(r.platform, r.newPlatform) : '';
   const vehicle = `${rideWords(r)}${plat ? ` ${plat}` : ''}`;
   let first: string;
-  if (a?.fromStation) first = fitName(`${vehicle} à ${time}, à `, displayName(r.from.name, settings.lang), '', maxPx);
+  const station = displayName(r.from.name, settings.lang);
+  if (a?.fromStation) first = station ? fitName(`${vehicle} à ${time}, à `, station, '', maxPx) : fit(`${vehicle} à ${time}`);
   else {
     const walk = walkBeforeRide(j);
     const ride = `${rideWords(r)} ${time}${plat ? ` ${plat}` : ''}`;

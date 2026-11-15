@@ -229,7 +229,6 @@ export const NEWS_LINES_1210: readonly string[] = [
   `Train ou bus déjà pris${NB}: «${NB}j’y descends${NB}».`,
   `Favoris${NB}: une ligne chacun, le détail en bas.`,
 ];
-export const NEWS_LINES_1210_WEB: readonly string[] = NEWS_LINES_1210;
 
 /**
  * 1.3.0 : les nouveautés de la 1.2.10 encore vraies, pour qui vient d'avant la 1.2.10 : « le détail en bas » des
