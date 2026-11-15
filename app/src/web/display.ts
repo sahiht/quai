@@ -74,7 +74,11 @@ export function describeContainers(cs: readonly ContainerSpec[], images: readonl
   const clean = (t: string) => t.replace(/\s+/g, ' ').trim();
   const cursor = by('cursor');
   const [a, b, c] = [by('colA'), by('colB'), by('colC')];
-  const rows: string[] = [];
+  // 1.3.0 (PRD-1.3.0 § 1) : les lignes de la liste et celles du pied se lisent de haut en bas, comme on les voit : la
+  // ligne d'action (colonne a prolongée sur la grille du pied) entre la note et les aides. Les trois colonnes commencent
+  // à la même hauteur (layoutPage, layoutGuide) : la rangée i est à rowsY + i lignes.
+  const rowsY = (box('colA') ?? box('colB'))?.y ?? 0;
+  const lines: { y: number; t: string }[] = [];
   for (let i = 0; i < Math.max(a.length, b.length, c.length); i++) {
     const wa = wordsAt(box('colA'), a[i]);
     const wb = wordsAt(box('colB'), b[i]);
@@ -82,10 +86,14 @@ export function describeContainers(cs: readonly ContainerSpec[], images: readonl
     const mixed = wa.length > 0 && wb.length > 0 && Math.min(...xs(wb)) < Math.max(...xs(wa)) && Math.max(...xs(wb)) > Math.min(...xs(wa));
     const cols = mixed ? [[...wa, ...wb].sort((p, q) => p.x - q.x).map((w) => w.t).join(' '), c[i]] : [a[i], b[i], c[i]];
     const row = cols.map((x) => clean(x ?? '')).filter(Boolean).join(', ');
-    if (row) rows.push(cursor[i]?.trim() ? `sélection : ${row}` : row);
+    if (row) lines.push({ y: rowsY + i * LINE_H, t: cursor[i]?.trim() ? `sélection : ${row}` : row });
   }
+  const footY = box('foot')?.y ?? SCREEN_H;
+  by('foot').forEach((t, k) => lines.push({ y: footY + k * LINE_H, t: clean(t) }));
+  // tri stable : à hauteur égale, la liste d'abord
+  lines.sort((p, q) => p.y - q.y);
   const pics = images.filter((i) => i.pixels).map((i) => `image\u00a0: ${describeImage(i.spec.image)}`);
-  return [clean(by('title').join(' ')), clean(by('clock').join(' ')), clean(by('top').join(' ')), ...pics, ...rows, ...by('foot').map(clean)].filter(Boolean).join('. ');
+  return [clean(by('title').join(' ')), clean(by('clock').join(' ')), clean(by('top').join(' ')), ...pics, ...lines.map((l) => l.t)].filter(Boolean).join('. ');
 }
 
 /* ------------------------------ 1.2.10 : images ------------------------------ */
