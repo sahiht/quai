@@ -1,15 +1,23 @@
 /**
  * 1.3.0 (PRD-1.3.0 § 6.1) : mouvement « lever la tête », appris pendant le test de l'écran des lunettes. Logique pure :
- * ni minuterie, ni accès au matériel ; le contrôleur donne les mesures du capteur de mouvement (signal `imu`).
+ * ni minuterie, ni accès au matériel ; le contrôleur donne les mesures du capteur de mouvement (signal `imu`, datées sur
+ * l'horloge de l'appli) et l'heure de la réponse.
+ *
+ * On ne sait pas si x, y, z sont des angles, des accélérations ou des vitesses ; un mauvais sens appris ferait compter
+ * comme « vu » le fait de baisser la tête vers le téléphone (rappels supprimés à tort). L'apprentissage est donc sûr :
  *
  * - Pendant l'attente (« ne touche à rien ») : la position de repos, moyenne et bruit (écart type) de chaque axe.
- * - Pendant la question (« Lève la tête ») : l'écart de chaque mesure à ce repos. Un écart compte s'il est tenu
- *   `HEADUP_HOLD` mesures de suite dans le même sens (un pic isolé ne compte pas) ; on garde le plus grand de chaque axe.
- * - Appris : l'axe qui change le plus par rapport au repos, son sens et son écart, seulement si cet écart vaut au moins
- *   trois fois le bruit du repos sur cet axe (changement net) et que le repos est connu (`HEADUP_REST_MIN` mesures).
+ * - À la réponse (« Le test de Quai », « Le Dashboard ») : la posture « téléphone », médiane des mesures des 0,5 s
+ *   d'avant (la personne regarde son téléphone pour toucher le bouton). Axe retenu : celui où elle s'écarte le plus du
+ *   repos, d'au moins trois fois le bruit ; sens « lever la tête » : l'opposé de la posture téléphone.
+ * - Écart appris : le plus grand écart à ce repos, dans ce sens-là, pendant la question, sans la dernière seconde avant
+ *   la réponse ; tenu `HEADUP_HOLD` mesures de suite (un pic isolé ne compte pas), et lui aussi d'au moins trois fois le
+ *   bruit. Sinon rien n'est appris (des vitesses, qui reviennent à zéro, n'ont pas de posture téléphone) : `headUp`
+ *   reste tel quel, les rappels se font à l'heure seulement.
  *
- * Confidentialité (PRD-1.3.0 § 10) : aucune mesure n'est gardée, seulement des sommes pour le repos et le plus grand écart
- * tenu par axe ; seul le mouvement appris (un axe, un sens, un écart) est enregistré dans les réglages.
+ * Confidentialité (PRD-1.3.0 § 10) : aucune mesure n'est gardée, seulement des sommes pour le repos, la dernière seconde
+ * de mesures (une dizaine) et le plus grand écart tenu de chaque sens ; seul le mouvement appris (un axe, un sens, un
+ * écart) est enregistré dans les réglages.
  */
 import type { Settings } from '../core/api';
 
@@ -23,6 +31,11 @@ export interface ImuSample {
   z: number;
 }
 
+/** Une mesure datée (horloge de l'appli, ms). */
+export interface ImuMeasure extends ImuSample {
+  at: number;
+}
+
 const AXES = ['x', 'y', 'z'] as const;
 
 /** Changement net : au moins trois fois le bruit du repos (PRD-1.3.0 § 6.1). */
@@ -31,8 +44,19 @@ export const HEADUP_NOISE_FACTOR = 3;
 export const HEADUP_HOLD = 3;
 /** Repos connu : 10 mesures au moins (1 s à une mesure toutes les 100 ms). */
 export const HEADUP_REST_MIN = 10;
+/** Posture « téléphone » : médiane des mesures des 0,5 s avant la réponse, 3 mesures au moins. */
+export const HEADUP_PHONE_MS = 500;
+export const HEADUP_PHONE_MIN = 3;
+/** La dernière seconde avant la réponse ne compte pas pour l'écart (la tête descend vers le téléphone). */
+export const HEADUP_LAST_MS = 1_000;
 
 const usable = (s: ImuSample): boolean => Number.isFinite(s.x) && Number.isFinite(s.y) && Number.isFinite(s.z);
+
+function median(v: number[]): number {
+  const s = [...v].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
 
 /** Apprentissage du mouvement « lever la tête » : `rest` pendant l'attente, `move` pendant la question, puis `result`. */
 export class HeadUpLearner {
@@ -40,9 +64,12 @@ export class HeadUpLearner {
   private n = 0;
   private mean = [0, 0, 0];
   private m2 = [0, 0, 0];
-  /** Mouvement : derniers écarts de chaque axe (HEADUP_HOLD au plus) et plus grand écart tenu, signé. */
+  /** Question : la dernière seconde de mesures, pas encore comptée (elle peut précéder la réponse). */
+  private last: ImuMeasure[] = [];
+  /** Écarts comptés : les derniers de chaque axe (HEADUP_HOLD au plus), plus grand écart tenu vers le haut et vers le bas. */
   private recent: number[][] = [[], [], []];
-  private peak = [0, 0, 0];
+  private up = [0, 0, 0];
+  private down = [0, 0, 0];
 
   /** Mesure pendant l'attente : la position de repos. */
   rest(s: ImuSample): void {
@@ -66,32 +93,51 @@ export class HeadUpLearner {
     return this.n ? Math.sqrt(this.m2[i] / this.n) : 0;
   }
 
-  /** Mesure pendant la question : écart au repos, gardé s'il est tenu HEADUP_HOLD mesures dans le même sens. */
-  move(s: ImuSample): void {
-    if (!usable(s) || !this.n) return;
-    AXES.forEach((k, i) => {
-      const last = this.recent[i];
-      last.push(s[k] - this.mean[i]);
-      if (last.length > HEADUP_HOLD) last.shift();
-      if (last.length < HEADUP_HOLD) return;
-      const sign = Math.sign(last[0]);
-      if (!sign || last.some((d) => Math.sign(d) !== sign)) return;
-      const held = sign * Math.min(...last.map(Math.abs));
-      if (Math.abs(held) > Math.abs(this.peak[i])) this.peak[i] = held;
-    });
+  /** Mesure pendant la question ; celles de plus d'une seconde avant la plus récente sont comptées (hors de la fin). */
+  move(s: ImuMeasure): void {
+    if (!usable(s) || !Number.isFinite(s.at) || !this.n) return;
+    this.last.push({ x: s.x, y: s.y, z: s.z, at: s.at });
+    this.countBefore(s.at - HEADUP_LAST_MS);
   }
 
-  /** Le mouvement appris, ou null : repos trop court, aucun écart tenu, ou changement pas assez net. */
-  result(): HeadUpMove | null {
-    if (this.n < HEADUP_REST_MIN) return null;
-    let best = -1;
-    AXES.forEach((_, i) => {
-      if (Math.abs(this.peak[i]) > (best < 0 ? 0 : Math.abs(this.peak[best]))) best = i;
+  /** Compte les mesures d'avant `t` : écart au repos, gardé s'il est tenu HEADUP_HOLD mesures dans le même sens. */
+  private countBefore(t: number): void {
+    while (this.last.length && this.last[0].at <= t) {
+      const s = this.last.shift()!;
+      AXES.forEach((k, i) => {
+        const r = this.recent[i];
+        r.push(s[k] - this.mean[i]);
+        if (r.length > HEADUP_HOLD) r.shift();
+        if (r.length < HEADUP_HOLD) return;
+        const sign = Math.sign(r[0]);
+        if (!sign || r.some((d) => Math.sign(d) !== sign)) return;
+        const held = Math.min(...r.map(Math.abs));
+        if (sign > 0) this.up[i] = Math.max(this.up[i], held);
+        else this.down[i] = Math.max(this.down[i], held);
+      });
+    }
+  }
+
+  /**
+   * Le mouvement appris à la réponse donnée à `answerAt`, ou null : repos trop court, pas de posture téléphone nette
+   * (axe retenu), ou pas d'écart net dans le sens opposé avant la dernière seconde.
+   */
+  result(answerAt: number): HeadUpMove | null {
+    if (this.n < HEADUP_REST_MIN || !Number.isFinite(answerAt)) return null;
+    this.countBefore(answerAt - HEADUP_LAST_MS);
+    const phone = this.last.filter((m) => m.at >= answerAt - HEADUP_PHONE_MS && m.at <= answerAt);
+    if (phone.length < HEADUP_PHONE_MIN) return null;
+    const off = AXES.map((k, i) => median(phone.map((m) => m[k])) - this.mean[i]);
+    let best = 0;
+    off.forEach((d, i) => {
+      if (Math.abs(d) > Math.abs(off[best])) best = i;
     });
-    if (best < 0) return null;
     const axis = AXES[best];
-    const delta = Math.abs(this.peak[best]);
-    if (delta < HEADUP_NOISE_FACTOR * this.noise(axis)) return null;
-    return { axis, sign: this.peak[best] > 0 ? 1 : -1, delta };
+    const floor = HEADUP_NOISE_FACTOR * this.noise(axis);
+    if (!(Math.abs(off[best]) > 0) || Math.abs(off[best]) < floor) return null;
+    const sign = off[best] > 0 ? -1 : 1;
+    const delta = sign > 0 ? this.up[best] : this.down[best];
+    if (!(delta > 0) || delta < floor) return null;
+    return { axis, sign, delta };
   }
 }
