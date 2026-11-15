@@ -208,7 +208,14 @@ export async function downloadExtract(url: string, dest: string, o: DownloadOpts
         out.end();
         await once(out, 'close').catch(() => undefined);
       }
-      const reason = ctrl.signal.aborted ? String((ctrl.signal.reason as Error)?.message ?? 'interrompu') : e instanceof Error ? e.message : String(e);
+      // cause réseau sous « fetch failed » (refus, délai de connexion, nom introuvable) : utile au journal
+      const cause = (e as { cause?: { code?: unknown; message?: unknown } } | null)?.cause;
+      const detail = cause ? String(cause.code ?? cause.message ?? '') : '';
+      const reason = ctrl.signal.aborted
+        ? String((ctrl.signal.reason as Error)?.message ?? 'interrompu')
+        : e instanceof Error
+          ? `${e.message}${detail ? ` : ${detail}` : ''}`
+          : String(e);
       last = reason;
       const kept = await stat(part).catch(() => null);
       log(`Chemins à pied : téléchargement de l'extrait, essai ${attempt + 1} échoué (${reason})${kept?.size ? `, ${mo1(kept.size)} gardés pour la reprise` : ''}`);

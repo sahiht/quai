@@ -368,6 +368,17 @@ describe('1.2.10 : téléchargement de l’extrait repris là où il s’est arr
     await expect(downloadExtract(URL_PBF, dest, { fetchImpl, retries: 3, backoffMs: [0], log: quiet, timeoutMs: 0 })).rejects.toThrow(/délai global dépassé/);
   });
 
+  it('panne réseau : la cause est au journal (« fetch failed : ECONNREFUSED »)', async () => {
+    const dir = tempDir('walk-dl');
+    const dest = join(dir, 'extract.osm.pbf');
+    const logs: string[] = [];
+    const fetchImpl = (async () => {
+      throw new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) });
+    }) as typeof fetch;
+    await expect(downloadExtract(URL_PBF, dest, { fetchImpl, retries: 0, backoffMs: [0], log: (m) => logs.push(m) })).rejects.toThrow('fetch failed : ECONNREFUSED');
+    expect(logs[0]).toContain('essai 1 échoué (fetch failed : ECONNREFUSED)');
+  });
+
   it('réponse plus courte qu’annoncé : extrait tronqué, jamais renommé comme complet', async () => {
     const dir = tempDir('walk-dl');
     const dest = join(dir, 'extract.osm.pbf');
