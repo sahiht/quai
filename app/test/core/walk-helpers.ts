@@ -2,8 +2,12 @@
  * 1.2.10 : graphes piétons construits à la main pour les tests du chemin à pied, codés au vrai format des tuiles
  * (core/walk/format.ts). Positions en mètres autour d'un point public (Ixelles, près de Flagey), au centre de sa tuile.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { expect } from 'vitest';
 import type { LatLon } from '../../src/core/api';
-import { baseKeyOf, boxOf, encodeTile, WALK_UNIT, type ChainIn, type WalkIndex, type WalkTileFile } from '../../src/core/walk/format';
+import type { WalkRoute } from '../../src/core/guide-types';
+import { baseKeyOf, boxOf, encodeTile, isWalkIndex, isWalkTile, WALK_UNIT, type ChainIn, type WalkIndex, type WalkTileFile } from '../../src/core/walk/format';
 import type { WalkSource } from '../../src/core/walk/router';
 
 /** Centre de la tuile 2541_145 (Ixelles, quartier de Flagey). */
@@ -124,4 +128,56 @@ export function metres(a: LatLon, b: LatLon): number {
   const dy = (b.lat - a.lat) * M_LAT;
   const dx = (b.lon - a.lon) * M_LAT * Math.cos((((a.lat + b.lat) / 2) * Math.PI) / 180);
   return Math.hypot(dx, dy);
+}
+
+/** Tuiles lues sur le disque (dossier de tuiles du pipeline). */
+export function diskSource(dir: string): WalkSource & { reads: number } {
+  const src = {
+    reads: 0,
+    index: async () => {
+      const x = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')) as unknown;
+      return isWalkIndex(x) ? x : null;
+    },
+    tile: async (key: string) => {
+      try {
+        const x = JSON.parse(readFileSync(join(dir, `${key}.json`), 'utf8')) as unknown;
+        src.reads++;
+        return isWalkTile(x) ? x : null;
+      } catch {
+        return null;
+      }
+    },
+  };
+  return src;
+}
+
+/** Générateur pseudo-aléatoire reproductible. */
+export function prng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Invariants d'un chemin : bouts exacts, points proches, virages espacés de 15 m, rien dans les 20 derniers mètres. */
+export function checkRoute(r: WalkRoute, from: LatLon, to: LatLon): void {
+  expect(r.coords[0]).toEqual(from);
+  expect(r.coords[r.coords.length - 1]).toEqual(to);
+  expect(r.coords.length).toBeGreaterThanOrEqual(2);
+  let along = 0;
+  const cum = [0];
+  for (let i = 1; i < r.coords.length; i++) cum.push((along += metres(r.coords[i - 1], r.coords[i])));
+  expect(Math.abs(r.lengthM - along)).toBeLessThan(0.5);
+  expect(r.lengthM).toBeGreaterThanOrEqual(metres(from, to) - 0.5);
+  let prev = -Infinity;
+  for (const m of r.maneuvers) {
+    expect(m.distM - prev).toBeGreaterThanOrEqual(15);
+    expect(m.distM).toBeLessThanOrEqual(r.lengthM - 20);
+    expect(Math.abs(cum[m.at] - m.distM)).toBeLessThan(0.5);
+    prev = m.distM;
+  }
 }

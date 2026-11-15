@@ -25,6 +25,8 @@ export interface WalkBuildOptions {
   builtAt?: string;
   budgetBytes?: number;
   maxTileBytes?: number;
+  /** source annoncée dans l'index (par défaut l'extrait Geofabrik) */
+  source?: string;
   log?: (m: string) => void;
   now?: () => Date;
 }
@@ -63,7 +65,7 @@ export async function buildWalk(o: WalkBuildOptions): Promise<WalkBuildResult> {
   const graph = buildGraph(data, { log });
   const version = o.version ?? dataVersion(data.timestamp, now);
   const builtAt = o.builtAt ?? now.toISOString();
-  const base = { version, builtAt, maxTileBytes: maxTile, log };
+  const base = { version, builtAt, maxTileBytes: maxTile, log, ...(o.source ? { source: o.source } : {}) };
   let built = buildTiles(graph, base);
   log(`Chemins à pied : ${sizeLine(built)}`);
   if (built.stats.bytes > budget && o.stopsDir) {

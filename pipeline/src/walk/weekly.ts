@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { appendFile, copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { isWalkIndex, type WalkIndex } from '../../../app/src/core/walk/format.ts';
 import { addDays, brusselsDate } from '../dates.ts';
 import { buildWalk, sizeLine } from './build.ts';
@@ -230,8 +230,8 @@ export function licenseSection(idx: WalkIndex): string {
   return `
 ${LICENSE_MARK} : ${ATTRIBUTION}, licence ODbL 1.0 (Open Database License,
 https://opendatacommons.org/licenses/odbl/1-0/ ; https://www.openstreetmap.org/copyright).
-Base de données dérivée de l'extrait Geofabrik belgium-latest.osm.pbf (données OpenStreetMap du ${idx.version}) :
-voies praticables à pied, carrefours, géométrie simplifiée (environ 2 m), noms de rue, marches, sens uniques à pied.
+Base de données dérivée (${idx.source}, données OpenStreetMap du ${idx.version}) : voies praticables à pied,
+carrefours, géométrie simplifiée (environ 2 m), noms de rue, marches, sens uniques à pied.
 Elle est diffusée sous la même licence (ODbL 1.0).
 `;
 }
@@ -244,6 +244,26 @@ async function dirBytes(dir: string): Promise<number> {
     else if (e.isFile()) total += (await stat(p)).size;
   }
   return total;
+}
+
+/**
+ * Sans réseau : tuiles construites depuis un extrait local (.osm ou .osm.pbf ; tests de bout en bout sur les données
+ * des fixtures, QUAI_WALK_OSM) directement dans dataDir/walk, licence ajoutée comme pour la publication de nuit.
+ */
+export async function localWalk(o: { input: string; dataDir: string; log?: (m: string) => void; now?: () => Date }): Promise<PublishResult> {
+  const log = o.log ?? ((m: string) => console.log(m));
+  const out = join(o.dataDir, 'walk');
+  try {
+    const r = await buildWalk({ input: o.input, out, stopsDir: o.dataDir, log, now: o.now, source: `OpenStreetMap, extrait local ${basename(o.input)}` });
+    const licence = join(o.dataDir, 'LICENSE-DATA.txt');
+    const had = await readFile(licence, 'utf8').catch(() => '');
+    if (!had.includes(LICENSE_MARK)) await appendFile(licence, licenseSection(r.built.index), 'utf8');
+    log(`Chemins à pied (extrait local) : ${sizeLine(r.built)}`);
+    return { published: true, message: 'publié', tiles: r.built.stats.tiles, bytes: r.built.stats.bytes };
+  } catch (e) {
+    await rm(out, { recursive: true, force: true }).catch(() => undefined);
+    return { published: false, message: `extrait local inutilisable (${e instanceof Error ? e.message : String(e)}) : chemins à pied absents` };
+  }
 }
 
 /** Copie les tuiles du cache dans les données de la nuit (dataDir/walk) et complète LICENSE-DATA.txt. Ne lève jamais. */

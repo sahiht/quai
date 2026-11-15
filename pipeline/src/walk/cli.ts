@@ -4,15 +4,19 @@
  *   node --experimental-strip-types src/walk/cli.ts build --input <extrait .osm.pbf ou .osm> --out <dossier> [--stops <données>]
  *   node --experimental-strip-types src/walk/cli.ts weekly --cache <dossier> [--stops <données>] [--url <adresse>] [--force]
  *   node --experimental-strip-types src/walk/cli.ts publish --cache <dossier> --data <données>
+ *   node --experimental-strip-types src/walk/cli.ts local --data <données> [--input <extrait>]
  *
  * weekly : tuiles de la semaine dans le cache (extrait Geofabrik téléchargé au plus une fois par semaine) ; code 1 en
  * cas d'échec (les tuiles d'avant restent). publish : copie dans les données de la nuit ; toujours code 0 (sans
  * tuiles, l'appli retombe sur le chemin droit). QUAI_WALK_FORCE=1 : comme --force.
+ * local : sans réseau, tuiles construites depuis un extrait local (--input, sinon la variable QUAI_WALK_OSM) dans
+ * <données>/walk, licence comprise ; tests de bout en bout : fixtures/pipeline/osm/namur-bruxelles.osm. Code 1 si
+ * l'extrait est inutilisable.
  */
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildWalk, sizeLine } from './build.ts';
-import { publishWalk, weeklyWalk } from './weekly.ts';
+import { localWalk, publishWalk, weeklyWalk } from './weekly.ts';
 
 function args(argv: string[]): { cmd: string; opts: Record<string, string | true> } {
   const [cmd = '', ...rest] = argv;
@@ -83,7 +87,21 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv, log: (m: stri
     if (!r.published) warn(r.message);
     return 0;
   }
-  log('Usage : cli.ts build|weekly|publish (voir l’en-tête de pipeline/src/walk/cli.ts)');
+  if (cmd === 'local') {
+    const dataDir = str('data');
+    const input = str('input') ?? (env.QUAI_WALK_OSM ? resolve(env.QUAI_WALK_OSM) : undefined);
+    if (!dataDir || !input) {
+      log('Erreur : --data et un extrait (--input ou la variable QUAI_WALK_OSM) sont obligatoires');
+      return 2;
+    }
+    const r = await localWalk({ input, dataDir, log });
+    if (!r.published) {
+      warn(r.message);
+      return 1;
+    }
+    return 0;
+  }
+  log('Usage : cli.ts build|weekly|publish|local (voir l’en-tête de pipeline/src/walk/cli.ts)');
   return 2;
 }
 

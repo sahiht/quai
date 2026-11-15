@@ -35,6 +35,8 @@ export interface TileBuildOptions {
   /** garder un tronçon ? (limite autour des arrêts) */
   keepEdge?: (lat: number, lon: number) => boolean;
   nearStopsM?: number;
+  /** source annoncée dans l'index (par défaut l'extrait Geofabrik) */
+  source?: string;
   log?: (m: string) => void;
 }
 
@@ -403,7 +405,7 @@ export function buildTiles(g: WalkGraph, o: TileBuildOptions): BuiltTiles {
     v: 1,
     version: o.version,
     builtAt: o.builtAt,
-    source: SOURCE,
+    source: o.source ?? SOURCE,
     licence: LICENCE,
     attribution: ATTRIBUTION,
     tile: { lat: WALK_TILE.lat, lon: WALK_TILE.lon },

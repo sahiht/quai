@@ -40,5 +40,9 @@ et l'attribution due.
      © les contributeurs d'OpenStreetMap, ODbL 1.0.
    - app/test/core/walk-data/ : tuiles piétonnes construites par le pipeline à partir de ces extraits ;
      © les contributeurs d'OpenStreetMap, ODbL 1.0.
+   - fixtures/pipeline/osm/namur-bruxelles.osm et app/test/core/walk-data/fixtures/ : extrait écrit à la main
+     au format OpenStreetMap pour les scénarios de bout en bout (noms de rues publiques autour des gares de
+     Namur, Bruxelles-Nord et Bruxelles-Central, de la Bourse et de la place Fontainas ; tracé simplifié dessiné
+     pour les tests, pas une copie de la base OpenStreetMap).
    - fixtures/ et app/test/fixtures/ : réseaux et réponses fictifs écrits pour les tests (aucune donnée réelle
      de voyageur).

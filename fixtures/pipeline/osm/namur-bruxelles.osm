@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Quai 1.2.10 : extrait OpenStreetMap écrit à la main pour les tests de bout en bout (données des fixtures,
+  fixtures/network.json). Tracé simplifié, à quelques dizaines de mètres près, des rues publiques autour des
+  arrêts des scénarios : gare de Namur et rues voisines (dont la position « Maison » des fixtures, rue Rogier),
+  Bourse, place Fontainas (« Bureau »), Bruxelles-Central, Bruxelles-Nord, Gare du Nord et place Rogier.
+  Ce n'est pas un relevé exact : noms de rues réels, géométrie approximative, aucun lieu privé.
+  Construction des tuiles : voir pipeline/src/walk/cli.ts (commande local, variable QUAI_WALK_OSM).
+-->
+<osm version="0.6" generator="quai-tests" timestamp="2026-11-08T00:00:00Z">
+  <!-- Namur : gare, rue de Fer, place de l'Ange, rue Rogier (Maison des fixtures) -->
+  <node id="1" lat="50.4685899" lon="4.8625000"/>
+  <node id="2" lat="50.4679604" lon="4.8625000"/>
+  <node id="3" lat="50.4679424" lon="4.8578374"/>
+  <node id="4" lat="50.4679604" lon="4.8589677"/>
+  <node id="5" lat="50.4679784" lon="4.8609458"/>
+  <node id="6" lat="50.4679604" lon="4.8630652"/>
+  <node id="7" lat="50.4679514" lon="4.8635597"/>
+  <node id="8" lat="50.4679604" lon="4.8646194"/>
+  <node id="9" lat="50.4679874" lon="4.8665974"/>
+  <node id="10" lat="50.4668812" lon="4.8589395"/>
+  <node id="11" lat="50.4658020" lon="4.8589677"/>
+  <node id="12" lat="50.4644980" lon="4.8589818"/>
+  <node id="13" lat="50.4638235" lon="4.8589677"/>
+  <node id="14" lat="50.4668812" lon="4.8609741"/>
+  <node id="15" lat="50.4658020" lon="4.8609458"/>
+  <node id="16" lat="50.4644980" lon="4.8609175"/>
+  <node id="17" lat="50.4638235" lon="4.8609458"/>
+  <node id="18" lat="50.4657840" lon="4.8578374"/>
+  <node id="19" lat="50.4658200" lon="4.8630652"/>
+  <node id="20" lat="50.4658020" lon="4.8649019"/>
+  <node id="21" lat="50.4657751" lon="4.8665974"/>
+  <node id="22" lat="50.4644800" lon="4.8578374"/>
+  <node id="23" lat="50.4645160" lon="4.8630652"/>
+  <node id="24" lat="50.4644980" lon="4.8651845"/>
+  <node id="25" lat="50.4644531" lon="4.8658910"/>
+  <node id="26" lat="50.4668812" lon="4.8647607"/>
+  <node id="27" lat="50.4638235" lon="4.8653258"/>
+  <node id="28" lat="50.4631041" lon="4.8654671"/>
+  <way id="1">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <tag k="highway" v="pedestrian"/>
+    <tag k="name" v="Place de la Station"/>
+  </way>
+  <way id="2">
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <nd ref="5"/>
+    <nd ref="2"/>
+    <nd ref="6"/>
+    <nd ref="7"/>
+    <nd ref="8"/>
+    <nd ref="9"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue Godefroid"/>
+  </way>
+  <way id="3">
+    <nd ref="4"/>
+    <nd ref="10"/>
+    <nd ref="11"/>
+    <nd ref="12"/>
+    <nd ref="13"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue Rogier"/>
+  </way>
+  <way id="4">
+    <nd ref="10"/>
+    <nd ref="2"/>
+    <tag k="highway" v="tertiary"/>
+    <tag k="name" v="Avenue de la Gare"/>
+  </way>
+  <way id="5">
+    <nd ref="5"/>
+    <nd ref="14"/>
+    <nd ref="15"/>
+    <nd ref="16"/>
+    <nd ref="17"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue des Croisiers"/>
+  </way>
+  <way id="6">
+    <nd ref="18"/>
+    <nd ref="11"/>
+    <nd ref="15"/>
+    <nd ref="19"/>
+    <nd ref="20"/>
+    <nd ref="21"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue Émile Cuvelier"/>
+  </way>
+  <way id="7">
+    <nd ref="22"/>
+    <nd ref="12"/>
+    <nd ref="16"/>
+    <nd ref="23"/>
+    <nd ref="24"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue Saint-Jacques"/>
+  </way>
+  <way id="8">
+    <nd ref="6"/>
+    <nd ref="19"/>
+    <nd ref="23"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue de Bruxelles"/>
+  </way>
+  <way id="9">
+    <nd ref="8"/>
+    <nd ref="26"/>
+    <nd ref="20"/>
+    <nd ref="24"/>
+    <tag k="highway" v="pedestrian"/>
+    <tag k="name" v="Rue de Fer"/>
+  </way>
+  <way id="10">
+    <nd ref="24"/>
+    <nd ref="27"/>
+    <nd ref="28"/>
+    <tag k="highway" v="pedestrian"/>
+    <tag k="name" v="Rue de l&apos;Ange"/>
+  </way>
+  <way id="11">
+    <nd ref="24"/>
+    <nd ref="25"/>
+    <tag k="highway" v="pedestrian"/>
+    <tag k="name" v="Place de l&apos;Ange"/>
+  </way>
+  <!-- Bruxelles : Bourse, place Fontainas (Bureau des fixtures), Bruxelles-Central -->
+  <node id="1000" lat="50.8509980" lon="4.3524063"/>
+  <node id="1001" lat="50.8496490" lon="4.3510532"/>
+  <node id="1002" lat="50.8483000" lon="4.3497000"/>
+  <node id="1003" lat="50.8468611" lon="4.3489166"/>
+  <node id="1004" lat="50.8454222" lon="4.3485320"/>
+  <node id="1005" lat="50.8441002" lon="4.3479907"/>
+  <node id="1006" lat="50.8420047" lon="4.3469937"/>
+  <node id="1007" lat="50.8402061" lon="4.3459966"/>
+  <node id="1008" lat="50.8496490" lon="4.3479907"/>
+  <node id="1009" lat="50.8496670" lon="4.3539732"/>
+  <node id="1010" lat="50.8483540" lon="4.3514805"/>
+  <node id="1011" lat="50.8483899" lon="4.3539732"/>
+  <node id="1012" lat="50.8468431" lon="4.3459966"/>
+  <node id="1013" lat="50.8468791" lon="4.3514377"/>
+  <node id="1014" lat="50.8468611" lon="4.3539732"/>
+  <node id="1015" lat="50.8454042" lon="4.3454268"/>
+  <node id="1016" lat="50.8454222" lon="4.3514662"/>
+  <node id="1017" lat="50.8454402" lon="4.3544005"/>
+  <node id="1018" lat="50.8454042" lon="4.3571068"/>
+  <node id="1019" lat="50.8460517" lon="4.3572492"/>
+  <node id="1020" lat="50.8440822" lon="4.3467088"/>
+  <node id="1021" lat="50.8440552" lon="4.3454268"/>
+  <node id="1022" lat="50.8439833" lon="4.3515517"/>
+  <node id="1023" lat="50.8439383" lon="4.3532610"/>
+  <way id="1000">
+    <nd ref="1000"/>
+    <nd ref="1001"/>
+    <nd ref="1002"/>
+    <nd ref="1003"/>
+    <nd ref="1004"/>
+    <nd ref="1005"/>
+    <tag k="highway" v="secondary"/>
+    <tag k="name" v="Boulevard Anspach"/>
+  </way>
+  <way id="1001">
+    <nd ref="1005"/>
+    <nd ref="1006"/>
+    <nd ref="1007"/>
+    <tag k="highway" v="secondary"/>
+    <tag k="name" v="Boulevard Maurice Lemonnier"/>
+  </way>
+  <way id="1002">
+    <nd ref="1008"/>
+    <nd ref="1001"/>
+    <nd ref="1009"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue Auguste Orts"/>
+  </way>
+  <way id="1003">
+    <nd ref="1002"/>
+    <nd ref="1010"/>
+    <nd ref="1011"/>
+    <tag k="highway" v="pedestrian"/>
+    <tag k="name" v="Rue de la Bourse"/>
+  </way>
+  <way id="1004">
+    <nd ref="1012"/>
+    <nd ref="1003"/>
+    <nd ref="1013"/>
+    <nd ref="1014"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue du Marché au Charbon"/>
+  </way>
+  <way id="1005">
+    <nd ref="1015"/>
+    <nd ref="1004"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue de la Grande Île"/>
+  </way>
+  <way id="1006">
+    <nd ref="1004"/>
+    <nd ref="1016"/>
+    <nd ref="1017"/>
+    <nd ref="1018"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue du Lombard"/>
+  </way>
+  <way id="1007">
+    <nd ref="1018"/>
+    <nd ref="1019"/>
+    <tag k="highway" v="pedestrian"/>
+    <tag k="name" v="Carrefour de l&apos;Europe"/>
+  </way>
+  <way id="1008">
+    <nd ref="1010"/>
+    <nd ref="1013"/>
+    <nd ref="1016"/>
+    <nd ref="1022"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue du Midi"/>
+  </way>
+  <way id="1009">
+    <nd ref="1005"/>
+    <nd ref="1020"/>
+    <nd ref="1021"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue d&apos;Anderlecht"/>
+  </way>
+  <way id="1010">
+    <nd ref="1005"/>
+    <nd ref="1022"/>
+    <nd ref="1023"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue des Bogards"/>
+  </way>
+  <!-- Bruxelles-Nord : gare, Gare du Nord (tram), rue du Progrès, place Rogier -->
+  <node id="2000" lat="50.8605000" lon="4.3612000"/>
+  <node id="2001" lat="50.8605000" lon="4.3601457"/>
+  <node id="2002" lat="50.8605000" lon="4.3620549"/>
+  <node id="2003" lat="50.8612195" lon="4.3601457"/>
+  <node id="2004" lat="50.8599964" lon="4.3601457"/>
+  <node id="2005" lat="50.8591510" lon="4.3600602"/>
+  <node id="2006" lat="50.8581977" lon="4.3600032"/>
+  <node id="2007" lat="50.8575322" lon="4.3594903"/>
+  <node id="2008" lat="50.8570826" lon="4.3590629"/>
+  <node id="2009" lat="50.8591510" lon="4.3569257"/>
+  <node id="2010" lat="50.8591510" lon="4.3633371"/>
+  <node id="2011" lat="50.8612195" lon="4.3620549"/>
+  <node id="2012" lat="50.8587014" lon="4.3620549"/>
+  <node id="2013" lat="50.8567228" lon="4.3579231"/>
+  <node id="2014" lat="50.8570016" lon="4.3589916"/>
+  <way id="2000">
+    <nd ref="2001"/>
+    <nd ref="2000"/>
+    <nd ref="2002"/>
+    <tag k="highway" v="footway"/>
+    <tag k="name" v="Passage de la gare du Nord"/>
+  </way>
+  <way id="2001">
+    <nd ref="2003"/>
+    <nd ref="2001"/>
+    <nd ref="2004"/>
+    <nd ref="2005"/>
+    <nd ref="2006"/>
+    <nd ref="2007"/>
+    <nd ref="2008"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue du Progrès"/>
+  </way>
+  <way id="2002">
+    <nd ref="2009"/>
+    <nd ref="2005"/>
+    <nd ref="2010"/>
+    <tag k="highway" v="secondary"/>
+    <tag k="name" v="Boulevard du Roi Albert II"/>
+  </way>
+  <way id="2003">
+    <nd ref="2011"/>
+    <nd ref="2002"/>
+    <nd ref="2012"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue de Brabant"/>
+  </way>
+  <way id="2004">
+    <nd ref="2013"/>
+    <nd ref="2014"/>
+    <nd ref="2008"/>
+    <tag k="highway" v="pedestrian"/>
+    <tag k="name" v="Place Rogier"/>
+  </way>
+</osm>

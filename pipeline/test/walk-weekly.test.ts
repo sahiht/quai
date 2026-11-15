@@ -218,6 +218,27 @@ describe('ligne de commande', () => {
   });
 });
 
+describe('extrait local, sans réseau (QUAI_WALK_OSM)', () => {
+  it('extrait des fixtures : data/walk construit, licence avec la source locale ; sans extrait : code 2 ; illisible : code 1', async () => {
+    const data = tempDir('quai-walk-local-');
+    writeFileSync(join(data, 'LICENSE-DATA.txt'), 'GTFS\n');
+    const logs: string[] = [];
+    const osm = join(ROOT_DIR, 'fixtures', 'pipeline', 'osm', 'namur-bruxelles.osm');
+    expect(await main(['local', '--data', data], { QUAI_WALK_OSM: osm }, (m) => logs.push(m))).toBe(0);
+    const idx = await readTiles(join(data, 'walk'));
+    expect(idx).toMatchObject({ version: '2026-11-08', source: 'OpenStreetMap, extrait local namur-bruxelles.osm', tiles: 5 });
+    const lic = readFileSync(join(data, 'LICENSE-DATA.txt'), 'utf8');
+    expect(lic).toContain('OpenStreetMap, extrait local namur-bruxelles.osm, données OpenStreetMap du 2026-11-08');
+    expect(await main(['local', '--data', data, '--input', osm], {}, (m) => logs.push(m))).toBe(0);
+    expect(readFileSync(join(data, 'LICENSE-DATA.txt'), 'utf8').match(/Chemins à pied \(dossier walk\/\)/g)).toHaveLength(1);
+    expect(await main(['local', '--data', data], {}, (m) => logs.push(m))).toBe(2);
+    const bad = writeXml(data, 'vide.osm', osmXml({ 1: ll(0, 0), 2: ll(0, 10) }, [{ id: 1, nodes: [1, 2], tags: { highway: 'motorway' } }]));
+    expect(await main(['local', '--data', data, '--input', bad], { GITHUB_ACTIONS: 'true' }, (m) => logs.push(m))).toBe(1);
+    expect(logs[logs.length - 1]).toMatch(/^::warning title=Chemins à pied::extrait local inutilisable/);
+    expect(existsSync(join(data, 'walk'))).toBe(false);
+  });
+});
+
 describe('flux « Données de nuit » (nightly.yml)', () => {
   interface Step { name?: string; id?: string; if?: string; run?: string; uses?: string; env?: Record<string, string>; 'continue-on-error'?: boolean; 'timeout-minutes'?: number; 'working-directory'?: string; with?: Record<string, unknown> }
   const text = readFileSync(join(ROOT_DIR, '.github', 'workflows', 'nightly.yml'), 'utf8');

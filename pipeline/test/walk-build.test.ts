@@ -10,7 +10,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { isWalkIndex, isWalkTile } from '../../app/src/core/walk/format.ts';
 import { buildWalk, dataVersion, NEAR_STOPS_M } from '../src/walk/build.ts';
 import { ATTRIBUTION, LICENCE, SOURCE } from '../src/walk/tiles.ts';
-import { cleanupTempDirs, tempDir } from './helpers.ts';
+import { cleanupTempDirs, ROOT_DIR, tempDir } from './helpers.ts';
 import { APP_WALK_DATA, ll, osmXml, readBuilt, tileLength, WALK_DATA, writeXml, type XmlWay } from './walk-helpers.ts';
 
 afterAll(cleanupTempDirs);
@@ -86,16 +86,17 @@ describe('budget', () => {
   });
 });
 
-describe('extraits réels (paquet pyrosm)', () => {
+describe('extraits réels (paquet pyrosm) et extrait des fixtures (écrit à la main)', () => {
   const FIXED = { version: '2026-11-01', builtAt: '2026-11-01T02:00:00.000Z' };
   const sets = [
-    { name: 'helsinki', input: 'pyrosm-helsinki.osm.pbf', tiles: 1, km: [110, 120] },
-    { name: 'kotka', input: 'pyrosm-test.osm.pbf', tiles: 2, km: [55, 62] },
+    { name: 'helsinki', input: join(WALK_DATA, 'pyrosm-helsinki.osm.pbf'), tiles: 1, km: [110, 120] },
+    { name: 'kotka', input: join(WALK_DATA, 'pyrosm-test.osm.pbf'), tiles: 2, km: [55, 62] },
+    { name: 'fixtures', input: join(ROOT_DIR, 'fixtures', 'pipeline', 'osm', 'namur-bruxelles.osm'), tiles: 5, km: [9, 11] },
   ];
   for (const s of sets) {
     it(`${s.name} : longueur gardée, tuiles sous 300 ko, données de test du téléphone à jour`, async () => {
       const out = tempDir('quai-walk-real-');
-      const r = await buildWalk({ input: join(WALK_DATA, s.input), out, log: quiet, ...FIXED });
+      const r = await buildWalk({ input: s.input, out, log: quiet, ...FIXED });
       expect(r.built.stats.tiles).toBe(s.tiles);
       expect(r.built.stats.maxTile.bytes).toBeLessThan(300_000);
       const b = readBuilt(out);
