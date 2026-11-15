@@ -31,6 +31,7 @@ import {
   linesView,
   loadingView,
   nearbyView,
+  NEWS_LINES_1210,
   NEWS_LINES_129,
   NEWS_LINES_128,
   newsLines,
@@ -150,8 +151,9 @@ async function followRow(core: ReturnType<typeof fakeCore>, f: LineFollow) {
   return { follow, mode: follow.mode, heads: m ? await core.lineHeads!(follow) : [] };
 }
 /** 1.2.2 (PRD-1.2.2 § 6) : sur le trajet suivi, toucher propose « Ne plus suivre ». */
-const HINT_STEPS = '△▽ étapes   toucher : ne plus suivre   double : retour';
-const HINT_OTHER = '△▽ étapes   toucher : suivre ce trajet   double : retour';
+/** 1.2.10 (PRD-1.2.10 § 5) : trajet guidé (ou suivi) : rien à lancer ; un autre : « y aller ». */
+const HINT_STEPS = '△▽ étapes   double : retour';
+const HINT_OTHER = '△▽ étapes   toucher : y aller   double : retour';
 
 const ctxOf = (now: number, s: Settings, patch: Partial<ViewCtx> = {}): ViewCtx => ({ now, settings: s, ...patch });
 
@@ -231,44 +233,40 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     ]);
   });
 
-  it('CA-M2.1 et CA-122.7 : étapes du trajet suivi, « Suivi » sur la ligne du titre, l’alerte avant la raison, « ▶ » sur la 1re étape ; ▼ : la suite', async () => {
+  it('CA-M2.1, CA-122.7 et PRD-1.2.10 § 5 : étapes du trajet suivi : le nom du trajet, l’alerte en haut, une rangée par étape, « ▶ » sur la 1re', async () => {
     const s = settings();
     const { map } = await answers(now, here, s);
     const journeys = map.get('fav-bureau')!.plan!.journeys;
     const v = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: 0, followedId: journeys[0].id, leaveAt0: journeys[0].leaveAt, fresh: true }, ctxOf(now, s));
-    expect(nb(v.title)).toBe('Vers le bureau : 07:35 → 08:58');
-    expect(v.titleRight).toBe('Suivi');
-    expect(nb(page(v).title)).toBe('Vers le bureau : 07:35 → 08:58   Suivi');
+    expect(nb(v.title)).toBe('Bureau');
+    expect(v.titleRight).toBeUndefined();
+    expect(nb(page(v).title)).toBe('Bureau');
     expect(v.log).toEqual({ page: 1, pages: 3, label: 'short', followed: true });
-    // IC jusqu'à Bruxelles-Nord, puis le tram 3 : 7 étapes pour 6 lignes ; 1.2.4 : la gare de départ nommée sous le
-    // départ à pied (2 lignes), les 2 dernières étapes annoncées en bas
+    // IC jusqu'à Bruxelles-Nord, puis le tram 3 : cinq étapes, une rangée chacune
     expect(check(v)).toEqual([
       '! Voie modifiée : l’IC part de la voie 6',
-      '07:35   Partir à pied vers la gare (7 min)   dans 4 min',
-      'Namur',
-      '07:42   IC vers Bruxelles-Midi, voie 6   +2 min',
-      '08:42   Descendre à Bruxelles-Nord',
-      '08:42   À pied vers Gare du Nord (2 min)',
-      // 1.2.5 (PRD-1.2.5 § 2) : l'IC a 2 min de retard ; à 08:44 à l'arrêt, le tram à 08:44 : aucune marge
-      '~08:44   Tram 3 vers Churchill   très juste',
-      '▽ suite du trajet : 2 étapes',
+      '07:35 à pied 7 min',
+      // l'IC a 2 min de retard : son heure estimée ; la voie modifiée au plus clair
+      '07:44 IC voie 6 ! → Bruxelles-Nord   08:42',
+      '08:42 à pied 2 min',
+      // 1.2.5 (PRD-1.2.5 § 2) : à 08:44 à l'arrêt, le tram à 08:44 : aucune marge
+      '~08:44 Tram 3 → Bourse   très juste',
+      '08:49 à pied 9 min',
+      'Fin du trajet. ▽ 2 autres trajets',
       HINT_STEPS,
     ]);
     expect(page(v).sel).toBe(0);
-    // toucher : « Ne plus suivre » et le détail du véhicule (plus « Dans le train » directement)
-    expect(v.tap).toEqual({ kind: 'open', route: { screen: 'followed' } });
+    // 1.2.10 : le trajet guidé n'a rien à lancer au toucher (arrêter : appui long, « Arrêter le guidage »)
+    expect(v.tap).toBeUndefined();
     const f = followedView({ title: 'Vers le bureau', journey: journeys[0] }, ctxOf(now, s));
     expect(nb(f.title)).toBe('Vers le bureau : trajet suivi');
     expect(check(f)).toEqual(['Ne plus suivre', 'Arrêts : IC vers Bruxelles-Midi, +2 min', '△▽ choisir   toucher : valider   double : retour']);
     expect(f.items.map((i) => i.action?.kind)).toEqual(['unfollow', 'open']);
     expect(f.items[1].action).toMatchObject({ kind: 'open', route: { screen: 'train', leg: 1 } });
     expect(check(followedView(null, ctxOf(now, s)))).toEqual(['Ce trajet n’est plus suivi.', 'double toucher : retour']);
-    // au bout : « Fin du trajet. ▽ 2 autres trajets »
-    const end = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: 0, followedId: journeys[0].id, leaveAt0: journeys[0].leaveAt, top: 1 }, ctxOf(now, s));
-    expect(checkAt(end, 1).slice(-3)).toEqual(['08:58   Arrivée au bureau (9 min à pied)', 'Fin du trajet. ▽ 2 autres trajets', HINT_STEPS]);
   });
 
-  it('CA-M2.2 et CA-122.7 : sans temps réel, « Si tu le rates » puis la raison ; « Autres trajets » ; une autre proposition, « Suivre ce trajet » ; une seule', async () => {
+  it('CA-M2.2 et PRD-1.2.10 § 5 : sans temps réel, « ~ » sur l’arrivée et les heures ; « Autres trajets » ; une autre proposition : « y aller » ; une seule', async () => {
     const s = settings();
     const { map } = await answers(now, here, s, { noRt: true });
     const journeys = map.get('fav-bureau')!.plan!.journeys;
@@ -276,40 +274,36 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     const ctx = ctxOf(now, s);
     const p1 = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: 0, followedId: journeys[0].id, fresh: true }, ctx);
     const l1 = check(p1);
-    // 1.2.5 (PRD-1.2.5 § 1) : départ à pied à 07:33, dans 2 min : « Si tu le rates » (l'IC suivant de Namur) en haut
-    expect(l1[0]).toBe('Si tu le rates : arrivée 09:57, 59 min plus tard');
-    expect(l1.slice(-2)).toEqual(['▽ suite du trajet : 2 étapes', HINT_STEPS]);
-    // 6 min avant, la raison
-    expect(check(stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: 0, followedId: journeys[0].id, fresh: true }, ctxOf(at(7, 27), s)))[0]).toBe('Le plus court : 1 changement, à pied 7 + 2 + 9 min');
+    // la ligne du haut : le départ à pied (dans 2 min) et l'arrivée prévue
+    expect(l1[0]).toBe('Départ 07:33, dans 2 min   arrivée ~08:58');
+    expect(l1.slice(-2)).toEqual(['Fin du trajet. ▽ 2 autres trajets', HINT_STEPS]);
     // ▼ au bout : « Autres trajets », la raison ou les moyens en 2e ligne
     const list = othersView({ screen: 'others', key: 'k', title: 'Vers le bureau', journeys, index: 0 }, journeys, ctx);
     expect(nb(list.title)).toBe('Vers le bureau : autres trajets');
     expect(check(list)).toEqual(['Le suivant   08:33 → 09:57', 'IC + tram 4, à pied 7 + 2 + 9 min', 'Plus tard   09:33 → 10:58', 'IC + tram 3, à pied 7 + 2 + 9 min', '△▽ choisir   toucher : voir   double : retour']);
-    // une autre proposition, ouverte depuis la liste : non suivie, sans « ▶ », « Suivre ce trajet » sur la ligne du titre
+    // une autre proposition, ouverte depuis la liste : non suivie, sans « ▶ », toucher : « y aller »
     const p3 = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: 2, followedId: journeys[0].id, fromList: true }, ctx);
-    expect(nb(p3.title)).toBe('Vers le bureau : 09:33 → 10:58');
-    expect(p3.titleRight).toBe('Suivre ce trajet');
+    expect(nb(p3.title)).toBe('Bureau');
+    expect(p3.titleRight).toBeUndefined();
     expect(p3.log).toEqual({ page: 3, pages: 3, label: 'later', followed: false });
     const l3 = check(p3);
-    expect(l3[0]).toBe('Plus tard : 1 changement, départ 09:33');
-    expect(l3).toContain('~09:42   IC vers Bruxelles-Midi, voie 4');
-    expect(l3.slice(-2)).toEqual(['▽ suite du trajet : 2 étapes', HINT_OTHER]);
+    expect(l3[0]).toBe('Départ 09:33   arrivée ~10:58');
+    expect(l3.find((l) => l.startsWith('~09:42 IC'))).toMatch(/^~09:42 IC voie 4 → Bruxelles-Nord {3}\d\d:\d\d$/);
+    expect(l3.slice(-2)).toEqual(['Fin du trajet. ▽ autres trajets', HINT_OTHER]);
     expect(page(p3).sel).toBe(-1);
-    expect(p3.tap).toEqual({ kind: 'follow' });
-    const p3end = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: 2, followedId: journeys[0].id, fromList: true, top: 1 }, ctx);
-    expect(checkAt(p3end, 1).slice(-3)).toEqual(['10:58   Arrivée au bureau (9 min à pied)', 'Fin du trajet. ▽ autres trajets', HINT_OTHER]);
-    // 1.2.2 : la 1re proposition d'un trajet ouvert, pas suivi : « Suivre ce trajet » aussi, sans aide des gestes
+    expect(p3.tap).toEqual({ kind: 'goGuide' });
+    // la 1re proposition d'un trajet ouvert, pas suivi : « y aller » aussi, sans aide des gestes
     const open = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys, index: 0, fresh: true }, ctxOf(now, settings({ gestureHints: false })));
-    expect(open.titleRight).toBe('Suivre ce trajet');
-    expect(open.tap).toEqual({ kind: 'follow' });
+    expect(open.titleRight).toBeUndefined();
+    expect(open.tap).toEqual({ kind: 'goGuide' });
     expect(open.mark).toBeUndefined();
-    expect(check(open).at(-1)).toBe('▽ suite du trajet : 2 étapes');
+    expect(check(open).at(-1)).toBe('Fin du trajet. ▽ 2 autres trajets');
     // une seule proposition : rien d'autre, dit au bout des étapes
-    const one = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: journeys.slice(0, 1), index: 0, top: 1 }, ctx);
-    expect(checkAt(one, 1).slice(-2)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', HINT_OTHER]);
+    const one = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: journeys.slice(0, 1), index: 0 }, ctx);
+    expect(check(one).slice(-2)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', HINT_OTHER]);
   });
 
-  it('CA-S6.3 : colonne d’état « dans 4 min » puis « en cours » ; repère sur l’étape en cours', async () => {
+  it('CA-S6.3 : repère sur l’étape en cours (1.2.10 : l’étape en cours n’a plus de colonne d’état)', async () => {
     const s = settings();
     const { map } = await answers(now, here, s);
     const journeys = map.get('fav-bureau')!.plan!.journeys;
@@ -317,16 +311,16 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     const j = await fakeCore(() => later).refresh(journeys[0], s);
     const v = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j, ...journeys.slice(1)], index: 0, followedId: j.id, leaveAt0: journeys[0].leaveAt, fresh: true }, ctxOf(later, s));
     const lines = check(v);
-    expect(lines[1]).toBe('07:35   Partir à pied vers la gare (7 min)   en cours');
+    expect(lines[1]).toBe('07:35 à pied 7 min');
     expect(page(v).sel).toBe(0);
     const inTrain = at(8, 5);
     const v2 = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0, followedId: j.id, leaveAt0: journeys[0].leaveAt, fresh: true }, ctxOf(inTrain, s));
-    expect(check(v2)[3]).toBe('07:42   IC vers Bruxelles-Midi, voie 6   en cours');
+    expect(check(v2)[2]).toBe('07:44 IC voie 6 ! → Bruxelles-Nord   08:42');
     expect(page(v2).sel).toBe(1);
     // 08:47 : dans le tram 3 (08:44 → 08:49), le repère est sur le tram
     const inTram = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0, followedId: j.id, fresh: true }, ctxOf(at(8, 47), s));
-    expect(page(inTram).sel).toBe(4);
-    expect(check(inTram)).toContain('~08:44   Tram 3 vers Churchill   en cours');
+    expect(page(inTram).sel).toBe(3);
+    expect(check(inTram)).toContain('~08:44 Tram 3 → Bourse   08:49');
   });
 
   it('dans le train : arrêts, aide « △▽ arrêts   double : retour » (L4)', async () => {
@@ -355,7 +349,7 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     expect(lines.at(-1)).toBe('△▽ arrêt   toucher : départs   double : retour');
   });
 
-  it('CA-122.2 : « Favoris » : ligne 1 comme l’accueil, détail pâle en 2e ligne ; « Adresses récentes » (3 au plus) ; « Autre adresse   sur le téléphone »', async () => {
+  it('CA-122.2 et PRD-1.2.10 § 2 : « Favoris » : une ligne comme l’accueil, « ! », le détail en bas ; « Adresses récentes » (3 au plus) ; « Autre adresse »', async () => {
     const s = settings();
     // lieux publics seulement (PRD-1.2.2, règle de confidentialité)
     s.recent = [
@@ -369,23 +363,25 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     const v = favoritesView({ entries: a.entries, recents: { [korenmarkt]: '07:40 → 08:51' } }, ctxOf(now, s, { rt: 'ok' }));
     expect(v.title).toBe('Favoris');
     expect(v.log).toEqual({ order: a.order });
-    expect(v.items.map((i) => [i.head ?? '', i.a, nb(i.c ?? ''), nb(i.b2 ?? '')])).toEqual([
-      ['', 'Bureau', 'dans 4 min → 08:58', 'IC 07:42 +2 voie 6 !, 1 changement'],
+    // 1.2.10 : « ! » après le nom (la voie de l'IC change) ; le détail de chaque élément pour la ligne du bas
+    expect(v.items.map((i) => [i.head ?? '', nb(i.a), nb(i.c ?? ''), nb((i as { detail?: string }).detail ?? '')])).toEqual([
+      ['', 'Bureau !', 'dans 4 min → 08:58', 'IC 07:42 +2 voie 6 !, 1 changement'],
       ['', 'Vers Gand-Saint-Pierre', '07:40 → 08:09', 'IC voie 4 à Bruxelles-Central'],
       ['', 'Maison', 'tu y es', ''],
-      ['ADRESSES RÉCENTES', 'Korenmarkt', '07:40 → 08:51', ''],
-      ['', 'Grand-Place', '…', ''],
-      ['', 'Place d’Armes', '…', ''],
+      ['ADRESSES RÉCENTES', 'Korenmarkt', '07:40 → 08:51', 'Korenmarkt, 9000 Gent'],
+      ['', 'Grand-Place', '…', 'Grand-Place, 1000 Bruxelles'],
+      ['', 'Place d’Armes', '…', 'Place d’Armes, 5000 Namur'],
       ['', 'Autre adresse', 'sur le téléphone', ''],
     ]);
     expect(check(v)).toEqual([
-      'Bureau   dans 4 min → 08:58',
-      'IC 07:42 +2 voie 6 !, 1 changement',
+      'Bureau !   dans 4 min → 08:58',
       'Vers Gand-Saint-Pierre   07:40 → 08:09',
-      'IC voie 4 à Bruxelles-Central',
       'Maison   tu y es',
       'ADRESSES RÉCENTES',
       'Korenmarkt   07:40 → 08:51',
+      'Grand-Place   …',
+      'Place d’Armes   …',
+      'IC 07:42 +2 voie 6 !, 1 changement',
       '△▽ choisir   toucher : ouvrir   double : retour',
     ]);
     // en bas de la liste : la ligne pâle n'est jamais sous le curseur (elle va avec l'adresse qui la suit)
@@ -425,19 +421,19 @@ describe('scénario 2 : en ville, gare du Nord (S2, 12:10)', () => {
       HINT_HOME,
     ]);
     expect(v.items[0].action).toEqual({ kind: 'open', route: { screen: 'favorites' } });
-    // la liste ouverte par « Favoris » : tous les favoris, la ligne de l'accueil puis le détail
+    // la liste ouverte par « Favoris » : tous les favoris, la ligne de l'accueil ; 1.2.10 : le détail du favori sous
+    // le curseur en bas (PRD-1.2.10 § 2)
     const list = favoritesView({ entries: a.entries }, ctxOf(now, s));
     expect(list.log).toEqual({ order: a.order });
     expect(check(list)).toEqual([
       'Bureau   maintenant → 12:26',
-      'tram 3 12:12, direct',
       'Vers Gand-Saint-Pierre   14:10 → 14:39',
-      'IC voie 4 à Bruxelles-Central',
       'Maison   17:13 → 18:23',
-      'IC 17:18 voie 3, direct',
       'Autre adresse   sur le téléphone',
+      'tram 3 12:12, direct',
       '△▽ choisir   toucher : ouvrir   double : retour',
     ]);
+    expect(list.log).toEqual({ order: a.order, detail: 'tram 3 12:12, direct' });
   });
 
   it('CA-122.3 : « Gares de train » : la gare choisie et son prochain train ; toucher : son tableau', async () => {
@@ -577,13 +573,13 @@ describe('scénario 3 : l’après-midi vers Gand (S3, 13:55)', () => {
     expect(check(homeView(home(a), ctxOf(now, s))).slice(0, 3)).toEqual(['Favoris   3', 'Vers Gand-Saint-Pierre   dans 13 min → 14:39', 'Bureau   maintenant → 14:07']);
     const journeys = a.map.get('fav-gand')!.plan!.journeys;
     const v = stepsPage({ title: 'Vers Gand-Saint-Pierre', label: '' }, { journeys, index: 0, followedId: journeys[0].id, fresh: true }, ctxOf(now, s));
-    expect(nb(page(v).title)).toBe('Vers Gand-Saint-Pierre : 14:10 → 14:39   Suivi');
+    // 1.2.10 (PRD-1.2.10 § 5) : le nom du trajet, le départ et l'arrivée en haut, une rangée par étape
+    expect(nb(page(v).title)).toBe('Gand-Saint-Pierre');
     const lines = check(v);
-    expect(lines[0]).toBe('Le plus court : direct');
-    expect(lines[1]).toMatch(/^14:10   IC vers Bruges, voie 4/);
+    expect(lines[0]).toBe('Départ 14:10, dans 15 min   arrivée 14:39');
+    expect(lines[1]).toBe('14:10 IC voie 4 → Gand-Saint-Pierre   14:39');
     // 1.2.4 : à bord dès le départ, d'où il part
     expect(lines[2]).toBe('depuis Bruxelles-Central');
-    expect(lines[3]).toBe('14:39   Arrivée à Gand-Saint-Pierre');
     expect(lines.slice(-2)).toEqual(['Fin du trajet. ▽ 2 autres trajets', HINT_STEPS]);
     // les autres trajets : « Le suivant », même trajet plus tard (les moyens en 2e ligne)
     expect(check(othersView({ screen: 'others', key: 'g', title: 'Vers Gand-Saint-Pierre', journeys, index: 0 }, journeys, ctxOf(now, s))).slice(0, 4)).toEqual(['Le suivant   14:25 → 14:56', 'IC', 'Plus tard   14:40 → 15:09', 'IC']);
@@ -594,18 +590,17 @@ describe('scénario 3 : l’après-midi vers Gand (S3, 13:55)', () => {
     const to = { type: 'address' as const, label: 'Korenmarkt, 9000 Gent', lat: 51.0547, lon: 3.7217 };
     const res = await fakeCore(() => now).route({ type: 'here' }, to, now, s, here);
     const v = stepsPage({ title: 'Vers Korenmarkt', label: '' }, { journeys: res.journeys, index: 0, fresh: true }, ctxOf(now, s));
-    expect(v.titleRight).toBe('Suivre ce trajet');
+    expect(v.titleRight).toBeUndefined();
+    expect(v.tap).toEqual({ kind: 'goGuide' });
     const lines = check(v);
-    expect(lines[0]).toBe('Le plus court : 1 changement, à pied 1 + 1 min');
-    expect(lines.slice(1, 8).map((l) => l.replace(/   (dans|en) .*$/, ''))).toEqual([
-      '14:10   IC vers Bruges, voie 4',
+    expect(lines.slice(0, 6)).toEqual([
+      'Départ 14:10, dans 15 min   arrivée 14:55',
+      '14:10 IC voie 4 → Gand-Saint-Pierre   14:39',
       'depuis Bruxelles-Central',
-      '14:39   Descendre à Gand-Saint-Pierre',
-      '14:39   À pied vers l’arrêt du tram (1 min)',
+      '14:39 à pied 1 min',
       // 1.2.5 (PRD-1.2.5 § 2) : 4 min entre l'arrivée à pied (14:40) et le tram : la marge
-      '14:44   Tram 1 vers Korenmarkt   marge 4 min',
-      '14:54   Descendre à Korenmarkt, Gand',
-      '▽ suite du trajet : 1 étape',
+      '14:44 Tram 1 → Korenmarkt, Gand   marge 4 min',
+      '14:54 à pied 1 min',
     ]);
   });
 
@@ -657,12 +652,12 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     const v = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: res.journeys, index: 0, followedId: j.id, fresh: true }, ctxOf(now, s));
     expect(v.titleRight).toBeUndefined();
     const lines = check(v);
-    expect(lines[0]).toBe('Le plus court : à pied, 9 min');
-    expect(lines[1]).toMatch(/^10:00   Partir à pied \(9 min\)/);
-    expect(lines[2]).toBe('10:09   Arrivée au bureau');
-    expect(lines.slice(-2)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', '△▽ étapes   double : retour']);
+    // 1.2.10 (PRD-1.2.10 § 5) : une rangée, la marche ; suivi (guidé) : rien à lancer
+    expect(lines).toEqual(['Départ 10:00   arrivée 10:09', '10:00 à pied 9 min', 'Fin du trajet. Pas d’autre trajet pour l’instant', '△▽ étapes   double : retour']);
     expect(v.tap).toBeUndefined();
     expect(lines.join(' ')).not.toMatch(/direct/);
+    // pas encore guidé : « y aller » (le guidage mène aussi à pied)
+    expect(stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: res.journeys, index: 0, fresh: true }, ctxOf(now, s)).tap).toEqual({ kind: 'goGuide' });
   });
 
   it('CA-M1.5 : déjà au bureau, « tu y es » sans 2e ligne, « Tu es déjà au bureau. »', async () => {
@@ -758,20 +753,21 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
       'toucher : continuer   double : quitter',
     ]);
     expect(check(firstRunView({ ...ctx, web: true })).at(-2)).toBe('position, langue et tes favoris, en une minute.');
-    // PRD-1.2.9 § 4 : un seul message ; depuis la 1.2.8, les lignes de la 1.2.9 ; d'avant, aussi celles de la 1.2.8 (une
-    // version entière ou rien : la 1.2.6 et la 1.2.5 ne tiennent plus) ; espace insécable devant « : »
-    const news = newsView(ctx, newsLines('1.2.8'));
-    expect(news.title).toBe('Quai 1.2.9');
-    expect(check(news)).toEqual(['« imminent » : seulement d’après le temps réel.', 'Téléphone : l’accueil reprend celui des lunettes.', 'Réglages : tout derrière un seul bouton.', 'toucher : continuer']);
+    // PRD-1.2.10 § 7 : un seul message ; depuis la 1.2.9, les lignes de la 1.2.10 ; d'avant, aussi celles de la 1.2.9
+    // (une version entière ou rien : les plus anciennes ne tiennent plus) ; espaces insécables
+    const news = newsView(ctx, newsLines('1.2.9'));
+    expect(news.title).toBe('Quai 1.2.10');
+    expect(check(news)).toEqual(['Y aller : guidé de porte à porte, écran calme.', 'Train ou bus déjà pris : « j’y descends ».', 'Favoris : une ligne chacun, le détail en bas.', 'toucher : continuer']);
     expect(check(newsView(ctx, newsLines('1.2.5'))).slice(3, 7)).toEqual([
-      'Un train : tout son trajet, gares d’avant comprises.',
-      'Chaque gare : sa voie et dans combien de temps.',
-      '● : là où le train arrive, d’après le temps réel.',
+      '« imminent » : seulement d’après le temps réel.',
+      'Téléphone : l’accueil reprend celui des lunettes.',
+      'Réglages : tout derrière un seul bouton.',
       'toucher : continuer',
     ]);
     expect(newsLines('1.1.0')).toEqual(newsLines('1.2.4'));
-    expect(newsLines('1.2.4')).toEqual(newsLines('1.2.7'));
-    expect(newsLines('1.2.7')).toEqual([...NEWS_LINES_129, ...NEWS_LINES_128]);
+    expect(newsLines('1.2.4')).toEqual(newsLines('1.2.8'));
+    expect(newsLines('1.2.7')).toEqual([...NEWS_LINES_1210, ...NEWS_LINES_129]);
+    expect(NEWS_LINES_128).toHaveLength(3);
     expect(news.tap).toEqual({ kind: 'continue' });
     expect(newsView({ ...ctx, web: true }, newsLines('1.2.0')).items).toEqual(newsView(ctx, newsLines('1.2.0')).items);
     const root = errorView('Quai', 'Pas de connexion aux horaires : nouvel essai dans 30 s', ctx, { root: true });
@@ -796,12 +792,11 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     const { map } = await answers(now, { lat: SCENARIO.s1.lat, lon: SCENARIO.s1.lon }, s);
     const j = map.get('fav-bureau')!.plan!.journeys[0];
     const v = stepsView({ label: 'bureau', leaveAt0: j.leaveAt }, j, ctxOf(now, s));
-    expect(nb(v.title)).toBe('Vers le bureau : 07:35 → 08:58');
-    expect(v.titleRight).toBe('Suivre ce trajet');
-    // 7 étapes, la 1re sur 2 lignes (1.2.4), pour 6 lignes : la suite d'abord ; au bout, aucune autre proposition
-    expect(check(v).at(-2)).toBe('▽ suite du trajet : 2 étapes');
-    const end = stepsPage({ label: 'bureau' }, { journeys: [j], index: 0, leaveAt0: j.leaveAt, top: 1 }, ctxOf(now, s));
-    expect(checkAt(end, 1).slice(-3)).toEqual(['08:58   Arrivée au bureau (9 min à pied)', 'Fin du trajet. Pas d’autre trajet pour l’instant', HINT_OTHER]);
+    // 1.2.10 (PRD-1.2.10 § 5) : le nom du trajet ; cinq étapes sur une page ; toucher : « y aller »
+    expect(nb(v.title)).toBe('Bureau');
+    expect(v.titleRight).toBeUndefined();
+    expect(check(v).slice(-2)).toEqual(['Fin du trajet. Pas d’autre trajet pour l’instant', HINT_OTHER]);
+    expect(v.tap).toEqual({ kind: 'goGuide' });
   });
 });
 
@@ -841,7 +836,9 @@ describe('lendemain, horaires périmés, destinations STIB', () => {
     const walk: Leg = { kind: 'walk', from: { name: N('Ma position'), lat: 0, lon: 0 }, to: { name: N('Bruxelles-Central'), lat: 0, lon: 0 }, dep: T(13, 58, 1), arr: T(14, 10, 1), schedDep: T(13, 58, 1), schedArr: T(14, 10, 1), walkMin: 12 };
     const door: Journey = { id: 'j1', legs: [walk, ride], dep: walk.dep, arr: ride.arr, leaveAt: T(13, 56, 1), transfers: 0, rt: false, alerts: [] };
     const v = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [door], index: 0 }, ctx());
-    expect(nb(v.title)).toBe('Vers le bureau : demain 13:56 → 14:39');
+    // 1.2.10 (PRD-1.2.10 § 5) : le jour dans la ligne du haut ; l'arrivée prévue « ~ »
+    expect(nb(v.title)).toBe('Bureau');
+    expect(check(v)[0]).toBe('Départ demain 13:56   arrivée ~14:39');
     expect(nb(planHomeText({ journeys: [door] }, late))).toBe('demain 13:56 → 14:39');
     expect(trainView(door, 1, ctx()).title).toBe('IC vers Bruges, demain');
   });
@@ -862,7 +859,9 @@ describe('lendemain, horaires périmés, destinations STIB', () => {
     };
     const j: Journey = { id: 'j', legs: [t4], dep: t4.dep, arr: t4.arr, leaveAt: t4.dep, transfers: 0, rt: true, alerts: [] };
     const sv = check(stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0 }, ctx()));
-    expect(sv.some((l) => /^23:40   Tram 4 vers Stalle/.test(l))).toBe(true);
+    // 1.2.10 (PRD-1.2.10 § 5) : la rangée dit l'arrêt de descente ; jamais « (P) »
+    expect(sv.some((l) => /^23:40 Tram 4 → Bourse/.test(l))).toBe(true);
+    expect(sv.join('\n')).not.toContain('(P)');
     expect(trainView(j, 0, ctx()).title).toBe('Tram 4 vers Stalle');
   });
 });
