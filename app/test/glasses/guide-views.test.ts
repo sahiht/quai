@@ -213,6 +213,8 @@ describe('PRD § 3.2 : les moments', () => {
     expect(shown(board({ vehicle: IC, depAt: T(7, 30), head: N('Ostende') })).lines[0]).toBe('IC à 07:30');
     const corr = shown(board({ vehicle: IC, depAt: T(7, 30), platform: '3', head: N('Ostende'), walkMin: 3, marginMin: 6 }));
     expect(corr.lines.slice(0, 3)).toEqual(['IC à 07:30, voie 3', 'vers Ostende', '3 min à pied jusqu’au quai, marge 6 min']);
+    // bus, tram, métro : « jusqu'à l'arrêt » (pas de quai)
+    expect(shown(board({ vehicle: TRAM3, depAt: T(8, 44), head: N('Churchill'), walkMin: 2, marginMin: 1 })).lines[2]).toBe('2 min à pied jusqu’à l’arrêt, marge 1 min');
   });
 
   it('platform : « Voie modifiée » ; « IC à 07:30, voie 6 au lieu de 4 » ; panneau « voie / 6 »', () => {

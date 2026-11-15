@@ -178,7 +178,8 @@ function boardMoment(m: Extract<Moment, { kind: 'board' }>, ctx: ViewCtx): Momen
   if (head) lines.push(F('pale', (w) => fitName('vers ', head, '', w)));
   // correspondance en gare : la marche jusqu'au quai et la marge passent avant le nombre d'arrêts (trois lignes au plus)
   // (la marge peut être négative : « très juste », jamais « marge -2 min »)
-  if (m.walkMin !== undefined) lines.push(L('pale', `${minText(m.walkMin)} à pied jusqu’au quai${m.marginMin !== undefined ? `, ${marginText(m.marginMin)}` : ''}`));
+  // « jusqu'au quai » pour un train, « jusqu'à l'arrêt » pour un bus, un tram, un métro (contrôle technique du 15/11)
+  if (m.walkMin !== undefined) lines.push(L('pale', `${minText(m.walkMin)} à pied jusqu’${train ? 'au quai' : 'à l’arrêt'}${m.marginMin !== undefined ? `, ${marginText(m.marginMin)}` : ''}`));
   else {
     const d = alightPhrase(m.stopsToAlight, m.alight, ctx);
     if (d) lines.push(m.stopsToAlight > 0 ? L('pale', d) : F('pale', (w) => fitName('descente à ', nameOf(m.alight, ctx), '', w)));
