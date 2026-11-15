@@ -66,6 +66,8 @@ import { APP_VERSION, compareVersions } from '../version';
 import { BOARD, HINTS, NB, SECTION, atTitle, catchable, lowerFirst, planHomeText, runningNext, shownMessage, towards, tripName, tripShort, upcoming, vehicleLong } from './format';
 import { DEBOUNCE, GestureFilter, type HubSignal } from './gestures';
 import { GUIDE_MENU, guideView, menuView, type GuideShow } from './guide-views';
+import { checkLines } from './guide-views';
+import { GuideTrail, MomentReminder, journalTitle, type ReminderNote, type ShownMoment } from './reminder';
 import { geometry, layoutPage } from './layout';
 import { anchorIndex, current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replace, replaceAt, reset, setSelection, type Gesture, type NavFrame, type NavState } from './nav';
 import { MENU_IDS, type AreaRef, type ContainerSpec, type GlassesView, type Intent, type Item, type KeepLineRoute, type LineRoute, type MenuItem, type OthersRoute, type PageSpec, type Route, type StepsRoute, type StopsRoute } from './types';
@@ -351,6 +353,8 @@ export interface FollowedGuide {
    * l'heure dit déjà le suivant).
    */
   beyondByLeg?: { journeyId: string; legs: Record<string, Stopover[]> };
+  /** 1.3.0 (PRD-1.3.0 § 6.4) : identifiant du trajet dans le journal (ControllerDeps.journal), repris à la réouverture. */
+  journal?: string;
 }
 
 /** État d'un trajet suivi : pas encore parti, en cours (M6.3), terminé. */
@@ -444,6 +448,7 @@ function parseGuide(x: unknown): FollowedGuide | null {
     for (const [k, v] of Object.entries(bl.legs)) if (/^\d+$/.test(k) && stopsOk(v)) legs[k] = v;
     if (Object.keys(legs).length) out.beyondByLeg = { journeyId: bl.journeyId, legs };
   }
+  if (typeof g.journal === 'string' && g.journal) out.journal = g.journal;
   return out;
 }
 
@@ -646,6 +651,30 @@ export class GlassesController implements GlassesApi {
   private deviceUp: boolean | null = null;
   /** Réglage « Me guider pendant un trajet » au dernier changement des réglages. */
   private guideWasOn: boolean;
+
+  /* 1.3.0 (PRD-1.3.0 § 6.2 à 6.4) : rappel des messages et capteur, batterie, vérification, journal (reminder.ts) */
+
+  /** Moment montré au dernier rendu de l'écran du guidage (null : aucun). */
+  private momentShown: GuideState['moment'] = null;
+  /** Batterie des lunettes au dernier signal `device` (absente : inconnue), donnée au moteur (GuideInput.battery). */
+  private battery: number | undefined;
+  /** Lunettes connectées au dernier signal `device` (journal) ; null : aucun signal encore. */
+  private glassesOn: boolean | null = null;
+  /** Lunettes connectées et portées au dernier signal `device` ; faux : rien n'est affiché (rappel suspendu). */
+  private glassesUp: boolean | null = null;
+  /** Journal du guidage en cours (null : pas de journal, ou pas de guidage). */
+  private trail: GuideTrail | null = null;
+  private reminder = new MomentReminder({
+    later: (fn, ms) => {
+      const h = setTimeout(fn, Math.max(100, this.d.clock.real(ms)));
+      return () => clearTimeout(h);
+    },
+    now: () => this.d.clock.now(),
+    display: () => this.settings().display,
+    imu: (on, pace) => (this.d.platform.glasses.imu ? this.d.platform.glasses.imu(on, pace) : null),
+    resend: (m, n) => this.remindResend(m, n),
+    note: (e) => this.remindNote(e),
+  });
 
   /* ------------------------------ 1.3.0 : test de l'écran (PRD-1.3.0 § 6.1) ------------------------------ */
 
@@ -922,6 +951,8 @@ export class GlassesController implements GlassesApi {
     this.stopWatch();
     clearTimeout(this.guideTimer);
     this.guideTimer = undefined;
+    // 1.3.0 (PRD-1.3.0 § 6.2) : rappels annulés, capteur de mouvement fermé (le journal reste ouvert : le guidage continue)
+    this.reminder.end();
     if (this.saveTimer) this.saveFollowed();
     // 1.3.0 : test de l'écran arrêté (capteur refermé) ; plus de recalcul des réponses des favoris
     if (this.dtest) this.endDisplayTest({ step: 'idle' });
@@ -986,6 +1017,8 @@ export class GlassesController implements GlassesApi {
 
   onSignal(s: HubSignal): void {
     if (this.stopped) return;
+    // 1.3.0 (PRD-1.3.0 § 6.2 à 6.4) : capteur, batterie, premier plan et lunettes pour le rappel et le journal du guidage
+    this.guideSignal(s);
     // 1.3.0 (PRD-1.3.0 § 6.1) : test de l'écran (mesures du capteur, arrière-plan, connexion)
     if (this.testSignal(s)) return;
     switch (s.kind) {
@@ -1047,6 +1080,8 @@ export class GlassesController implements GlassesApi {
     // 1.2.10 (PRD-1.2.10 § 3.4) : sur l'écran du guidage, l'appui long ouvre le menu (Quai Web ; l'appli Even a son menu
     // système), le double toucher ramène à l'accueil (le guidage continue), glisser ne fait rien ; toucher : guideTap
     if (current(this.nav).route.screen === 'guide' && g !== 'tap') {
+      // 1.3.0 (PRD-1.3.0 § 6.2) : un geste sur les lunettes : le message est vu, plus de rappel
+      this.reminder.touch();
       if (g === 'long') void this.openGuideMenu();
       else if (g === 'double') void this.guideHome();
       else this.log(`QUAI_GESTURE ${g} sans effet sur guide`);
@@ -1637,6 +1672,9 @@ export class GlassesController implements GlassesApi {
     // 1.2.10 : « J'y descends » part de l'arrêt de montée (s'il est connu), jamais de la position du moment : on peut
     // déjà être à bord, et le trajet ne doit pas prendre fin pour « pas parti » (tripPhase)
     const origin = kind === 'ride' ? (start && knownPoint(start) ? { lat: start.lat, lon: start.lon } : undefined) : here ?? (start ? { lat: start.lat, lon: start.lon } : undefined);
+    // 1.3.0 (PRD-1.3.0 § 6.4) : le guidage d'avant est remplacé ; le nouveau commence son trajet dans le journal
+    this.endTrail('replaced');
+    const journal = kind ? this.beginTrail(kind, s) : undefined;
     this.trip = {
       v: 1,
       explicit: true,
@@ -1652,7 +1690,7 @@ export class GlassesController implements GlassesApi {
       index,
       key: s.key,
       // 1.2.10 : le guidage porté par le trajet suivi, mémoire neuve ; un nouveau guidage remplace le précédent
-      ...(kind ? { guide: { kind, mem: newGuideMemory(), ...(beyond?.length ? { beyond } : {}) } } : {}),
+      ...(kind ? { guide: { kind, mem: newGuideMemory(), ...(beyond?.length ? { beyond } : {}), ...(journal ? { journal } : {}) } } : {}),
     };
     this.saveFollowed();
     this.syncGuide();
@@ -2253,7 +2291,10 @@ export class GlassesController implements GlassesApi {
     const guided = !!t.guide && this.guideOn();
     if (st) {
       try {
-        return guideStatusOf(st, j, guideTitle(t, t.guide?.kind ?? 'trip'), guided, this.settings().lang);
+        const out = guideStatusOf(st, j, guideTitle(t, t.guide?.kind ?? 'trip'), guided, this.settings().lang);
+        // 1.3.0 (PRD-1.3.0 § 6.3) : les problèmes de la vérification, tant qu'ils existent (une ligne chacun, deux au plus)
+        if (t.guide && st.issues?.length) out.check = checkLines(st.issues);
+        return out;
       } catch (e) {
         console.warn('[Quai] carte « En cours »', errText(e));
       }
@@ -2477,6 +2518,9 @@ export class GlassesController implements GlassesApi {
     this.replanJob = null;
     this.replanTried.clear();
     this.beyondAsked.clear();
+    // 1.3.0 (PRD-1.3.0 § 6.2) : plus de rappel en attente, capteur fermé
+    this.reminder.end();
+    this.momentShown = null;
   }
 
   /**
@@ -2635,6 +2679,9 @@ export class GlassesController implements GlassesApi {
       return;
     }
     if (m) {
+      // 1.3.0 (PRD-1.3.0 § 6.2, § 6.4) : effacé d'un toucher : plus de rappel ; noté dans le journal
+      this.reminder.touch();
+      this.trail?.add('clear', { m: m.kind });
       this.trip = { ...t, guide: { ...t.guide, mem: dismissMoment(t.guide.mem, m.id, now) } };
       this.whereUntil = 0;
       this.saveFollowed(false);
@@ -2692,6 +2739,7 @@ export class GlassesController implements GlassesApi {
     const t = this.trip;
     const top = current(this.nav).route;
     const onGuide = top.screen === 'guide' || top.screen === 'menu' || (reason === 'stopped' && top.screen === 'steps' && !!t && top.key === t.key);
+    this.endTrail(reason);
     this.trip = null;
     this.saveFollowed();
     this.guideGone();
@@ -2705,6 +2753,8 @@ export class GlassesController implements GlassesApi {
     this.stopWatch();
     clearTimeout(this.guideTimer);
     this.guideTimer = undefined;
+    // 1.3.0 (PRD-1.3.0 § 6.4) : guidage fini sans fin donnée (« Ne plus suivre ») : arrêté
+    this.endTrail('stopped');
     this.resetGuideRun();
     this.notifyGuide();
   }
@@ -2734,6 +2784,8 @@ export class GlassesController implements GlassesApi {
       ...(t.origin ? { origin: t.origin } : {}),
       ...(missed ? { missed } : {}),
       ...this.beyondInput(g, j),
+      // 1.3.0 (PRD-1.3.0 § 6.3) : batterie des lunettes, si elle est connue
+      ...(this.battery !== undefined ? { battery: this.battery } : {}),
     };
   }
 
@@ -2850,6 +2902,8 @@ export class GlassesController implements GlassesApi {
       this.trip = { ...t, guide: { ...g, mem: res.mem } };
       this.saveFollowed(false);
     }
+    // 1.3.0 (PRD-1.3.0 § 6.4) : montée, descente, arrêt dépassé, arrivée, vérification et positions, dans le journal
+    this.trailFor(g)?.step(st, g.mem, res.mem, j, this.settings().lang);
     if (st.ended) {
       this.endGuide('ended');
       return null;
@@ -2928,6 +2982,8 @@ export class GlassesController implements GlassesApi {
     if (f.speed !== undefined) gf.speed = f.speed;
     if (f.heading !== undefined) gf.heading = f.heading;
     this.fixes.push(gf);
+    // 1.3.0 (PRD-1.3.0 § 6.4) : résumé des positions du journal : son instant et sa précision seulement
+    this.trailFor(this.trip.guide)?.fix(gf.at, gf.accuracy);
     if (this.fixes.length > 1 && this.fixes[this.fixes.length - 2].at > gf.at) this.fixes.sort((a, b) => a.at - b.at);
     this.pruneFixes(this.d.clock.now());
     this.stepGuide();
@@ -3019,11 +3075,14 @@ export class GlassesController implements GlassesApi {
         // commence le nouveau trajet (arrêts suivants lus pour ce trajet-là)
         const beyond = cur.guide.kind === 'trip' ? this.beyondInput(cur.guide, old).beyondByLeg : undefined;
         const j2 = found ? (found.kept ? found.j : replanJourney(old, found.j, now, beyond)) : null;
+        // 1.3.0 (PRD-1.3.0 § 6.4) : le recalcul et son résultat, dans le journal
+        this.trailFor(cur.guide)?.add('replan', { reason: req.reason, found: !!(found && j2 && j2.id !== old.id) });
         if (found && j2 && j2.id !== old.id) {
           // le nouveau trajet (avec, devant, le véhicule où l'on est encore) ; sa session ; plus de chemin à pied gardé
           const journeys = [j2, ...found.journeys.filter((x) => x.id !== found.j.id && x.id !== j2.id)];
           const guide: FollowedGuide = { kind: cur.guide.kind, mem: cur.guide.mem };
           if (found.beyond?.length) guide.beyond = found.beyond;
+          if (cur.guide.journal) guide.journal = cur.guide.journal;
           this.trip = { ...cur, journey: j2, journeys, index: 0, key: this.newKey(), guide, ...(found.title ? { title: found.title } : {}) };
         } else this.trip = { ...cur, guide: { ...cur.guide, mem: replanNone(cur.guide.mem, now) } };
         this.saveFollowed();
@@ -3119,8 +3178,11 @@ export class GlassesController implements GlassesApi {
     const t = this.trip;
     const j = t ? this.journeyOf(t.journey) : null;
     const st = t && j ? (this.guideState?.journeyId === j.id ? this.guideState : this.peekGuide(t, j)) : null;
+    this.momentShown = null;
     if (!t || !j || !st) return messageView(t?.title ?? 'Quai', [''], ctx);
     const show: GuideShow = st.moment ? 'moment' : this.whereUntil > ctx.now ? 'where' : 'empty';
+    // 1.3.0 (PRD-1.3.0 § 6.2) : le moment montré, pour le rappel et le journal (noteShown, après l'envoi de la page)
+    if (show === 'moment') this.momentShown = st.moment;
     const v = guideView(st, show, j, ctx);
     v.tap ??= { kind: 'guideTap' };
     if (this.d.web) delete v.menu;
@@ -3135,6 +3197,115 @@ export class GlassesController implements GlassesApi {
       if (!it.action && items[i]) it.action = { kind: 'menu', id: items[i].id };
     });
     return v;
+  }
+
+  /* ------------------------------ 1.3.0 : rappel, capteur, batterie, journal (PRD-1.3.0 § 6.2 à 6.4) ------------------------------ */
+
+  /**
+   * Après chaque page envoyée aux lunettes : le moment montré sur l'écran du guidage (ou rien), pour le rappel des
+   * messages (un nouveau message important attend d'être vu) et le journal (moment affiché, au premier affichage).
+   */
+  private noteShown(view: GlassesView): void {
+    // lunettes déconnectées ou ôtées : rien n'est affiché ; l'attente reprend à leur retour (page reconstruite)
+    if (this.glassesUp === false) {
+      this.reminder.suspend();
+      return;
+    }
+    const m = view.screen === 'guide' && current(this.nav).route.screen === 'guide' ? this.momentShown : null;
+    if (m) this.trail?.shown(m);
+    // Quai Web : pas de lunettes, l'écran dessiné est toujours visible : aucun rappel (ni capteur)
+    this.reminder.shown(m && !this.d.web ? { kind: m.kind, id: m.id } : null);
+  }
+
+  /**
+   * Rappel n° `n` d'un message important (§ 6.2) : la page entière renvoyée (reconstruite comme un premier affichage,
+   * images comprises), seulement s'il est encore à l'écran ; sinon faux (les rappels s'arrêtent).
+   */
+  private remindResend(m: ShownMoment, n: number): boolean {
+    if (this.stopped || this.paused || !this.ready || !this.guideShown() || current(this.nav).route.screen !== 'guide') return false;
+    const cur = this.guideState?.moment;
+    if (!cur || cur.id !== m.id || cur.until <= this.d.clock.now()) return false;
+    void this.render(true);
+    return true;
+  }
+
+  /** Rappel envoyé, message vu : dans le journal ; capteur ouvert ou fermé : ligne du mode test (jamais les mesures). */
+  private remindNote(e: ReminderNote): void {
+    if (e.k === 'imu') {
+      this.log(`QUAI_IMU ${e.on ? 'on' : 'off'}`);
+      return;
+    }
+    if (e.k === 'remind') {
+      this.log(`QUAI_REMIND ${e.m.kind} ${e.n}`);
+      this.trail?.add('remind', { m: e.m.kind, n: e.n });
+      return;
+    }
+    this.log(`QUAI_SEEN ${e.m.kind}`);
+    this.trail?.add('seen', { m: e.m.kind });
+  }
+
+  /**
+   * Signaux de l'hôte pour le guidage : mesures du capteur (rappel), batterie des lunettes (moteur, journal), premier plan
+   * quitté ou revenu et lunettes connectées ou non (journal) ; premier plan quitté, lunettes ôtées : rappel suspendu,
+   * capteur fermé (il reprend au prochain affichage de la page).
+   */
+  private guideSignal(s: HubSignal): void {
+    switch (s.kind) {
+      case 'imu':
+        this.reminder.sample(s);
+        return;
+      case 'background':
+        this.reminder.suspend();
+        this.trail?.add('fg', { on: false });
+        return;
+      case 'foreground':
+        this.trail?.add('fg', { on: true });
+        return;
+      case 'device': {
+        this.glassesUp = s.connected && s.wearing !== false;
+        if (!this.glassesUp) this.reminder.suspend();
+        if (s.connected !== this.glassesOn) {
+          if (this.glassesOn !== null) this.trail?.add('glasses', { connected: s.connected });
+          this.glassesOn = s.connected;
+        }
+        // batterie de 1 à 100 ; absente (ou 0 du SDK) : inconnue, l'ancienne valeur n'est pas gardée
+        const level = typeof s.battery === 'number' && Number.isFinite(s.battery) && s.battery >= 1 ? Math.min(100, Math.round(s.battery)) : undefined;
+        if (level === this.battery) return;
+        this.battery = level;
+        this.trail?.battery(level);
+        // le moteur la reçoit tout de suite (vérification au départ)
+        if (this.trip?.guide && this.ready) this.stepGuide();
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  /** Journal du guidage `g` (repris après une réouverture : même identifiant) ; null sans journal ni identifiant. */
+  private trailFor(g: FollowedGuide | undefined): GuideTrail | null {
+    const journal = this.d.journal;
+    if (!journal || !g?.journal) return null;
+    if (this.trail?.id !== g.journal) this.trail = new GuideTrail(journal, g.journal, () => this.d.clock.now());
+    return this.trail.ended ? null : this.trail;
+  }
+
+  /** Nouveau guidage : son trajet dans le journal (titre comme à l'écran, jamais d'adresse), batterie au départ. */
+  private beginTrail(kind: GuideKind, s: TripSession): string | undefined {
+    const journal = this.d.journal;
+    if (!journal) return undefined;
+    const trail = GuideTrail.begin(journal, { title: journalTitle(guideTitle(s, kind), s.to), kind }, () => this.d.clock.now());
+    if (!trail) return undefined;
+    this.trail = trail;
+    trail.battery(this.battery);
+    return trail.id;
+  }
+
+  /** Fin du trajet dans le journal (done, stopped, ended, replaced), une seule fois. */
+  private endTrail(reason: 'done' | 'stopped' | 'ended' | 'replaced'): void {
+    const trail = this.trail ?? this.trailFor(this.trip?.guide);
+    this.trail = null;
+    trail?.end(reason);
   }
 
   /* ------------------------------ Réglages ------------------------------ */
@@ -3918,6 +4089,8 @@ export class GlassesController implements GlassesApi {
       }
     }
     this.page = page;
+    // 1.3.0 (PRD-1.3.0 § 6.2) : ce qui est maintenant à l'écran, pour le rappel des messages et le journal
+    this.noteShown(view);
     // 1.2.10 (PRD-1.2.10 § 3.9) : les images de la page, une à la fois : toutes après sa construction, sinon celles qui
     // changent dans leur conteneur (dessin seul) ; un envoi qui échoue laisse le texte seul (le guidage continue)
     const toPaint = (page.images ?? []).filter((img) => built || JSON.stringify(before?.images?.find((o) => o.id === img.id)?.image) !== JSON.stringify(img.image));
