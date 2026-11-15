@@ -3,13 +3,16 @@
  * choisi (« Changer l’ordre », S3) ; « Ajouter un favori » (32 au plus) ; en bas, les adresses récentes (S4).
  * 1.2.2 : plus d'arrêt favori (rangés dans « Gares » et « Bus, tram, métro », PRD-1.2.2 § 5) ; la marche maximale
  * est dans « Trajets » (revue d'usage n° 9).
+ * 1.2.10 (PRD-1.2.10 § 4.2) : « Y aller » au bout de chaque favori (la rangée s'ouvre toujours d'un toucher), son
+ * message dessous ; pas pendant « Changer l’ordre ».
  */
 import type { Favorite, FavoritePlace, FavoriteTrip } from '../../core/api';
 import { LIMITS } from '../../settings';
 import { header, type PhoneCtx } from '../app';
 import { h, icon, ICON, liveRegion, svgNode } from '../dom';
+import { canGo, goButton, goFavorite } from '../glasses-link';
 import { endpointText, limitText, placeSubtitle, PROPOSE_TEXT, rankText, T, typo } from '../text';
-import { listRow } from '../ui';
+import { listRow, messageHub, type MessageHub } from '../ui';
 import { fillAccess, placeIcon } from './places';
 import { moveById } from './picks';
 
@@ -35,21 +38,35 @@ const favIcon = (f: ShownFavorite): HTMLSpanElement => (f.kind === 'place' ? pla
 /** Déplace le favori `id` d'un rang vers le haut (-1) ou le bas (+1). */
 export const moveFavorite = (list: Favorite[], id: string, dir: -1 | 1): Favorite[] => moveById(list, id, dir);
 
-/** Ligne d'un favori : titre, sous-titre, accès d'un lieu, créneau (« en tête le matin »). */
-function favoriteRow(ctx: PhoneCtx, f: ShownFavorite): HTMLLIElement {
+/**
+ * 1.2.10 : « Y aller » au bout de la rangée d'un favori, son message dessous (la rangée garde son toucher : modifier ;
+ * plus de chevron à côté du bouton).
+ */
+function withGo(ctx: PhoneCtx, hub: MessageHub, row: HTMLLIElement, f: ShownFavorite, title: string): HTMLLIElement {
+  if (!canGo(ctx)) return row;
+  row.classList.add('fav-go');
+  row.querySelector('.chev')?.remove();
+  const message = hub.slot();
+  row.append(goButton(hub, message, typo(`${T.goThere} : ${title}`), () => goFavorite(ctx, f.id)), message);
+  return row;
+}
+
+/** Ligne d'un favori : titre, sous-titre, accès d'un lieu, créneau (« en tête le matin ») ; 1.2.10 : « Y aller ». */
+function favoriteRow(ctx: PhoneCtx, f: ShownFavorite, hub: MessageHub): HTMLLIElement {
   const title = favoriteRowTitle(f, ctx);
   const open = (): void => ctx.go(`#/favoris/${encodeURIComponent(f.id)}`);
   const propose = typo(PROPOSE_TEXT[f.propose]) || undefined;
-  if (f.kind === 'trip') return listRow({ icon: favIcon(f), title, sub: favoriteSubtitle(f), sub3: propose, label: `Modifier le trajet fixe ${title}`, onClick: open });
+  if (f.kind === 'trip') return withGo(ctx, hub, listRow({ icon: favIcon(f), title, sub: favoriteSubtitle(f), sub3: propose, label: `Modifier le trajet fixe ${title}`, onClick: open }), f, title);
   const row = listRow({ icon: favIcon(f), title, sub: favoriteSubtitle(f), sub2: ' ', sub3: propose, label: `Modifier ${title}`, onClick: open });
   const t3 = row.querySelector('.t3');
   if (t3) fillAccess(ctx, t3, f);
-  return row;
+  return withGo(ctx, hub, row, f, title);
 }
 
 export function favoritesScreen(ctx: PhoneCtx): HTMLElement {
   const list = h('ul', { class: 'list box' });
   const live = liveRegion();
+  const hub = messageHub();
   let ordering = false;
   const reorder = h('button', { type: 'button', class: 'btn btn-secondary btn-block' }, T.reorder);
   const add = h('button', { type: 'button', class: 'btn btn-primary btn-block', style: 'min-height:48px', onclick: () => ctx.go('#/favoris/nouveau') }, svgNode(ICON.plusWhite), h('span', null, T.addFav));
@@ -61,7 +78,7 @@ export function favoritesScreen(ctx: PhoneCtx): HTMLElement {
     list.classList.toggle('ordering', ordering);
     favorites.forEach((f, i) => {
       if (!ordering) {
-        list.appendChild(favoriteRow(ctx, f));
+        list.appendChild(favoriteRow(ctx, f, hub));
         return;
       }
       const title = favoriteRowTitle(f, ctx);

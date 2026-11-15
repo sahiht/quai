@@ -1,14 +1,17 @@
 /**
  * Réglages (#/reglages, 1.2.9, PRD-1.2.9 § 2.3) : tous les réglages qui ne sont pas sur l'accueil, derrière son bouton
  * « Réglages ». « Dans les lunettes » : Affichage (rayon, signe « ~ », pluie) et Alertes (avec le seuil du retard) ;
- * « Tes trajets » : « Marche maximale » et « Marge avant de partir » réglables sur place (les pas-à-pas de l'écran
- * Trajets), puis « Position et langue » ; « Quai » : Données ; en bas, les sources des horaires. Favoris, gares, arrêts
- * et lignes se règlent sur l'accueil. Affichage, Alertes, Données et Position et langue reviennent ici.
+ * 1.2.10 (PRD-1.2.10 § 4.1) : « Pendant un trajet » : « Me guider pendant un trajet », allumé par défaut, lu par les
+ * lunettes dès qu'il change (réglages partagés) ; « Tes trajets » : « Marche maximale » et « Marge avant de partir »
+ * réglables sur place (les pas-à-pas de l'écran Trajets), puis « Position et langue » ; « Quai » : Données ; en bas, les
+ * sources des horaires. Favoris, gares, arrêts et lignes se règlent sur l'accueil. Affichage, Alertes, Données et
+ * Position et langue reviennent ici.
  */
+import { guideOn } from '../../settings';
 import { header, type PhoneCtx } from '../app';
 import { h, icon } from '../dom';
 import { alertsSummary, displaySummary, LANG_TEXT, T, typo } from '../text';
-import { group, navRow } from '../ui';
+import { group, navRow, nextId, switchRow } from '../ui';
 import { ANSWER_REFRESH_MS } from './home';
 import { tripSteppers } from './trips';
 
@@ -22,6 +25,26 @@ export function dataSubtitle(ctx: PhoneCtx): string {
   if (rt === 'down') return T.rtDown;
   if (rt === 'offline') return typo(T.offline);
   return 'Tout est à jour';
+}
+
+/**
+ * 1.2.10 : interrupteur « Me guider pendant un trajet » et son aide (texte du PRD § 4.1). Enregistré tout de suite :
+ * les lunettes le suivent comme les autres réglages. Nom : le libellé ; l'aide le décrit (lecteurs d'écran).
+ */
+function guideSwitch(ctx: PhoneCtx): HTMLElement {
+  const row = switchRow({
+    label: T.guide,
+    sub: typo(T.guideHelp),
+    checked: guideOn(ctx.settings.get()),
+    onChange: (on) => void ctx.settings.update((x) => ({ ...x, display: { ...x.display, guide: on } })),
+  });
+  const id = nextId('guide');
+  row.querySelector('.c1')!.id = `${id}-nom`;
+  row.querySelector('.c2')!.id = `${id}-aide`;
+  const input = row.querySelector('input')!;
+  input.setAttribute('aria-labelledby', `${id}-nom`);
+  input.setAttribute('aria-describedby', `${id}-aide`);
+  return row;
 }
 
 export function settingsScreen(ctx: PhoneCtx): HTMLElement {
@@ -41,6 +64,7 @@ export function settingsScreen(ctx: PhoneCtx): HTMLElement {
         navRow({ href: '#/alertes', icon: icon('alert'), title: T.alerts, sub: alertsSummary(s.alerts) }),
       ),
     ),
+    group('rg-guidage', T.groupDuringTrip, h('div', { class: 'box' }, guideSwitch(ctx))),
     group(
       'rg-trajets',
       T.groupTrips,

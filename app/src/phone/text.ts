@@ -5,6 +5,7 @@
  */
 import type { Endpoint, FavoriteAnswer, Journey, LineMatch, LinePick, Mode, NameLang, Op, Place, PlanResult, Propose, Settings } from '../core/api';
 import { LABEL_TEXT } from '../core/api';
+import type { GuideStatus } from '../core/guide-types';
 import { favoriteTitle, placeOf } from '../core/favorites';
 import { displayLabel, HOLIDAY_TEXT, holidayName, longestWalk, meansText, rideName, walksMore } from '../core/means';
 import { NB, shortAddress } from '../core/text';
@@ -34,7 +35,6 @@ export const T = {
   where: 'Où vas-tu ?',
   /** 1.2.2 (revue d'usage n° 5) : plus de « lieu », un lieu est un favori depuis la 1.2. */
   wherePlaceholder: 'Adresse, gare, arrêt ou favori',
-  addrPlaceholder: 'Rue et numéro, commune',
   privacy: 'Adresses : services officiels des Régions bruxelloise, flamande et wallonne. Seul le texte tapé leur est envoyé, ta position reste sur le téléphone.',
   /** Quai Web, rubrique « Position » (PRD-1.2 § 3). */
   privacyWeb: 'Adresses : services officiels des Régions bruxelloise, flamande et wallonne. Seul le texte tapé leur est envoyé.',
@@ -66,7 +66,6 @@ export const T = {
   removeFavButton: 'Supprimer ce favori',
   stopMissing: 'Arrêt introuvable : choisis-le à nouveau',
   noFav: 'Aucun favori pour l’instant.',
-  manageFavs: 'Gérer mes favoris',
   myFavs: 'Mes favoris',
   addFav: 'Ajouter un favori',
   newFav: 'Nouveau favori',
@@ -102,51 +101,31 @@ export const T = {
   leaveAlertSub: 'à l’heure de départ conseillée',
   works: 'Travaux et déviations',
   worksSub: 'sur tes gares et tes lignes',
-  /** 1.2.2 (PRD-1.2.2 § 4) : gares et lignes choisies, sur l'accueil du téléphone et dans l'onglet Réglages de Quai Web. */
+  /** 1.2.2 (PRD-1.2.2 § 4) : nom de la liste des gares proposées à l'ajout (lecteurs d'écran). */
   stations: 'Gares',
-  lines: 'Bus, tram, métro',
   /** 1.2.6 (PRD-1.2.6 § 1) : les trois rubriques, chacune dit son mode. */
   stationsTitle: 'Gares de train',
   stopsTitle: 'Arrêts de bus, tram, métro',
   addStop: 'Ajouter un arrêt',
   noStop: 'Aucun arrêt pour l’instant.',
   addStation: 'Ajouter une gare',
-  /** 1.2.3 (PRD-1.2.3 § 3) : « Bus, tram, métro » reçoit une ligne (à un arrêt) ou un arrêt entier. */
-  addLine: 'Ajouter une ligne ou un arrêt',
   noStation: 'Aucune gare pour l’instant.',
-  noLine: 'Aucune ligne ni arrêt pour l’instant.',
-  /** 1.2.4 (PRD-1.2.4 § 2) : les deux blocs de « Bus, tram, métro », comme dans les lunettes. */
-  stopsGroup: 'Arrêts',
-  linesGroup: 'Lignes',
-  /** Ouverture d'office des départs à moins de 300 m (`near`, l'ancien créneau « près » d'un arrêt favori). */
-  pickNear: 'Ouvrir d’office à moins de 300 m',
   removePick: 'Retirer',
   stationExists: 'Déjà dans tes gares.',
-  lineExists: 'Déjà dans tes lignes.',
   /** 1.2.4 : un arrêt (toutes ses lignes) déjà gardé, comme le dit son retrait (« de tes arrêts »). */
   stopExists: 'Déjà dans tes arrêts.',
   /** Type à droite d'une proposition déjà choisie. */
   stationTaken: 'déjà dans tes gares',
   lineTaken: 'déjà dans tes lignes',
   stopTaken: 'déjà dans tes arrêts',
-  stationLead: 'Ses prochains trains s’afficheront dans les lunettes.',
   stationField: 'Nom de la gare',
   stationPlaceholder: 'Namur, Gand-Saint-Pierre…',
-  stationNearby: 'Les plus proches de ta position.',
   stationNone: 'Aucune gare ne correspond. Vérifie l’orthographe.',
-  lineLead: 'Toute la ligne s’affichera dans les lunettes, dans les deux sens, avec l’attente à chaque arrêt.',
-  /** 1.2.3 : les deux choix de l'ajout (comme « Nouveau favori ») et « Un arrêt », toutes ses lignes. */
-  kindsLegend: 'Une ligne ou un arrêt',
-  kindLine: 'Une ligne',
   /** 1.2.6 : section « Lignes de bus, tram, métro » de l'accueil. */
   followsTitle: 'Lignes de bus, tram, métro',
   addFollow: 'Ajouter une ligne',
   noFollows: 'Aucune ligne pour l’instant.',
   bothWays: 'les deux sens',
-  kindLineSub: 'numéro, les deux sens',
-  kindStop: 'Un arrêt',
-  kindStopSub: 'toutes ses lignes',
-  stopLead: 'Tous ses départs s’afficheront dans les lunettes.',
   stopField: 'Nom de l’arrêt',
   stopSearchPlaceholder: 'Rogier, Gare du Nord…',
   stopSearchNone: 'Aucun arrêt de bus, tram ou métro ne correspond. Pour une gare, ajoute-la à tes gares.',
@@ -155,12 +134,6 @@ export const T = {
   linePlaceholder: 'W, 36, 71…',
   lineNone: 'Aucune ligne de bus, tram ou métro ne porte ce numéro. Pour un train, ajoute sa gare à tes gares.',
   linesFound: 'Lignes trouvées',
-  whichStop: 'À quel arrêt ?',
-  stopFilter: 'Filtrer les arrêts',
-  stopPlaceholder: 'Nom de l’arrêt',
-  stopsLoading: 'Chargement des arrêts…',
-  stopNone: 'Aucun arrêt de cette ligne ne correspond.',
-  stopsNone: 'Aucun arrêt trouvé pour cette ligne.',
   chosenStop: 'arrêt choisi',
   changeLine: 'Changer de ligne',
   anotherLine: 'Ajouter une autre ligne',
@@ -191,7 +164,45 @@ export const T = {
   alerts: 'Alertes',
   data: 'Données',
   sources: 'Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company',
+  /** 1.2.10 (PRD-1.2.10 § 4.1) : le seul réglage du guidage, dans Réglages. */
+  groupDuringTrip: 'Pendant un trajet',
+  guide: 'Me guider pendant un trajet',
+  guideHelp: 'Les lunettes restent vides et t’écrivent seulement quand tu dois agir : partir, tourner, monter, descendre. Éteint : ton trajet est suivi sans rien afficher tout seul.',
+  /** 1.2.10 (PRD-1.2.10 § 4.2) : bouton d'un favori, et son message quand les lunettes n'en rendent pas. */
+  goThere: 'Y aller',
+  guideStarted: 'Guidage lancé sur les lunettes.',
+  followStarted: 'Trajet suivi dans les lunettes.',
+  /** 1.2.10 (PRD-1.2.10 § 4.3) : carte « En cours » de l'accueil ; « suivi » quand le guidage est éteint. */
+  nowTitle: 'En cours',
+  stopGuide: 'Arrêter le guidage',
+  stopFollow: 'Arrêter le suivi',
+  guideStopped: 'Guidage arrêté.',
+  followStopped: 'Suivi arrêté.',
+  /** 1.2.10 (PRD-1.2.10 § 4.4) : l'ouverture de Quai, sur son écran. */
+  opening: 'À l’ouverture de Quai',
+  openingLead: 'Ce que les lunettes montrent en premier.',
+  /** 1.2.10 (PRD-1.2.10 § 3.8 et § 4.5) : carte « Chemins à pied » de l'écran Données. */
+  walkTitle: 'Chemins à pied',
+  walkText: 'OpenStreetMap : les vrais chemins à pied, avec les escaliers, les parcs et les passages des gares. Le chemin se calcule sur ton téléphone : ta position n’est jamais envoyée.',
+  /** Quai Web : le chemin se calcule dans le navigateur. */
+  walkTextWeb: 'OpenStreetMap : les vrais chemins à pied, avec les escaliers, les parcs et les passages des gares. Le chemin se calcule dans ton navigateur : ta position n’est jamais envoyée.',
+  walkCredit: '© les contributeurs d’OpenStreetMap, licence ODbL',
 } as const;
+
+/** 1.2.10 : choix de « À l’ouverture de Quai » (libellés de la revue d'usage n° 11, mêmes valeurs enregistrées). */
+export const OPENING_LABEL: Record<Settings['display']['opening'], string> = {
+  suggest: 'L’accueil, avec mes favoris en tête',
+  firstFavorite: 'Directement mon premier favori',
+  home: 'L’accueil, sans favoris',
+};
+/** Ordre des choix de l'ouverture (celui de la 1.2.9). */
+export const OPENING_ORDER: readonly Settings['display']['opening'][] = ['suggest', 'firstFavorite', 'home'];
+
+/** 1.2.10 : carte « En cours » : « Bureau, arrivée 08:54 » (sans heure connue : le titre seul). */
+export const guideTitleLine = (s: Pick<GuideStatus, 'title' | 'arr'>): string => (Number.isFinite(s.arr) && s.arr > 0 ? `${s.title}, arrivée ${hhmm(s.arr)}` : s.title);
+/** 1.2.10 : « Maintenant : bus 6 vers Gare des Guillemins » (rien si le moteur ne dit rien). */
+export const guideNowLine = (s: Pick<GuideStatus, 'now'>): string => (s.now.trim() ? typo(`Maintenant : ${s.now.trim()}`) : '');
+
 
 /** Titre de la bannière « Nouveau » de l'accueil (1.2.9 : sur une ligne, les nouveautés dépliées à la demande). */
 export const newsTitle = (version: string): string => `Nouveau dans Quai ${version}`;
@@ -279,6 +290,26 @@ export const NEWS_129_WEB: readonly string[] = [
   NEWS_129[2],
 ];
 
+/**
+ * 1.2.10 (PRD-1.2.10 § 7) : nouveautés de la bannière, comme le message « Quai 1.2.10 » des lunettes (« Y aller »,
+ * « j'y descends », favoris sur une ligne), puis ce qui change sur le téléphone.
+ */
+export const NEWS_1210: readonly string[] = [
+  '« Y aller » : Quai te guide de porte à porte. L’écran des lunettes reste vide et t’écrit seulement quand tu dois agir : partir, tourner, monter, descendre.',
+  'Train ou bus déjà pris : dans la liste de ses arrêts, touche celui où tu descends, « j’y descends », et Quai te dit quand descendre.',
+  'Favoris des lunettes : une ligne chacun, le détail du favori choisi en bas de l’écran.',
+  'Sur l’accueil du téléphone : « Y aller » sur chaque favori et, pendant le trajet, la carte « En cours ». Le réglage « Me guider pendant un trajet » est derrière le bouton « Réglages ».',
+];
+
+/** 1.2.10 : les mêmes sur Quai Web, où la page du téléphone est l'onglet Réglages, et l'appui long de l'onglet Lunettes. */
+export const NEWS_1210_WEB: readonly string[] = [
+  NEWS_1210[0],
+  NEWS_1210[1],
+  NEWS_1210[2],
+  'Dans l’onglet Réglages : « Y aller » sur chaque favori et, pendant le trajet, la carte « En cours ». Le réglage « Me guider pendant un trajet » est derrière le bouton « Réglages ».',
+  'Dans l’onglet Lunettes, le bouton « Appui long » ouvre le menu du guidage : « Arrêter le guidage », « Voir tout le trajet ».',
+];
+
 /** 1.2.8 : nouveautés de la bannière (comme le message « Quai 1.2.8 » des lunettes). */
 export const NEWS_128: readonly string[] = [
   'Dans les lunettes, touche un train au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.',
@@ -289,12 +320,13 @@ export const NEWS_128: readonly string[] = [
 const stillTrue = (l: string): boolean => !/^Bus, tram, métro\b/.test(l);
 
 /**
- * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.9 ; depuis une version
+ * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.2.10 ; depuis une version
  * antérieure (`seen` : la version vue avant la mise à jour), celles des versions sautées ensuite, de la plus récente à
- * la plus ancienne, sans celles qui ne sont plus vraies.
+ * la plus ancienne, sans celles qui ne sont plus vraies. Quai Web (`web`) : ses propres lignes (onglet Réglages).
  */
 export function newsLines(seen = '', web = false): string[] {
-  const out = [...(web ? NEWS_129_WEB : NEWS_129)];
+  const out = [...(web ? NEWS_1210_WEB : NEWS_1210)];
+  if (seen && compareVersions(seen, '1.2.9') < 0) out.push(...(web ? NEWS_129_WEB : NEWS_129));
   if (seen && compareVersions(seen, '1.2.8') < 0) out.push(...NEWS_128);
   if (seen && compareVersions(seen, '1.2.6') < 0) out.push(...NEWS_126);
   if (seen && compareVersions(seen, '1.2.5') < 0) out.push(...NEWS_125.filter(stillTrue));
@@ -327,9 +359,8 @@ export const lineGoneText = (name: string): string => `${name} n’est plus dans
 /** 1.2.4 : un arrêt (toutes ses lignes) de « Bus, tram, métro ». */
 export const removeStopText = (name: string): string => `Retirer ${name} de tes arrêts ?`;
 export const stopGoneText = (name: string): string => `${name} n’est plus dans tes arrêts.`;
-/** « Ajouter une ligne » depuis un arrêt (?arret=…) : ses lignes en raccourcis, et une ligne qui n'y passe pas. */
+/** « Ajouter une ligne » depuis un arrêt (?arret=…) : ses lignes en raccourcis. */
 export const stopLinesText = (stop: string): string => (stop ? `Lignes à ${stop} :` : 'Lignes de cet arrêt :');
-export const notServedText = (stop: string): string => `Cette ligne ne passe pas à ${stop}.`;
 /** Rang annoncé après « Monter » ou « Descendre » : « Namur : 2e sur 3. » */
 export const rankText = (name: string, rank: number, total: number): string => `${name} : ${rank === 1 ? '1er' : `${rank}e`} sur ${total}.`;
 export const noStopText = (min: number): string => `Aucun arrêt à moins de ${min} min à pied de cette adresse.`;
@@ -481,11 +512,6 @@ export function sameEndpoint(a: Endpoint, b: Endpoint): boolean {
  */
 export function journeyTimes(j: Journey): { start: number; end: number } {
   return { start: journeyStart(j), end: j.arr };
-}
-
-/** Marche totale en minutes (départ, correspondances, arrivée). */
-export function walkMinutesOf(j: Journey): number {
-  return j.legs.filter((l) => l.kind === 'walk').reduce((s, l) => s + walkMinOf(l), 0);
 }
 
 /** « 07:33 → 08:56 », « demain 06:20 → 06:46 ». */
