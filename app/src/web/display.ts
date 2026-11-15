@@ -5,10 +5,17 @@
  * tombent exactement comme sur les G2. La forme des lettres vient d'une police du système, resserrée au
  * besoin pour tenir dans la largeur du caractère des lunettes. Le canvas est redessiné à la résolution de
  * l'écran (net à toutes les tailles).
+ *
+ * 1.2.10 (PRD-1.2.10 § 3.9) : conteneurs d'image du guidage, dessinés avec les pixels mêmes envoyés aux lunettes
+ * (glasses/images.ts, 16 niveaux de vert) : un pixel des lunettes = un pixel de l'image, agrandi sans lissage. Les
+ * images de la page sont aussi lisibles par les tests (attribut data-images du canvas) et décrites en mots
+ * (aria-description), comme les conteneurs texte.
  */
 import { getAdvW, getTextWidth } from '@evenrealities/pretext';
 import { LINE_H, SCREEN_H, SCREEN_W } from '../glasses/font';
-import type { Brightness, ContainerSpec } from '../glasses/types';
+import { describeImage, renderImage } from '../glasses/images';
+import { pageImages } from '../platform/page';
+import type { Brightness, ContainerSpec, ImageSpec } from '../glasses/types';
 
 /** Vert des lunettes. */
 export const GREEN = '#33ff66';
@@ -60,7 +67,7 @@ function wordsAt(c: ContainerSpec | undefined, line: string | undefined): { x: n
  * et pâles (« Bus W » et « Bruxelles Midi » dans la colonne a, « vers » dans la b, entremêlés) se lit dans l'ordre des
  * mots à l'écran : « Bus W vers Bruxelles Midi, 20 · ~37 min ».
  */
-export function describeContainers(cs: readonly ContainerSpec[]): string {
+export function describeContainers(cs: readonly ContainerSpec[], images: readonly PaintedImage[] = []): string {
   const box = (name: string) => cs.find((c) => c.name === name);
   const by = (name: string) => box(name)?.content.split('\n') ?? [];
   const clean = (t: string) => t.replace(/\s+/g, ' ').trim();
@@ -76,7 +83,99 @@ export function describeContainers(cs: readonly ContainerSpec[]): string {
     const row = cols.map((x) => clean(x ?? '')).filter(Boolean).join(', ');
     if (row) rows.push(cursor[i]?.trim() ? `sélection : ${row}` : row);
   }
-  return [clean(by('title').join(' ')), clean(by('clock').join(' ')), clean(by('top').join(' ')), ...rows, ...by('foot').map(clean)].filter(Boolean).join('. ');
+  const pics = images.filter((i) => i.pixels).map((i) => `image\u00a0: ${describeImage(i.spec.image)}`);
+  return [clean(by('title').join(' ')), clean(by('clock').join(' ')), clean(by('top').join(' ')), ...pics, ...rows, ...by('foot').map(clean)].filter(Boolean).join('. ');
+}
+
+/* ------------------------------ 1.2.10 : images ------------------------------ */
+
+/** Conteneur d'image de la page et ses pixels (null : créé, rien encore dessiné, comme sur les G2). */
+export interface PaintedImage {
+  spec: ImageSpec;
+  pixels: Uint8Array | null;
+}
+
+/** Composantes d'une couleur #rrggbb. */
+function rgbOf(color: string): [number, number, number] {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
+  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [0x33, 0xff, 0x66];
+}
+
+/**
+ * Pixels RGBA d'une image : le vert des lunettes, opacité niveau × 17 (15 → 255) ; sur le fond noir de l'écran, le
+ * niveau v donne v / 15 du vert, comme l'opacité des niveaux du texte.
+ */
+export function imageRGBA(pixels: Uint8Array, color = GREEN): Uint8ClampedArray {
+  const [r, g, b] = rgbOf(color);
+  const out = new Uint8ClampedArray(pixels.length * 4);
+  for (let i = 0; i < pixels.length; i++) {
+    out[i * 4] = r;
+    out[i * 4 + 1] = g;
+    out[i * 4 + 2] = b;
+    out[i * 4 + 3] = Math.min(15, pixels[i]) * 17;
+  }
+  return out;
+}
+
+/** Image prête pour drawImage (canvas hors écran), ou null hors d'un navigateur. */
+function surfaceOf(pixels: Uint8Array, w: number, h: number, color: string): CanvasImageSource | null {
+  try {
+    if (typeof document === 'undefined') return null;
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext('2d');
+    if (!ctx || typeof ctx.createImageData !== 'function') return null;
+    const data = ctx.createImageData(w, h);
+    data.data.set(imageRGBA(pixels, color));
+    ctx.putImageData(data, 0, 0);
+    return c;
+  } catch {
+    return null;
+  }
+}
+
+const surfaces = new WeakMap<Uint8Array, CanvasImageSource | null>();
+
+/**
+ * Dessine les images (coordonnées des lunettes) : chaque conteneur dessiné est opaque (une image des G2 n'a pas de
+ * transparence) ; pixel pour pixel par drawImage sans lissage, ou, sans canvas hors écran, par bandes horizontales.
+ */
+export function drawImages(ctx: Ctx2D & Partial<Pick<CanvasRenderingContext2D, 'drawImage' | 'imageSmoothingEnabled'>>, images: readonly PaintedImage[], color = GREEN): void {
+  for (const im of images) {
+    if (!im.pixels) continue;
+    const { x, y, w, h } = im.spec;
+    if (im.pixels.length !== w * h) continue;
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(x, y, w, h);
+    let surface = surfaces.get(im.pixels);
+    if (surface === undefined) {
+      surface = typeof ctx.drawImage === 'function' ? surfaceOf(im.pixels, w, h, color) : null;
+      surfaces.set(im.pixels, surface);
+    }
+    if (surface && typeof ctx.drawImage === 'function') {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(surface, x, y, w, h);
+    } else {
+      ctx.fillStyle = color;
+      for (let row = 0; row < h; row++) {
+        let col = 0;
+        while (col < w) {
+          const v = im.pixels[row * w + col];
+          let end = col + 1;
+          while (end < w && im.pixels[row * w + end] === v) end++;
+          if (v > 0) {
+            ctx.globalAlpha = Math.min(15, v) / 15;
+            ctx.fillRect(x + col, y + row, end - col, 1);
+          }
+          col = end;
+        }
+      }
+    }
+    ctx.restore();
+  }
 }
 
 type Ctx2D = Pick<
@@ -209,8 +308,11 @@ function drawLine(ctx: Ctx2D, line: string, x0: number, baseline: number): void 
   }
 }
 
-/** Dessine une page (coordonnées des lunettes : 576 × 288) : fond noir, texte vert, luminosité par conteneur. */
-export function drawContainers(ctx: Ctx2D, cs: readonly ContainerSpec[], color = GREEN): void {
+/**
+ * Dessine une page (coordonnées des lunettes : 576 × 288) : fond noir, texte vert, luminosité par conteneur ; 1.2.10 :
+ * puis les images dessinées de la page.
+ */
+export function drawContainers(ctx: Ctx2D & Partial<Pick<CanvasRenderingContext2D, 'drawImage' | 'imageSmoothingEnabled'>>, cs: readonly ContainerSpec[], color = GREEN, images: readonly PaintedImage[] = []): void {
   ctx.save();
   ctx.globalAlpha = 1;
   ctx.fillStyle = '#000';
@@ -227,19 +329,21 @@ export function drawContainers(ctx: Ctx2D, cs: readonly ContainerSpec[], color =
     c.content.split('\n').forEach((line, i) => drawLine(ctx, line, c.x, c.y + i * LINE_H + BASELINE));
     ctx.restore();
   }
+  drawImages(ctx, images, color);
   ctx.restore();
 }
 
 /** Canvas de l'écran des lunettes : garde la dernière page, la redessine à chaque changement de taille. */
 export class GlassesCanvas {
   private cs: ContainerSpec[] = [];
+  private imgs: PaintedImage[] = [];
   private frame = 0;
   private readonly observer: ResizeObserver | null;
 
   /** `watchWindow` : aussi redessiner au redimensionnement de la fenêtre (densité de pixels changée) ; faux pour les aperçus éphémères. */
   constructor(
     readonly canvas: HTMLCanvasElement,
-    private readonly onPaint?: (cs: readonly ContainerSpec[]) => void,
+    private readonly onPaint?: (cs: readonly ContainerSpec[], images: readonly PaintedImage[]) => void,
     watchWindow = true,
   ) {
     this.observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => this.schedule()) : null;
@@ -248,14 +352,50 @@ export class GlassesCanvas {
     if (watchWindow || !this.observer) window.addEventListener('resize', () => this.schedule());
   }
 
-  paint(cs: readonly ContainerSpec[]): void {
+  /**
+   * Conteneurs texte de la page. 1.2.10 : `images` donné (même vide) : nouvelle page, ses conteneurs d'image sont créés
+   * vides (start, rebuild) ; absent : seul le texte change (textContainerUpgrade), les images restent.
+   */
+  paint(cs: readonly ContainerSpec[], images?: readonly ImageSpec[]): void {
     this.cs = cs.map((c) => ({ ...c }));
-    this.onPaint?.(this.cs);
-    this.schedule();
+    // mêmes règles que l'appli Even : une image hors des limites du SDK n'existe pas non plus ici
+    if (images) this.imgs = pageImages(this.cs, images).map((spec) => ({ spec: { ...spec }, pixels: null }));
+    this.changed();
+  }
+
+  /**
+   * 1.2.10 : dessine une image dans son conteneur (même identifiant, nom et taille que dans la page), avec les pixels
+   * mêmes des lunettes. Faux si la page n'a pas ce conteneur.
+   */
+  paintImage(img: ImageSpec): boolean {
+    const i = this.imgs.findIndex((x) => x.spec.id === img.id && x.spec.name === img.name && x.spec.w === img.w && x.spec.h === img.h);
+    if (i < 0) return false;
+    this.imgs[i] = { spec: { ...img }, pixels: renderImage(img) };
+    this.changed();
+    return true;
   }
 
   get containers(): readonly ContainerSpec[] {
     return this.cs;
+  }
+
+  /** 1.2.10 : conteneurs d'image de la page et leurs pixels. */
+  get images(): readonly PaintedImage[] {
+    return this.imgs;
+  }
+
+  private changed(): void {
+    // images lisibles par les tests de bout en bout et décrites pour les lecteurs d'écran
+    const drawn = this.imgs.filter((i) => i.pixels);
+    try {
+      this.canvas.dataset.images = JSON.stringify(this.imgs.map((i) => ({ id: i.spec.id, name: i.spec.name, x: i.spec.x, y: i.spec.y, w: i.spec.w, h: i.spec.h, image: i.spec.image, drawn: !!i.pixels })));
+      if (drawn.length) this.canvas.setAttribute('aria-description', drawn.map((i) => describeImage(i.spec.image)).join(', '));
+      else this.canvas.removeAttribute('aria-description');
+    } catch {
+      /* canvas sans attributs (tests) */
+    }
+    this.onPaint?.(this.cs, this.imgs);
+    this.schedule();
   }
 
   private schedule(): void {
@@ -281,6 +421,6 @@ export class GlassesCanvas {
     const ctx = this.canvas.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(w / SCREEN_W, 0, 0, h / SCREEN_H, 0, 0);
-    drawContainers(ctx, this.cs);
+    drawContainers(ctx, this.cs, GREEN, this.imgs);
   }
 }
