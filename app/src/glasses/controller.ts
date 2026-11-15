@@ -123,6 +123,12 @@ import {
   type StopLine,
   type ViewCtx,
 } from './views';
+// 1.3.0 (équipe C2) : réponses des favoris (PRD-1.3.0 § 8), test de l'écran des lunettes (§ 6.1)
+import type { DisplayTestCmd, DisplayTestState } from '../core/api';
+import { NEAR_M } from '../core/favorites';
+import { walkMinOf } from './format';
+import { HeadUpLearner } from './headup';
+import { displayTestView } from './views';
 
 /** 1.2.10 : ce que le contrôleur donne au moteur (contrat de l'équipe A, lu sur la signature de guideStep). */
 type GuideInput = Parameters<typeof guideStep>[0];
@@ -228,8 +234,26 @@ const NOT_LEFT_M = 300;
 const NOT_LEFT_AFTER_MS = 3 * 60_000;
 /** Trajet suivi rafraîchi (temps réel) seulement quand son départ approche. */
 const TRIP_REFRESH_AHEAD_MS = 2 * 3_600_000;
-/** Réponses des favoris calculées 2 par 2, dans l'ordre affiché. */
-const ANSWER_POOL = 2;
+/**
+ * Réponses des favoris. 1.3.0 (PRD-1.3.0 § 8) : 3 calculs à la fois au plus (comme « Gares »), tous écrans confondus,
+ * dans l'ordre de l'écran affiché, ses favoris sans réponse d'abord.
+ */
+const ANSWER_POOL = 3;
+/**
+ * 1.3.0 (§ 8) : un calcul n'est plus abandonné au bout de 20 s (le cœur continuait, les demandes suivantes attendaient
+ * derrière lui et dépassaient à leur tour : « … » figés). Au bout de 60 s, sa place est rendue et un nouvel essai est
+ * permis ; sa réponse sert quand même si elle arrive.
+ */
+const ANSWER_LOST_MS = 60_000;
+/** 1.3.0 (§ 8) : calcul en erreur : nouvel essai au bout de 5 s, puis 15 s, puis 30 s. */
+const ANSWER_RETRY_MS = [5_000, 15_000, 30_000] as const;
+/** 1.3.0 (PRD-1.3.0 § 6.1) : test de l'écran : ne rien toucher 45 s, puis 15 s pour toucher la page envoyée. */
+export const TEST_WAIT_MS = 45_000;
+export const TEST_SENT_MS = 15_000;
+/** Question du téléphone restée sans réponse : le test s'arrête au bout de 2 min (capteur refermé). */
+export const TEST_ASK_MS = 120_000;
+/** Capteur de mouvement pendant le test : une mesure toutes les 100 ms. */
+export const TEST_IMU_MS = 100;
 /** Réponses des favoris qui ne sont pas à l'écran : recalculées au plus toutes les 5 min. */
 const WARM_MS = 5 * 60_000;
 
@@ -541,7 +565,22 @@ export class GlassesController implements GlassesApi {
   /** Dernières réponses des favoris (ordre intelligent, règle 5) et heure de leur calcul. */
   private answers = new Map<string, FavoriteAnswer>();
   private answerAt = new Map<string, number>();
+  /** 1.3.0 : favoris en file ou en calcul, et la fin de leur calcul (réussi ou non). */
   private answering = new Map<string, Promise<void>>();
+  /** 1.3.0 (PRD-1.3.0 § 8) : file des calculs (l'écran affiché devant, dans son ordre), calculs en cours, fin de chaque attente. */
+  private answerQueue: string[] = [];
+  private answerRunning = 0;
+  private answerDone = new Map<string, () => void>();
+  /** Numéro de chaque demande, et de la réponse montrée par favori : une réponse plus ancienne n'est jamais remise. */
+  private answerSeq = 0;
+  private answerShownSeq = new Map<string, number>();
+  /** Position ou réglages changés pendant un calcul : sa réponse sert en attendant d'être refaite. */
+  private answerEpoch = 0;
+  /** Erreurs de suite par favori (nouvel essai bientôt). */
+  private answerErrors = new Map<string, number>();
+  /** Prochaine réponse montrée qui deviendra « … » (premier véhicule parti) : recalculée à cet instant. */
+  private answerWake: ReturnType<typeof setTimeout> | undefined;
+  private answerWakeAt = Infinity;
   /** Ordre de l'accueil et de la liste, figés pendant l'affichage (M1.4). */
   private homeOrder: string[] | null = null;
   /** 1.2.1 : favoris de la règle 5 à l'entrée dans l'accueil (tu y es, rien dans les 3 heures), jamais montrés dessus. */
@@ -636,6 +675,18 @@ export class GlassesController implements GlassesApi {
     resend: (m, n) => this.remindResend(m, n),
     note: (e) => this.remindNote(e),
   });
+
+  /* ------------------------------ 1.3.0 : test de l'écran (PRD-1.3.0 § 6.1) ------------------------------ */
+
+  /** Test en cours (attente, page envoyée, question) ; null sinon. */
+  private dtest: DisplayTestRun | null = null;
+  /** Dernier état donné au téléphone, et ses abonnés. */
+  private dtestState: DisplayTestState = { step: 'idle' };
+  private dtestListeners = new Set<(s: DisplayTestState) => void>();
+  /** Le prochain rendu est une étape du test : pendant le test, rien d'autre ne part vers les lunettes. */
+  private dtestPaint = false;
+  /** Lunettes connectées (signal `device`) ; null : aucun signal encore. */
+  private linked: boolean | null = null;
 
   constructor(private d: ControllerDeps) {
     this.filter = new GestureFilter(d.web ? WEB_DEBOUNCE : DEBOUNCE);
@@ -903,6 +954,9 @@ export class GlassesController implements GlassesApi {
     // 1.3.0 (PRD-1.3.0 § 6.2) : rappels annulés, capteur de mouvement fermé (le journal reste ouvert : le guidage continue)
     this.reminder.end();
     if (this.saveTimer) this.saveFollowed();
+    // 1.3.0 : test de l'écran arrêté (capteur refermé) ; plus de recalcul des réponses des favoris
+    if (this.dtest) this.endDisplayTest({ step: 'idle' });
+    clearTimeout(this.answerWake);
   }
 
   /**
@@ -965,6 +1019,8 @@ export class GlassesController implements GlassesApi {
     if (this.stopped) return;
     // 1.3.0 (PRD-1.3.0 § 6.2 à 6.4) : capteur, batterie, premier plan et lunettes pour le rappel et le journal du guidage
     this.guideSignal(s);
+    // 1.3.0 (PRD-1.3.0 § 6.1) : test de l'écran (mesures du capteur, arrière-plan, connexion)
+    if (this.testSignal(s)) return;
     switch (s.kind) {
       case 'gesture':
         if (!this.filter.accept(s.gesture, performanceNow())) {
@@ -1017,6 +1073,8 @@ export class GlassesController implements GlassesApi {
   }
 
   onGesture(g: Gesture): void {
+    // 1.3.0 (PRD-1.3.0 § 6.1) : pendant le test de l'écran, les gestes sont à lui
+    if (this.dtest) return this.testGesture(g);
     const view = this.view;
     if (!view) return;
     // 1.2.10 (PRD-1.2.10 § 3.4) : sur l'écran du guidage, l'appui long ouvre le menu (Quai Web ; l'appli Even a son menu
@@ -1217,43 +1275,179 @@ export class GlassesController implements GlassesApi {
     return fav ? { fav, answer: this.answers.get(id) } : null;
   }
 
-  /** Réponses des favoris affichés, 2 à la fois, chacune affichée dès qu'elle arrive (M1.6). */
-  private refreshAnswers(ids: string[], force: boolean, maxAge = REFRESH_MS): Promise<void> {
+  /**
+   * Réponses des favoris `ids`, chacune affichée dès qu'elle arrive (M1.6). 1.3.0 (PRD-1.3.0 § 8) : une seule file pour
+   * tous les écrans, 3 calculs à la fois au plus ; l'écran affiché passe devant, dans son ordre, ses favoris sans réponse
+   * d'abord (`background` : en fin de file) ; jamais deux calculs du même favori ; « tu y es » sans calcul ; une réponse
+   * devenue « … » (premier véhicule parti) est recalculée. Rend la fin des calculs de ces favoris.
+   */
+  private refreshAnswers(ids: string[], force: boolean, maxAge = REFRESH_MS, background = false): Promise<void> {
     const now = this.d.clock.now();
-    const todo = ids.filter((id) => !this.answering.has(id) && (force || !this.answerAt.has(id) || now - (this.answerAt.get(id) ?? 0) >= maxAge));
-    if (!todo.length) return Promise.all(ids.map((id) => this.answering.get(id)).filter(Boolean)).then(() => undefined);
-    let i = 0;
-    const worker = async (): Promise<void> => {
-      while (i < todo.length) {
-        const id = todo[i++];
-        const job = this.answerOne(id);
-        this.answering.set(id, job);
-        await job;
+    let here = false;
+    const due: string[] = [];
+    for (const id of ids) {
+      if (this.answerHere(id)) {
+        here = true;
+        continue;
       }
-    };
-    return Promise.all(Array.from({ length: Math.min(ANSWER_POOL, todo.length) }, worker)).then(() => undefined);
+      if (this.answering.has(id)) continue;
+      const a = this.answers.get(id);
+      const at = this.answerAt.get(id);
+      if (force || !a || at === undefined || now - at >= maxAge || !answerShown(a, now)) due.push(id);
+      else this.wakeOutdated(a);
+    }
+    for (const id of due) {
+      let done = (): void => undefined;
+      this.answering.set(id, new Promise<void>((r) => (done = r)));
+      this.answerDone.set(id, done);
+    }
+    if (background) this.answerQueue.push(...due);
+    else {
+      const queued = new Set([...this.answerQueue, ...due]);
+      const mine = ids.filter((id) => queued.has(id));
+      const shown = (id: string): boolean => {
+        const a = this.answers.get(id);
+        return !!a && answerShown(a, now);
+      };
+      const first = [...mine.filter((id) => !shown(id)), ...mine.filter(shown)];
+      this.answerQueue = [...first, ...this.answerQueue.filter((id) => !first.includes(id))];
+    }
+    this.pumpAnswers();
+    if (here) this.renderAnswers();
+    return Promise.all(ids.map((id) => this.answering.get(id)).filter((p): p is Promise<void> => !!p)).then(() => undefined);
   }
 
+  /** 1.3.0 (§ 8) : lance les calculs de la file, 3 à la fois au plus. */
+  private pumpAnswers(): void {
+    while (!this.stopped && this.answerRunning < ANSWER_POOL && this.answerQueue.length) {
+      const id = this.answerQueue.shift()!;
+      this.answerRunning++;
+      void this.answerOne(id);
+    }
+  }
+
+  /**
+   * Calcul de la réponse d'un favori. 1.3.0 (§ 8) : sa place est rendue à la fin du calcul (réussi ou non) ou au bout de
+   * 60 s ; une réponse qui arrive plus tard sert quand même, sauf si une plus récente est déjà montrée.
+   */
   private async answerOne(id: string): Promise<void> {
+    const seq = ++this.answerSeq;
+    const epoch = this.answerEpoch;
+    let held = true;
+    const release = (): void => {
+      if (!held) return;
+      held = false;
+      this.answerRunning--;
+      this.answering.delete(id);
+      this.answerDone.get(id)?.();
+      this.answerDone.delete(id);
+      this.pumpAnswers();
+    };
+    const lost = setTimeout(release, ANSWER_LOST_MS);
+    let redo = false;
     try {
       const s = this.settings();
       const fav = s.favorites.find((f) => f.id === id);
-      if (!fav) return;
-      const a = await deadline(this.d.core.answer(fav, this.hereLL(), s), CORE_TIMEOUT_MS, `Pas de réseau${NB}: réessaie dans un instant.`);
-      this.setAnswer(a);
+      if (fav) {
+        const a = await this.d.core.answer(fav, this.hereLL(), s);
+        redo = this.takeAnswer(fav, a, seq, epoch);
+        this.answerErrors.delete(id);
+      }
     } catch (e) {
       console.warn('[Quai] réponse du favori', id, errText(e));
+      this.answerFailed(id);
     } finally {
-      this.answering.delete(id);
+      clearTimeout(lost);
+      release();
     }
+    if (redo) this.refreshShown();
+    this.renderAnswers();
+  }
+
+  /**
+   * 1.3.0 (§ 8) : réponse calculée, montrée sauf si une plus récente l'est déjà. Position ou réglages changés pendant le
+   * calcul : elle sert en attendant d'être refaite (vrai), jamais un « tu y es » qui ne correspond plus à la position.
+   */
+  private takeAnswer(fav: Favorite, a: FavoriteAnswer, seq: number, epoch: number): boolean {
+    if ((this.answerShownSeq.get(fav.id) ?? 0) > seq) return false;
+    const stale = epoch !== this.answerEpoch;
+    if (stale && this.atDestination(fav) !== (a.state === 'here')) return true;
+    this.setAnswer(a);
+    this.wakeOutdated(a);
+    if (stale) this.answerAt.delete(fav.id);
+    return stale;
+  }
+
+  /** 1.3.0 (§ 8) : destination fixe du favori à 300 m au plus de la position : « tu y es » (règle du cœur, NEAR_M). */
+  private atDestination(f: Favorite): boolean {
+    const here = this.hereLL();
+    if (!here || f.kind === 'stop') return false;
+    const to = asTrip(f).to;
+    const dest = to.type === 'here' ? null : endpointPoint(to, this.settings());
+    return !!dest && distanceM(here, dest) <= NEAR_M;
+  }
+
+  /** 1.3.0 (§ 8) : « tu y es » posé tout de suite, sans calcul ; vrai si le favori est là où l'on est. */
+  private answerHere(id: string): boolean {
+    const fav = this.settings().favorites.find((f) => f.id === id);
+    if (!fav || !this.atDestination(fav)) return false;
+    if (this.answers.get(id)?.state !== 'here') this.setAnswer({ favoriteId: id, kind: 'trip', state: 'here', plan: { journeys: [], empty: 'here' }, updatedAt: this.d.clock.now() });
+    return true;
+  }
+
+  /** 1.3.0 (§ 8) : « tu y es » d'une autre position (déplacement, lieu déplacé dans les réglages) : retiré. */
+  private dropFalseHere(): void {
+    for (const [id, a] of [...this.answers]) {
+      const f = a.state === 'here' ? this.settings().favorites.find((x) => x.id === id) : undefined;
+      if (f && !this.atDestination(f)) this.answers.delete(id);
+    }
+  }
+
+  /** 1.3.0 (§ 8) : calcul en erreur : nouvel essai bientôt (5 s, 15 s, puis 30 s), « … » jamais laissé sans calcul. */
+  private answerFailed(id: string): void {
+    const n = (this.answerErrors.get(id) ?? 0) + 1;
+    this.answerErrors.set(id, n);
+    this.answerAt.delete(id);
+    const ms = ANSWER_RETRY_MS[Math.min(n, ANSWER_RETRY_MS.length) - 1];
+    this.timers.push(setTimeout(() => this.refreshShown(), Math.max(50, this.d.clock.real(ms))));
+  }
+
+  /** 1.3.0 (§ 8) : réponses de l'écran affiché qui manquent ou sont dépassées (sans forcer les autres). */
+  private refreshShown(): void {
+    if (!this.ready || this.stopped || this.paused) return;
+    const r = current(this.nav).route;
+    if (r.screen === 'home') void this.refreshAnswers(this.homeShown(), false);
+    else if (r.screen === 'favorites') void this.refreshAnswers(this.listOrder ?? [], false);
+  }
+
+  /** Écran des réponses affiché : nouveau rendu. */
+  private renderAnswers(): void {
     const r = current(this.nav).route;
     if (this.ready && (r.screen === 'home' || r.screen === 'favorites')) void this.render();
+  }
+
+  /** 1.3.0 (§ 8) : une réponse montrée devient « … » quand son premier véhicule part : recalculée à cet instant. */
+  private wakeOutdated(a: FavoriteAnswer): void {
+    const at = outdatedAt(a);
+    if (!(at < this.answerWakeAt)) return;
+    clearTimeout(this.answerWake);
+    this.answerWakeAt = at;
+    this.answerWake = setTimeout(
+      () => {
+        this.answerWake = undefined;
+        this.answerWakeAt = Infinity;
+        this.refreshShown();
+      },
+      Math.max(50, this.d.clock.real(at - this.d.clock.now())),
+    );
   }
 
   /** Enregistre une réponse ; zone d'un arrêt favori retrouvée ailleurs (M8.3) : le favori est mis à jour. */
   private setAnswer(a: FavoriteAnswer): void {
     this.answers.set(a.favoriteId, a);
     this.answerAt.set(a.favoriteId, this.d.clock.now());
+    // 1.3.0 (§ 8) : la plus récente réponse montrée ; un calcul plus ancien qui finit après ne la remplace pas
+    this.answerShownSeq.set(a.favoriteId, ++this.answerSeq);
     const m = a.movedTo;
     if (m) {
       void this.d.settings.update((x) => ({
@@ -1273,7 +1467,7 @@ export class GlassesController implements GlassesApi {
     const p = Promise.all([this.refreshAnswers(shown, force), this.refreshNearby(force)]).then(() => undefined);
     void p.then(() => {
       const others = this.settings().favorites.map((f) => f.id).filter((id) => !shown.includes(id));
-      return this.refreshAnswers(others, false, WARM_MS);
+      return this.refreshAnswers(others, false, WARM_MS, true);
     });
     return p;
   }
@@ -1732,10 +1926,19 @@ export class GlassesController implements GlassesApi {
   /**
    * ▼ au bout des étapes (PRD-1.2.1 § 3.1 à 3.4) : la page « Autres trajets », jamais un autre trajet directement ;
    * au bout d'une proposition ouverte depuis la liste, retour à la liste. ▲ en haut, ou ▼ sans autre proposition :
-   * rien (la ligne du bas dit « Fin du trajet. Pas d'autre trajet pour l'instant »).
+   * rien (la ligne du bas dit « Fin du trajet. Pas d'autre trajet pour l'instant »). 1.3.0 (PRD-1.3.0 § 2) : ▲ sur la
+   * première rangée de « Autres trajets » (vue `edgeUp`) : retour au trajet proposé d'en dessous, là où il était (sa
+   * dernière page, « Fin du trajet »).
    */
   private stepsEdge(dir: 'up' | 'down'): void {
     const r = current(this.nav).route;
+    if (r.screen === 'others' && dir === 'up') {
+      if (this.nav.stack[this.nav.stack.length - 2]?.route.screen !== 'steps') return;
+      this.clearToast();
+      this.nav = pop(this.nav);
+      void this.onRouteChanged();
+      return;
+    }
     if (r.screen !== 'steps' || dir !== 'down') return;
     const list = routeJourneys(r);
     if (!list?.length) return;
@@ -2100,6 +2303,184 @@ export class GlassesController implements GlassesApi {
     };
   }
 
+  /* ------------------------------ 1.3.0 : test de l'écran des lunettes (PRD-1.3.0 § 6.1) ------------------------------ */
+
+  /**
+   * Test de l'écran, mené par le téléphone (Réglages, « Pendant un trajet ») : `start` (Quai au premier plan des lunettes
+   * et lunettes connectées, sinon `error: 'closed'` ; Quai Web : pas de test), `answer` (réponse à la question de
+   * l'étape ask), `cancel` (à tout moment). Rend l'état qui en résulte.
+   */
+  async displayTest(cmd: DisplayTestCmd): Promise<DisplayTestState> {
+    if (cmd.kind === 'start') return this.startDisplayTest();
+    if (cmd.kind === 'cancel') return this.dtest ? this.endDisplayTest({ step: 'idle' }) : this.setTestState({ step: 'idle' });
+    const t = this.dtest;
+    if (!t || t.step !== 'ask') return this.dtestState;
+    // « Le test de Quai » : visible en levant la tête ; « Le Dashboard » ; « Rien » : pas de résultat
+    const result = cmd.answer === 'quai' ? 'headUp' : cmd.answer === 'dashboard' ? 'dashboard' : undefined;
+    return this.finishDisplayTest(result, result ? t.learner.result() : null);
+  }
+
+  /** Abonnement du téléphone à l'état du test : chaque étape, et les secondes restantes chaque seconde. */
+  onDisplayTest(cb: (s: DisplayTestState) => void): () => void {
+    this.dtestListeners.add(cb);
+    return () => {
+      this.dtestListeners.delete(cb);
+    };
+  }
+
+  /**
+   * Étape wait : l'écran du test en page entière (« Ne touche à rien »), 45 s, et le capteur de mouvement ouvert (100 ms)
+   * pour la position de repos (refusé ou absent : le test se fait sans apprendre le mouvement).
+   */
+  private async startDisplayTest(): Promise<DisplayTestState> {
+    if (this.d.web) return this.setTestState({ step: 'idle' });
+    if (this.dtest) return this.dtestState;
+    if (this.stopped || !this.ready || this.paused || this.linked === false) return this.setTestState({ step: 'idle', error: 'closed' });
+    // le test et le guidage ne vont jamais ensemble (un seul capteur de mouvement)
+    if (this.trip?.guide) return this.setTestState({ step: 'idle', error: 'guiding' });
+    const run: DisplayTestRun = { step: 'wait', until: this.d.clock.now() + TEST_WAIT_MS, learner: new HeadUpLearner(), imu: false };
+    this.dtest = run;
+    run.timer = setTimeout(() => void this.testStep(run, 'sent'), this.d.clock.real(TEST_WAIT_MS));
+    run.tick = setInterval(() => this.testTick(run), Math.max(100, this.d.clock.real(1_000)));
+    this.setTestState({ step: 'wait', left: TEST_WAIT_MS / 1_000 });
+    await this.paintTest(true);
+    if (this.dtest !== run) return this.dtestState;
+    run.imu = true;
+    await this.testImu(true);
+    // test arrêté pendant l'ouverture du capteur : refermé encore une fois, après l'ouverture
+    if (this.dtest !== run) void this.testImu(false);
+    return this.dtestState;
+  }
+
+  /** Étape suivante : sent (nouvelle page entière, 15 s pour la toucher), puis ask (question du téléphone, 2 min au plus). */
+  private async testStep(run: DisplayTestRun, step: 'sent' | 'ask'): Promise<void> {
+    if (this.dtest !== run) return;
+    clearTimeout(run.timer);
+    run.step = step;
+    if (step === 'sent') {
+      run.until = this.d.clock.now() + TEST_SENT_MS;
+      run.timer = setTimeout(() => void this.testStep(run, 'ask'), this.d.clock.real(TEST_SENT_MS));
+      this.setTestState({ step: 'sent', left: TEST_SENT_MS / 1_000 });
+    } else {
+      clearInterval(run.tick);
+      run.tick = undefined;
+      run.timer = setTimeout(() => {
+        if (this.dtest === run) this.endDisplayTest({ step: 'idle' });
+      }, this.d.clock.real(TEST_ASK_MS));
+      this.setTestState({ step: 'ask' });
+    }
+    // sent : page entière (rebuild), comme un message du guidage ; ask : « Réponds sur le téléphone »
+    await this.paintTest(step === 'sent');
+  }
+
+  /** Secondes restantes de l'étape (wait, sent), pour le compte à rebours du téléphone. */
+  private testTick(run: DisplayTestRun): void {
+    if (this.dtest !== run || run.step === 'ask') return;
+    const left = Math.max(0, Math.ceil((run.until - this.d.clock.now()) / 1_000));
+    if (left !== this.dtestState.left) this.setTestState({ step: run.step, left });
+  }
+
+  /**
+   * Geste pendant le test : un toucher (ou un double toucher) sur la page envoyée = résultat visible, fin du test ;
+   * pendant l'attente et la question, rien ne compte (le test reste à son étape).
+   */
+  private testGesture(g: Gesture): void {
+    if (this.dtest?.step === 'sent' && (g === 'tap' || g === 'double')) {
+      void this.finishDisplayTest('visible', null);
+      return;
+    }
+    this.log(`QUAI_GESTURE ${g} sans effet sur displayTest`);
+  }
+
+  /**
+   * Signaux pendant le test (vrai : consommé). Mesures du capteur : le repos pendant l'attente, le mouvement pendant la
+   * question (jamais de rendu ni de journal par mesure). Arrière-plan ou lunettes déconnectées (`connected` qui passe à
+   * faux : un signal de batterie seule ne compte pas) : pendant l'attente ou la page envoyée, le test s'arrête (`closed`) ;
+   * pendant la question, le capteur se ferme et la question reste ; au retour, l'écran du test et le capteur reviennent.
+   */
+  private testSignal(s: HubSignal): boolean {
+    const was = this.linked;
+    if (s.kind === 'device') this.linked = s.connected;
+    const t = this.dtest;
+    if (!t) return false;
+    if (s.kind === 'imu') {
+      if (t.step === 'wait') t.learner.rest(s);
+      else if (t.step === 'ask' && t.imu) t.learner.move(s);
+      return true;
+    }
+    const lost = s.kind === 'background' || (s.kind === 'device' && was !== false && !s.connected);
+    const back = s.kind === 'foreground' || (s.kind === 'device' && was === false && s.connected);
+    if (lost && t.step !== 'ask') this.endDisplayTest({ step: 'idle', error: 'closed' });
+    else if (lost) {
+      t.imu = false;
+      void this.testImu(false);
+    } else if (back && t.step === 'ask') {
+      this.dtestPaint = true;
+      t.imu = true;
+      void this.testImu(true);
+    }
+    return false;
+  }
+
+  /** Fin du test avec un résultat (« Rien » : aucun) : enregistré dans les réglages (headUp seulement s'il est appris). */
+  private async finishDisplayTest(result: 'visible' | 'headUp' | 'dashboard' | undefined, move: Settings['display']['headUp'] | null): Promise<DisplayTestState> {
+    this.closeDisplayTest();
+    if (result) {
+      try {
+        await this.d.settings.update((x) => ({ ...x, display: { ...x.display, alert: result, ...(move ? { headUp: move } : {}) } }));
+      } catch (e) {
+        console.warn('[Quai] résultat du test de l’écran non enregistré', errText(e));
+      }
+    }
+    return this.setTestState({ step: 'done', ...(result ? { result } : {}), learned: !!(result && move) });
+  }
+
+  private endDisplayTest(s: DisplayTestState): DisplayTestState {
+    this.closeDisplayTest();
+    return this.setTestState(s);
+  }
+
+  /** Test fini ou arrêté : minuteries arrêtées, capteur refermé (toujours : sans frais s'il l'est déjà), l'écran d'avant. */
+  private closeDisplayTest(): void {
+    const t = this.dtest;
+    if (!t) return;
+    this.dtest = null;
+    clearTimeout(t.timer);
+    clearInterval(t.tick);
+    void this.testImu(false);
+    void this.render(true);
+  }
+
+  /** Capteur de mouvement des lunettes ouvert (une mesure toutes les 100 ms) ou fermé ; faux : refusé ou absent. */
+  private async testImu(on: boolean): Promise<boolean> {
+    const port = this.d.platform.glasses;
+    if (!port.imu) return false;
+    try {
+      return await (on ? port.imu(true, TEST_IMU_MS) : port.imu(false));
+    } catch (e) {
+      console.warn('[Quai] capteur de mouvement', errText(e));
+      return false;
+    }
+  }
+
+  /** Rendu d'une étape du test : le seul qui part vers les lunettes pendant le test. */
+  private paintTest(force: boolean): Promise<void> {
+    this.dtestPaint = true;
+    return this.render(force);
+  }
+
+  private setTestState(s: DisplayTestState): DisplayTestState {
+    this.dtestState = s;
+    for (const cb of [...this.dtestListeners]) {
+      try {
+        cb(s);
+      } catch (e) {
+        console.warn('[Quai] test de l’écran', errText(e));
+      }
+    }
+    return s;
+  }
+
   /* ------------------------------ 1.2.10 : guidage « Y aller » (PRD-1.2.10 § 3) ------------------------------ */
 
   /** Réglage « Me guider pendant un trajet » (absent : allumé). */
@@ -2138,6 +2519,8 @@ export class GlassesController implements GlassesApi {
    * remplace le précédent. Réglage allumé : « Où tu en es » d'abord (15 s).
    */
   private startGuide(kind: GuideKind, j: Journey, s: TripSession, beyond?: Stopover[]): void {
+    // 1.3.0 (PRD-1.3.0 § 6.1, équipe C2) : un guidage qui démarre arrête d'abord le test de l'écran (capteur refermé)
+    if (this.dtest) this.endDisplayTest({ step: 'idle', error: 'guiding' });
     this.resetGuideRun();
     if (this.guideOn()) this.showWhere(WHERE_LAUNCH_MS);
     this.follow(j, s, kind, beyond);
@@ -2930,6 +3313,9 @@ export class GlassesController implements GlassesApi {
     // Les réponses dépendent des favoris et des réglages (filtres, marche maximale) : à recalculer.
     this.answerAt.clear();
     for (const id of [...this.answers.keys()]) if (!s.favorites.some((f) => f.id === id)) this.answers.delete(id);
+    // 1.3.0 (PRD-1.3.0 § 8) : calculs en cours refaits avec ces réglages ; un lieu déplacé n'est plus « tu y es »
+    this.answerEpoch++;
+    this.dropFalseHere();
     // Les données dépendent du nombre de départs, du rayon, des favoris : on recharge. Les écrans de la pile gardent
     // leurs données pendant le rechargement (pas d'écran d'attente : 1.2.2, les départs sous « garder une ligne »),
     // les autres sont oubliés.
@@ -3011,6 +3397,8 @@ export class GlassesController implements GlassesApi {
     if (!this.ready) return;
     const r = current(this.nav).route;
     if (r.screen === 'home') void this.refreshHome(true);
+    // 1.3.0 (PRD-1.3.0 § 8) : « Favoris » suit aussi la position choisie (Quai Web) : « tu y es » tout de suite
+    else if (r.screen === 'favorites') void this.refreshList(false);
     if (r.screen === 'home' || USES_POSITION.has(r.screen)) await this.render();
   }
 
@@ -3019,6 +3407,10 @@ export class GlassesController implements GlassesApi {
     for (const k of [...this.cache.keys()]) if (USES_POSITION.has(k.split(':')[0])) this.cache.delete(k);
     this.nearbyLight = null;
     this.answerAt.clear();
+    // 1.3.0 (PRD-1.3.0 § 8) : calculs en cours refaits pour la nouvelle position (leur réponse sert en attendant) ;
+    // « tu y es » suit la position
+    this.answerEpoch++;
+    this.dropFalseHere();
     // 1.2.2 : adresses récentes (trajets depuis la position) à recalculer ; la réponse montrée reste en attendant.
     for (const [k, v] of this.recents) this.recents.set(k, { ...v, at: 0 });
   }
@@ -3046,7 +3438,7 @@ export class GlassesController implements GlassesApi {
     if (f.route.screen === 'home') {
       if (resumed && f.fresh) this.freezeHome();
       void this.refreshHome(false);
-    }
+    } else if (f.route.screen === 'favorites') void this.refreshList(false); // 1.3.0 (§ 8)
     if (f.route.screen === 'home' || USES_POSITION.has(f.route.screen)) await this.render();
   }
 
@@ -3479,6 +3871,8 @@ export class GlassesController implements GlassesApi {
 
   /** Vue de l'écran courant ; lance le chargement si besoin. */
   buildView(): GlassesView {
+    // 1.3.0 (PRD-1.3.0 § 6.1) : l'écran du test par-dessus l'écran courant, qui revient tel quel à la fin
+    if (this.dtest) return displayTestView(this.ctx(), this.dtest.step);
     this.fixGuideRoute();
     this.syncEntry();
     const f = current(this.nav);
@@ -3619,6 +4013,10 @@ export class GlassesController implements GlassesApi {
    */
   async render(force = false): Promise<void> {
     if (this.stopped) return;
+    // 1.3.0 (PRD-1.3.0 § 6.1) : pendant le test de l'écran, rien d'autre que ses étapes ne part vers les lunettes (pas
+    // même l'heure du titre) : un envoi pourrait rallumer l'écran et fausser le test
+    if (this.dtest && !this.dtestPaint) return;
+    this.dtestPaint = false;
     if (force) this.forceNext = true;
     if (this.paused) return;
     if (this.rendering) {
@@ -3863,6 +4261,21 @@ function alreadyText(title: string): string {
   return `Tu es déjà ${atTitle(title)}.`;
 }
 
+/**
+ * 1.3.0 (PRD-1.3.0 § 8) : instant où la réponse montrée d'un favori devient « … » (son premier véhicule est parti,
+ * comme catchable de format.ts) ; Infinity si elle ne le devient jamais (« tu y es », à pied, arrêt favori…).
+ */
+function outdatedAt(a: FavoriteAnswer): number {
+  const j = a.kind === 'trip' && a.state === 'ok' ? a.plan?.journeys[0] : undefined;
+  const k = j ? j.legs.findIndex(isRide) : -1;
+  if (!j || k < 0) return Infinity;
+  const walk = j.legs.slice(0, k).reduce((s, l) => s + (l.kind === 'walk' ? walkMinOf(l) : 0), 0);
+  return j.legs[k].dep - walk * 60_000 + 30_001;
+}
+
+/** 1.3.0 (§ 8) : la réponse montre autre chose que « … » (tripHomeText). */
+const answerShown = (a: FavoriteAnswer, now: number): boolean => now < outdatedAt(a);
+
 /** Départ du trajet suivi (pour savoir quand le rafraîchir). */
 function journeyStartMs(t: FollowedTrip): number {
   return Math.min(t.leaveAt0, t.journey.leaveAt);
@@ -3875,6 +4288,12 @@ function journeyStartMs(t: FollowedTrip): number {
 function guideTitle(t: Pick<FollowedTrip, 'title'>, kind: GuideKind): string {
   return kind === 'ride' ? t.title : tripName(t.title);
 }
+
+/**
+ * 1.3.0 (PRD-1.3.0 § 6.1) : test de l'écran en cours : étape, fin de l'étape (wait, sent), apprentissage du mouvement,
+ * capteur demandé (à refermer), minuteries.
+ */
+type DisplayTestRun = { step: 'wait' | 'sent' | 'ask'; until: number; learner: HeadUpLearner; imu: boolean; timer?: ReturnType<typeof setTimeout>; tick?: ReturnType<typeof setInterval> };
 
 /** Session d'un trajet suivi : propositions, titre, extrémités, favori. */
 type TripSession = { key: string; title: string; journeys: Journey[]; from?: Endpoint; to?: Endpoint; favoriteId?: string };
