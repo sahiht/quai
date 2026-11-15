@@ -52,9 +52,10 @@ describe('PRD-1.2.10 § 3.1 : « y aller » sur l’écran du trajet', () => {
     expect(t.journeys.map((j) => j.id)).toEqual(['j-bureau', 'j-bureau-2']);
     expect(h.c.state.nav.stack.map((f) => f.route.screen)).toEqual(['home', 'guide']);
     expect(h.last()).toMatchObject({ screen: 'guide', show: 'where' });
-    // le moteur reçoit le trajet, son titre, le genre, l'heure du lancement, la position de départ et les réglages
+    // le moteur reçoit le trajet, son nom (titre de l'écran du guidage), le genre, l'heure du lancement, la position de
+    // départ et les réglages
     const input = engine.last().input;
-    expect(input).toMatchObject({ kind: 'trip', title: 'Vers le bureau', journey: { id: 'j-bureau' } });
+    expect(input).toMatchObject({ kind: 'trip', title: 'Bureau', journey: { id: 'j-bureau' } });
     expect(input.startedAt).toBeGreaterThanOrEqual(NOW);
     expect(input.origin).toBeDefined();
     expect(input.settings.v).toBe(4);

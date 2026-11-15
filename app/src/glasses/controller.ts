@@ -62,12 +62,12 @@ import { deadline } from '../platform/queue';
 import type { Fix, PageExtra, Platform } from '../platform/types';
 import { LIMITS, newId, type SettingsStore } from '../settings';
 import { APP_VERSION, compareVersions } from '../version';
-import { BOARD, HINTS, NB, SECTION, atTitle, catchable, lowerFirst, planHomeText, runningNext, shownMessage, towards, tripShort, upcoming, vehicleLong } from './format';
+import { BOARD, HINTS, NB, SECTION, atTitle, catchable, lowerFirst, planHomeText, runningNext, shownMessage, towards, tripName, tripShort, upcoming, vehicleLong } from './format';
 import { DEBOUNCE, GestureFilter, type HubSignal } from './gestures';
 import { GUIDE_MENU, guideView, menuView, type GuideShow } from './guide-views';
-import { geometry, layoutPage, shapeKey } from './layout';
+import { geometry, layoutPage } from './layout';
 import { anchorIndex, current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replace, replaceAt, reset, setSelection, type Gesture, type NavFrame, type NavState } from './nav';
-import { MENU_IDS, type AreaRef, type GlassesView, type Intent, type Item, type KeepLineRoute, type LineRoute, type MenuItem, type OthersRoute, type PageSpec, type Route, type StepsRoute, type StopsRoute } from './types';
+import { MENU_IDS, type AreaRef, type ContainerSpec, type GlassesView, type Intent, type Item, type KeepLineRoute, type LineRoute, type MenuItem, type OthersRoute, type PageSpec, type Route, type StepsRoute, type StopsRoute } from './types';
 import { completeFollow, isFollowed, matchFollow, sameFollow, type LineFollow, type LineRun } from '../core/linerun';
 import {
   alreadyThereView,
@@ -984,6 +984,13 @@ export class GlassesController implements GlassesApi {
         await this.goTo(i.key, i.to, i.label);
         return;
       case 'resume': {
+        // 1.2.10 : depuis l'écran du trajet d'un trajet guidé (ouvert par-dessus l'écran du guidage) : retour à celui-ci
+        const g = this.guideShown() ? this.nav.stack.findIndex((f) => f.route.screen === 'guide') : -1;
+        if (g >= 0) {
+          this.nav = { stack: this.nav.stack.slice(0, g + 1) };
+          await this.onRouteChanged();
+          return;
+        }
         const nav = this.resumeNav(this.nav, false);
         if (nav) {
           this.nav = nav;
@@ -1982,12 +1989,12 @@ export class GlassesController implements GlassesApi {
     const guided = !!t.guide && this.guideOn();
     if (st) {
       try {
-        return guideStatusOf(st, j, t.title, guided, this.settings().lang);
+        return guideStatusOf(st, j, guideTitle(t, t.guide?.kind ?? 'trip'), guided, this.settings().lang);
       } catch (e) {
         console.warn('[Quai] carte « En cours »', errText(e));
       }
     }
-    return { kind: t.guide?.kind ?? 'trip', title: t.title, arr: j.arr, now: '', guided };
+    return { kind: t.guide?.kind ?? 'trip', title: guideTitle(t, t.guide?.kind ?? 'trip'), arr: j.arr, now: '', guided };
   }
 
   /** 1.2.10 : la carte « En cours » du téléphone, prévenue à chaque changement de l'état du guidage. */
@@ -2272,7 +2279,7 @@ export class GlassesController implements GlassesApi {
     return {
       kind: g.kind,
       journey: j,
-      title: t.title,
+      title: guideTitle(t, g.kind),
       now,
       fixes: [...this.fixes],
       settings: this.settings(),
@@ -2658,8 +2665,8 @@ export class GlassesController implements GlassesApi {
     const ctx: GuideCtx = { now: this.d.clock.now(), settings: this.settings() };
     if (f && !f.ok) ctx.stale = f.message || `Horaires périmés${NB}: mise à jour de nuit en panne`;
     if (this.d.web) ctx.web = true;
-    // 1.2.10 : le trajet guidé (son écran du trajet n'a plus « toucher : y aller »)
-    if (this.trip?.guide) ctx.guidedJourneyId = this.trip.journey.id;
+    // 1.2.10 : le trajet guidé, ou le trajet suivi quand le guidage est éteint (son écran du trajet n'a plus « y aller »)
+    if (this.trip && (this.trip.guide || !this.guideOn())) ctx.guidedJourneyId = this.trip.journey.id;
     if (this.meta) {
       try {
         ctx.rt = this.d.core.status().rt;
@@ -3543,6 +3550,14 @@ function journeyStartMs(t: FollowedTrip): number {
   return Math.min(t.leaveAt0, t.journey.leaveAt);
 }
 
+/**
+ * 1.2.10 (PRD-1.2.10 § 3.2, § 5) : titre du guidage (écran du guidage, carte « En cours » du téléphone) : le nom du trajet
+ * (« Bureau » pour « Vers le bureau ») ; « j'y descends » : « Vers Bruxelles-Central ».
+ */
+function guideTitle(t: Pick<FollowedTrip, 'title'>, kind: GuideKind): string {
+  return kind === 'ride' ? t.title : tripName(t.title);
+}
+
 /** Session d'un trajet suivi : propositions, titre, extrémités, favori. */
 type TripSession = { key: string; title: string; journeys: Journey[]; from?: Endpoint; to?: Endpoint; favoriteId?: string };
 
@@ -3583,12 +3598,19 @@ function pageExtra(p: PageSpec): PageExtra | undefined {
 }
 
 /**
- * 1.2.10 : forme d'une page : ses conteneurs de texte, ses conteneurs d'image (place, taille ; pas leur dessin : une autre
- * image dans le même conteneur se dessine sans reconstruire) et son menu système.
+ * 1.2.10 : forme d'une page, qui oblige à la reconstruire quand elle change : ses conteneurs de texte (place, taille,
+ * filet), ses conteneurs d'image (place, taille ; pas leur dessin : une autre image dans le même conteneur se dessine
+ * sans reconstruire, consigne de l'intégration) et son menu système. Comme shapeKey (layout.ts), le dessin des images en
+ * moins.
  */
 function pageShape(p: PageSpec): string {
-  const imgs = (p.images ?? []).map((i) => `${i.id}:${i.name}:${i.x},${i.y},${i.w},${i.h}`).join('|');
-  return `${shapeKey(p)}#${imgs}#${JSON.stringify(p.menu ?? [])}`;
+  const cs = p.containers.map((c) => {
+    const b = (c as ContainerSpec & { border?: { width: number; level: number } }).border;
+    return `${c.id}:${c.x},${c.y},${c.w},${c.h}${b ? `/b${b.width}:${b.level}` : ''}`;
+  });
+  const imgs = (p.images ?? []).map((i) => `i${i.id}:${i.name}:${i.x},${i.y},${i.w},${i.h}`);
+  const menu = p.menu?.length ? [`m:${p.menu.map((m) => `${m.id}=${m.label}`).join(',')}`] : [];
+  return [...cs, ...imgs, ...menu].join('|');
 }
 
 /** 1.2.10 : un point connu (ni absent, ni 0,0 : arrêt sans coordonnées dans les arrêts d'un départ). */

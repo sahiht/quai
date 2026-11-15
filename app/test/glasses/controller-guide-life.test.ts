@@ -275,7 +275,7 @@ describe('PRD-1.2.10 § 3.7 : persistance et reprise', () => {
     // ouverture : le trajet en cours, à l'écran de l'heure (dans le bus : « Dans le train »)
     expect(screensOf(h)).toEqual(['home', 'steps', 'train']);
     expect(h.watches).toHaveLength(0);
-    expect(h.c.guideStatus()).toMatchObject({ kind: 'trip', title: 'Vers le bureau', guided: false });
+    expect(h.c.guideStatus()).toMatchObject({ kind: 'trip', title: 'Bureau', guided: false });
   });
 
   it('guidage illisible : le trajet reste suivi sans guidage ; mémoire illisible : neuve ; chemin illisible : écarté', () => {
@@ -307,7 +307,7 @@ describe('PRD-1.2.10 § 4.3 : carte « En cours » du téléphone', () => {
     out = { phase: { kind: 'walk', leg: 0 } };
     await h.c.goFavorite('fav-bureau');
     await h.settle();
-    expect(h.c.guideStatus()).toEqual({ kind: 'trip', title: 'Vers le bureau', arr: NOW + 75 * MIN, now: 'walk j-bureau', guided: true });
+    expect(h.c.guideStatus()).toEqual({ kind: 'trip', title: 'Bureau', arr: NOW + 75 * MIN, now: 'walk j-bureau', guided: true });
     await h.settings.update((s) => ({ ...s, display: { ...s.display, guide: false } }));
     await h.settle();
     expect(h.c.guideStatus()?.guided).toBe(false);
@@ -326,7 +326,7 @@ describe('PRD-1.2.10 § 4.3 : carte « En cours » du téléphone', () => {
     await h.c.goFavorite('fav-bureau');
     await h.settle();
     expect(got).toHaveLength(1);
-    expect(got[0]).toMatchObject({ title: 'Vers le bureau', now: 'before j-bureau', guided: true });
+    expect(got[0]).toMatchObject({ title: 'Bureau', now: 'before j-bureau', guided: true });
     await h.settle(61_000);
     expect(got).toHaveLength(1);
     out = { phase: { kind: 'walk', leg: 0 } };
@@ -353,6 +353,6 @@ describe('PRD-1.2.10 § 4.3 : carte « En cours » du téléphone', () => {
     const j = door('j-l', NOW + 5 * MIN, NOW + 60 * MIN);
     await h.c.showTrip({ title: 'Vers le bureau', from: { type: 'here' }, to: { type: 'place', placeId: 'fav-bureau' }, result: { journeys: [j] }, index: 0 });
     await h.settle();
-    expect(h.c.guideStatus()).toEqual({ kind: 'trip', title: 'Vers le bureau', arr: NOW + 60 * MIN, now: 'before j-l', guided: false });
+    expect(h.c.guideStatus()).toEqual({ kind: 'trip', title: 'Bureau', arr: NOW + 60 * MIN, now: 'before j-l', guided: false });
   });
 });

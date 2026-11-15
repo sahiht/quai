@@ -1,12 +1,15 @@
 /**
  * Quai 1.2.2, trajet suivi seulement sur demande (docs/v1.2.2/PRD-1.2.2.md § 6 ; CA-122.7) : ouvrir un favori, une
- * adresse ou un trajet ouvert d'office ne le suit pas ; « Suivre ce trajet » le suit (la 1re proposition comprise) ;
- * l'écran le dit (« Suivi » sur la ligne du titre), même sans l'aide des gestes ; sur le trajet suivi, toucher propose
- * « Ne plus suivre » ; un trajet gardé par la 1.2.1 (sans la marque `explicit`) n'est pas « En cours ».
+ * adresse ou un trajet ouvert d'office ne le suit pas ; un trajet gardé par la 1.2.1 (sans la marque `explicit`) n'est
+ * pas « En cours ». 1.2.10 (docs/v1.2.10/PRD-1.2.10.md § 3.1, § 3.4, § 5) : « Suivre ce trajet » devient « y aller »
+ * (toucher : intention goGuide, le guidage porte le trajet suivi) ; arrêter passe par l'appui long (« Arrêter le
+ * guidage ») : l'écran du trajet guidé n'a plus d'action au toucher. Le lancement du guidage est éprouvé avec le
+ * contrôleur (équipe C2).
  */
 import { describe, expect, it } from 'vitest';
 import type { Favorite, FavoriteAnswer, Journey } from '../../src/core/api';
 import { TRIP_KEY, parseTrip } from '../../src/glasses/controller';
+import { stepsPage, tapIntent } from '../../src/glasses/views';
 import { createKV, memoryBackend } from '../../src/platform/kv';
 import { MIN, PLACES, at, journey, nb, settingsWith, setup, stubCore, type Screen } from './helpers';
 
@@ -18,13 +21,14 @@ function door(id: string, leave: number, arr: number): Journey {
   return journey(id, [{ walk: 5, to: 'Merbraine' }, { ride: 'W', mode: 'bus', dep: leave + 5 * MIN, arr: arr - 4 * MIN, from: 'Merbraine', to: 'Bruxelles Midi', head: 'Bruxelles Midi' }, { walk: 4 }], { label: 'short', reason: 'Le plus court : direct, à pied 5 + 4 min' });
 }
 function answers(fav: Favorite, now: number): FavoriteAnswer | undefined {
-  const j = fav.id === 'fav-bureau' ? door('j-bureau', NOW + 2 * MIN, NOW + 75 * MIN) : fav.id === 'fav-mama' ? door('j-mama', NOW + 10 * MIN, NOW + 80 * MIN) : undefined;
+  const j = fav.id === 'fav-bureau' ? door('j-bureau', NOW + 2 * MIN, NOW + 75 * MIN) : fav.id === 'fav-ecole' ? door('j-ecole', NOW + 10 * MIN, NOW + 80 * MIN) : undefined;
   return j ? { favoriteId: fav.id, kind: 'trip', state: 'ok', plan: { journeys: [j] }, updatedAt: now } : undefined;
 }
 const steps = (s: Screen) => s.screen === 'steps' && s.page !== undefined;
 const homeReady = (s: Screen) => s.screen === 'home' && s.shown?.length === 2 && !s.lines.some((l) => / …$/.test(l));
 const open = (patch = {}, kv = createKV(memoryBackend())) =>
-  setup({ now: NOW, kv, settings: settingsWith([PLACES.bureau, PLACES.mama], { seenVersion: '1.2.9', ...patch }), core: (now) => stubCore(now, { answers }) });
+  setup({ now: NOW, kv, settings: settingsWith([PLACES.bureau, PLACES.ecole], { seenVersion: '1.2.10', ...patch }), core: (now) => stubCore(now, { answers }) });
+const HINT_GO = '△▽ étapes   toucher : y aller   double : retour';
 
 describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
   it('ouvrir un favori ne le suit pas : « Suivre ce trajet » ; au départ, pas de « En cours » ni de « Dans le train »', async () => {
@@ -32,9 +36,10 @@ describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
     await h.until(homeReady);
     await h.gesture('tap');
     const s = await h.until(steps);
-    expect(nb(s.title)).toBe('Vers le bureau : 07:33 → 08:46   Suivre ce trajet');
+    expect(nb(s.title)).toBe('Bureau');
     expect(s).toMatchObject({ followed: false, sel: -1 });
-    expect(s.lines.at(-1)).toBe('△▽ étapes   toucher : suivre ce trajet   double : retour');
+    expect(s.lines[0]).toBe('Départ 07:33, dans 2 min   arrivée 08:46');
+    expect(s.lines.at(-1)).toBe(HINT_GO);
     expect(h.c.followed).toBeNull();
     // l'heure du départ passe : rien ne se met à suivre tout seul
     h.advance(10 * MIN);
@@ -47,78 +52,29 @@ describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
     h.c.stop();
   });
 
-  it('« Suivre ce trajet » le suit : « Trajet suivi : Bus W 07:38 », « Suivi » sur la ligne du titre, puis « En cours »', async () => {
-    const h = await open();
-    await h.until(homeReady);
-    await h.gesture('tap');
-    await h.until(steps);
-    await h.gesture('tap');
-    expect(nb(h.last().lines.at(-1)!)).toBe('Trajet suivi : Bus W 07:38');
-    expect(h.last()).toMatchObject({ followed: true, sel: 0 });
-    expect(nb(h.last().title)).toBe('Vers le bureau : 07:33 → 08:46   Suivi');
-    const saved = JSON.parse((await h.kv.get(TRIP_KEY))!) as { explicit?: boolean; favoriteId?: string };
-    expect(saved).toMatchObject({ explicit: true, favoriteId: 'fav-bureau' });
-    h.advance(3_000);
-    await h.c.render();
-    expect(h.last().lines.at(-1)).toBe('△▽ étapes   toucher : ne plus suivre   double : retour');
-    // l'heure du départ : « En cours » sur l'accueil, et le favori du trajet n'y est pas répété
-    h.advance(3 * MIN);
-    await h.gesture('double');
-    const home = await h.until((x) => x.screen === 'home' && x.lines[0].startsWith('En cours'));
-    expect(home.lines.slice(0, 3)).toEqual(['En cours : vers le bureau   W 07:38', 'Favoris   2', 'Mama   dans 6 min → 08:51']);
-    h.c.stop();
+  it('toucher sur l’écran du trajet : « y aller » (goGuide) ; sur le trajet guidé, aucune action (arrêter : appui long)', () => {
+    const j = door('j-bureau', NOW + 2 * MIN, NOW + 75 * MIN);
+    const c = { now: NOW, settings: settingsWith([PLACES.bureau]) };
+    const open1 = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0, fresh: true }, c);
+    expect(tapIntent(open1, 0)).toEqual({ kind: 'goGuide' });
+    expect(open1.titleRight).toBeUndefined();
+    const guided = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0, fresh: true }, { ...c, guidedJourneyId: 'j-bureau' });
+    expect(tapIntent(guided, 0)).toBeUndefined();
+    expect(guided.mark).toBe(0);
+    expect(guided.log).toMatchObject({ followed: true });
   });
 
-  it('sur le trajet suivi, toucher propose « Ne plus suivre » ; un second toucher arrête le suivi', async () => {
-    const h = await open();
-    await h.until(homeReady);
-    await h.gesture('tap');
-    await h.until(steps);
-    await h.gesture('tap');
-    h.advance(3_000);
-    await h.gesture('tap');
-    const menu = await h.until((x) => x.screen === 'followed');
-    expect(nb(menu.title)).toBe('Vers le bureau : trajet suivi');
-    expect(menu.lines).toEqual(['Ne plus suivre', 'Arrêts : Bus W vers Bruxelles Midi', '△▽ choisir   toucher : valider   double : retour']);
-    expect(menu.sel).toBe(0);
-    // double toucher : rien ne change
-    await h.gesture('double');
-    expect(h.last()).toMatchObject({ screen: 'steps', followed: true });
-    await h.gesture('tap', 'tap');
-    expect(h.last()).toMatchObject({ screen: 'steps', followed: false });
-    expect(h.last().lines.at(-1)).toBe('Suivi arrêté');
-    expect(nb(h.last().title)).toMatch(/   Suivre ce trajet$/);
-    expect(h.c.followed).toBeNull();
-    await h.settle();
-    expect(await h.kv.get(TRIP_KEY)).toBeFalsy();
-    h.c.stop();
-  });
-
-  it('le détail du véhicule (« Dans le train » de la 1.2.1) reste à portée : « Arrêts : … » ; double toucher : les étapes', async () => {
-    const h = await open();
-    await h.until(homeReady);
-    await h.gesture('tap');
-    await h.until(steps);
-    await h.gesture('tap');
-    h.advance(3_000);
-    await h.gesture('tap');
-    await h.until((x) => x.screen === 'followed');
-    await h.gesture('down', 'tap');
-    expect((await h.until((x) => x.screen === 'train')).title).toBe('Bus W vers Bruxelles Midi');
-    await h.gesture('double');
-    expect(h.last()).toMatchObject({ screen: 'steps', followed: true });
-    h.c.stop();
-  });
-
-  it('sans aide des gestes (réglage), l’état reste dit sur la ligne du titre', async () => {
+  it('sans aide des gestes (réglage) : aucune aide, le toucher lance toujours le guidage', async () => {
     const h = await open({ display: { ...settingsWith([]).display, gestureHints: false } });
     await h.until(homeReady);
     await h.gesture('tap');
     const s = await h.until(steps);
-    expect(nb(s.title)).toMatch(/   Suivre ce trajet$/);
+    expect(nb(s.title)).toBe('Bureau');
     expect(s.lines.some((l) => l.startsWith('△▽'))).toBe(false);
-    await h.gesture('tap');
-    expect(nb(h.last().title)).toMatch(/   Suivi$/);
+    const c = { now: NOW, settings: settingsWith([PLACES.bureau], { display: { ...settingsWith([]).display, gestureHints: false } }) };
+    const v = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [door('j', NOW + 2 * MIN, NOW + 75 * MIN)], index: 0, fresh: true }, c);
+    expect(v.hints).toBe('');
+    expect(v.tap).toEqual({ kind: 'goGuide' });
     h.c.stop();
   });
 
@@ -146,7 +102,8 @@ describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
     const h = await open({ display: { ...settingsWith([]).display, opening: 'firstFavorite' } });
     const s = await h.until(steps);
     expect(s).toMatchObject({ followed: false });
-    expect(nb(s.title)).toMatch(/^Vers le bureau : .*   Suivre ce trajet$/);
+    expect(nb(s.title)).toBe('Bureau');
+    expect(s.lines.at(-1)).toBe(HINT_GO);
     expect(h.c.followed).toBeNull();
     h.c.stop();
   });
@@ -157,8 +114,10 @@ describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
     const j = door('j-phone', NOW + 2 * MIN, NOW + 75 * MIN);
     expect(nb(await h.c.showTrip({ title: 'Vers le bureau', from: { type: 'here' }, to: { type: 'place', placeId: 'fav-bureau' }, favoriteId: 'fav-bureau', result: { journeys: [j] }, index: 0 }))).toBe('Affiché dans les lunettes : Bus W 07:38.');
     const s = await h.until(steps);
-    expect(s).toMatchObject({ followed: true });
-    expect(nb(s.title)).toMatch(/   Suivi$/);
+    // suivi (et guidé quand le contrôleur le dira) : rien à lancer au toucher
+    expect(s).toMatchObject({ followed: true, sel: 0 });
+    expect(nb(s.title)).toBe('Bureau');
+    expect(s.lines.at(-1)).toBe('△▽ étapes   double : retour');
     await h.settle();
     expect(JSON.parse((await h.kv.get(TRIP_KEY))!).explicit).toBe(true);
     h.c.stop();

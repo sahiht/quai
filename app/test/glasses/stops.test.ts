@@ -199,10 +199,10 @@ describe('CA-123.1 : tableau complet d’une gare ou d’un arrêt', () => {
 });
 
 describe('CA-123.2 : les arrêts d’un départ', () => {
-  it('1.2.8 train : tout le trajet, gares d’avant en pâle, ● où il arrive, voie et passage en clair, curseur sur la gare du tableau', () => {
+  it('1.2.8 train : tout le trajet, gares d’avant en pâle, ● où il arrive, voie et passage en clair ; 1.2.10 : la gare de la montée pâle, le curseur sur la suivante', () => {
     const d = namurBoard(NOW).departures[1];
     const v = stopsView({ screen: 'stops', areaId: STATIONS.namur.areaId, dep: d }, icFromBrussels(d, NOW), ctx());
-    expect(v).toMatchObject({ screen: 'trainRun', title: 'IC vers Herstal', initialSel: 5, initialTop: 4, paged: true });
+    expect(v).toMatchObject({ screen: 'trainRun', title: 'IC vers Herstal', initialSel: 6, initialTop: 4, paged: true });
     expect(v.log).toMatchObject({ stops: 11, gare: 5, vehicle: 5, passed: 5 });
     // la gare d'avant (quittée, en pâle, son heure) au-dessus de Namur ; le train arrive à Namur (temps réel) : ●
     expect(lines(v)).toEqual([
@@ -213,25 +213,29 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
       '○ Huy   SUPPRIMÉ',
       '○ Liège-Guillemins voie 5   à 08:34',
       '○ Liège-Carré voie 1   à 08:40',
-      '△▽ gares   toucher : départs   double : retour',
+      '△▽ arrêts   toucher : j’y descends   double : retour',
     ]);
-    // les gares quittées tout en pâle (colonne b), leur heure comprise ; la voie modifiée au plus clair
+    // les gares quittées tout en pâle (colonne b), leur heure comprise ; 1.2.10 : la gare de la montée aussi (§ 3.1)
     const p = page(v);
     const a = nb(container(p, 'colA').content).split('\n');
     const b = nb(container(p, 'colB').content).split('\n');
     const c = nb(container(p, 'colC').content).split('\n');
     expect([a[0].trim(), b[0].replace(/ +/g, ' ').trim(), (c[0] ?? '').trim()]).toEqual(['', '○ Gembloux voie 1 07:30', '']);
-    expect([a[1].replace(/ +/g, ' ').trim(), b[1].trim(), c[1].trim()]).toEqual(['● Namur voie 6 !', '', 'dans 13 min']);
+    expect([a[1].trim(), b[1].replace(/ +/g, ' ').trim(), (c[1] ?? '').trim()]).toEqual(['', '● Namur voie 6 ! dans 13 min', '']);
     expect([a[2].replace(/ +/g, ' ').trim(), b[2].trim()]).toEqual(['○ Andenne', 'voie 1']);
-    expect(p.sel).toBe(5);
+    expect(p.sel).toBe(6);
     // △ : les gares d'avant, jusqu'à la gare de départ du train
     const first = layoutPage(v, { sel: 0, top: 0 });
     expect(first.lines.map(nb).slice(1, 4)).toEqual(['○ Bruxelles-Midi voie 15   06:41', '○ Bruxelles-Central voie 3   06:45', '○ Bruxelles-Nord voie 11   06:49']);
     // ▼ : jusqu'au terminus
     const end = layoutPage(v, { sel: 10, top: 10 });
     expect(end.lines.map(nb).find((l) => l.startsWith('○ Herstal'))).toBe('○ Herstal voie 1   à 08:46');
-    // toucher une gare : ses départs (comme 1.2.3)
-    expect(v.items[6].action).toEqual({ kind: 'open', route: { screen: 'board', areaId: 'sncb:Andenne', name: N('Andenne') } });
+    // 1.2.10 : toucher une gare après la montée : « j'y descends » (son rang dans le trajet) ; avant et la montée : rien ;
+    // une gare supprimée : rien
+    expect(v.items[6].action).toEqual({ kind: 'alight', index: 6 });
+    expect(v.items.slice(0, 6).every((it) => !it.action)).toBe(true);
+    expect(v.items[7].action).toBeUndefined();
+    expect(v.items[8].action).toEqual({ kind: 'alight', index: 8 });
     expect(v.items.every((it) => !!it.key)).toBe(true);
   });
 
@@ -264,7 +268,11 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
       ctx(),
     );
     expect(bus.title).toBe('Bus W vers Bruxelles Midi');
-    expect(lines(bus)).toEqual(['07:48 +3   Braine-l’Alleud Merbraine', '07:56 +3   Waterloo Eglise', '08:41 +3   Bruxelles Midi', '△▽ arrêts   toucher : départs   double : retour']);
+    // 1.2.10 : l'arrêt de la montée (ligne du haut) pâle et sans action ; les suivants : « j'y descends »
+    expect(bus.top?.strong).toBeFalsy();
+    expect(container(page(bus), 'top').level).toBe(2);
+    expect(bus.items.map((it) => it.action)).toEqual([{ kind: 'alight', index: 1 }, { kind: 'alight', index: 2 }]);
+    expect(lines(bus)).toEqual(['07:48 +3   Braine-l’Alleud Merbraine', '07:56 +3   Waterloo Eglise', '08:41 +3   Bruxelles Midi', '△▽ arrêts   toucher : j’y descends   double : retour']);
     const t3 = dep(NOW, 40, { op: 'stib', mode: 'tram', line: '3', head: N('Churchill'), rt: false });
     const tram = stopsView(
       { screen: 'stops', areaId: 'stib:6357F', dep: t3 },
@@ -276,7 +284,7 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
       ctx(),
     );
     expect(tram.title).toBe('Tram 3 vers Churchill');
-    expect(lines(tram)).toEqual(['~08:11   Gare du Nord', '~08:13   Rogier', '~08:36   Churchill', '~ horaire prévu, sans temps réel', '△▽ arrêts   toucher : départs   double : retour']);
+    expect(lines(tram)).toEqual(['~08:11   Gare du Nord', '~08:13   Rogier', '~08:36   Churchill', '~ horaire prévu, sans temps réel', '△▽ arrêts   toucher : j’y descends   double : retour']);
     // départ du lendemain (le prochain, même plus tard) : le titre le dit
     const late = at('2026-11-10', 23, 40);
     const ic = trainAt(late, 400, { line: 'IC', head: N('Herstal'), platform: '4' });
@@ -310,7 +318,8 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
     const v = stopsView({ screen: 'stops', areaId: STATIONS.namur.areaId, dep: ic }, { ...icStops, at: 0 }, ctx());
     const first = page(v);
     expect(nb(first.lines[0])).toBe('○ Namur voie 2   dans 14 min');
-    expect(first.sel).toBe(0);
+    // 1.2.10 : le curseur sur la première gare où descendre, Namur (la montée) au-dessus
+    expect(first.sel).toBe(1);
     expect(first.lines.some((l) => l.includes('…'))).toBe(false);
     // la dernière page finit au terminus
     const end = layoutPage(v, { sel: v.items.length - 1, top: v.items.length - 1 });
@@ -327,33 +336,23 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
       ctx(),
     );
     expect(bus.title).toBe('Bus 36 vers Wavre');
-    expect(lines(bus)).toEqual(['~07:37   Braine-l’Alleud Côté du Collège', '~07:42   Braine-l’Alleud Gare', '~07:53   Waterloo Gare', '~08:29   Wavre Gare', '~ horaire prévu, sans temps réel', '△▽ arrêts   toucher : départs   double : retour']);
+    expect(lines(bus)).toEqual(['~07:37   Braine-l’Alleud Côté du Collège', '~07:42   Braine-l’Alleud Gare', '~07:53   Waterloo Gare', '~08:29   Wavre Gare', '~ horaire prévu, sans temps réel', '△▽ arrêts   toucher : j’y descends   double : retour']);
   });
 
-  it('du tableau aux arrêts, d’un arrêt à son tableau, et retour : chaque double toucher revient d’un écran, curseur gardé', async () => {
+  it('du tableau à tout le trajet de l’IC et retour : le curseur sur la première gare où descendre ; double toucher revient, curseur gardé', async () => {
     const { core: c } = core(() => NOW);
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.9', stations: [STATIONS.namur] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.2.10', stations: [STATIONS.namur] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: STATIONS.namur.areaId, name: STATIONS.namur.name });
     await h.until(boardReady);
-    // le 2e départ : l'IC de 07:42 vers Herstal ; 1.2.8 : tout son trajet (il part de Namur), le curseur sur Namur
+    // le 2e départ : l'IC de 07:42 vers Herstal ; 1.2.8 : tout son trajet (il part de Namur) ; 1.2.10 : le curseur sur
+    // Andenne, Namur (la montée) au-dessus, pâle
     await h.gesture('down', 'tap');
     const s = await h.until(stopsReady);
-    expect(s).toMatchObject({ screen: 'trainRun', title: 'IC vers Herstal', sel: 0 });
+    expect(s).toMatchObject({ screen: 'trainRun', title: 'IC vers Herstal', sel: 1 });
     expect(s.lines.slice(0, 3)).toEqual(['○ Namur voie 6 !   dans 13 min', '○ Andenne voie 1   dans 29 min', '○ Huy   SUPPRIMÉ']);
-    // Huy : son tableau, puis l'un de ses départs, tout son trajet
-    await h.gesture('down', 'down', 'tap');
-    const huy = await h.until((x) => boardReady(x) && x.title.startsWith('Huy'));
-    expect(huy.lines.slice(0, 2)).toEqual(['★ garder la gare', 'IC   Namur   07:40  voie 1']);
-    await h.gesture('tap');
-    const s2 = await h.until((x) => stopsReady(x) && x.title === 'IC vers Namur');
-    expect(s2.lines[0]).toBe('○ Huy voie 1   dans 9 min');
-    // retour, retour, retour : le tableau de Huy, le trajet de l'IC (sur Huy), le tableau de Namur (sur l'IC)
-    await h.gesture('double');
-    expect(h.last()).toMatchObject({ screen: 'board', sel: 1 });
-    expect(h.last().title).toMatch(/^Huy/);
-    await h.gesture('double');
-    expect(h.last()).toMatchObject({ screen: 'trainRun', title: 'IC vers Herstal', sel: 2 });
+    expect(s.lines.at(-1)).toBe('△▽ arrêts   toucher : j’y descends   double : retour');
+    // retour : le tableau de Namur, le curseur sur l'IC
     await h.gesture('double');
     expect(h.last()).toMatchObject({ screen: 'board', title: 'Namur, train (SNCB) ★', sel: 2 });
     await h.gesture('double');
