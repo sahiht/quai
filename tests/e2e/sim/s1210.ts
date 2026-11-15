@@ -126,11 +126,11 @@ async function goTo(r: Run, trace: Trace | null, t: number, keepMark = true): Pr
 }
 
 /** Trajet suivi (clé quai.trip) : le trajet guidé, son titre. */
-async function followed(r: Run): Promise<{ journey: O.OJourney; title: string; guide?: { kind?: string } } | null> {
+async function followed(r: Run): Promise<{ journey: O.OJourney; title: string; guide?: { kind?: string; beyondByLeg?: { legs?: Record<string, NonNullable<O.OLeg['stops']>> } } } | null> {
   const raw = await r.page.eval<string | null>(`localStorage.getItem('quai.trip')`);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as { journey: O.OJourney; title: string; guide?: { kind?: string } };
+    return JSON.parse(raw) as { journey: O.OJourney; title: string; guide?: { kind?: string; beyondByLeg?: { legs?: Record<string, NonNullable<O.OLeg['stops']>> } } };
   } catch {
     return null;
   }
@@ -549,10 +549,14 @@ async function s1210passed(ctx: Ctx): Promise<void> {
       const { j, title } = await launch(r);
       const ic = j.legs[rideLeg(j)];
       for (let t = T('07:31'); t <= T('08:43'); t += 60_000) await goTo(r, NAMUR_PASSED, t);
+      // arrêts de l'IC après la descente : lus par le guidage au début de l'étape à bord et gardés avec lui, par étape
+      // (quai.trip, guide.beyondByLeg) le temps de l'étape (décision du 15/11), pas dans les arrêts de l'étape
+      const onBoard = await followed(r);
+      const kept = [...(ic.stops ?? []), ...(onBoard?.guide?.beyondByLeg?.legs?.[String(rideLeg(j))] ?? [])];
+      const central = kept.find((x) => x.name.fr === 'Bruxelles-Central');
+      check(central, `Bruxelles-Central absent des arrêts de l’IC et des arrêts suivants gardés par le guidage : ${JSON.stringify(kept.map((x) => x.name.fr))}`);
       for (const t of [T('08:44'), T('08:45'), T('08:45:30')]) await goTo(r, NAMUR_PASSED, t);
       const s = await waitGuide(r, '« Tu as passé Bruxelles-Nord » (passed)', (x) => isGuide(x) && /^Tu as passé /.test(O.norm(x.lines[0])), 15_000);
-      const central = (ic.stops ?? []).find((x) => x.name.fr === 'Bruxelles-Central');
-      check(central, `Bruxelles-Central absent des arrêts de l’IC (Stopover) : ${JSON.stringify(ic.stops?.map((x) => x.name.fr))}`);
       const after = await followed(r);
       const newArr = after && after.journey.id !== j.id ? after.journey.arr : undefined;
       expectLines(s, O.passedLines(ic.to.name.fr, 'Bruxelles-Central', central.est, ic.rt, newArr), 'arrêt dépassé (§ 3.2, passed ; § 3.6)');
