@@ -26,7 +26,7 @@ import { distM, joinTrace, pointAt, stay, walk, type LatLon, type Trace, type Tr
 import { NAMUR_FONTAINAS, PLACES, toFix } from '../traces/traces';
 import type { GlassesScreen, Page } from './cdp';
 import * as O from './guide-oracle';
-import { canvasToShot, checkGuidePixels, litCount, type GuideShot } from './guide-pixels';
+import { canvasToShot, checkCalmPixels, checkGuidePixels, litCount, type GuideShot } from './guide-pixels';
 import { accordionLines, checkPixels, levels, truncatedLines } from './pixels';
 import type { Ctx } from './s1210';
 
@@ -90,7 +90,10 @@ export const TXT = {
   testAsk: 'Lève la tête. Que vois-tu dans les lunettes ?',
   answers: { quai: 'Le test de Quai', dashboard: 'Le Dashboard', nothing: 'Rien' },
   testVisible: 'Les messages de Quai se voient sans rien faire. S’il le faut, Quai les rappelle.',
-  testHeadUp: 'Lève un peu la tête pour voir les messages. Pour le moindre mouvement : dans l’appli Even, règle l’angle d’affichage au plus bas.',
+  /** 1.3.1 (PRD-1.3.1 § 5) : le conseil précis (T131.headUp) ; avant : celui de la 1.3.0 */
+  get testHeadUp(): string {
+    return O.SPEC.v131 ? O.T131.headUp : 'Lève un peu la tête pour voir les messages. Pour le moindre mouvement : dans l’appli Even, règle l’angle d’affichage au plus bas.';
+  },
   testDashboard: 'En levant la tête, tu vois le Dashboard. Pendant un trajet, touche une fois les lunettes pour voir Quai.',
   testCancel: 'Arrêter le test',
   testClosed: 'Ouvre Quai sur les lunettes, puis recommence.',
@@ -1318,6 +1321,15 @@ async function s130check(ctx: Ctx130): Promise<void> {
     await maskWait();
     await sim.input('click');
     const e = await sim.waitScreen(calm, 8_000, 'écran calme après le toucher');
+    if (O.SPEC.v131) {
+      // 1.3.1 (PRD-1.3.1 § 1) : sur le vrai simulateur, « · · · » au niveau le plus pâle (alpha 197 au plus), en bas au centre
+      let res = checkCalmPixels(await sim.rawShot(), 'dots');
+      for (let k = 0; res.bad.length && k < 4; k++) {
+        await sleep(400);
+        res = checkCalmPixels(await sim.rawShot(), 'dots');
+      }
+      check(!res.bad.length, `écran calme du simulateur :\n        ${res.bad.join('\n        ')}`);
+    }
     const j = (await host.storage('quai.journal')) ?? '';
     check(/"battery"|batterie/i.test(j), 'journal : batterie au départ pas notée (PRD-1.3.0 § 6.4)');
     return { screen: e, shot: false };
@@ -1443,6 +1455,8 @@ async function s130journal(ctx: Ctx130): Promise<void> {
       const head = `Journal Quai ${ctx.appVersion}, trajet « ${FONTAINAS} », 10/11/2026`;
       check(text.includes(head), `en-tête « ${head} » absent : « ${text.slice(0, 300)} »`);
       check(/(^|\n)\s*07:3\d:\d\d Partir maintenant affiché\s*($|\n)/.test(text), `ligne « 07:3x:xx Partir maintenant affiché » absente (une ligne par événement, heures de Bruxelles) : « ${text.slice(0, 800)} »`);
+      // 1.3.1 (PRD-1.3.1 § 2, L2) : « masqué d’un toucher », plus jamais « effacé »
+      if (O.SPEC.v131) check(/ masqué d’un toucher/.test(text) && !/ effacé d’un toucher/.test(text), `journal : « … masqué d’un toucher » attendu, jamais « effacé » (PRD-1.3.1 § 2, L2) : « ${text.slice(0, 800)} »`);
       const bad = journalPrivacyIssues(text, pushed, ['Place Fontainas, 1000 Bruxelles']);
       check(!bad.length, `texte du journal : ${bad.join(' ; ')}`);
       for (const b of [TXT.journalCopy, TXT.journalClear]) check(await page.eval<boolean>(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === ${JSON.stringify(b)})`), `bouton « ${b} » absent`);

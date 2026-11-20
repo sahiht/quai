@@ -1211,19 +1211,22 @@ async function s131sousterre(ctx: Ctx131): Promise<void> {
 
 /* ------------------------------ s131pluie : « pluie prévue » sur « Partir maintenant » (B19) ------------------------------ */
 
-/** Place Rogier (Bruxelles), 08:46 : la marche jusqu'au tram 3 se fait sous la pluie du faux Open-Meteo (08:45 à 09:00). */
-const ROGIER = { lat: 50.8546, lon: 4.3589 };
-const ROGIER_START = { mockLat: String(ROGIER.lat), mockLon: String(ROGIER.lon), mockNow: '2026-11-10T08:46:00+01:00' };
+/**
+ * Gare de Bruxelles-Central (scénario 3 des fixtures), 08:46 : vers la place Fontainas, 10 min à pied (aucun tram par là
+ * dans les fixtures), sous la pluie du faux Open-Meteo (Bruxelles, 08:45 à 09:00).
+ */
+const CENTRAL = { lat: 50.8454, lon: 4.3571 };
+const RAIN_START = { mockLat: String(CENTRAL.lat), mockLon: String(CENTRAL.lon), mockNow: '2026-11-10T08:46:00+01:00' };
 
 async function s131pluie(ctx: Ctx131): Promise<void> {
   await ctx.withChrome(async (page) => {
     const r: Run = { ctx, page, mark: 0 };
     await wstep(r, 'partir-sous-la-pluie', async () => {
-      await openWeb(r, ctx.pageUrl({ ...ROGIER_START, ...ctx.preset('p/1210.json') }, true));
+      await openWeb(r, ctx.pageUrl({ ...RAIN_START, ...ctx.preset('p/1210.json') }, true));
       const { j, title } = await webLaunch(r);
       check(j.legs[0]?.kind === 'walk', `essai impossible : le trajet ne commence pas à pied (${j.legs.map((l) => l.kind).join(', ')})`);
       check(j.legs[0].rain, `essai impossible : la première marche du trajet ne porte pas la pluie (faux Open-Meteo : 08:45 à 09:00 sur Bruxelles), trajet ${JSON.stringify(j.legs.map((l) => [l.kind, O.hm(l.dep), O.hm(l.arr), l.rain ?? false]))}`);
-      const stay0 = { id: 's131-rogier', label: 'Place Rogier', places: ['Place Rogier, Bruxelles'], points: stay(ROGIER, T('08:46'), T('09:10'), { phase: 'stay', accuracy: 6 }) } as Trace;
+      const stay0 = { id: 's131-central', label: 'Gare de Bruxelles-Central', places: ['Bruxelles-Central'], points: stay(CENTRAL, T('08:46'), T('09:10'), { phase: 'stay', accuracy: 6 }) } as Trace;
       r.mark = r.page.screens().length;
       await goTo(r, stay0, Math.max(j.leaveAt, T('08:46')) + 5_000);
       const s = await momentWeb(r, 'Partir maintenant', 'Partir maintenant', 12_000);
@@ -1368,7 +1371,16 @@ async function s131tel(ctx: Ctx131): Promise<void> {
       check(ft?.journey?.legs?.[0]?.kind === 'walk', `le trajet guidé commence à pied : ${JSON.stringify(ft?.journey?.legs?.map((l) => l.kind))}`);
       const j = ft!.journey;
       const tr: Trace = { id: 's131-rogier', label: 'Gare du Nord → Rogier (à pied)', places: ['Gare du Nord', 'Rogier'], points: joinTrace(stay(GDN, T('12:10'), j.leaveAt, { phase: 'stay', accuracy: 6 }), walk([GDN, { lat: 50.8585, lon: 4.3592 }, PLACES.rogier], j.leaveAt + 10_000, { speed: 1.3 })) };
-      for (let t = T('12:10:30'); t <= j.leaveAt + 70_000; t += 30_000) await goTo(r, tr, t);
+      await walkThrough(r, tr, T('12:10:30'), j.leaveAt + 70_000, 30_000);
+      // § 4 : « Où tu en es » à pied : « À pied vers l'arrêt Rogier » (le nom, plus « l'arrêt du métro 6 »)
+      const cur = r.page.lastScreen()!;
+      if (!isCalm(cur)) {
+        await sleep(1_600);
+        await webMask(r, 'moment en cours');
+      }
+      await gesture(r, 'tap');
+      const w = await waitGuide(r, '« Où tu en es » à pied vers Rogier', isWhere);
+      check(w.lines.some((l) => O.matches(l, 'À pied vers l’arrêt Rogier')), `« Où tu en es » : « À pied vers l’arrêt Rogier » attendu (PRD-1.3.1 § 4) : ${show(w)}`);
       await page.eval(`(document.querySelector('#w-tab-reglages')?.click(), location.hash = '#/', true)`);
       const txt = await pageWait(page, /En cours/, 10_000, 'carte « En cours »');
       check(/Maintenant : à pied vers l’arrêt Rogier/.test(txt), `carte « En cours » : « Maintenant : à pied vers l’arrêt Rogier » attendu (U3, L2 : le nom de l’arrêt, plus « l’arrêt du métro 6 ») ; texte vu : « ${txt.slice(0, 500)} »`);
