@@ -170,6 +170,19 @@ describe('1.3.1, R4 : l’heure de partir suit le vrai chemin de la première ma
     expect(step(r3, at('07:10:30'), here(at('07:10:30'))).where.walk).toMatchObject({ leaveAt: at('07:12'), remainingMin: 6 });
   });
 
+  it('jamais plus tard que l’heure prévue : le chemin n’arrive qu’à 07:16:30 (calcul retardé), « Partir maintenant » de 07:15 garde son heure et sa fin (contrôle du moteur)', () => {
+    const r = run();
+    const s15 = step(r, at('07:15'), here(at('07:15')));
+    expect(m(s15.moment, 'leave')).toMatchObject({ walkMin: 3, since: at('07:15'), until: at('07:18') });
+    r.input.walk = { leg: 0, route: longRoute() };
+    const s16 = step(r, at('07:16:30'), here(at('07:16:30')));
+    // les vraies minutes et la marge vraie (« très juste »), mais l'heure de partir reste 07:15 : le message ne dure pas
+    // jusqu'à 07:19:30 et la marche ne « part » pas à 07:16:30
+    expect(s16.phase).toEqual({ kind: 'walk', leg: 0 });
+    expect(m(s16.moment, 'leave')).toMatchObject({ walkMin: 6, since: at('07:15'), until: at('07:18'), tight: true });
+    expect(step(r, at('07:18:01'), here(at('07:18:01'))).moment?.kind).not.toBe('leave');
+  });
+
   it('correspondance devenue impossible : le départ raté d’aujourd’hui (« très juste », « Si tu le rates », puis « Ton bus 71 de 07:20 est parti »)', () => {
     const r = run(longRoute(), { startedAt: at('07:16') });
     const s0 = step(r, at('07:16'), here(at('07:16')));

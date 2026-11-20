@@ -717,6 +717,19 @@ describe('B18 (P6, P8) : deux virages proches annoncés ensemble, distance stabl
     step(r, t + 4 * SEC, fix(alongPath(rt.coords, 212), t + 4 * SEC, { speed: 1.3 }));
     expect(step(r, t + 6 * SEC, fix(alongPath(rt.coords, 215), t + 6 * SEC, { speed: 1.3 })).moment).toBeNull();
   });
+
+  it('la position recule de 12 m trois fois de suite (la médiane remonte) : la distance montrée reste (contrôle du moteur)', () => {
+    const rt = firstWalkRoute();
+    const r = guide(prdTrip(), { walk: { leg: 0, route: rt } });
+    const ds: number[] = [];
+    // à 170, 176, 182 m (virage à 200 m), puis trois positions à 170 m : sans la mémoire `turnDist`, 30 m après 18 m
+    [170, 176, 182, 170, 170, 170].forEach((d, k) => {
+      const t = at('07:07') + k * 2 * SEC;
+      ds.push(m(step(r, t, fix(alongPath(rt.coords, d), t, { speed: 1.3 })).moment, 'turn').distM);
+    });
+    for (let i = 1; i < ds.length; i++) expect(ds[i], ds.join(' ')).toBeLessThanOrEqual(ds[i - 1]);
+    expect(ds[ds.length - 1]).toBeLessThanOrEqual(25);
+  });
 });
 
 /* ------------------------------ Seuils ------------------------------ */
