@@ -710,8 +710,8 @@ function walkingStill(c: Ctx, w: number): boolean {
 /**
  * Prochain arrêt à bord (le premier non passé) : par la position si les arrêts ont tous une position, sinon l'heure.
  * 1.3.1 (B9, conseil du manager du pôle) : jamais avant le plus loin vu par la position pendant cette étape (mémoire
- * `rideNext`) : le bruit de la position autour d'un arrêt ne fait plus reculer la ligne de progression ; l'heure seule
- * peut encore le faire (temps réel revu), la position corrige l'heure.
+ * `rideNext`), à l'heure non plus (position perdue) : le bruit de la position autour d'un arrêt ne fait plus reculer la
+ * ligne de progression.
  */
 function nextStopOf(c: Ctx, k: number): number {
   const l = c.legs[k];
@@ -996,9 +996,9 @@ function walkedAlong(c: Ctx, w: number, d: number): boolean {
  * plus récente à `minM` mètres au moins (60 s au plus), comparé à la direction du chemin devant le point le plus proche
  * (sur 15 m). `angle` : 0 dans le sens du chemin, 180 à contresens ; `back` : la progression le long du chemin (prolongé
  * avant son début : départ du mauvais côté) n'avance pas. Rien à mesurer (undefined) : pas assez de marche, une des deux
- * positions à plus de 30 m du chemin, ou, pour lancer le demi-tour (`start`), moins de 20 m de chemin devant ou une
+ * positions à plus de 30 m du chemin, ou, pour lancer le demi-tour (`start`), moins de 20 m de chemin devant, une
  * allure qui n'est pas celle d'une marche (0,5 à 2,5 m/s sur ce déplacement : le bruit d'une position immobile saute
- * plus vite).
+ * plus vite) ou un éloignement qui revient en arrière en route.
  */
 function motionOn(pts: LatLon[], cum: number[], fx: TimedPoint[], i: number, minM: number, start: boolean): { angle: number; back: boolean } | undefined {
   const f = fx[i];
@@ -1040,10 +1040,10 @@ function smoothed(fx: readonly GuideFix[]): TimedPoint[] {
  * 1.3.1 (A6, P3) : « Fais demi-tour » sur le chemin de la marche `w` (vrai chemin ; le chemin ne crée de virage qu'aux
  * carrefours) : 15 m à contresens du chemin (plus de 135°, sans avancer le long de lui ; deux fois la précision annoncée
  * si elle est moins bonne que 7,5 m), positions lissées sur trois, pour les trois dernières, à 0,5 m/s au moins (jamais
- * à l'arrêt). Couvre le départ du mauvais côté (le raccord de la porte à la rue
- * compris) et le virage raté (le nouveau chemin, calculé depuis la position, repart en arrière). Une fois par chemin
- * (id avec builtAt) ; fini après 10 m dans le bon sens (moins de 90°, deux positions) ou d'un toucher ; un nouveau
- * chemin le remplace. Moment `turn` (flèche demi-tour), sans rue : « vers l'arrêt X » sous « Fais demi-tour ».
+ * à l'arrêt). Couvre le départ du mauvais côté (le raccord de la porte à la rue compris) et le virage raté (le nouveau
+ * chemin, calculé depuis la position, repart en arrière). Une fois par chemin (id avec builtAt) ; fini après 10 m dans
+ * le bon sens (moins de 90°, deux positions) ou d'un toucher ; un nouveau chemin le remplace. Moment `turn` (flèche
+ * demi-tour), sans rue : « vers l'arrêt X » sous « Fais demi-tour ».
  */
 function uturnCand(c: Ctx, w: number, route: WalkRoute, pts: LatLon[], cum: number[]): Cand | null {
   const { m } = c;
