@@ -170,6 +170,11 @@ export type Moment =
       /** marche dans la gare jusqu'au quai (correspondance), et marge */
       walkMin?: number;
       marginMin?: number;
+      /**
+       * 1.3.1 (B16, U4, A4 ; contrôle du moteur) : correspondance très juste (marge de 1 min ou moins, comme `Then.tight`
+       * de « Descends ») : « 2 min à pied → Gare du Nord, très juste », jamais « marge 1 min » après « très juste »
+       */
+      tight?: boolean;
       alight: Names;
       stopsToAlight: number;
       /** 1.3.1 (§ 4, § 12 « conflit réglé ») : l'arrêt ou la gare où monter (« 2 min à pied → Gare du Nord, très juste ») */
@@ -222,6 +227,8 @@ export type Moment =
       sched?: number;
       platform?: string;
       arr?: number;
+      /** 1.3.1 (PRD-1.3.1 § 14, R1) : rue de la sortie du métro vers la suite du chemin (« Sortie : Boulevard Anspach ») */
+      exit?: string;
     })
   /** 1.3.0 (PRD-1.3.0 § 4) : marche sans chemin à pied (hors de Belgique) : la direction et le temps, sans virage. */
   | (MomentBase & { kind: 'offMap'; walkMin: number; distM?: number; bearingDeg?: number; toward?: Names })

@@ -132,6 +132,8 @@ export interface PbfNode {
   id: number;
   lat: number;
   lon: number;
+  /** 1.3.1 : étiquettes du nœud (keys_vals des nœuds denses, keys et vals des nœuds simples) */
+  tags?: Record<string, string>;
 }
 export interface PbfWay {
   id: number;
@@ -168,10 +170,21 @@ export function writePbf(nodes: PbfNode[], ways: PbfWay[], o: { perBlock?: numbe
   for (let i = 0; i < nodes.length; i += per) {
     const part = nodes.slice(i, i + per);
     const block = new PbWriter();
-    block.bytesField(1, new PbWriter().bytesField(1, []).buf());
+    // 1.3.1 : table de chaînes des étiquettes de nœuds (sans étiquette : la table d'une chaîne vide, comme avant)
+    const tagged = part.some((n) => n.tags && Object.keys(n.tags).length);
+    const nstrings = [''];
+    const nidx = (x: string) => {
+      let k = nstrings.indexOf(x);
+      if (k < 0) k = nstrings.push(x) - 1;
+      return k;
+    };
     const group = new PbWriter();
     if (o.plainNodes) {
-      for (const n of part) group.bytesField(1, new PbWriter().tag(1, 0).sint(n.id).tag(8, 0).sint(toUnits(n.lat, latOff)).tag(9, 0).sint(toUnits(n.lon, lonOff)).buf());
+      for (const n of part) {
+        const w = new PbWriter().tag(1, 0).sint(n.id);
+        if (tagged && n.tags && Object.keys(n.tags).length) w.packed(2, Object.keys(n.tags).map(nidx)).packed(3, Object.values(n.tags).map(nidx));
+        group.bytesField(1, w.tag(8, 0).sint(toUnits(n.lat, latOff)).tag(9, 0).sint(toUnits(n.lon, lonOff)).buf());
+      }
     } else {
       const ids: number[] = [];
       const lats: number[] = [];
@@ -189,8 +202,22 @@ export function writePbf(nodes: PbfNode[], ways: PbfWay[], o: { perBlock?: numbe
         pla = la;
         plo = lo;
       }
-      group.bytesField(2, new PbWriter().packed(1, ids, true).packed(8, lats, true).packed(9, lons, true).buf());
+      const dense = new PbWriter().packed(1, ids, true).packed(8, lats, true).packed(9, lons, true);
+      if (tagged) {
+        const kv: number[] = [];
+        for (const n of part) {
+          for (const [k, v] of Object.entries(n.tags ?? {})) kv.push(nidx(k), nidx(v));
+          kv.push(0);
+        }
+        dense.packed(10, kv);
+      }
+      group.bytesField(2, dense.buf());
     }
+    if (tagged) {
+      const st = new PbWriter();
+      for (const x of nstrings) st.str(1, x);
+      block.bytesField(1, st.buf());
+    } else block.bytesField(1, new PbWriter().bytesField(1, []).buf());
     block.bytesField(2, group.buf());
     if (gran !== 100) block.field(17, gran);
     if (latOff) block.int64(19, latOff);

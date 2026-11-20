@@ -484,6 +484,11 @@ export interface Core {
    * dans la publication (ou index illisible, serveur injoignable). Jamais d'exception.
    */
   walkIndex?(): Promise<{ date: string; tiles?: number } | null>;
+  /**
+   * 1.3.1 (PRD-1.3.1 § 14, R1) : sorties du métro et du prémétro publiées (data/exits.json, format de
+   * core/walk/exits-format.ts) ; null : aucune (fichier absent ou illisible, serveur injoignable). Jamais d'exception.
+   */
+  walkExits?(): Promise<import('./walk/exits-format').ExitsFile | null>;
   init(): Promise<Meta>;
   /** La publication en vigueur : elle peut changer après init() (copie remplacée par le réseau, relecture de 10 min). */
   readonly meta: Meta | null;

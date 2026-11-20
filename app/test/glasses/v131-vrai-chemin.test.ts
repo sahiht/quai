@@ -134,6 +134,55 @@ describe('1.3.1, R4 : l’heure de partir suit le vrai chemin de la première ma
     expect(step(r, at('07:16:41'), here(at('07:16:41'))).moment?.kind).not.toBe('leave');
   });
 
+  it('l’heure de partir ne saute pas : chemin recalculé en route (à 35 m du départ, une minute de moins ; puis depuis la position, position perdue) : toujours 07:12 et 6 min', () => {
+    // à 35 m du départ (pas encore « parti », 40 m), hors du chemin 10 s : le contrôleur donne un chemin depuis la position,
+    // de 345 m (5 min). Avant : l'heure passait à 07:13, la phase revenait à « avant », « 6 min » devenait « 5 min »
+    const r = run(longRoute());
+    const leave = m(step(r, at('07:12'), here(at('07:12'))).moment, 'leave');
+    const p = offset(START, 35, 0);
+    const c = offset(START, 100, 0);
+    r.input.walk = { leg: 0, route: route([p, c, { lat: P.flagey.lat, lon: c.lon }, P.flagey], [], 'osm', 2) };
+    expect(Math.ceil(r.input.walk.route.lengthM / 80)).toBe(5);
+    for (const hm of ['07:12:20', '07:12:40']) {
+      const s = step(r, at(hm), here(at(hm), p, hm === '07:12:20' ? 1 : 0));
+      expect(s.phase, hm).toEqual({ kind: 'walk', leg: 0 });
+      expect(m(s.moment, 'leave'), hm).toMatchObject({ id: leave.id, walkMin: 6, since: at('07:12'), until: at('07:15') });
+    }
+    // parti (60 m), chemin recalculé depuis la position (il ne part plus du départ), puis plus de position (téléphone en
+    // poche, passage couvert) : avant, retour à la phase « avant » avec « Ensuite : partir à 07:15 » et « 3 min à pied »
+    const r2 = run(longRoute());
+    step(r2, at('07:12'), here(at('07:12')));
+    const q = offset(START, 60, 0);
+    step(r2, at('07:13'), here(at('07:13'), q, 1.3));
+    r2.input.walk = { leg: 0, route: longRoute(q) };
+    step(r2, at('07:13:05'), here(at('07:13:05'), q, 1.3));
+    r2.mem = JSON.parse(JSON.stringify(r2.mem));
+    for (const hm of ['07:14:10', '07:14:40', '07:15']) {
+      const s = step(r2, at(hm));
+      expect(s.phase, hm).toEqual({ kind: 'walk', leg: 0 });
+      expect(s.where.walk?.leaveAt, hm).toBeUndefined();
+      expect(s.moment?.kind, hm).not.toBe('leave');
+    }
+    // le chemin absent un instant (double du contrôleur) : la même heure aussi
+    const r3 = run(longRoute());
+    expect(step(r3, at('07:10'), here(at('07:10'))).where.walk).toMatchObject({ leaveAt: at('07:12'), remainingMin: 6 });
+    delete r3.input.walk;
+    expect(step(r3, at('07:10:30'), here(at('07:10:30'))).where.walk).toMatchObject({ leaveAt: at('07:12'), remainingMin: 6 });
+  });
+
+  it('jamais plus tard que l’heure prévue : le chemin n’arrive qu’à 07:16:30 (calcul retardé), « Partir maintenant » de 07:15 garde son heure et sa fin (contrôle du moteur)', () => {
+    const r = run();
+    const s15 = step(r, at('07:15'), here(at('07:15')));
+    expect(m(s15.moment, 'leave')).toMatchObject({ walkMin: 3, since: at('07:15'), until: at('07:18') });
+    r.input.walk = { leg: 0, route: longRoute() };
+    const s16 = step(r, at('07:16:30'), here(at('07:16:30')));
+    // les vraies minutes et la marge vraie (« très juste »), mais l'heure de partir reste 07:15 : le message ne dure pas
+    // jusqu'à 07:19:30 et la marche ne « part » pas à 07:16:30
+    expect(s16.phase).toEqual({ kind: 'walk', leg: 0 });
+    expect(m(s16.moment, 'leave')).toMatchObject({ walkMin: 6, since: at('07:15'), until: at('07:18'), tight: true });
+    expect(step(r, at('07:18:01'), here(at('07:18:01'))).moment?.kind).not.toBe('leave');
+  });
+
   it('correspondance devenue impossible : le départ raté d’aujourd’hui (« très juste », « Si tu le rates », puis « Ton bus 71 de 07:20 est parti »)', () => {
     const r = run(longRoute(), { startedAt: at('07:16') });
     const s0 = step(r, at('07:16'), here(at('07:16')));

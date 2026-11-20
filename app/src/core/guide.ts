@@ -81,6 +81,12 @@ export const GUIDE = {
   passedMs: 3 * MIN,
   /** arrêt dépassé, nouveau trajet qui garde le véhicule : la dernière minute avant sa descente est à « Descends » */
   passedKeptMs: 1 * MIN,
+  /**
+   * 1.3.1 (contrôle du moteur, remarque 10) : après une descente constatée, « resté à bord » seulement dans les 10 min
+   * qui la suivent, et si une position était encore à 150 m de l'arrêt (alightNearM) dans les 3 dernières minutes
+   */
+  passedAfterMs: 10 * MIN,
+  passedSeenMs: 3 * MIN,
   /** « Tu y es » : à 50 m de la destination ; 2 min, puis fin */
   arrivedM: 50,
   arrivedMs: 2 * MIN,
@@ -145,6 +151,11 @@ export const GUIDE = {
    */
   wayFactor: 1.5,
   wayExtraM: 100,
+  /**
+   * 1.3.1 (A2, contrôle du moteur) : « est parti » en marchant seulement avec 45 s de positions (la plus ancienne des
+   * 90 dernières secondes) : assez pour voir qu'on ne s'éloigne pas de l'arrêt
+   */
+  walkSeenMs: 45 * SEC,
   /** 1.3.1 (A5, P2) : « Partir maintenant » reste devant le premier virage jusqu'à 15 m de marche sur le chemin (deux positions) */
   leaveHoldM: 15,
   /**
@@ -162,6 +173,11 @@ export const GUIDE = {
   uturnAccM: 20,
   uturnFixes: 3,
   uturnAheadM: 5,
+  /**
+   * 1.3.1 (A6, contrôle du moteur) : chemin en épingle : pas de demi-tour si une partie du chemin, à 30 m au plus
+   * (offRouteM), va dans le sens de la marche à 60° près
+   */
+  uturnWithDeg: 60,
   /** 1.3.1 (B18, P6) : virage suivant à 30 m au plus : annoncé avec celui-ci (« puis à gauche ») */
   turnThenM: 30,
   /** 1.3.1 (B18, P8) : distance d'un virage : médiane des 3 dernières positions (10 s au plus), jamais en hausse */
@@ -205,6 +221,11 @@ export interface GuideInput {
    * (tightLegs), le suivant de la même ligne, même destination, lu au tableau de l'arrêt par le contrôleur.
    */
   nextByLeg?: Record<number, { vehicle: VehicleRef; depAt: number; rt: boolean }>;
+  /**
+   * 1.3.1 (PRD-1.3.1 § 14, R1) : sortie du métro ou du prémétro par rang de la marche qui suit une descente à un arrêt
+   * STIB sous terre (contrôleur : exits.json, core/exits.ts) ; le moment walk (B17) la dit en 3e ligne pâle.
+   */
+  exitByLeg?: Record<number, string>;
 }
 
 /* ------------------------------ Mémoire ------------------------------ */
@@ -280,9 +301,20 @@ interface Mem extends GuideMemory {
   turnDist?: { id: string; d: number };
   /**
    * 1.3.1 (R4, realFirstWalk) : trajet `jid`, première fois (epoch ms) où le vrai chemin de la première marche s'est
-   * montré plus long que la marche prévue : l'heure de partir n'est jamais avancée avant cet instant
+   * montré plus long que la marche prévue : l'heure de partir n'est jamais avancée avant cet instant ; `min` : ses
+   * vraies minutes, gardées pour tout le guidage de ce trajet (l'heure de partir ne change plus avec le chemin gardé)
    */
-  walk0?: { jid: string; at: number };
+  walk0?: { jid: string; at: number; min?: number };
+  /**
+   * 1.3.1 (A2, contrôle du moteur) : vu à l'arrêt de montée (60 m) du véhicule de l'étape `leg`, à `at` : ce qui s'en
+   * éloigne ensuite au pas le long de la ligne est le véhicule (bouchon, zone piétonne) : montée constatée (observe)
+   */
+  atStop?: { leg: number; at: number };
+  /**
+   * 1.3.1 (remarque 10) : rang de l'étape en véhicule dont on a quitté l'arrêt de descente à pied (une position au pas à
+   * plus de 150 m de lui après la descente constatée) : ce véhicule ne nous emporte plus (justLeft)
+   */
+  walkedOff?: number;
 }
 
 const ISSUE_KINDS: readonly CheckIssue['kind'][] = ['battery', 'noPosition', 'positionLost'];
@@ -334,7 +366,11 @@ function readMem(mem: GuideMemory | null | undefined): Mem {
   if (chk) out.chk = chk;
   if (x.rideNext && Number.isInteger(x.rideNext.leg) && Number.isInteger(x.rideNext.s)) out.rideNext = { leg: x.rideNext.leg, s: x.rideNext.s };
   if (x.turnDist && typeof x.turnDist.id === 'string' && Number.isFinite(x.turnDist.d)) out.turnDist = { id: x.turnDist.id, d: x.turnDist.d };
-  if (x.walk0 && typeof x.walk0.jid === 'string' && Number.isFinite(x.walk0.at)) out.walk0 = { jid: x.walk0.jid, at: x.walk0.at };
+  if (x.walk0 && typeof x.walk0.jid === 'string' && Number.isFinite(x.walk0.at)) {
+    out.walk0 = { jid: x.walk0.jid, at: x.walk0.at, ...(Number.isInteger(x.walk0.min) && (x.walk0.min as number) > 0 ? { min: x.walk0.min } : {}) };
+  }
+  if (x.atStop && Number.isInteger(x.atStop.leg) && Number.isFinite(x.atStop.at)) out.atStop = { leg: x.atStop.leg, at: x.atStop.at };
+  if (Number.isInteger(x.walkedOff)) out.walkedOff = x.walkedOff;
   return out;
 }
 
@@ -562,14 +598,25 @@ function recentFixes(c: Ctx, ms: number): GuideFix[] {
 function walkingTo(c: Ctx, w: number): boolean {
   const wl = c.legs[w];
   if (!c.fix || wl?.kind !== 'walk' || !slow(c) || !walkingStill(c, w) || (w === 0 && !c.started)) return false;
+  // contrôle du moteur : vers l'arrêt, pas en s'en éloignant. Un bus ou un tram lent (bouchon, zone piétonne) qui repart
+  // de l'arrêt du côté d'où l'on vient passait pour une marche vers l'arrêt : « Fais demi-tour », puis « Ton bus est
+  // parti » et un nouveau trajet alors qu'on est dedans. Vu à l'arrêt avant : la montée est constatée au pas (observe,
+  // mémoire atStop). Sinon (téléphone verrouillé à l'arrêt, réveillé dans le véhicule) : comparé à la plus ancienne
+  // position de la dernière minute
+  const old = recentFixes(c, GUIDE.freshMs)[0];
+  const before = old && old !== c.fix ? old : undefined;
   const pr = c.walkPr?.leg === w ? c.walkPr : undefined;
-  if (pr && pr.route.source === 'osm' && pr.offM <= GUIDE.offRouteM) return true;
+  if (pr && pr.route.source === 'osm' && pr.offM <= GUIDE.offRouteM) {
+    const was = before ? projectOn(routePoints(pr.route), before) : undefined;
+    return !was || was.offM > GUIDE.offRouteM || pr.alongM >= was.alongM - GUIDE.uturnM;
+  }
   const a = w === 0 && knownPoint(c.in.origin) ? c.in.origin : wl.from;
   const b = wl.to;
   if (!knownPoint(a) || !knownPoint(b)) return false;
   const ab = distanceM(a, b);
   const pa = distanceM(c.fix, a);
   const pb = distanceM(c.fix, b);
+  if (before && pb > distanceM(before, b) + GUIDE.offRouteM) return false;
   if (pa + pb > ab * GUIDE.wayFactor + GUIDE.wayExtraM) return false;
   // angle aigu en B entre le départ et la position : pas au-delà de l'arrêt
   return pa * pa < ab * ab + pb * pb;
@@ -629,6 +676,9 @@ function observe(c: Ctx): void {
   if (!c.fix) return;
   // montée : la première étape en véhicule pas encore faite, l'étape d'avant finie
   const after = Math.max(m.alighted?.leg ?? -1, m.boarded?.leg ?? -1);
+  // contrôle du moteur (A2) : vu à l'arrêt de montée du prochain véhicule (60 m), dans les 15 min avant son départ ou après
+  const kb = nextRide(legs, after + 1);
+  if (kb >= 0 && !legs[kb].cancelled && now >= legs[kb].dep - GUIDE.boardAheadMs && distTo(c, legs[kb].from) <= GUIDE.stopM) m.atStop = { leg: kb, at: now };
   for (let k = nextRide(legs, after + 1); k >= 0; k = nextRide(legs, k + 1)) {
     const l = legs[k];
     // 1.3.1 (A3, I1) : un véhicule sans temps réel gardé plus longtemps (keptUntil) : sa montée se constate jusque-là
@@ -640,7 +690,10 @@ function observe(c: Ctx): void {
     // une position encore prise dans ce véhicule (en retard, traitée en retard, ou qui continue au-delà de l'arrêt), qui
     // roule près de la ligne suivante, passait pour la montée (descente jamais constatée, arrêt dépassé jamais vu)
     if (p >= 0 && !seenAtStop(c, l, legs[p].arr - GUIDE.alightFromMs)) break;
-    if (fast(c) && distTo(c, l.from) >= GUIDE.boardLeftM) {
+    // contrôle du moteur (A2, A3) : vu à l'arrêt, puis à 100 m le long de la ligne après l'heure du véhicule : monté, même
+    // au pas (bus, tram, métro dans un bouchon ou une zone piétonne ; pas un train : on fait 100 m sur un quai)
+    const crept = m.atStop?.leg === k && !isTrain(l) && now >= l.dep;
+    if ((fast(c) || crept) && distTo(c, l.from) >= GUIDE.boardLeftM) {
       const pr = rideProj(c, l);
       const ok = pr ? pr.offM <= GUIDE.onLineM && pr.alongM >= GUIDE.boardAlongM : knownPoint(l.from);
       if (ok) {
@@ -657,6 +710,10 @@ function observe(c: Ctx): void {
     const l = legs[b];
     if (now >= l.arr - GUIDE.alightFromMs && slow(c) && distTo(c, l.to) <= GUIDE.alightNearM) m.alighted = { leg: b, at: now };
   }
+  // 1.3.1 (remarque 10) : descendu, puis au pas à plus de 150 m de l'arrêt : reparti à pied (vitesse connue seulement :
+  // une position seule au réveil du téléphone ne dit pas l'allure)
+  const al = m.alighted;
+  if (al && c.speed !== undefined && slow(c) && knownPoint(legs[al.leg]?.to) && distTo(c, legs[al.leg].to) > GUIDE.alightNearM) m.walkedOff = al.leg;
 }
 
 /* ------------------------------ Où l'on est ------------------------------ */
@@ -678,7 +735,11 @@ function arrivedNow(c: Ctx): { yes: boolean; byFix: boolean } {
     if (alightedFrom(m, L - 1)) return carriedOn(c) ? { yes: false, byFix: false } : { yes: true, byFix: true };
     // encore à bord d'après la position (véhicule en retard, ou emporté au-delà de l'arrêt) : pas arrivé
     const aboard = boardedOn(m, L - 1) && (riding(c, L - 1) || (fast(c) && distTo(c, last.to) > GUIDE.alightNearM));
-    if (now >= last.arr && !aboard) return { yes: true, byFix: false };
+    // 1.3.1 (A2, A3 ; contrôle du moteur) : trajet qui finit par un véhicule, jamais monté, et la position dit qu'on
+    // l'attend encore à son arrêt (en retard sans temps réel : gardé) ou qu'on marche encore vers lui : pas arrivé, jamais
+    // « Tu y es » à l'arrêt de départ ou en pleine rue à l'heure où il arrive ; detect dit ensuite s'il est raté
+    const notLeft = c.in.kind === 'trip' && !boardedOn(m, L - 1) && !last.cancelled && (stillAtStop(c, L - 1) || (L >= 2 && c.legs[L - 2].kind === 'walk' && walkingTo(c, L - 2)));
+    if (now >= last.arr && !aboard && !notLeft) return { yes: true, byFix: false };
     return { yes: false, byFix: false };
   }
   if (c.fix && knownPoint(last.to) && distanceM(c.fix, last.to) <= GUIDE.arrivedM) {
@@ -843,10 +904,29 @@ function passedAt(c: Ctx, loc: Loc): number {
   const cands: number[] = [];
   if (loc.phase.kind === 'ride') cands.push(loc.phase.leg);
   // descente constatée (immobile à quai), puis on roule : peut-être resté dans ce véhicule, même quand l'heure dit déjà
-  // le véhicule suivant (pas encore monté dedans)
-  if (m.alighted && fast(c) && !cands.includes(m.alighted.leg) && !(loc.phase.kind === 'ride' && boardedOn(m, loc.phase.leg))) cands.push(m.alighted.leg);
+  // le véhicule suivant (pas encore monté dedans). 1.3.1 (contrôle du moteur, remarque 10) : seulement si l'on vient de
+  // quitter cet arrêt avec lui (justLeft) : sinon, montée non constatée dans le véhicule suivant, « Tu as passé … »
+  // venait à tort pour l'arrêt d'avant, devant « Descends », avec un nouveau trajet demandé
+  if (m.alighted && fast(c) && !cands.includes(m.alighted.leg) && !(loc.phase.kind === 'ride' && boardedOn(m, loc.phase.leg)) && justLeft(c, m.alighted.leg)) cands.push(m.alighted.leg);
   for (const k of cands) if (passedLeg(c, k)) return k;
   return -1;
+}
+
+/**
+ * 1.3.1 (contrôle du moteur, remarque 10) : après la descente constatée de l'étape `k`, peut-on encore être resté à bord
+ * de ce véhicule ? Seulement si l'on vient de quitter son arrêt avec lui : descente constatée il y a 10 min au plus (le
+ * temps d'un arrêt en gare), jamais reparti à pied de l'arrêt depuis (mémoire `walkedOff`, tenue par observe), et une
+ * position encore à 150 m de l'arrêt dans les 3 dernières minutes (rester à bord se voit dans la minute qui suit le
+ * départ). Sans cela, toute montée non constatée dans le véhicule suivant (téléphone verrouillé, pas de position sous
+ * terre, quai loin du point de la gare) donnait plus tard « Tu as passé … » pour l'arrêt d'avant.
+ */
+function justLeft(c: Ctx, k: number): boolean {
+  const to = c.legs[k]?.to;
+  const f0 = c.fix;
+  const al = c.m.alighted;
+  if (!f0 || !al || !knownPoint(to)) return false;
+  if (c.now - al.at > GUIDE.passedAfterMs || c.m.walkedOff === k) return false;
+  return fixesOf(c.in).some((f) => f.at <= f0.at && f0.at - f.at <= GUIDE.passedSeenMs && distanceM(f, to) <= GUIDE.alightNearM);
 }
 
 /** L'arrêt de descente de l'étape `k` est-il dépassé (voir passedAt) ? */
@@ -924,7 +1004,9 @@ function detect(c: Ctx, loc: Loc): void {
   if (!found && c.fix && loc.phase.kind === 'walk') {
     const k = loc.phase.leg + 1;
     const l = legs[k];
-    if (l?.kind === 'ride' && !l.cancelled && !boardedOn(m, k) && now >= l.dep) {
+    // contrôle du moteur : seulement avec 45 s de positions (au réveil du téléphone, une position ou deux ne disent pas si
+    // l'on marche vers l'arrêt ou si l'on en repart dans un véhicule lent : walkingTo compare à la plus ancienne)
+    if (l?.kind === 'ride' && !l.cancelled && !boardedOn(m, k) && now >= l.dep && c.fix.at - recentFixes(c, 2 * GUIDE.walkSeenMs)[0].at >= GUIDE.walkSeenMs) {
       const gone = l.rt ? now >= l.dep + GUIDE.missedMs : now + walkLeftMs(c, loc.phase.leg) > keptUntil(c, k);
       if (gone) found = pending(c, loc, 'missed', k);
     }
@@ -954,6 +1036,7 @@ function detect(c: Ctx, loc: Loc): void {
       // (rideOnJourney, par le contrôleur) ; sinon seulement « Descends à … »
       if (kind === 'ride' && !(nx && knownPoint(nx))) found.local = true;
       if (m.alighted && m.alighted.leg >= k) delete m.alighted;
+      if (m.walkedOff === k) delete m.walkedOff;
       m.boarded = { leg: k, at: m.boarded?.leg === k ? m.boarded.at : now };
       // le véhicule où l'on est : le nouveau trajet qui le garde jusqu'à l'arrêt suivant le retrouve (adopt)
       found.onBoard = { ...(legs[k].tripId ? { tripId: legs[k].tripId } : {}), schedDep: legs[k].schedDep, at: m.boarded.at };
@@ -1024,6 +1107,10 @@ function motionOn(pts: LatLon[], cum: number[], fx: TimedPoint[], i: number, min
   const pf = projectAlong(pts, f, cum);
   const pa = projectAlong(pts, a, cum);
   if (pf.offM > GUIDE.offRouteM || pa.offM > GUIDE.offRouteM) return undefined;
+  // chemin en épingle (rampe, aller et retour jusqu'au passage piéton quand les trottoirs sont séparés) : la position,
+  // bruitée, se projette sur l'autre branche, qui va dans l'autre sens. Si une partie du chemin à 30 m au plus va dans
+  // le sens de la marche, on ne sait pas sur quelle branche on est : jamais « Fais demi-tour » dans le doute
+  if (start && routeGoesWith(pts, cum, f, bearingDeg(a, f))) return undefined;
   const total = cum[cum.length - 1];
   let from = Math.max(0, pf.alongM);
   if (total - from < LAST_TURN_FREE_M) {
@@ -1032,6 +1119,25 @@ function motionOn(pts: LatLon[], cum: number[], fx: TimedPoint[], i: number, min
   }
   const dir = bearingDeg(pointAlong(pts, cum, from), pointAlong(pts, cum, Math.min(total, from + GUIDE.uturnM)));
   return { angle: Math.abs(relativeDeg(bearingDeg(a, f), dir)), back: pf.alongM <= pa.alongM + GUIDE.uturnAheadM };
+}
+
+/**
+ * 1.3.1 (A6, contrôle du moteur) : une partie du chemin, à 30 m au plus de `p`, va-t-elle dans le sens `moveDeg` (à 60°
+ * près : direction de chaque segment proche, ou du chemin sur les 15 m qui suivent son point le plus proche) ?
+ */
+function routeGoesWith(pts: LatLon[], cum: number[], p: LatLon, moveDeg: number): boolean {
+  const total = cum[cum.length - 1];
+  for (let s = 0; s + 1 < pts.length; s++) {
+    const pr = projectOn([pts[s], pts[s + 1]], p);
+    if (pr.offM > GUIDE.offRouteM) continue;
+    const from = cum[s] + pr.alongM;
+    if (total - from < GUIDE.uturnAheadM) continue;
+    // la direction du segment lui-même, ou celle des 15 m qui suivent (avant un coin, elles diffèrent)
+    const ahead = bearingDeg(pointAlong(pts, cum, from), pointAlong(pts, cum, Math.min(total, from + GUIDE.uturnM)));
+    const own = cum[s + 1] - cum[s] >= 1 ? bearingDeg(pts[s], pts[s + 1]) : ahead;
+    if ([own, ahead].some((dir) => Math.abs(relativeDeg(dir, moveDeg)) <= GUIDE.uturnWithDeg)) return true;
+  }
+  return false;
 }
 
 /** Une position (ou une moyenne de positions) datée. */
@@ -1061,7 +1167,12 @@ function uturnCand(c: Ctx, w: number, route: WalkRoute, pts: LatLon[], cum: numb
   if (!f0 || m.dismissed.includes(id)) return null;
   // positions précises seulement (20 m) ; pour lancer, lissées sur trois : une position qui saute ne fait pas faire
   // demi-tour ; pour finir, telles quelles (la flèche s'efface dès qu'on va dans le bon sens)
-  const raw = recentFixes(c, GUIDE.freshMs).filter((f) => (f.accuracy ?? 0) <= GUIDE.uturnAccM);
+  // contrôle du moteur : après une descente, seulement les positions d'après elle (constatée, sinon l'heure d'arrivée) et
+  // jamais une position à la vitesse d'un véhicule : le train ou le bus qui freine en arrivant du côté où part la marche
+  // passait pour 15 m de marche à contresens (« Fais demi-tour » au premier pas dans le bon sens)
+  const pk = w > 0 && c.legs[w - 1].kind === 'ride' ? w - 1 : -1;
+  const since = pk < 0 ? -Infinity : m.alighted && m.alighted.leg >= pk ? m.alighted.at : c.legs[pk].arr;
+  const raw = recentFixes(c, GUIDE.freshMs).filter((f) => (f.accuracy ?? 0) <= GUIDE.uturnAccM && f.at >= since && !(Number.isFinite(f.speed) && (f.speed as number) >= GUIDE.walkMaxMs));
   const n = raw.length;
   const wl = c.legs[w];
   const make = (since: number): Moment => ({ kind: 'turn', id, since, until: f0.at + GUIDE.freshMs, leg: w, turn: 'uturn', distM: 0, toward: wl.to.name, final: w === c.legs.length - 1 });
@@ -1449,6 +1560,8 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
           // tableau par le contrôleur), « Si tu le rates : tram 3 à 08:51 » ; jamais sinon
           const mg = connectionMargin(legs, k);
           const nx = c.in.nextByLeg?.[k];
+          // très juste dit comme à « Descends » (Then.tight) : la même correspondance, le même mot (A4 : le moteur le dit)
+          if (mg !== undefined && mg <= GUIDE.tightMin) mo.tight = true;
           if (mg !== undefined && mg <= GUIDE.tightMin && nx && Number.isFinite(nx.depAt) && nx.depAt > l.dep) {
             mo.ifMissed = { vehicle: { ...nx.vehicle }, depAt: nx.depAt, rt: !!nx.rt };
           }
@@ -1586,6 +1699,9 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
           const pl = platformOf(r);
           if (pl && isTrain(r)) mo.platform = pl;
         } else if (final) mo.arr = j.arr;
+        // 1.3.1 (PRD-1.3.1 § 14, R1) : la sortie du métro à prendre, si le contrôleur la connaît (core/exits.ts)
+        const exit = c.in.exitByLeg?.[w];
+        if (exit) mo.exit = exit;
         return mo;
       },
     });
@@ -1902,6 +2018,8 @@ function adopt(m: Mem, j: Journey, now: number): void {
     // 1.3.1 : progression à bord et distance du virage, propres aux étapes de l'ancien trajet
     delete m.rideNext;
     delete m.turnDist;
+    delete m.atStop;
+    delete m.walkedOff;
   }
   m.jid = j.id;
 }
@@ -1955,8 +2073,11 @@ function endedNow(c: Ctx, loc: Loc): boolean {
  *   vient tout de suite, et si le véhicule ne peut plus être pris, c'est le départ raté d'aujourd'hui (« très juste »,
  *   « Si tu le rates », puis le véhicule parti) ;
  * - rien ne change si le chemin n'est pas plus long, n'est pas un vrai chemin (ligne droite : hors de Belgique, pas de
- *   données), ne part pas du point de départ (40 m ; recalculé en route : la position dit déjà la marche restante) ou
- *   ne mène pas à l'arrêt (30 m) ; ni pour un trajet à pied seul (aucun véhicule à prendre), ni pour « j'y descends ».
+ *   données), ne part pas du point de départ (40 m) ou ne mène pas à l'arrêt (30 m) ; ni pour un trajet à pied seul
+ *   (aucun véhicule à prendre), ni pour « j'y descends » ;
+ * - décidé une fois par trajet (contrôle du moteur) : les vraies minutes sont gardées (mémoire `walk0.min`) ; le chemin
+ *   recalculé en route depuis la position (chemin quitté 10 s) ne ramène pas l'heure de partir à l'heure prévue, et ne
+ *   la déplace pas d'une minute : la position dit déjà la marche restante.
  * Les marches de correspondance gardent leurs minutes prévues (on ne choisit pas l'heure d'une descente).
  * Le seul endroit de cette règle : le trajet rendu sert à tout le calcul du pas (même identifiant, même arrivée).
  */
@@ -1964,16 +2085,21 @@ function realFirstWalk(input: GuideInput, m: Mem): Journey {
   const j = input.journey;
   const w = j.legs[0];
   const r = j.legs[1];
-  const route = input.walk?.leg === 0 ? input.walk.route : undefined;
-  if (input.kind !== 'trip' || !w || w.kind !== 'walk' || !r || r.kind !== 'ride' || !route || route.source !== 'osm') return j;
-  if (!Number.isFinite(route.lengthM) || !Number.isFinite(j.leaveAt)) return j;
-  const start = knownPoint(input.origin) ? input.origin : knownPoint(w.from) ? w.from : undefined;
-  if (!start || !knownPoint(route.from) || distanceM(route.from, start) > GUIDE.leaveM) return j;
-  if (!knownPoint(w.to) || !knownPoint(route.to) || distanceM(route.to, w.to) > 30) return j;
-  const real = minutesFor(route.lengthM, false);
+  if (input.kind !== 'trip' || !w || w.kind !== 'walk' || !r || r.kind !== 'ride' || !Number.isFinite(j.leaveAt)) return j;
+  // décidé une fois par trajet (mémoire `walk0`) : un chemin recalculé en route (depuis la position, plus court ou qui
+  // ne part plus du départ) ou absent un instant ne ramène pas l'heure de partir en arrière, ni ne la déplace
+  let real = m.walk0?.jid === j.id ? m.walk0.min : undefined;
+  if (real === undefined) {
+    const route = input.walk?.leg === 0 ? input.walk.route : undefined;
+    if (!route || route.source !== 'osm' || !Number.isFinite(route.lengthM)) return j;
+    const start = knownPoint(input.origin) ? input.origin : knownPoint(w.from) ? w.from : undefined;
+    if (!start || !knownPoint(route.from) || distanceM(route.from, start) > GUIDE.leaveM) return j;
+    if (!knownPoint(w.to) || !knownPoint(route.to) || distanceM(route.to, w.to) > 30) return j;
+    real = minutesFor(route.lengthM, false);
+  }
   const extra = real - walkMinOf(w);
   if (extra <= 0) return j;
-  if (m.walk0?.jid !== j.id) m.walk0 = { jid: j.id, at: input.now };
+  m.walk0 = { jid: j.id, at: m.walk0?.jid === j.id ? m.walk0.at : input.now, min: real };
   const leaveAt = Math.min(j.leaveAt, Math.max(j.leaveAt - extra * MIN, m.walk0.at));
   const shift = j.leaveAt - leaveAt;
   const legs = j.legs.slice();
