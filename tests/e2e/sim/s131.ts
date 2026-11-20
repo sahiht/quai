@@ -420,7 +420,8 @@ async function s131accueil(ctx: Ctx131): Promise<void> {
   await sim.launch(ctx.pageUrl({ ...START, ...ctx.preset('p/131from130.json') }, false));
   await ctx.step('accueil', async () => {
     const s = await simHome(sim);
-    const news = sim.screens.filter((x) => x.screen === 'message');
+    // la page « Chargement… » du lancement est aussi un écran `message` : ce n'est pas un message des nouveautés
+    const news = sim.screens.filter((x) => x.screen === 'message' && !(x.lines.length === 1 && /^Chargement/.test(x.lines[0])));
     check(!news.length, `message à l’ouverture pour qui vient de la 1.3.0 (PRD-1.3.1 § 9 : pas de message des nouveautés) : ${news.map(show).join(' | ')}`);
     const { bad, at, favs } = homeOrderIssues(s);
     check(!bad.length, `accueil (PRD-1.3.1 § 8) :\n        ${bad.join('\n        ')}\n      vu : ${JSON.stringify(s.lines)}`);
@@ -696,7 +697,9 @@ async function s131apos(ctx: Ctx131): Promise<void> {
   });
   await ctx.step('tableau-waterloo', async () => {
     const cur = sim.last!;
-    const k = cur.lines.findIndex((l) => /^Waterloo {3}/.test(l));
+    // B21 : les lignes ouvertes sous la gare du curseur ne sont pas des rangées (le rang se compte sans elles)
+    const open = accordionLines(cur);
+    const k = cur.lines.filter((l) => !open.includes(l)).findIndex((l) => /^Waterloo {3}/.test(l));
     check(k >= 0, `Waterloo absent de « Gares de train » : ${show(cur)}`);
     await sim.select(k);
     await sim.input('click');

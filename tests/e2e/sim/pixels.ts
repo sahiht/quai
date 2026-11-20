@@ -79,8 +79,12 @@ const NOTE = /^(~ horaire prévu|\* s’arrête avant le terminus|Temps réel in
 const TOP_TRAIN = /^[●◎○─…]+ {3}descente (au prochain arrêt|dans \d+ arrêts)$/;
 /** 1.2.5 (PRD-1.2.5 § 4) : rangée en mots clairs et pâles de « Bus, tram, métro » (« Bus W vers Bruxelles Midi   20 min »). */
 export const SEG_ROW = /^(Bus SNCB|Bus|Tram|Métro|Ligne) \S+ vers /;
-/** Accueil : les lignes qui suivent les favoris (jamais en retrait, même sans ligne vide). */
-const HOME_TOOLS = /^(Autour de moi|Gares|Bus, tram, métro)( {3}|$)/;
+/**
+ * Accueil : les lignes qui suivent les favoris (jamais en retrait, même sans ligne vide). 1.3.1 (§ 8) : les favoris sont
+ * suivis de « Gares de train », « Lignes de bus, tram, métro », « Arrêts de bus, tram, métro » ; avec « En cours » en tête,
+ * la ligne vide saute : ces rubriques restent à la marge.
+ */
+const HOME_TOOLS = /^(Autour de moi|Gares|Bus, tram, métro|Gares de train|Lignes de bus, tram, métro|Arrêts de bus, tram, métro)( {3}|$)/;
 /** « Bus, tram, métro » : titre d'une ligne choisie (à la marge) ; le reste, ses sens, en retrait. */
 const LINE_TITLE = /^((Bus SNCB|Bus|Tram|Métro|Ligne) \S+ · |.+ · toutes les lignes$)/;
 /** Ligne d'aide (ou message temporaire de l'accueil) : jamais une ligne de la liste. */
