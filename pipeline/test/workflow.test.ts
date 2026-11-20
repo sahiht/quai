@@ -141,9 +141,12 @@ describe('nightly.yml', () => {
       'working-directory': 'pipeline',
       run: 'node --experimental-strip-types src/walk/cli.ts exits --tiles ../site/data/walk --stops ../site/data --input "$RUNNER_TEMP/belgium-latest.osm.pbf"',
     });
-    // après la publication des chemins à pied de la nuit (les tuiles mesurées), avant la sauvegarde du cache
+    // après la publication des chemins à pied de la nuit (les tuiles mesurées) et après les balayages (leurs bilans
+    // ne l'attendent jamais), avant l'envoi du site (sauté en vérification)
     expect(k).toBeGreaterThan(i((s) => s.name === 'Publier les chemins à pied (site/data/walk)'));
-    expect(k).toBeLessThan(i((s) => s.uses === 'actions/cache/save@v6'));
+    expect(k).toBeGreaterThan(i((s) => s.name === 'Balayer les chemins à pied'));
+    expect(k).toBeGreaterThan(i((s) => s.name === 'Balayer les lignes de bus, tram et métro'));
+    expect(k).toBeLessThan(i((s) => s.uses === 'actions/upload-pages-artifact@v5'));
     expect(steps[k].run).not.toContain('gtfs-cache');
   });
 

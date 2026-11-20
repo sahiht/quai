@@ -123,7 +123,8 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv, log: (m: stri
       if (!existsSync(input)) {
         const url = typeof opts.url === 'string' ? opts.url : GEOFABRIK_URL;
         log(`Sorties du métro : téléchargement de ${url}`);
-        const got = await downloadExtract(url, input, { log });
+        // 30 min au plus pour le téléchargement : l'étape (45 min) garde le temps de mesurer
+        const got = await downloadExtract(url, input, { log, timeoutMs: 30 * 60_000 });
         const expected = await publishedMd5(url);
         if (expected && expected !== got.md5) throw new Error('extrait reçu incomplet (empreinte MD5 différente)');
         log(`Sorties du métro : extrait reçu, ${(got.bytes / 1e6).toFixed(1).replace('.', ',')} Mo en ${Math.round((Date.now() - t0) / 1000)} s${expected ? ', MD5 vérifié' : ''}`);
