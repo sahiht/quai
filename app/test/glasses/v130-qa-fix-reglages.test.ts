@@ -5,6 +5,7 @@
  * Even (bridgeStorage, file du pont, createKV), vrais réglages (loadSettings, SettingsStore), vrai contrôleur. Lieux
  * publics seulement.
  */
+import { APP_VERSION } from '../../src/version';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FIRST_USE_KEY } from '../../src/glasses/controller';
 import { bridgeStorage } from '../../src/platform/even';
