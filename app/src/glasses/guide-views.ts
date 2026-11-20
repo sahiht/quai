@@ -19,6 +19,7 @@ import {
   NB,
   alightWords,
   boardWait,
+  delaySuffix,
   diffText,
   fitName,
   headText,
@@ -43,10 +44,15 @@ import { metersText, type ViewCtx } from './views';
 /** Ce que l'écran du guidage montre : rien, le moment du moteur, ou « Où tu en es ». */
 export type GuideShow = 'empty' | 'moment' | 'where';
 
-/** Menu de l'appui long pendant un guidage (PRD § 3.4) : menu système des lunettes, ou écran `menu` de Quai Web. */
+/**
+ * Menu de l'appui long pendant un guidage (PRD § 3.4) : menu système des lunettes, ou écran `menu` de Quai Web. 1.3.1
+ * (B10, E4) : « Voir tout le trajet », « Voir les arrêts » (« Dans le train » du véhicule en cours ; le contrôleur le
+ * retire d'un trajet sans véhicule), « Arrêter le guidage » en dernier (le curseur ne s'ouvre plus sur lui).
+ */
 export const GUIDE_MENU: MenuItem[] = [
-  { id: MENU_IDS.stopGuide, label: 'Arrêter le guidage' },
   { id: MENU_IDS.allSteps, label: 'Voir tout le trajet' },
+  { id: MENU_IDS.stops, label: 'Voir les arrêts' },
+  { id: MENU_IDS.stopGuide, label: 'Arrêter le guidage' },
 ];
 
 /** Textes fixes du guidage (PRD § 3.2, § 3.3). */
@@ -101,6 +107,15 @@ const mp = (ctx: ViewCtx): boolean => ctx.settings.display.markPlanned;
 const nameOf = (n: Names | undefined, ctx: ViewCtx): string => (n ? displayName(n, ctx.settings.lang) : '');
 const timeOf = (ms: number, rt: boolean, ctx: ViewCtx): string => `${plannedMark(rt, mp(ctx))}${hhmm(ms)}`;
 const vehicle = (v: VehicleRef): string => rideWords(v);
+
+/**
+ * 1.3.1 (B13, U6) : l'heure d'un véhicule à prendre, « bus 6 à ~07:12 », « IC à 07:44 » ; un train en retard d'au moins
+ * 1 min s'écrit comme en gare, l'heure prévue et le retard (« IC 07:42 +2 ») : `sched`, donné par le moteur.
+ */
+export function vehicleAtText(v: VehicleRef, depAt: number, rt: boolean, ctx: ViewCtx, sched?: number): string {
+  if (sched !== undefined && isTrainRef(v) && depAt - sched >= 60_000) return `${vehicle(v)} ${hhmm(sched)}${delaySuffix(Math.round((depAt - sched) / 60_000))}`;
+  return `${vehicle(v)} à ${timeOf(depAt, rt, ctx)}`;
+}
 
 /**
  * « descente dans 4 arrêts », « descente au prochain arrêt » ; nombre inconnu (0, moteur) : « descente à Liège-Guillemins »
@@ -312,6 +327,20 @@ function checkMoment(m: Extract<Moment, { kind: 'check' }>, web = false): Moment
   return { lines: lines.length ? lines : [MAIN(GUIDE_TEXT.check)], hints: HINTS.guide };
 }
 
+/**
+ * 1.3.1 (B17, P7) : la marche après une descente : « 3 min à pied jusqu’à l’arrêt Gare Centrale » au plus clair, puis
+ * « bus 71 à 08:34 » (dernière marche : « 13 min à pied jusqu’au bureau », puis « arrivée 09:01 ») ; panneau « à pied ».
+ * Première forme (contrat du pôle Guidage), mots finis par l'équipe des écrans.
+ */
+function walkMoment(m: Extract<Moment, { kind: 'walk' }>, title: string, ctx: ViewCtx): MomentView {
+  const toward = nameOf(m.toward, ctx);
+  const kind = m.final || !m.vehicle ? 'dest' : isTrainRef(m.vehicle) ? 'station' : 'stop';
+  const lines: GLine[] = [F('hi', (w) => leaveWalkText(m.walkMin, toward, kind, title, w))];
+  if (m.vehicle && m.depAt !== undefined) lines.push(L('norm', `${vehicle(m.vehicle)} à ${timeOf(m.depAt, m.rt ?? false, ctx)}`));
+  else if (m.arr !== undefined) lines.push(L('norm', `arrivée ${hhmm(m.arr)}`));
+  return { lines, image: { kind: 'sign', label: 'à pied', value: String(m.walkMin), foot: 'min' }, hints: HINTS.guide };
+}
+
 function momentView(m: Moment, s: GuideState, j: Journey, ctx: ViewCtx): MomentView {
   const title = s.where.title;
   const ride = s.kind === 'ride';
@@ -338,6 +367,8 @@ function momentView(m: Moment, s: GuideState, j: Journey, ctx: ViewCtx): MomentV
       return offMapMoment(m, j, title, ctx);
     case 'check':
       return checkMoment(m, !!ctx.web);
+    case 'walk':
+      return walkMoment(m, title, ctx);
   }
 }
 

@@ -210,7 +210,8 @@ describe('téléphone : « Maintenant : … »', () => {
 
   it('chaque étape du trajet du PRD', () => {
     expect(guideNowText(st({ kind: 'before', leg: 0 }), j, 'fr')).toBe('partir à 07:05');
-    expect(guideNowText(st({ kind: 'walk', leg: 0 }), j, 'fr')).toBe('à pied vers l’arrêt du bus 6');
+    // 1.3.1 (PRD-1.3.1 § 4, U3) : le nom de l'arrêt où monter
+    expect(guideNowText(st({ kind: 'walk', leg: 0 }), j, 'fr')).toBe('à pied vers l’arrêt Monument Gramme');
     expect(guideNowText(st({ kind: 'wait', leg: 1 }), j, 'fr')).toBe('bus 6 vers Gare des Guillemins');
     expect(guideNowText(st({ kind: 'ride', leg: 1, next: 1 }), j, 'fr')).toBe('bus 6 vers Gare des Guillemins');
     expect(guideNowText(st({ kind: 'walk', leg: 2 }), j, 'fr')).toBe('à pied vers la voie 3');

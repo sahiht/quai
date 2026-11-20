@@ -436,7 +436,9 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     expect(g).toMatchObject({ title: 'Bureau', show: 'moment', moment: { kind: 'platform' } });
     expect(g.lines[0]).toBe('Voie modifiée');
     expect(c.followed).toMatchObject({ favoriteId: 'fav-bureau', guide: { kind: 'trip' } });
-    // toucher : le moment s'efface (écran vide) ; toucher sur l'écran vide : « Où tu en es » (PRD-1.2.10 § 3.4)
+    // toucher : le moment est masqué (écran vide) ; toucher sur l'écran vide : « Où tu en es » (PRD-1.2.10 § 3.4) ;
+    // 1.3.1 (A7) : un message n'est masqué que s'il est affiché depuis au moins 1,5 s
+    h.advance(1_500);
     await gesture('tap');
     expect(last()).toMatchObject({ screen: 'guide', show: 'empty' });
     await gesture('tap');

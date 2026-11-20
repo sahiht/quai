@@ -35,6 +35,7 @@ import type {
 import { journeyId } from './journeys';
 import { isSncbBus, rideName } from './means';
 import { headName, placeNoun, vers } from './text';
+import { apos } from './typo';
 import { displayName, distanceM, hhmm } from './util';
 import { bearingDeg, cumulative, knownPoint, projectOn, relativeDeg, routePoints, turnsOf, walkProgress } from './guide-walk';
 
@@ -164,6 +165,12 @@ export interface GuideInput {
   beyondByLeg?: Record<number, Stopover[]>;
   /** 1.3.0 (PRD-1.3.0 § 6.3) : batterie des lunettes (0 à 100), si connue (signal `device` de la plateforme) */
   battery?: number;
+  /**
+   * 1.3.1 (A3, B16) : par rang d'étape en véhicule, le départ suivant depuis le même arrêt, s'il est connu : pour le
+   * premier véhicule, celui d'un autre trajet proposé (comme « Si tu le rates ») ; pour une correspondance très juste
+   * (tightLegs), le suivant de la même ligne, même destination, lu au tableau de l'arrêt par le contrôleur.
+   */
+  nextByLeg?: Record<number, { vehicle: VehicleRef; depAt: number; rt: boolean }>;
 }
 
 /* ------------------------------ Mémoire ------------------------------ */
@@ -324,6 +331,39 @@ const isTrain = (l: Leg): boolean => l.mode === 'train' && !isSncbBus(l);
 /** Voie en vigueur et voie modifiée. */
 const platformOf = (l: Leg): string | undefined => l.newPlatform || l.platform || undefined;
 const platformChanged = (l: Leg): boolean => !!l.newPlatform && l.newPlatform !== l.platform;
+
+/**
+ * 1.3.1 (B13, U6) : heure prévue d'un train en retard d'au moins 1 min (temps réel), pour l'écrire comme en gare
+ * (« IC 07:42 +2 ») ; absente sinon (à l'heure, en avance, sans temps réel, bus, tram, métro).
+ */
+function trainSched(l: Leg): number | undefined {
+  return isTrain(l) && l.rt && !l.cancelled && Number.isFinite(l.schedDep) && l.dep - l.schedDep >= MIN ? l.schedDep : undefined;
+}
+
+/**
+ * 1.3.1 (B16, U4) : marge d'une correspondance, en minutes exactes (avec les secondes) : départ de l'étape `k` moins
+ * l'arrivée du véhicule d'avant et les marches entre eux ; undefined sans véhicule d'avant.
+ */
+export function connectionMargin(legs: readonly Leg[], k: number): number | undefined {
+  const b = legs[k];
+  if (!b || b.kind !== 'ride') return undefined;
+  let p = -1;
+  for (let i = k - 1; i >= 0; i--) if (legs[i].kind === 'ride') { p = i; break; }
+  if (p < 0) return undefined;
+  let walk = 0;
+  for (let i = p + 1; i < k; i++) if (legs[i].kind === 'walk') walk += walkMinOf(legs[i]);
+  return (b.dep - legs[p].arr) / MIN - walk;
+}
+
+/** 1.3.1 (B16, U4) : rangs des correspondances très juste (marge de 1 min ou moins), non supprimées. */
+export function tightLegs(j: Pick<Journey, 'legs'>): number[] {
+  const out: number[] = [];
+  j.legs.forEach((l, k) => {
+    const mg = connectionMargin(j.legs, k);
+    if (mg !== undefined && !l.cancelled && mg <= GUIDE.tightMin) out.push(k);
+  });
+  return out;
+}
 
 export function vehicleRef(l: Pick<Leg, 'op' | 'mode' | 'line' | 'cat'>): VehicleRef {
   const v: VehicleRef = {};
@@ -795,7 +835,8 @@ function detect(c: Ctx, loc: Loc): void {
 /* ------------------------------ Moments ------------------------------ */
 
 // 1.3.0 (PRD-1.3.0 § 4, § 6.3) : offMap après leave (la marche commence), check après eux (jamais devant une action)
-const PRIO: Record<Moment['kind'], number> = { replan: 0, passed: 1, alight: 2, platform: 3, board: 4, turn: 5, leave: 6, offMap: 7, check: 8, nextStop: 9, arrived: 10 };
+// 1.3.1 (B17) : walk, la marche après une descente, au rang de leave (jamais ensemble : leave est la première marche)
+const PRIO: Record<Moment['kind'], number> = { replan: 0, passed: 1, alight: 2, platform: 3, board: 4, turn: 5, leave: 6, walk: 6, offMap: 7, check: 8, nextStop: 9, arrived: 10 };
 
 interface Cand {
   id: string;
@@ -860,15 +901,21 @@ function slowAt(c: Ctx, p: { alongM: number; stopAlong: number[] }): boolean {
 function thenOf(legs: Leg[], k: number): Then {
   const a = legs[k + 1];
   if (!a) return { kind: 'none' };
-  const rideThen = (r: Leg, walkMin: number): Then => {
+  const rideThen = (r: Leg, walkMin: number, i: number): Then => {
     const t: Then = { kind: 'ride', vehicle: vehicleRef(r), depAt: r.dep, rt: !!r.rt, walkMin };
     const p = platformOf(r);
     if (p && isTrain(r)) t.platform = p;
+    // 1.3.1 (§ 4, B16, B13) : l'arrêt où monter, correspondance très juste, heure prévue d'un train en retard
+    t.from = r.from.name;
+    const mg = connectionMargin(legs, i);
+    if (mg !== undefined && mg <= GUIDE.tightMin) t.tight = true;
+    const sc = trainSched(r);
+    if (sc !== undefined) t.sched = sc;
     return t;
   };
-  if (a.kind === 'ride') return rideThen(a, 0);
+  if (a.kind === 'ride') return rideThen(a, 0, k + 1);
   const b = legs[k + 2];
-  if (b && b.kind === 'ride') return rideThen(b, walkMinOf(a));
+  if (b && b.kind === 'ride') return rideThen(b, walkMinOf(a), k + 2);
   return { kind: 'walk', min: walkMinOf(a), toward: a.to.name, last: !b };
 }
 
@@ -1020,7 +1067,7 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
         id: `${base}:${jid}`, kind: 'replan', trig: now < swapAt + GUIDE.replanMs, end: now >= swapAt + GUIDE.replanMs,
         make: (since) => ({
           kind: 'replan', id: `${base}:${jid}`, since, until: swapAt + GUIDE.replanMs, leg: Math.max(0, k), reason, lost,
-          ...(r ? { next: { vehicle: vehicleRef(r), depAt: r.dep, ...(isTrain(r) && platformOf(r) ? { platform: platformOf(r) } : {}) } } : {}),
+          ...(r ? { next: { vehicle: vehicleRef(r), depAt: r.dep, ...(isTrain(r) && platformOf(r) ? { platform: platformOf(r) } : {}), ...(trainSched(r) !== undefined ? { sched: trainSched(r) } : {}) } } : {}),
           arr: j.arr, laterMin: roundMin(j.arr - re.oldArr),
         }),
       });
@@ -1136,6 +1183,10 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
         // voie : trains seulement (panneau « voie » ; un quai de bus n'en est pas une)
         if (plat && isTrain(l)) mo.platform = plat;
         if (platformChanged(l) && isTrain(l)) mo.platformChanged = true;
+        // 1.3.1 (§ 4, B13) : l'arrêt où monter ; heure prévue d'un train en retard
+        mo.stop = l.from.name;
+        const sc = trainSched(l);
+        if (sc !== undefined) mo.sched = sc;
         if (p >= 0) {
           const w = legs[k - 1].kind === 'walk' && k - 1 > p ? legs[k - 1] : undefined;
           const walkMin = w && now < w.arr ? walkMinOf(w) : undefined;
@@ -1152,7 +1203,7 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
       const since0 = m.shown[pid] ?? now;
       out.push({
         id: pid, kind: 'platform', trig: true, end: now >= since0 + GUIDE.platformMs,
-        make: (since) => ({ kind: 'platform', id: pid, since, until: since + GUIDE.platformMs, leg: k, vehicle: vehicleRef(l), depAt: l.dep, platform: l.newPlatform as string, ...(l.platform ? { was: l.platform } : {}) }),
+        make: (since) => ({ kind: 'platform', id: pid, since, until: since + GUIDE.platformMs, leg: k, vehicle: vehicleRef(l), depAt: l.dep, platform: l.newPlatform as string, ...(l.platform ? { was: l.platform } : {}), ...(trainSched(l) !== undefined ? { sched: trainSched(l) } : {}) }),
       });
     }
   }
@@ -1199,6 +1250,8 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
           mo.depAt = r.dep;
           mo.rt = !!r.rt;
           mo.marginMin = margin;
+          const sc = trainSched(r);
+          if (sc !== undefined) mo.sched = sc;
           if (exact <= GUIDE.tightMin) {
             mo.tight = true;
             if (c.in.missed) mo.missed = { ...c.in.missed };
@@ -1294,6 +1347,8 @@ function whereOf(c: Ctx, loc: Loc): WhereAmI {
     const p = platformOf(l);
     if (p && isTrain(l)) out.platform = p;
     if (platformChanged(l) && isTrain(l)) out.platformChanged = true;
+    const sc = trainSched(l);
+    if (sc !== undefined) out.sched = sc;
     return out;
   };
   if ((ph.kind === 'before' || ph.kind === 'walk') && legs[ph.leg]?.kind === 'walk') {
@@ -1325,6 +1380,8 @@ function whereOf(c: Ctx, loc: Loc): WhereAmI {
       walk.depAt = r.dep;
       walk.rt = !!r.rt;
       walk.marginMin = Math.floor((r.dep - now) / MIN) - remainingMin;
+      const sc = trainSched(r);
+      if (sc !== undefined) walk.sched = sc;
     }
     if (pr && pr.route.source === 'osm' && c.fix) {
       const nx = walkProgress(pr.route, c.fix).next;
@@ -1762,12 +1819,14 @@ export function rideJourney(dep: Departure, stops: DepartureStops, board: number
 
 /**
  * « Maintenant : … » de la carte « En cours » du téléphone : « bus 6 vers Gare des Guillemins », « à pied vers l’arrêt
- * du bus 6 », « IC vers Courtrai, voie 3 », « partir à 07:05 », « à pied, arrivée 08:54 », « tu y es ».
+ * Flagey » (1.3.1, PRD-1.3.1 § 4, U3 : le nom de l'arrêt, plus « l’arrêt du bus 6 »), « IC vers Courtrai, voie 3 »,
+ * « partir à 07:05 » (1.3.1, L5 : la carte écrit alors « Ensuite : … », GuideStatus.then), « à pied, arrivée 08:54 »,
+ * « tu y es ». 1.3.1 (§ 7) : les noms venus des données avec l'apostrophe typographique (apos).
  */
 export function guideNowText(state: GuideState, journey: Journey, lang: NameLang, title?: string): string {
   const legs = journey.legs;
   const ph = state.phase;
-  const toward = (l: Leg): string => `${rideName(l)} vers ${headName({ op: l.op, head: l.head ?? l.to.name }, lang)}`;
+  const toward = (l: Leg): string => `${rideName(l)} vers ${apos(headName({ op: l.op, head: l.head ?? l.to.name }, lang))}`;
   switch (ph.kind) {
     case 'before': {
       const l = legs[ph.leg];
@@ -1782,9 +1841,11 @@ export function guideNowText(state: GuideState, journey: Journey, lang: NameLang
       if (isTrain(r)) {
         const p = platformOf(r);
         if (ph.leg > 0 && legs[ph.leg - 1].kind === 'ride' && p) return `à pied vers la voie ${p}`;
-        return `à pied vers ${displayName(r.from.name, lang)}`;
+        return `à pied vers ${apos(displayName(r.from.name, lang))}`;
       }
-      return `à pied vers l’arrêt du ${rideName(r)}`;
+      // 1.3.1 (§ 4, U3) : le nom de l'arrêt ; sans nom (données incomplètes), le véhicule comme avant
+      const stop = apos(displayName(r.from.name, lang)).trim();
+      return stop ? `à pied vers l’arrêt ${stop}` : `à pied vers l’arrêt du ${rideName(r)}`;
     }
     case 'wait': {
       const l = legs[ph.leg];
@@ -1803,9 +1864,14 @@ export function guideNowText(state: GuideState, journey: Journey, lang: NameLang
   }
 }
 
-/** Carte « En cours » du téléphone (PRD § 4.3). `guided` : réglage « Me guider pendant un trajet ». */
+/**
+ * Carte « En cours » du téléphone (PRD § 4.3). `guided` : réglage « Me guider pendant un trajet ». 1.3.1 (L5) : avant le
+ * départ, la ligne dit ce qui vient (« Ensuite : partir à 07:05 », `then`), pas ce qui se passe.
+ */
 export function guideStatusOf(state: GuideState, journey: Journey, title: string, guided: boolean, lang: NameLang): GuideStatus {
-  return { kind: state.kind, title, arr: journey.arr, now: guideNowText(state, journey, lang, title), guided };
+  const out: GuideStatus = { kind: state.kind, title, arr: journey.arr, now: guideNowText(state, journey, lang, title), guided };
+  if (state.phase.kind === 'before' && out.now) out.then = true;
+  return out;
 }
 
 /** « vers le bureau », « vers Gand-Saint-Pierre », « vers chez Karim » (titre du trajet, « Vers … » gardé). */

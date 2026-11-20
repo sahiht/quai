@@ -54,8 +54,8 @@ import type {
 import { LABEL_TEXT, labelOf, type LineMatch } from '../core/api';
 import { MESSAGES, QuaiError } from '../core/errors';
 import { NEAR_M, asTrip, endpointPoint, favoriteTitle, placeOf } from '../core/favorites';
-import { dismissMoment, guideStatusOf, guideStep, newGuideMemory, replanJourney, replanNone, rideJourney, rideOnJourney } from '../core/guide';
-import type { GuideFix, GuideKind, GuideMemory, GuideState, GuideStatus, LocationNeed, WalkRoute } from '../core/guide-types';
+import { dismissMoment, guideStatusOf, guideStep, newGuideMemory, replanJourney, replanNone, rideJourney, rideOnJourney, tightLegs } from '../core/guide';
+import type { GuideFix, GuideKind, GuideMemory, GuideState, GuideStatus, LocationNeed, VehicleRef, WalkRoute } from '../core/guide-types';
 import { shortAddress } from '../core/text';
 import { displayName, distanceM, mainMode } from '../core/util';
 import type { Mode, Names, Op } from '../../../shared/types';
@@ -69,7 +69,7 @@ import { BOARD, HINTS, NB, SECTION, atTitle, catchable, lowerFirst, planHomeText
 import { DEBOUNCE, GestureFilter, type HubSignal } from './gestures';
 import { GUIDE_MENU, checkLines, guideView, menuView, type GuideShow } from './guide-views';
 import { HeadUpLearner } from './headup';
-import { GuideTrail, MomentReminder, journalTitle, readRemindMemo, type ReminderNote, type RemindMemo, type ShownMoment } from './reminder';
+import { GuideTrail, IMPORTANT, MomentReminder, journalTitle, readRemindMemo, type ReminderNote, type RemindMemo, type ShownMoment } from './reminder';
 import { geometry, layoutPage } from './layout';
 import { anchorIndex, current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replace, replaceAt, reset, setSelection, type Gesture, type NavFrame, type NavState } from './nav';
 import { MENU_IDS, type AreaRef, type ContainerSpec, type GlassesView, type Intent, type Item, type KeepLineRoute, type MenuItem, type OthersRoute, type PageSpec, type Route, type StepsRoute, type StopsRoute } from './types';
@@ -77,6 +77,7 @@ import { completeFollow, isFollowed, matchFollow, sameFollow, type LineFollow, t
 import {
   alreadyThereView,
   arrivalView,
+  detailLeg,
   boardView,
   displayTestView,
   errorView,
@@ -284,6 +285,10 @@ const ROUTE_FRESH_MS = 10_000;
 const BEYOND_COORDS = 3;
 /** 1.2.10 (§ 3.7) : guidage enregistré à chaque changement, au plus toutes les 5 s (lancement, arrêt : tout de suite). */
 const GUIDE_SAVE_MS = 5_000;
+/** 1.3.1 (A7, E3) : un toucher ne masque qu'un message affiché depuis au moins 1,5 s. */
+export const TAP_MASK_AFTER_MS = 1_500;
+/** 1.3.1 (B16) : le tableau de l'arrêt d'une correspondance très juste est lu dans l'heure qui précède son départ. */
+const NEXT_AHEAD_MS = 60 * 60_000;
 
 /** 1.2.10 : textes du guidage (toasts des lunettes, messages du téléphone à côté du bouton « Y aller »). */
 export const GUIDE_TEXT = {
@@ -334,7 +339,7 @@ export interface FollowedTrip {
 
 /**
  * 1.2.10 : guidage porté par le trajet suivi, persistant avec lui (quai.trip) : genre, mémoire du moteur gardée telle
- * quelle (ses champs internes compris : moments effacés ou montrés, nouveau trajet demandé ; rien n'est rejoué à la
+ * quelle (ses champs internes compris : moments masqués ou montrés, nouveau trajet demandé ; rien n'est rejoué à la
  * reprise), chemin à pied en cours, arrêts du véhicule après la descente (« j'y descends »).
  */
 export interface FollowedGuide {
@@ -663,6 +668,19 @@ export class GlassesController implements GlassesApi {
 
   /** Moment montré au dernier rendu de l'écran du guidage (null : aucun). */
   private momentShown: GuideState['moment'] = null;
+  /**
+   * 1.3.1 (A1, E2) : messages importants déjà vus par le contrôleur (identifiants) : chacun ramène l'écran du guidage une
+   * fois, à son apparition.
+   */
+  private backSeen = new Set<string>();
+  /** 1.3.1 (A7, E3) : premier affichage de chaque moment sur les lunettes (identifiant → epoch ms, horloge de Quai). */
+  private seenAt = new Map<string, number>();
+  /**
+   * 1.3.1 (B16, U4) : correspondances très juste dont le tableau de l'arrêt a été lu (`journeyId:rang`), et le suivant
+   * de la même ligne trouvé (GuideInput.nextByLeg). Une lecture par correspondance et par lancement.
+   */
+  private nextAsked = new Set<string>();
+  private nextFound = new Map<string, { vehicle: VehicleRef; depAt: number; rt: boolean }>();
   /** Batterie des lunettes au dernier signal `device` (absente : inconnue), donnée au moteur (GuideInput.battery). */
   private battery: number | undefined;
   /** Lunettes connectées au dernier signal `device` (journal) ; null : aucun signal encore. */
@@ -2538,6 +2556,11 @@ export class GlassesController implements GlassesApi {
     // 1.3.0 (PRD-1.3.0 § 6.2) : plus de rappel en attente, capteur fermé
     this.reminder.end();
     this.momentShown = null;
+    // 1.3.1 (A1, A7, B16)
+    this.backSeen.clear();
+    this.seenAt.clear();
+    this.nextAsked.clear();
+    this.nextFound.clear();
   }
 
   /**
@@ -2682,7 +2705,10 @@ export class GlassesController implements GlassesApi {
 
   /**
    * Toucher sur l'écran du guidage (intention guideTap, PRD-1.2.10 § 3.4) : écran vide → « Où tu en es » (30 s) ; un
-   * moment → effacé (il ne revient pas, Quai relance pour la suite) ; « Où tu en es » → effacé ; « Tu y es » → terminé.
+   * moment → masqué (il ne revient pas, Quai relance pour la suite ; 1.3.1, point 2 : « masquer », rien n'est effacé, le
+   * guidage continue) ; « Où tu en es » → masqué ; « Tu y es » → terminé. 1.3.1 (A7, E3) : un moment n'est masqué (ou
+   * « Tu y es » terminé) que s'il est affiché depuis au moins 1,5 s : un toucher parti juste avant son arrivée (fenêtre
+   * Bluetooth : on masquait « Où tu en es » au moment où « Descends » arrivait) le laisse à l'écran.
    */
   private async guideTap(): Promise<void> {
     if (!this.trip?.guide || current(this.nav).route.screen !== 'guide') return;
@@ -2691,13 +2717,22 @@ export class GlassesController implements GlassesApi {
     if (!t?.guide) return;
     const now = this.d.clock.now();
     const m = st?.moment;
+    if (m) {
+      const at = this.seenAt.get(m.id);
+      if (at === undefined || now - at < TAP_MASK_AFTER_MS) {
+        this.log(`QUAI_GESTURE toucher sans effet : ${m.kind} affiché depuis moins de 1,5 s`);
+        this.whereUntil = 0;
+        this.stepGuide();
+        return;
+      }
+    }
     if (m?.kind === 'arrived') {
       this.endGuide('done');
       return;
     }
     if (m) {
       this.trip = { ...t, guide: { ...t.guide, mem: dismissMoment(t.guide.mem, m.id, now) } };
-      // 1.3.0 (PRD-1.3.0 § 6.2, § 6.4) : effacé d'un toucher : plus de rappel (gardé avec le guidage, après la mémoire du
+      // 1.3.0 (PRD-1.3.0 § 6.2, § 6.4) : masqué d'un toucher : plus de rappel (gardé avec le guidage, après la mémoire du
       // moteur) ; noté dans le journal
       this.reminder.touch();
       this.trail?.add('clear', { m: m.kind });
@@ -2718,13 +2753,42 @@ export class GlassesController implements GlassesApi {
   /** Appui long sur l'écran du guidage (Quai Web, geste `long`) : le menu rendu par Quai, mêmes choix que le menu système. */
   private async openGuideMenu(): Promise<void> {
     if (!this.guideShown()) return;
-    this.nav = push(this.nav, { screen: 'menu', items: GUIDE_MENU.map((x) => ({ ...x })) });
+    this.nav = push(this.nav, { screen: 'menu', items: this.guideMenuItems() });
     await this.onRouteChanged();
   }
 
   /**
+   * 1.3.1 (B10, E4) : choix du menu de l'appui long : « Voir tout le trajet », « Voir les arrêts » (seulement si le trajet
+   * guidé a un véhicule), « Arrêter le guidage » en dernier (GUIDE_MENU).
+   */
+  private guideMenuItems(): MenuItem[] {
+    const t = this.trip;
+    const j = t ? this.journeyOf(t.journey) : null;
+    const rides = !!j && j.legs.some(isRide);
+    return GUIDE_MENU.filter((x) => rides || x.id !== MENU_IDS.stops).map((x) => ({ ...x }));
+  }
+
+  /**
+   * 1.3.1 (B10, E4) : « Voir les arrêts » : « Dans le train » du véhicule en cours (à bord ou attendu à l'arrêt), sinon
+   * du prochain à prendre, sinon du dernier ; -1 sans véhicule.
+   */
+  private stopsLeg(j: Journey): number {
+    const st = this.guideState?.journeyId === j.id ? this.guideState : null;
+    const ph = st?.phase;
+    const rides = j.legs.map((l, i) => (l.kind === 'ride' ? i : -1)).filter((i) => i >= 0);
+    if (!rides.length) return -1;
+    if (ph && (ph.kind === 'ride' || ph.kind === 'wait') && j.legs[ph.leg]?.kind === 'ride') return ph.leg;
+    if (ph && (ph.kind === 'walk' || ph.kind === 'before')) {
+      const k = rides.find((i) => i > ph.leg);
+      if (k !== undefined) return k;
+    }
+    return detailLeg(j, this.d.clock.now());
+  }
+
+  /**
    * Choix du menu de l'appui long (PRD-1.2.10 § 3.4) : « Arrêter le guidage » (fin immédiate, « Guidage arrêté »,
-   * l'accueil) ; « Voir tout le trajet » (l'écran du trajet guidé ; double toucher : retour au guidage).
+   * l'accueil) ; « Voir tout le trajet » (l'écran du trajet guidé ; double toucher : retour au guidage). 1.3.1 (B10) :
+   * « Voir les arrêts » (« Dans le train » du véhicule en cours, avec sa progression ; double toucher : retour au guidage).
    */
   private async guideMenu(id: number): Promise<void> {
     const t = this.trip;
@@ -2741,10 +2805,17 @@ export class GlassesController implements GlassesApi {
       this.endGuide('stopped');
       return;
     }
-    if (id !== MENU_IDS.allSteps) return;
-    // depuis l'écran du menu (Quai Web), l'écran du trajet prend sa place ; depuis le menu système, il s'ouvre par-dessus
-    const steps = this.tripStepsRoute(t);
-    this.nav = top === 'menu' ? replace(this.nav, steps) : push(this.nav, steps);
+    let to: Route | null = null;
+    if (id === MENU_IDS.allSteps) to = this.tripStepsRoute(t);
+    else if (id === MENU_IDS.stops) {
+      const j = this.journeyOf(t.journey);
+      const k = this.stopsLeg(j);
+      if (k >= 0) to = { screen: 'train', journey: j, leg: k, label: t.title };
+      else this.log('QUAI_GESTURE voir les arrêts sans véhicule');
+    }
+    if (!to) return;
+    // depuis l'écran du menu (Quai Web), l'écran choisi prend sa place ; depuis le menu système, il s'ouvre par-dessus
+    this.nav = top === 'menu' ? replace(this.nav, to) : push(this.nav, to);
     await this.onRouteChanged();
   }
 
@@ -2790,6 +2861,7 @@ export class GlassesController implements GlassesApi {
   private guideInput(t: FollowedTrip, g: FollowedGuide, j: Journey, now: number): GuideInput {
     const walk = g.walk && g.walk.journeyId === j.id ? { leg: g.walk.leg, route: g.walk.route } : undefined;
     const missed = missedOf(j, t.journeys.map((x) => this.journeyOf(x)));
+    const nextByLeg = g.kind === 'trip' ? this.nextByLegOf(t, j) : undefined;
     return {
       kind: g.kind,
       journey: j,
@@ -2804,6 +2876,8 @@ export class GlassesController implements GlassesApi {
       ...this.beyondInput(g, j),
       // 1.3.0 (PRD-1.3.0 § 6.3) : batterie des lunettes, si elle est connue
       ...(this.battery !== undefined ? { battery: this.battery } : {}),
+      // 1.3.1 (A3, B16) : le départ suivant depuis le même arrêt, s'il est connu
+      ...(nextByLeg ? { nextByLeg } : {}),
     };
   }
 
@@ -2915,6 +2989,8 @@ export class GlassesController implements GlassesApi {
     this.guideState = st;
     // un moment nouveau prend la place de « Où tu en es »
     if (st.moment && st.moment.id !== prev?.moment?.id) this.whereUntil = 0;
+    // 1.3.1 (A1) : un message important nouveau ramène l'écran du guidage
+    const back = this.bringBack(st);
     // la mémoire du moteur, gardée telle quelle (au plus toutes les 5 s)
     if (res.mem !== g.mem) {
       this.trip = { ...t, guide: { ...g, mem: res.mem } };
@@ -2930,10 +3006,78 @@ export class GlassesController implements GlassesApi {
     if (st.needRoute) this.askRoute(st.needRoute);
     this.maybeReplan(st);
     this.askBeyond(st);
+    this.askNext(st);
     this.scheduleGuideWake(st);
     this.notifyGuide();
-    if (o.render !== false && this.ready && current(this.nav).route.screen === 'guide') void this.render();
+    if (back && this.ready) void this.onRouteChanged();
+    else if (o.render !== false && this.ready && current(this.nav).route.screen === 'guide') void this.render();
     return st;
+  }
+
+  /**
+   * 1.3.1 (A1, E2) : les six messages importants (partir, monter, voie modifiée, descendre, imprévu, arrêt dépassé :
+   * IMPORTANT) ramènent l'écran du guidage quel que soit l'écran affiché (accueil, tableau, trajet, « Dans le train »,
+   * menu de Quai Web), une fois chacun, à son apparition ; l'accueil dessous (double toucher), comme au lancement. Virage,
+   * prochain arrêt, « Tu y es », vérification : non. Réglage « Me guider » éteint : rien. Vrai si l'écran a changé.
+   */
+  private bringBack(st: GuideState): boolean {
+    const m = st.moment;
+    if (!m || !IMPORTANT.has(m.kind) || this.backSeen.has(m.id)) return false;
+    this.backSeen.add(m.id);
+    if (this.stopped || !this.guideShown()) return false;
+    const top = current(this.nav).route.screen;
+    if (top === 'guide') return false;
+    this.nav = { stack: [this.homeFrame(), initNav({ screen: 'guide' }).stack[0]] };
+    this.log(`QUAI_GUIDE retour à l’écran du guidage depuis ${top} : ${m.kind}`);
+    return true;
+  }
+
+  /**
+   * 1.3.1 (B16, U4) : correspondance très juste (tightLegs), son départ dans l'heure : le tableau de son arrêt est lu une
+   * fois (une requête de plus, seulement dans ce cas), pour le suivant de la même ligne, même destination
+   * (GuideInput.nextByLeg : « Si tu le rates : tram 3 à 08:51 » au moment « monter »). Échec : rien, pas de nouvel essai.
+   */
+  private askNext(st: GuideState): void {
+    const t = this.trip;
+    if (!t?.guide || t.guide.kind !== 'trip' || !this.guideShown() || st.phase.kind === 'arrived' || st.phase.kind === 'ended') return;
+    const j = this.journeyOf(t.journey);
+    const now = this.d.clock.now();
+    for (const k of tightLegs(j)) {
+      const l = j.legs[k];
+      const key = `${j.id}:${k}`;
+      if (this.nextAsked.has(key) || !l.from.areaId || !l.line || l.dep - now > NEXT_AHEAD_MS || now >= l.dep) continue;
+      this.nextAsked.add(key);
+      void this.readNext(j, k, key).catch((e: unknown) => console.warn('[Quai] départ suivant de la correspondance', errText(e)));
+    }
+  }
+
+  private async readNext(j: Journey, k: number, key: string): Promise<void> {
+    const l = j.legs[k];
+    const board = await deadline(this.d.core.board(l.from.areaId!, { horizonMin: 90, limit: BOARD.limit }), CORE_TIMEOUT_MS, 'tableau trop lent');
+    const next = board.departures
+      .filter((d) => !d.cancelled && d.line === l.line && (!l.op || d.op === l.op) && (!l.head || sameNames(d.head, l.head)) && d.sched > l.schedDep && d.est > l.dep && (!l.tripId || d.tripId !== l.tripId))
+      .sort((a, b) => a.est - b.est)[0];
+    const cur = this.trip;
+    if (!next || !cur?.guide || cur.journey.id !== j.id) return;
+    const vehicle: VehicleRef = { op: next.op, mode: next.mode, line: next.line, ...(next.op === 'sncb' && next.mode === 'train' ? { cat: next.line } : {}) };
+    this.nextFound.set(key, { vehicle, depAt: next.est, rt: !!next.rt });
+    this.stepGuide();
+  }
+
+  /**
+   * 1.3.1 (A3, B16) : le départ suivant depuis le même arrêt, par rang d'étape (GuideInput.nextByLeg) : pour le premier
+   * véhicule, le plus tôt des autres trajets proposés depuis le même arrêt ; pour une correspondance très juste, le
+   * suivant de la même ligne lu au tableau (askNext).
+   */
+  private nextByLegOf(t: FollowedTrip, j: Journey): Record<number, { vehicle: VehicleRef; depAt: number; rt: boolean }> | undefined {
+    const out: Record<number, { vehicle: VehicleRef; depAt: number; rt: boolean }> = {};
+    const first = nextOfFirst(j, t.journeys.map((x) => this.journeyOf(x)));
+    if (first) out[first.leg] = first.next;
+    for (const [key, v] of this.nextFound) {
+      const i = key.lastIndexOf(':');
+      if (key.slice(0, i) === j.id) out[Number(key.slice(i + 1))] = v;
+    }
+    return Object.keys(out).length ? out : undefined;
   }
 
   /** Prochain recalcul du moteur : à `wakeAt`, à la fin du moment ou de « Où tu en es », 60 s au plus tard. */
@@ -3206,7 +3350,11 @@ export class GlassesController implements GlassesApi {
     const v = guideView(st, show, j, ctx);
     v.tap ??= { kind: 'guideTap' };
     if (this.d.web) delete v.menu;
-    else if (!v.menu?.length) v.menu = GUIDE_MENU;
+    else {
+      // 1.3.1 (B10) : « Voir les arrêts » seulement si le trajet a un véhicule
+      const rides = j.legs.some(isRide);
+      v.menu = (v.menu?.length ? v.menu : GUIDE_MENU).filter((x) => rides || x.id !== MENU_IDS.stops);
+    }
     return v;
   }
 
@@ -3233,6 +3381,8 @@ export class GlassesController implements GlassesApi {
     }
     const m = view.screen === 'guide' && current(this.nav).route.screen === 'guide' ? this.momentShown : null;
     if (m) this.trail?.shown(m);
+    // 1.3.1 (A7) : premier affichage du moment (un rappel ne le remet pas à zéro)
+    if (m && !this.seenAt.has(m.id)) this.seenAt.set(m.id, this.d.clock.now());
     // Quai Web : pas de lunettes, l'écran dessiné est toujours visible : aucun rappel (ni capteur)
     this.reminder.shown(m && !this.d.web ? { kind: m.kind, id: m.id } : null);
   }
@@ -4459,6 +4609,29 @@ export function missedOf(j: Journey, journeys: readonly Journey[]): { arr: numbe
     if (best === undefined || x.arr < best) best = x.arr;
   }
   return best === undefined ? undefined : { arr: best, laterMin: Math.floor(best / 60_000) - Math.floor(j.arr / 60_000) };
+}
+
+/**
+ * 1.3.1 (A3, I1) : le premier véhicule du trajet `j` et le départ suivant depuis le même arrêt, le plus tôt des autres
+ * trajets proposés (`journeys`, comme missedOf) : « 15 min avant le suivant » du moteur. Rien sans autre départ.
+ */
+export function nextOfFirst(j: Journey, journeys: readonly Journey[]): { leg: number; next: { vehicle: VehicleRef; depAt: number; rt: boolean } } | undefined {
+  const k = j.legs.findIndex(isRide);
+  const first = k >= 0 ? j.legs[k] : undefined;
+  if (!first || first.cancelled) return undefined;
+  let best: Journey['legs'][number] | undefined;
+  for (const x of journeys) {
+    if (x.id === j.id) continue;
+    const r = x.legs.find((l) => l.kind === 'ride' && !l.cancelled && l.dep > first.dep && sameStopOf(l.from, first.from));
+    if (r && (!best || r.dep < best.dep)) best = r;
+  }
+  if (!best) return undefined;
+  const vehicle: VehicleRef = {};
+  if (best.op) vehicle.op = best.op;
+  if (best.mode) vehicle.mode = best.mode;
+  if (best.line) vehicle.line = best.line;
+  if (best.cat) vehicle.cat = best.cat;
+  return { leg: k, next: { vehicle, depAt: best.dep, rt: !!best.rt } };
 }
 
 /** 1.2.10 : distance en mètres d'une position à un chemin (segments, projection locale : quelques kilomètres au plus). */
