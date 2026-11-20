@@ -288,9 +288,10 @@ export function createCore(opts: CoreOptions): Core {
      * voie à 100 m ou qu'aucun chemin ne les relie ; null si les données manquent ou que le réseau fait défaut (le
      * guidage réessaie au besoin). Jamais d'exception.
      */
-    async walkRoute(from: LatLon, to: LatLon): Promise<WalkRoute | null> {
+    async walkRoute(from: LatLon, to: LatLon, opts?: { avoidSteps?: boolean }): Promise<WalkRoute | null> {
       try {
-        return await walk.route(from, to);
+        // 1.3.1 (R4) : « Éviter les escaliers » (opts.avoidSteps), sans lui le chemin de toujours
+        return await walk.route(from, to, opts);
       } catch {
         return null;
       }

@@ -101,9 +101,11 @@ describe('Affichage', () => {
       ['Aides de gestes', true],
       ['Signaler les horaires prévus', true],
       ['Pluie pendant la marche', true],
+      // 1.3.1 (PRD-1.3.1 § 14, R5) : « Plein soleil », éteint par défaut, après la pluie
+      ['Plein soleil', false],
     ]);
     // un seul trait entre deux interrupteurs
-    expect(groups[1].querySelectorAll('.box > .bordered')).toHaveLength(2);
+    expect(groups[1].querySelectorAll('.box > .bordered')).toHaveLength(3);
     expect(groups[1].querySelector('.box > :first-child')!.classList.contains('bordered')).toBe(false);
   });
 
@@ -222,7 +224,7 @@ describe('1.2.10 : Affichage sur un seul écran, l’ouverture sur son écran (P
     expect(textOf(again.querySelector('.back'))).toBe('Accueil');
   });
 
-  it('tient dans 390 × 844 (calcul des sections, hauteurs mesurées dans Chrome) : rien de plus que l’en-tête, l’aperçu, deux choix segmentés, une ligne et trois interrupteurs', () => {
+  it('tient dans 390 × 844 (calcul des sections, hauteurs mesurées dans Chrome) : l’en-tête, l’aperçu, deux choix segmentés, une ligne et les trois interrupteurs de la 1.2.10', () => {
     const el = mount(displayScreen(harness({ settings: defaults() }).ctx));
     // les blocs de l'écran, dans l'ordre : en-tête, aperçu sans titre écrit, deux groupes
     expect([...el.children].map((c) => c.tagName.toLowerCase() + (c.className ? `.${c.className.split(' ')[0]}` : ''))).toEqual(['header.head', 'div.preview-top', 'section.group', 'section.group']);
@@ -231,9 +233,11 @@ describe('1.2.10 : Affichage sur un seul écran, l’ouverture sur son écran (P
     const [home, all] = [...el.querySelectorAll<HTMLElement>('section.group')];
     expect([...home.querySelectorAll('.box > *')].map((c) => c.className)).toEqual(['pad-row', 'pad-row bordered', 'list bordered opening-link']);
     expect(home.querySelectorAll('.seg')).toHaveLength(2);
-    expect(all.querySelectorAll('.switch-row')).toHaveLength(3);
+    // les trois interrupteurs de la 1.2.10 d'abord (le quatrième, « Plein soleil », est compté dans le test suivant)
+    const switches = [...all.querySelectorAll('.switch-row')];
+    expect(switches.slice(0, 3).map((r) => textOf(r.querySelector('.c1')))).toEqual(['Aides de gestes', 'Signaler les horaires prévus', 'Pluie pendant la marche']);
     // sous-titres des interrupteurs : deux sur une ligne (36 caractères au plus à 13 px), la pluie sur deux
-    const subs = [...all.querySelectorAll('.switch-row .c2')].map((c) => plainText(c));
+    const subs = switches.slice(0, 3).map((c) => plainText(c.querySelector('.c2')!));
     expect(subs.map((t) => t.length <= 36)).toEqual([true, true, false]);
     // hauteurs (px) mesurées à 390 × 844 dans Chrome (Inter) : marges de la page 24 + 32, espaces de 12, en-tête 80,
     // aperçu 175 (350 × 175), titre de groupe 18 + 6, choix segmenté 96, ligne de l'ouverture 57, interrupteur 56 (69
@@ -242,6 +246,24 @@ describe('1.2.10 : Affichage sur un seul écran, l’ouverture sur son écran (P
     const groupAll = 18 + 6 + (56 + 1 + 56 + 1 + 68 + 2);
     const total = 24 + 80 + 12 + 175 + 12 + groupHome + 12 + groupAll + 32;
     expect(total).toBeLessThanOrEqual(844 - 10);
+  });
+
+  it('1.3.1 (PRD-1.3.1 § 14, R5, arbitrage signalé au directeur) : avec « Plein soleil », 889 px, environ 55 px de plus que 390 × 844', () => {
+    const el = mount(displayScreen(harness({ settings: defaults() }).ctx));
+    const all = [...el.querySelectorAll<HTMLElement>('section.group')][1];
+    const switches = [...all.querySelectorAll('.switch-row')];
+    expect(switches.map((r) => textOf(r.querySelector('.c1')))).toEqual(['Aides de gestes', 'Signaler les horaires prévus', 'Pluie pendant la marche', 'Plein soleil']);
+    // sa ligne pâle tient sur une ligne (36 caractères au plus) : un interrupteur de 56 px et un trait
+    expect(plainText(switches[3].querySelector('.c2')!)).toBe('Le texte pâle devient plus clair.');
+    expect(plainText(switches[3].querySelector('.c2')!).length).toBeLessThanOrEqual(36);
+    // mêmes hauteurs que le test précédent, plus cet interrupteur : la spécification de la 1.3.1 place « Plein soleil »
+    // dans Affichage ; la 1.2.10 (§ 4.4) voulait qu'Affichage tienne dans 390 × 844 : il dépasse de 55 px (un court
+    // défilement), en attendant la décision du directeur. Toute autre hausse fait échouer ce test.
+    const groupHome = 18 + 6 + (96 + 1 + 96 + 1 + 57 + 2);
+    const groupAll = 18 + 6 + (56 + 1 + 56 + 1 + 68 + 1 + 56 + 2);
+    const total = 24 + 80 + 12 + 175 + 12 + groupHome + 12 + groupAll + 32;
+    expect(total).toBe(889);
+    expect(total - (844 - 10)).toBe(55);
   });
 });
 

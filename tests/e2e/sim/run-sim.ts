@@ -3995,7 +3995,8 @@ async function s129(): Promise<void> {
       check(layout.second === 'preview-top', `aperçu juste sous l’en-tête : ${layout.second}`);
       check(sameList(layout.groups, ['Accueil des lunettes', 'Sur tous les écrans']), `groupes : ${JSON.stringify(layout.groups)}`);
       check(sameList(layout.legends, ['Rayon de « Autour de moi »', 'Ordre des favoris']), `« Accueil des lunettes » : ${JSON.stringify(layout.legends)} (1.2.10 : l’ouverture de Quai sur son écran, PRD-1.2.10 § 4.4)`);
-      check(sameList(layout.switches, ['Aides de gestes', 'Signaler les horaires prévus', 'Pluie pendant la marche']), `« Sur tous les écrans » : ${JSON.stringify(layout.switches)}`);
+      // 1.3.1 (PRD-1.3.1 § 14, R5) : « Plein soleil » après la pluie
+      check(sameList(layout.switches, ['Aides de gestes', 'Signaler les horaires prévus', 'Pluie pendant la marche', 'Plein soleil']), `« Sur tous les écrans » : ${JSON.stringify(layout.switches)}`);
       return { shot: true };
     });
     await phoneStep(page, 'tel-lignes', async () => {

@@ -12,11 +12,17 @@
  * absente de la publication (hors de l'extrait de Belgique) ; sinon `nosnap` (aucune voie à 100 m d'un bout, ou aucune
  * tuile utilisable), `nopath` (pas de chemin dans les tuiles, même au second essai) ou `far` (plus de 5 km, rien de
  * chargé). Les vrais chemins sont exactement ceux de la 1.2.10 : la raison s'ajoute aux chemins droits, rien d'autre.
+ *
+ * 1.3.1 (PRD-1.3.1 § 14, R4) : réglage « Éviter les escaliers » (`avoidSteps`) : dans les tuiles chargées pour le chemin
+ * habituel, d'abord un chemin sans marches (escaliers et escaliers mécaniques écartés, graph.ts withoutSteps), accroché
+ * à des voies sans marches ; s'il n'y en a pas, le chemin habituel, exactement celui du réglage éteint. Aucune tuile de
+ * plus n'est demandée pour lui : son détour reste dans le cadre des deux bouts et de sa marge. Réglage éteint ou absent :
+ * rien ne change.
  */
 import type { LatLon } from '../api';
 import type { WalkRoute } from '../guide-types';
 import { leafKeyOf, leafKeysForBox, WALK_UNIT, type UnitBox, type WalkIndex, type WalkTileFile } from './format';
-import { M_PER_U, mergeTiles, prepareTile, unitsM, type RoutingGraph, type TileGraph } from './graph';
+import { M_PER_U, mergeTiles, prepareTile, unitsM, withoutSteps, type RoutingGraph, type TileGraph } from './graph';
 import { routeOn, straightRoute } from './route';
 
 /** Marge autour du cadre des deux bouts. */
@@ -42,6 +48,12 @@ export interface WalkSource {
 export interface WalkRouterOptions {
   now?: () => number;
   maxTiles?: number;
+}
+
+/** 1.3.1 (R4) : choix d'un chemin à pied (réglages de la personne). */
+export interface WalkOptions {
+  /** « Éviter les escaliers » : un chemin sans marches s'il en existe un, sinon le chemin habituel */
+  avoidSteps?: boolean;
 }
 
 const valid = (p: LatLon | null | undefined): p is LatLon =>
@@ -75,8 +87,8 @@ export class WalkRouter {
     this.maxTiles = opts.maxTiles ?? MAX_TILES;
   }
 
-  /** Chemin à pied de `from` à `to` (voir l'en-tête du fichier pour les cas). */
-  async route(from: LatLon, to: LatLon): Promise<WalkRoute | null> {
+  /** Chemin à pied de `from` à `to` (voir l'en-tête du fichier pour les cas ; 1.3.1 : `opts.avoidSteps`). */
+  async route(from: LatLon, to: LatLon, opts: WalkOptions = {}): Promise<WalkRoute | null> {
     if (!valid(from) || !valid(to)) return null;
     const crow = unitsM(from.lat / WALK_UNIT, from.lon / WALK_UNIT, to.lat / WALK_UNIT, to.lon / WALK_UNIT);
     if (crow > MAX_WALK_M) return this.straight(from, to, 'far');
@@ -102,7 +114,13 @@ export class WalkRouter {
       // n'est jamais mélangée aux autres (ses points de coupe ne se raccordent pas) ; elle sert dès que l'index suit
       const loaded = got.filter((t): t is TileGraph => t !== null && t.ver === index.version);
       if (!loaded.length) return this.straight(from, to, why('nosnap'));
-      const r = routeOn(this.graphOf(loaded), from, to, this.now());
+      const g = this.graphOf(loaded);
+      // 1.3.1 (R4) : sans marches d'abord, dans les mêmes tuiles ; sinon le chemin habituel ci-dessous
+      if (opts.avoidSteps === true) {
+        const free = routeOn(withoutSteps(g), from, to, this.now());
+        if (typeof free !== 'string') return free;
+      }
+      const r = routeOn(g, from, to, this.now());
       if (typeof r !== 'string') return r;
       if (r === 'nosnap') return this.straight(from, to, why('nosnap'));
     }
