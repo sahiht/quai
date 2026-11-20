@@ -292,7 +292,7 @@ export function journalTripLine(t: Pick<JournalTrip, 'startedAt' | 'endedAt' | '
 
 /** 1.2.10 : choix de « À l’ouverture de Quai » (libellés de la revue d'usage n° 11, mêmes valeurs enregistrées). */
 export const OPENING_LABEL: Record<Settings['display']['opening'], string> = {
-  suggest: 'L’accueil, avec mes favoris en tête',
+  suggest: 'L’accueil, avec mes favoris',
   firstFavorite: 'Directement mon premier favori',
   home: 'L’accueil, sans favoris',
 };

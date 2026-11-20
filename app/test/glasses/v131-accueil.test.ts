@@ -249,7 +249,7 @@ describe('PRD-1.3.1 § 8 : le curseur à l’ouverture de Quai, le retour à l�
     expect(home.shown).toEqual([]);
     expect(home.sel).toBe(0);
     b.c.stop();
-    // « L’accueil, avec mes favoris en tête » : une gare gardée « près », à moins de 300 m, ouvre ses départs d'office ;
+    // « L’accueil, avec mes favoris » : une gare gardée « près », à moins de 300 m, ouvre ses départs d'office ;
     // double toucher : l'accueil, curseur sur « Autour de moi »
     const atStation = { lat: STATIONS.braine.lat, lon: STATIONS.braine.lon };
     const c = await setup({ now: NOW, pos: atStation, settings: full({ stations: [{ ...STATIONS.braine, near: true }] }), core: (now) => stubCore(now, { answers: answersDay, board }) });

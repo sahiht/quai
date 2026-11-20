@@ -70,10 +70,10 @@ describe('Affichage', () => {
     expect(el.querySelector('label.choice')).toBeNull();
     // l'ouverture : une ligne (un vrai lien) qui ouvre son écran, sa valeur dessous
     const row = el.querySelector<HTMLAnchorElement>('.opening-link a.nav-row')!;
-    expect([textOf(row.querySelector('.t1')), textOf(row.querySelector('.t2')), row.getAttribute('href')]).toEqual(['À l’ouverture de Quai', 'L’accueil, avec mes favoris en tête', '#/affichage/ouverture']);
+    expect([textOf(row.querySelector('.t1')), textOf(row.querySelector('.t2')), row.getAttribute('href')]).toEqual(['À l’ouverture de Quai', 'L’accueil, avec mes favoris', '#/affichage/ouverture']);
     const opening = mount(openingScreen(harness({ settings: defaults() }).ctx));
     expect([...opening.querySelectorAll('label.choice')].map((l) => [l.querySelector('input')!.value, textOf(l)])).toEqual([
-      ['suggest', 'L’accueil, avec mes favoris en tête'],
+      ['suggest', 'L’accueil, avec mes favoris'],
       ['firstFavorite', 'Directement mon premier favori'],
       ['home', 'L’accueil, sans favoris'],
     ]);

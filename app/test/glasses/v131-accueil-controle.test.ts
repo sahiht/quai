@@ -227,4 +227,28 @@ describe('contrôle 1.3.1, B20 : les favoris du soir pendant le chargement et su
     expect(soon.lines.some((l) => l.includes('demain'))).toBe(false);
     h.c.stop();
   });
+  it('remarque 4 du contrôle : accueil touché, laissé affiché jusqu’au matin, le cœur ne recalcule plus : un favori du soir dépassé (« … ») quitte l’accueil', async () => {
+    // École garde un trajet plus tard (06:30) ; Parc et Namur partaient à 05:52
+    let down = false;
+    const answers = (fav: Favorite, now: number): FavoriteAnswer => {
+      if (down) throw new Error('pas de réseau');
+      return fav.id === 'fav-ecole' ? ok(fav, door('j-ecole', at(TOMORROW, 6, 30), at(TOMORROW, 7, 10)), now) : night()(fav, now);
+    };
+    const h = await setup({ now: NIGHT, settings: S, core: (now) => stubCore(now, { answers, board }) });
+    await h.until((x) => ready(x) && x.shown?.length === 3 && x.lines.some((l) => l.startsWith('Vers Namur')));
+    await h.gesture('down', 'down');
+    expect(h.last().shown).toEqual(['fav-parc', 'fav-ecole', 'fav-namur']);
+    // le lendemain à 05:53 : les départs de 05:52 sont passés, les réponses ne se recalculent plus
+    down = true;
+    h.advance(at(TOMORROW, 5, 53) - NIGHT);
+    await h.c.refreshCurrent(true);
+    await h.settle(150);
+    const morning = h.last();
+    expect(morning.screen).toBe('home');
+    // seul le favori dont la réponse montre encore un trajet reste ; jamais une ligne « … » d'un favori du soir
+    expect(morning.shown).toEqual(['fav-ecole']);
+    expect(morning.lines.some((l) => /^(Parc|Vers Namur) /.test(l))).toBe(false);
+    expect(morning.lines.some((l) => l.startsWith('École   06:30'))).toBe(true);
+    h.c.stop();
+  });
 });
