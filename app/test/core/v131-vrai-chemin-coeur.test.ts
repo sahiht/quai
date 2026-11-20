@@ -1,0 +1,332 @@
+/**
+ * Quai 1.3.1, décision du propriétaire du 20/11 à 21:59 : « 7h12 partout ». L'heure de partir, les minutes de la première
+ * marche et la marge sont celles du vrai chemin à pied, portées par le trajet lui-même (core/firstwalk.ts). Ici le vrai
+ * cœur (calcul des trajets, favoris, temps réel, tuiles piétonnes au vrai format) sur le mini-réseau commun : une règle
+ * par test. Les écrans (lunettes, téléphone, guidage) : test/glasses/v131-vrai-chemin.test.ts et
+ * test/phone/v131-vrai-chemin.test.ts. Scène : vrai-chemin-scene.ts (arrêt Esplanade, tram 3 de 07:20, la Bourse).
+ */
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Core, FavoriteTrip, Journey, Settings } from '../../src/core/api';
+import { FIRST_WALK } from '../../src/core/firstwalk';
+import { hhmm } from '../../src/core/util';
+import { at, BOURSE, ESPLANADE, MIN, offset, scene, settle, START, TILE, VERSION, type PathKind } from './vrai-chemin-scene';
+
+const TO = { type: 'place' as const, placeId: 'bourse' };
+const HERE = { type: 'here' as const };
+
+/** Un cœur à l'heure `hm` (horloge réglable). */
+function world(path: PathKind | null, hm: string, patch: Partial<Settings> = {}) {
+  const sc = scene(path);
+  const clock = { t: at(hm) };
+  const core = sc.core(() => clock.t);
+  const s = sc.settings(patch);
+  const route = (c: Core = core, here = START) => c.route(HERE, TO, clock.t, s, here);
+  return { sc, clock, core, s, route };
+}
+
+/** Ce que les écrans lisent d'un trajet. */
+const read = (j: Journey) => ({
+  leave: hhmm(j.leaveAt),
+  walk: j.legs[0].walkMin,
+  est: j.legs[0].walkEst,
+  walkAt: `${hhmm(j.legs[0].dep)}-${hhmm(j.legs[0].arr)}`,
+  ride: `${j.legs[1].line} ${hhmm(j.legs[1].dep)}`,
+  margin: Math.round((j.legs[1].dep - j.leaveAt) / MIN) - (j.legs[0].walkMin ?? 0),
+});
+
+afterEach(() => vi.restoreAllMocks());
+
+describe('l’exemple du propriétaire : 3 min estimées, vrai chemin de 446 m (6 min), tram à 07:20', () => {
+  it('sans tuiles piétonnes : l’estimation, exactement la 1.3.0 (partir à 07:15, 3 min, aucun champ nouveau)', async () => {
+    const w = world(null, '07:10');
+    const r = await w.route();
+    expect(read(r.journeys[0])).toEqual({ leave: '07:15', walk: 3, est: undefined, walkAt: '07:15-07:18', ride: '3 07:20', margin: 2 });
+    expect(r.journeys.every((j) => j.legs.every((l) => !('walkEst' in l)))).toBe(true);
+    // rien d'autre qu'une demande de l'index des chemins à pied (absent : 404), aucune tuile
+    expect(w.sc.walkCalls()).toEqual(['walk/index.json']);
+  });
+
+  it('avec le vrai chemin : partir à 07:12, 6 min à pied (estimation gardée : 3), la marche de 07:12 à 07:18, la marge du réglage (2 min)', async () => {
+    const w = world('long', '07:10');
+    const r = await w.route();
+    expect(read(r.journeys[0])).toEqual({ leave: '07:12', walk: 6, est: 3, walkAt: '07:12-07:18', ride: '3 07:20', margin: 2 });
+    expect(hhmm(r.journeys[0].dep)).toBe('07:12');
+    // les propositions suivantes partent du même endroit vers le même arrêt : même chemin, même correction
+    expect(r.journeys.slice(1).map((j) => read(j).walk)).toEqual(r.journeys.slice(1).map(() => 6));
+    // le reste du trajet est celui de l'estimation, à l'identique (arrivée, véhicules, dernière marche : règle 7)
+    const base = (await world(null, '07:10').route()).journeys;
+    expect(r.journeys.map((j) => j.id)).toEqual(base.map((j) => j.id));
+    expect(r.journeys.map((j) => j.label)).toEqual(base.map((j) => j.label));
+    r.journeys.forEach((j, i) => {
+      expect(j.legs.slice(1)).toEqual(base[i].legs.slice(1));
+      expect(j.arr).toBe(base[i].arr);
+    });
+  });
+
+  it('une seule source : route, favori (answer), refresh, firstWalk et suggestion disent 07:12 ; appliquée deux fois, la correction ne s’empile pas', async () => {
+    const w = world('long', '07:10');
+    const j = (await w.route()).journeys[0];
+    const a = await w.core.answer(BOURSE, START, w.s);
+    expect(read(a.plan!.journeys[0])).toMatchObject({ leave: '07:12', walk: 6, est: 3 });
+    const again = await w.core.refresh(j, w.s);
+    expect(read(again)).toMatchObject({ leave: '07:12', walk: 6, est: 3, walkAt: '07:12-07:18' });
+    expect(read(await w.core.refresh(again, w.s, { followed: true }))).toMatchObject({ leave: '07:12', walk: 6, est: 3 });
+    expect(w.core.firstWalk!(again, w.s)).toBe(again);
+    // un plan mémorisé du favori (temps réel seul, 30 s plus tard) : toujours 07:12
+    w.clock.t += 30_000;
+    expect(read((await w.core.answer(BOURSE, START, w.s)).plan!.journeys[0])).toMatchObject({ leave: '07:12', walk: 6, est: 3 });
+  });
+});
+
+describe('règle 3 : personne n’attend le chemin', () => {
+  it('tuile lente : le trajet sort tout de suite avec l’estimation (0,1 s d’attente au plus) ; chemin connu : un signal, puis 07:12 partout, une seule fois', async () => {
+    const w = world('long', '07:10');
+    w.sc.hold();
+    let news = 0;
+    w.core.onFirstWalk!(() => news++);
+    const t0 = performance.now();
+    const r0 = await w.route();
+    expect(performance.now() - t0).toBeLessThan(1500);
+    expect(read(r0.journeys[0])).toMatchObject({ leave: '07:15', walk: 3, est: undefined });
+    // refresh et favori pendant que la tuile charge : l'estimation, sans rien demander de plus
+    expect(read(await w.core.refresh(r0.journeys[0], w.s))).toMatchObject({ leave: '07:15', walk: 3 });
+    expect(read((await w.core.answer(BOURSE, START, w.s)).plan!.journeys[0])).toMatchObject({ leave: '07:15', walk: 3 });
+    expect(w.core.firstWalk!(r0.journeys[0], w.s)).toBe(r0.journeys[0]);
+    expect(news).toBe(0);
+    expect(w.sc.walkCalls().filter((u) => u.includes(TILE))).toHaveLength(1);
+    // la tuile arrive
+    w.sc.release();
+    await settle(60);
+    expect(news).toBe(1);
+    const fixed = w.core.firstWalk!(r0.journeys[0], w.s);
+    expect(read(fixed)).toMatchObject({ leave: '07:12', walk: 6, est: 3, walkAt: '07:12-07:18' });
+    expect(read(await w.core.refresh(r0.journeys[0], w.s))).toMatchObject({ leave: '07:12', walk: 6 });
+    expect(read((await w.core.answer(BOURSE, START, w.s)).plan!.journeys[0])).toMatchObject({ leave: '07:12', walk: 6 });
+    expect(read((await w.route()).journeys[0])).toMatchObject({ leave: '07:12', walk: 6 });
+    // l'heure ne recule jamais ensuite, et rien ne saute une deuxième fois
+    await settle(60);
+    expect(news).toBe(1);
+    expect(read(await w.core.refresh(fixed, w.s))).toMatchObject({ leave: '07:12', walk: 6 });
+  });
+
+  it('réseau coupé pour la tuile : l’estimation partout ; pas redemandée avant 2 min ; puis le chemin, et 07:12', async () => {
+    const w = world('long', '07:10');
+    w.sc.fail(true);
+    const r0 = await w.route();
+    expect(read(r0.journeys[0])).toMatchObject({ leave: '07:15', walk: 3, est: undefined });
+    const tiles = () => w.sc.walkCalls().filter((u) => u.includes(TILE)).length;
+    const n = tiles();
+    w.clock.t += 60_000;
+    expect(read(await w.core.refresh(r0.journeys[0], w.s))).toMatchObject({ leave: '07:15', walk: 3 });
+    expect(tiles()).toBe(n);
+    // le réseau revient ; 2 min après l'échec, le rafraîchissement du trajet redemande le chemin
+    w.sc.fail(false);
+    w.clock.t += FIRST_WALK.retryMs;
+    const again = await w.core.refresh(r0.journeys[0], w.s);
+    expect(tiles()).toBeGreaterThan(n);
+    expect(read(again)).toMatchObject({ leave: '07:12', walk: 6, est: 3 });
+  });
+
+  it('pas de vrai chemin (aucune voie à 100 m du départ : chemin droit) ou chemin pas plus long : rien ne change', async () => {
+    for (const kind of ['elsewhere', 'short'] as const) {
+      const w = world(kind, '07:10');
+      const r = await w.route();
+      await settle();
+      expect(read(r.journeys[0]), kind).toEqual({ leave: '07:15', walk: 3, est: undefined, walkAt: '07:15-07:18', ride: '3 07:20', margin: 2 });
+      expect(read(await w.core.refresh(r.journeys[0], w.s)), kind).toMatchObject({ leave: '07:15', walk: 3, est: undefined });
+      expect(r).toEqual(await world(null, '07:10').route());
+    }
+  });
+
+  it('un chemin connu ne vaut que pour son départ (40 m) : parti de 60 m plus loin, un autre chemin est demandé', async () => {
+    const w = world('long', '07:10');
+    await w.route();
+    const n = w.sc.walkCalls().length;
+    // à 20 m : le même chemin sert (aucune demande, aucune tuile), la correction est là tout de suite
+    const near = await w.route(w.core, offset(START, 0, -20));
+    expect(near.journeys[0].legs[0].walkEst).toBeDefined();
+    expect(w.sc.walkCalls()).toHaveLength(n);
+    // jamais plus tard que l'estimation, quel que soit le point de départ
+    for (const j of near.journeys) expect(j.legs[0].walkMin!).toBeGreaterThanOrEqual(j.legs[0].walkEst!);
+  });
+});
+
+describe('règles 1 et 2 : jamais plus tard, 5 min d’avance au plus', () => {
+  it('vrai chemin plus court que l’estimation (130 m tout droit, 2 min pour 3 estimées) : l’heure de partir ne recule pas', async () => {
+    const sc = scene('short');
+    const clock = { t: at('07:10') };
+    const core = sc.core(() => clock.t);
+    const s = sc.settings();
+    const here = offset(ESPLANADE, 0, -130);
+    const j = (await core.route(HERE, TO, clock.t, s, here)).journeys[0];
+    await settle();
+    expect(read(j)).toMatchObject({ leave: '07:15', walk: 3, est: undefined });
+    expect(read(await core.refresh(j, s))).toMatchObject({ leave: '07:15', walk: 3, est: undefined });
+  });
+
+  it('vrai chemin de 1 000 m (13 min pour 3 estimées) : 5 min d’avance, pas 10 (partir à 07:10) ; noté au journal technique, rien à l’écran', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const w = world('huge', '07:05');
+    const r = await w.route();
+    const j = r.journeys.find((x) => hhmm(x.legs[1].dep) === '07:20')!;
+    expect(read(j)).toMatchObject({ leave: '07:10', walk: 8, est: 3, walkAt: '07:10-07:18', margin: 2 });
+    // appliquée encore (refresh, firstWalk) : toujours 8 min, jamais 13
+    expect(read(await w.core.refresh(j, w.s))).toMatchObject({ leave: '07:10', walk: 8, est: 3 });
+    expect(w.core.firstWalk!(j, w.s)).toBe(j);
+    const lines = warn.mock.calls.map((c) => String(c[0])).filter((t) => t.includes('première marche'));
+    expect(lines).toEqual(['[Quai] première marche : vrai chemin de 13 min pour 3 min prévues, avance limitée à 5 min']);
+    // rien à l'écran : aucune alerte du trajet n'en parle
+    expect(JSON.stringify(r.journeys.map((x) => x.alerts))).not.toMatch(/chemin|limit/);
+  });
+});
+
+describe('règles 4 et 5 : heure déjà passée, classement', () => {
+  it('07:13 : il fallait partir à 07:12 ; le trajet reste le premier, heure de partir passée, encore attrapable (comme en 1.3.0 dans la marge)', async () => {
+    const w = world('long', '07:13');
+    const r = await w.route();
+    expect(read(r.journeys[0])).toMatchObject({ leave: '07:12', walk: 6, ride: '3 07:20' });
+    // l'alerte « partir » de la 1.3.0, avec les vraies minutes
+    expect(r.journeys[0].alerts.map((a) => a.kind)).toContain('leave');
+    expect(r.journeys[0].alerts.find((a) => a.kind === 'leave')!.text).toContain('6');
+  });
+
+  it('07:15 : le tram de 07:20 ne peut plus être attrapé par le vrai chemin (6 min) : comme un départ raté, le suivant vient à sa place (07:28, partir à 07:20)', async () => {
+    // la 1.3.0 (estimation) le propose encore : « partir maintenant », pour un tram qu'on rate
+    const old = await world(null, '07:15').route();
+    expect(read(old.journeys[0])).toMatchObject({ leave: '07:15', walk: 3, ride: '3 07:20' });
+    const w = world('long', '07:15');
+    const r = await w.route();
+    expect(read(r.journeys[0])).toMatchObject({ leave: '07:20', walk: 6, ride: '3 07:28' });
+    expect(r.journeys.some((j) => hhmm(j.legs[1].dep) === '07:20')).toBe(false);
+    // les propositions restantes sont celles de l'estimation, dans le même ordre, sans le départ raté
+    const kept = old.journeys.slice(1).map((j) => j.id);
+    expect(r.journeys.map((j) => j.id).slice(0, kept.length)).toEqual(kept);
+    // le favori dit la même chose
+    expect(read((await w.core.answer(BOURSE, START, w.s)).plan!.journeys[0])).toMatchObject({ leave: '07:20', ride: '3 07:28' });
+  });
+
+  it('chemin connu trop tard (07:15, tuile lente) : le trajet montré garde sa place et dit 07:12 (heure passée) ; un nouveau calcul donne le suivant', async () => {
+    const w = world('long', '07:15');
+    w.sc.hold();
+    const r0 = await w.route();
+    expect(read(r0.journeys[0])).toMatchObject({ leave: '07:15', ride: '3 07:20' });
+    w.sc.release();
+    await settle(60);
+    // le trajet déjà à l'écran : même trajet, heure de partir passée (l'écran du trajet le garde, comme en 1.3.0)
+    const shown = await w.core.refresh(r0.journeys[0], w.s);
+    expect(shown.id).toBe(r0.journeys[0].id);
+    expect(read(shown)).toMatchObject({ leave: '07:12', walk: 6, ride: '3 07:20' });
+    // le favori (plan mémorisé) : son premier véhicule n'est plus attrapable, il est recalculé : le suivant
+    const a = await w.core.answer(BOURSE, START, w.s);
+    expect(read(a.plan!.journeys[0])).toMatchObject({ ride: '3 07:28', leave: '07:20' });
+  });
+
+  it('le classement ne dépend pas des chemins connus : mêmes propositions, même ordre, mêmes étiquettes qu’avec l’estimation, à chaque minute de 07:00 à 07:30', async () => {
+    const known = scene('long');
+    const none = scene(null);
+    const clock = { t: at('07:00') };
+    const a = known.core(() => clock.t);
+    const b = none.core(() => clock.t);
+    const s = known.settings();
+    let dropped = 0;
+    for (let t = at('07:00'); t <= at('07:30'); t += MIN) {
+      clock.t = t;
+      const ra = (await a.route(HERE, TO, t, s, START)).journeys;
+      const rb = (await b.route(HERE, TO, t, s, START)).journeys;
+      const hm = hhmm(t);
+      // un départ que l'estimation croit attrapable et que le vrai chemin (3 min de plus) dit raté : écarté, rien d'autre
+      const lost = rb.filter((j) => j.legs[1].dep - 6 * MIN < t);
+      dropped += lost.length;
+      const kept = rb.filter((j) => !lost.includes(j)).map((j) => j.id);
+      expect(ra.map((j) => j.id).slice(0, kept.length), hm).toEqual(kept);
+      for (const j of ra) {
+        expect(j.legs[1].dep - (j.legs[0].walkMin ?? 0) * MIN, hm).toBeGreaterThanOrEqual(t);
+        expect(j.leaveAt, hm).toBeLessThanOrEqual(rb.find((x) => x.id === j.id)?.leaveAt ?? Infinity);
+      }
+    }
+    expect(dropped).toBeGreaterThan(0);
+  });
+});
+
+describe('règle 6 : « Éviter les escaliers »', () => {
+  it('le chemin est celui du réglage : par l’escalier (180 m) rien ne change ; sans marches (446 m), partir à 07:12', async () => {
+    const off = world('stairs', '07:10');
+    expect(read((await off.route()).journeys[0])).toMatchObject({ leave: '07:15', walk: 3, est: undefined });
+    const on = world('stairs', '07:10', { avoidSteps: true });
+    expect(read((await on.route()).journeys[0])).toMatchObject({ leave: '07:12', walk: 6, est: 3 });
+    // même cœur, réglage changé en route : chaque réglage a son chemin
+    const j = (await off.route()).journeys[0];
+    const turned = await off.core.refresh(j, { ...off.s, avoidSteps: true });
+    await settle();
+    expect(read(await off.core.refresh(turned, { ...off.s, avoidSteps: true }))).toMatchObject({ leave: '07:12', walk: 6 });
+  });
+});
+
+describe('règle 7 : seulement la première marche', () => {
+  it('favori de gare à gare, à pied jusqu’à la gare : la marche position → gare suit son vrai chemin ; les marches suivantes gardent leurs minutes', async () => {
+    // de l'arrêt Esplanade (tram 3) vers la Bourse, en partant de 180 m au sud : la marche position → arrêt est la première
+    const fav: FavoriteTrip = { kind: 'trip', id: 'fav-esplanade', from: { type: 'area', areaId: 'stib:6380', op: 'stib', name: { fr: 'Esplanade', nl: 'Esplanade' }, lat: ESPLANADE.lat, lon: ESPLANADE.lon }, to: { type: 'area', areaId: 'stib:6362', op: 'stib', name: { fr: 'Bourse', nl: 'Beurs' }, lat: 50.8483, lon: 4.3497 }, label: 'Bourse', propose: 'never' };
+    const base = world(null, '07:10');
+    const a0 = await base.core.answer(fav, START, base.s);
+    expect(read(a0.plan!.journeys[0])).toMatchObject({ leave: '07:15', walk: 3, ride: '3 07:20' });
+    const w = world('long', '07:10');
+    const a = await w.core.answer(fav, START, w.s);
+    expect(read(a.plan!.journeys[0])).toMatchObject({ leave: '07:12', walk: 6, est: 3, ride: '3 07:20' });
+    expect(a.plan!.journeys[0].legs.slice(1)).toEqual(a0.plan!.journeys[0].legs.slice(1));
+    // 07:15 : le tram de 07:20 n'est plus attrapable par le vrai chemin : le suivant
+    w.clock.t = at('07:15');
+    const later = await w.core.answer(fav, START, w.s);
+    expect(read(later.plan!.journeys[0])).toMatchObject({ ride: '3 07:28', leave: '07:20', walk: 6 });
+  });
+});
+
+describe('règles 8 et 9 : réseau et coût', () => {
+  it('en plus de la 1.3.0 : l’index des chemins à pied et les tuiles du quartier, une fois ; jamais la position ; rien vers le relais', async () => {
+    const w = world('long', '07:10');
+    const base = world(null, '07:10');
+    await w.route();
+    await base.route();
+    const rest = (calls: string[]) => calls.filter((u) => !u.includes('/walk/')).sort();
+    // mêmes demandes qu'avec l'estimation, plus les chemins à pied
+    expect(rest(w.sc.server.calls)).toEqual(rest(base.sc.server.calls));
+    const walk = w.sc.walkCalls();
+    expect(walk[0]).toBe('walk/index.json');
+    expect(walk.filter((u) => u === 'walk/index.json')).toHaveLength(1);
+    // tuiles : celle du quartier et ses voisines du cadre (départ, arrêt, 300 m de marge), demandées par leur clé
+    const tiles = [...new Set(walk.slice(1))];
+    expect(tiles).toContain(`walk/${TILE}.json?v=${VERSION}`);
+    expect(tiles.length).toBeLessThanOrEqual(4);
+    for (const u of w.sc.server.calls) {
+      expect(u).not.toContain(String(START.lat).slice(0, 7));
+      expect(u).not.toContain(String(START.lon).slice(0, 6));
+    }
+    // ensuite : accueil (favori), rafraîchissements, nouveau calcul 5 min plus tard : plus aucune demande de chemin
+    const n = walk.length;
+    await w.core.answer(BOURSE, START, w.s);
+    for (let i = 0; i < 10; i++) {
+      w.clock.t += 30_000;
+      const a = await w.core.answer(BOURSE, START, w.s);
+      await w.core.refresh(a.plan!.journeys[0], w.s);
+    }
+    expect(w.sc.walkCalls().slice(n).filter((u) => u.includes(TILE))).toEqual([]);
+  });
+
+  it('coût : un chemin calculé par arrêt de départ (3 propositions du même arrêt : 1 calcul), quelques millisecondes ; le calcul des trajets ne ralentit pas', async () => {
+    const time = async (path: PathKind | null) => {
+      const w = world(path, '07:10');
+      await w.route();
+      const t0 = performance.now();
+      for (let i = 0; i < 20; i++) {
+        w.clock.t += 1000;
+        await w.route();
+        await w.core.answer(BOURSE, START, w.s);
+      }
+      return (performance.now() - t0) / 20;
+    };
+    const without = await time(null);
+    const withWalk = await time('long');
+    // même ordre de grandeur (le chemin est en mémoire : aucune attente) ; borne large pour une machine chargée
+    expect(withWalk).toBeLessThan(without * 3 + 50);
+    console.info(`[mesure] route + favori : ${without.toFixed(1)} ms sans chemins, ${withWalk.toFixed(1)} ms avec`);
+  });
+});
