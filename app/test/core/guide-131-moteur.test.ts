@@ -14,7 +14,7 @@ import type { GuideFix, GuideState, Moment, VehicleRef } from '../../src/core/gu
 import { dismissMoment, GUIDE, replanNone } from '../../src/core/guide';
 import { pointAlong, projectAlong } from '../../src/core/guide-walk';
 import { distanceM } from '../../src/core/util';
-import { at, fix, firstWalkRoute, guide, journeyOf, kindOf, lerp, MIN, N, offset, P, prdTrip, rideLeg, route, S, SEC, step, toward, walkLeg, type Run } from './guide-fixtures';
+import { at, fix, firstWalkRoute, guide, journeyOf, kindOf, lerp, MIN, N, offset, P, prdTrip, rideLeg, route, S, SEC, step, stop, toward, walkLeg, type Run } from './guide-fixtures';
 
 const m = <K extends Moment['kind']>(x: Moment | null, kind: K): Extract<Moment, { kind: K }> => {
   expect(x?.kind).toBe(kind);
@@ -178,6 +178,83 @@ describe('A2 (P1) : bus raté en marchant', () => {
     // nouveau trajet demandé depuis l'arrêt ; aucun message avant qu'il soit connu (jamais « est parti »)
     expect(s.replan).toMatchObject({ reason: 'missed', from: { areaId: 'tec:LGgram' } });
     expect(s.moment).toBeNull();
+  });
+
+  describe('véhicule lent qui repart de l’arrêt (contrôle du moteur)', () => {
+    // tram 7 de Monument Gramme vers l'est : il repasse devant le parc d'Avroy, le long du chemin de la marche (zone
+    // piétonne, bouchon : 2 m/s, jamais la vitesse d'un véhicule)
+    const east = (d: number) => stop(`Arrêt ${d}`, offset(P.avroy, d, 0), `tec:E${d}`);
+    const tram = (rt: boolean) => rideLeg({ op: 'tec', mode: 'tram', line: '7', head: 'Coronmeuse', rt, stops: [{ p: S.gramme, t: at('07:12') }, { p: east(400), t: at('07:20') }, { p: east(1200), t: at('07:28') }] });
+    const trip = (rt = true) => journeyOf([walkLeg(S.avroy, S.gramme, at('07:05'), 5), tram(rt)], 'jlent', at('07:05'));
+    const street = () => route([P.avroy, P.gramme]);
+    const back = [P.gramme, offset(P.avroy, 1200, 0)];
+    const aboard = (x: { t: number; s: GuideState }[]) => {
+      for (const y of x) {
+        expect(y.s.phase.kind === 'wait' || y.s.phase.kind === 'ride', `${hm(y.t)} ${y.s.phase.kind}`).toBe(true);
+        expect(isUturn(y.s), hm(y.t)).toBe(false);
+        expect(y.s.moment?.kind, hm(y.t)).not.toBe('replan');
+        expect(y.s.replan, hm(y.t)).toBeUndefined();
+        expect(y.s.ended, hm(y.t)).toBe(false);
+      }
+    };
+
+    it('attendu à l’arrêt, monté, le tram repart au pas le long du chemin de la marche : jamais « à pied », ni « Fais demi-tour », ni « Ton tram est parti » ; montée constatée', () => {
+      const r = guide(trip(), { walk: { leg: 0, route: street() } });
+      play(r, trace(street().coords, { t0: at('07:05'), toM: 400, every: 5, noise: 3 }));
+      stay(r, P.gramme, at('07:10:20'), at('07:12'), 10);
+      // avant : phase « à pied » dès 100 m, « Fais demi-tour », puis à 07:14 « Ton tram 7 de 07:12 est parti » et un nouveau trajet
+      const out = play(r, trace(back, { t0: at('07:12:05'), toM: 400, v: 2, every: 5, noise: 3 }));
+      aboard(out);
+      expect(out[out.length - 1].s.phase).toMatchObject({ kind: 'ride', leg: 1 });
+      expect((r.mem as { boarded?: { leg: number } }).boarded?.leg).toBe(1);
+    });
+
+    it('sans temps réel, le tram a 6 min de retard et repart au pas : le guidage continue (A3), pas de « est parti »', () => {
+      const r = guide(trip(false), { walk: { leg: 0, route: street() } });
+      play(r, trace(street().coords, { t0: at('07:05'), toM: 400, every: 5, noise: 3 }));
+      aboard(stay(r, P.gramme, at('07:10:20'), at('07:18'), 10).map((s, i) => ({ t: at('07:10:20') + i * 10 * SEC, s })));
+      const out = play(r, trace(back, { t0: at('07:18:05'), toM: 400, v: 2, every: 5, noise: 3 }));
+      aboard(out);
+      expect(out[out.length - 1].s.phase).toMatchObject({ kind: 'ride', leg: 1 });
+    });
+
+    it('téléphone verrouillé pendant l’attente, réveillé dans un tram lent 2 min 30 après le départ : pas de « est parti », plus « à pied » dès qu’on voit qu’il s’éloigne', () => {
+      // (a) tram vers le nord-est (du côté du départ, entre le parc et l'arrêt à vol d'oiseau), hors du chemin de la marche ;
+      // (b) parti de 900 m à l'est de l'arrêt, le tram repart vers l'est le long du chemin de la marche
+      const ne = offset(P.gramme, 300, 500);
+      const farEast = stop('Parc de la Boverie', offset(P.gramme, 900, 0));
+      const ride = (to: LatLon) => rideLeg({ op: 'tec', mode: 'tram', line: '7', head: 'Coronmeuse', stops: [{ p: S.gramme, t: at('07:12') }, { p: stop('Arrêt suivant', to, 'tec:NX'), t: at('07:20') }] });
+      const cases: { name: string; j: ReturnType<typeof journeyOf>; walk: ReturnType<typeof route>; origin: LatLon; line: LatLon[] }[] = [
+        { name: 'hors du chemin', j: journeyOf([walkLeg(S.avroy, S.gramme, at('07:05'), 5), ride(ne)], 'jlent2', at('07:05')), walk: street(), origin: P.avroy, line: [P.gramme, ne] },
+        { name: 'le long du chemin', j: journeyOf([walkLeg(farEast, S.gramme, at('06:58'), 12), ride(offset(P.gramme, 1500, 0))], 'jlent3', at('06:58')), walk: route([farEast, P.gramme]), origin: farEast, line: [P.gramme, offset(P.gramme, 1500, 0)] },
+      ];
+      for (const x of cases) {
+        const r = guide(x.j, { walk: { leg: 0, route: x.walk }, origin: x.origin });
+        play(r, trace(x.walk.coords, { t0: x.j.leaveAt, toM: 150, every: 5, noise: 3 }));
+        // aucune position ensuite jusqu'à 07:14:30 ; au réveil, à 150 m de l'arrêt, au pas. Avant : « Ton tram 7 de 07:12
+        // est parti » dès la première position, et un nouveau trajet demandé depuis le tram
+        const out = play(r, trace(x.line, { t0: at('07:14:30'), fromM: 150, toM: 300, v: 2, every: 5, noise: 3 }));
+        for (const y of out) {
+          expect(isUturn(y.s), `${x.name} ${hm(y.t)}`).toBe(false);
+          expect(y.s.moment?.kind, `${x.name} ${hm(y.t)}`).not.toBe('replan');
+          expect(y.s.replan, `${x.name} ${hm(y.t)}`).toBeUndefined();
+          expect(y.s.ended, `${x.name} ${hm(y.t)}`).toBe(false);
+        }
+        // 30 m plus loin de l'arrêt qu'à la première position (15 m en arrière sur le chemin) : plus « à pied »
+        for (const y of out.filter((z) => z.t >= at('07:14:50'))) expect(y.s.phase.kind, `${x.name} ${hm(y.t)}`).toBe('ride');
+      }
+    });
+
+    it('qui marche vraiment vers l’arrêt en retard garde A2 : « est parti » 2 min après le départ, après 45 s de positions', () => {
+      const r = guide(trip(), { walk: { leg: 0, route: street() } });
+      // verrouillé jusqu'à 07:13:40, puis en marche vers l'arrêt (à 250 m), bus parti à 07:12
+      const out = play(r, trace(street().coords, { t0: at('07:13:40'), fromM: 150, toM: 290, every: 5, noise: 3 }));
+      const k = out.findIndex((y) => y.s.moment?.kind === 'replan');
+      expect(k).toBeGreaterThan(0);
+      expect(out[k].t).toBeGreaterThanOrEqual(at('07:14:25'));
+      expect(out[k].t).toBeLessThanOrEqual(at('07:14:35'));
+      for (const y of out) expect(y.s.phase, hm(y.t)).toEqual({ kind: 'walk', leg: 0 });
+    });
   });
 
   it('pas parti (règle 1.2.x) : toujours vrai pour qui reste chez soi', () => {
@@ -425,6 +502,26 @@ describe('A6 (P3) : « Fais demi-tour »', () => {
     // limite voulue : sur l'épingle même, dans le doute (une branche à 30 m va dans le sens de la marche), rien n'est
     // dit ; le chemin quitté plus de 10 s demande toujours un nouveau chemin. Les vrais demi-tours (départ du mauvais
     // côté, virage raté) : tests ci-dessus, inchangés
+  });
+
+  it('à la descente : le train qui freine en arrivant du côté où part la marche n’est pas une marche à contresens (40 traces bruitées)', () => {
+    // IC de Bruxelles-Nord (au nord-nord-est) à Bruxelles-Central, 40 s à quai, puis à pied vers l'arrêt Gare Centrale
+    // (à l'est-nord-est) : les positions du train, à l'allure d'un piéton sur ses derniers mètres, comptaient
+    const wrong: number[] = [];
+    for (let seed = 1; seed <= 40; seed++) {
+      const r = guide(prdTrip(), { startedAt: at('08:20'), walk: { leg: 4, route: route([P.central, P.gareCentrale]) } });
+      const rnd = rng(seed);
+      const noisy = (p: LatLon) => offset(p, (rnd() * 2 - 1) * 5, (rnd() * 2 - 1) * 5);
+      let u = false;
+      for (let t = at('08:25'); t <= at('08:29:40'); t += 5 * SEC) {
+        const inTrain = t < at('08:27');
+        const p = inTrain ? lerp(P.nord, P.central, (t - at('08:23')) / (4 * MIN)) : t <= at('08:27:40') ? P.central : lerp(P.central, P.gareCentrale, (t - at('08:27:40')) / (2 * MIN));
+        const speed = inTrain ? distanceM(P.nord, P.central) / 240 : t <= at('08:27:40') ? 0 : distanceM(P.central, P.gareCentrale) / 120;
+        if (isUturn(step(r, t, fix(noisy(p), t, { speed, accuracy: 5 })))) u = true;
+      }
+      if (u) wrong.push(seed);
+    }
+    expect(wrong).toEqual([]);
   });
 
   it('jamais à l’arrêt d’attente ni avant de partir', () => {
