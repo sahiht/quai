@@ -19,6 +19,11 @@ export interface PreparedArea {
   headKeysNl: string[];
   /** Motifs au départ de chaque arrêt physique (index dans stops). */
   patternsAtStop: number[][];
+  /**
+   * 1.3.1 (R3) : jours de service (meta.serviceDates) des instants de `times` : la fenêtre des départs connus, pour
+   * « , dernier » d'après l'horaire (core/boards.ts, scheduleLast). Absents : aucune marque.
+   */
+  dates?: readonly string[];
 }
 
 const prepared = new WeakMap<AreaFile, { dates: string; prep: PreparedArea }>();
@@ -58,6 +63,7 @@ export function prepareArea(file: AreaFile, meta: Meta): PreparedArea {
     headKeys: file.patterns.map((p) => headKey(p.head?.fr ?? '')),
     headKeysNl: file.patterns.map((p) => headKey(p.head?.nl ?? '')),
     patternsAtStop,
+    dates: [...meta.serviceDates],
   };
   prepared.set(file, { dates, prep });
   return prep;

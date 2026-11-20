@@ -268,7 +268,13 @@ export function createCore(opts: CoreOptions): Core {
     return scopeTexts(alerts, scope, BOARD_BUDGET);
   }
 
-  const refreshEnv: RefreshEnv = { rt, now, trainDays, area: preparedOrNull };
+  // 1.3.1 (R3) : « , dernier » d'une étape en bus, tram ou métro d'après une zone déjà connue, jamais demandée au réseau
+  const cachedArea = async (id: string): Promise<PreparedArea | null> => {
+    const f = await data.cachedArea(aliasOf.get(id) ?? id).catch(() => null);
+    const meta = data.meta;
+    return f && meta ? prepareArea(f, meta) : null;
+  };
+  const refreshEnv: RefreshEnv = { rt, now, trainDays, area: preparedOrNull, cachedArea };
 
   const core: Core = {
     get meta() {

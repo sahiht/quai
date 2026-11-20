@@ -13,7 +13,7 @@ import { prettyName } from '../../../shared/names';
 import { namesOf, scopeTexts, stibMessageText, TRIP_BUDGET, type AlertScope, type ScopeStop } from './alerts';
 import type { Alert, Journey, Leg, Settings } from './api';
 import type { PreparedArea } from './areas';
-import { stibPassages, type StibPassage } from './boards';
+import { legDepartureIn, scheduleLast, stibPassages, trainLegLast, type StibPassage } from './boards';
 import type { RealtimeClient, RtTrip, StibEntry } from './realtime';
 import { stibPoint } from './realtime';
 import { delayMinutes, headKey, headScore, platformOfStopId, RT_MAX_SHIFT_MS, rtAtStop, rtAtStopShown, rtOccurrence, sameStop, type TripContext } from './rtmerge';
@@ -30,6 +30,11 @@ export interface RefreshEnv {
   now: () => number;
   trainDays: () => Promise<DayIndex[]>;
   area: (id: string) => Promise<PreparedArea | null>;
+  /**
+   * 1.3.1 (R3) : zone déjà connue (mémoire, cache persistant), jamais demandée au réseau : « , dernier » d'une étape en
+   * bus, tram ou métro. Absente : pas de marque d'après l'horaire pour ces étapes.
+   */
+  cachedArea?: (id: string) => Promise<PreparedArea | null>;
 }
 
 /** Passages STIB acceptés autour de l'horaire prévu d'une étape. */
@@ -392,6 +397,35 @@ export async function applyRealtime(legs: Leg[], env: RefreshEnv, followed = fal
   }
 }
 
+/**
+ * 1.3.1 (R3, PRD-1.3.1 § 14) : « , dernier » d'après l'horaire sur les étapes en véhicule (après applyRealtime), sans
+ * rien demander au réseau : un train d'après les trains des jours déjà chargés (trainLegLast) ; un bus, un tram, un
+ * métro d'après le fichier de sa zone de montée s'il est déjà connu (env.cachedArea, scheduleLast). Une étape STIB suivie
+ * en direct garde la seule parole de la STIB (« Dernier passage », applyStib) : jamais deux marques.
+ */
+export async function markLast(legs: Leg[], env: RefreshEnv): Promise<void> {
+  const rides = legs.filter((l) => l.kind === 'ride' && !(l.op === 'stib' && (l.last || l.rt)));
+  if (!rides.length) return;
+  const days = rides.some((l) => l.op === 'sncb') ? await env.trainDays().catch(() => [] as DayIndex[]) : [];
+  const ids = [...new Set(rides.filter((l) => l.op !== 'sncb' && l.from.areaId).map((l) => l.from.areaId!))];
+  const preps = new Map<string, PreparedArea | null>();
+  if (env.cachedArea) {
+    const load = env.cachedArea;
+    await Promise.all(ids.map(async (id) => preps.set(id, await load(id).catch(() => null))));
+  }
+  for (const l of rides) {
+    let last = false;
+    if (l.op === 'sncb') last = trainLegLast(days, l);
+    else {
+      const prep = l.from.areaId ? preps.get(l.from.areaId) : null;
+      const di = prep ? legDepartureIn(prep, l) : -1;
+      last = !!prep && di >= 0 && scheduleLast(prep, di);
+    }
+    if (last) l.last = true;
+    else delete l.last;
+  }
+}
+
 /** Recalcule les marches, l'heure de départ conseillée et les champs du trajet. */
 export function recompute(j: Journey, legs: Leg[], settings: Settings, now: number, fresh: boolean): Journey {
   const margin = Math.max(0, settings.alerts.leaveBeforeMin) * 60_000;
@@ -575,6 +609,7 @@ async function worksFor(j: Journey, env: RefreshEnv): Promise<string[]> {
 export async function refreshJourneys(js: readonly Journey[], settings: Settings, env: RefreshEnv, fresh = false, followed = false): Promise<Journey[]> {
   const legs = js.map((j) => j.legs.map(cloneLeg));
   await applyRealtime(legs.flat(), env, followed);
+  await markLast(legs.flat(), env);
   const now = env.now();
   return Promise.all(
     js.map(async (j, i) => {
