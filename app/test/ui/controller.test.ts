@@ -164,7 +164,7 @@ describe('contrôleur des lunettes : démarrage, rendu, sortie', () => {
     await gesture('down', 'down', 'tap');
     await until((s) => s.screen === 'nearby' && s.lines.length > 2);
     expect(last().lines).toContain('~ horaire prévu, sans temps réel');
-    expect(last().lines.at(-1)).toBe('△▽ arrêt   toucher : départs   double : retour');
+    expect(last().lines.at(-1)).toBe('△▽ choisir   toucher : départs   double : retour');
     await settings.update((s) => ({ ...s, display: { ...s.display, markPlanned: false, gestureHints: false } }));
     await settle(60);
     expect(last().screen).toBe('nearby');
@@ -356,7 +356,7 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     await gesture('down', 'down', 'down', 'down', 'down', 'tap');
     const f = await until(followsReady);
     expect(f.title).toBe('Lignes de bus, tram, métro');
-    expect(f.lines).toEqual(['Tram 3 vers Churchill', 'Tram 3 vers Esplanade', 'Tram 4 vers Stalle', '△▽ choisir   toucher : la ligne   double : retour']);
+    expect(f.lines).toEqual(['Tram 3 vers Churchill', 'Tram 3 vers Esplanade', 'Tram 4 vers Stalle', '△▽ choisir   toucher : parcours   double : retour']);
     // toucher : toute la ligne dans ce sens, le curseur sur l'arrêt le plus proche (à 80 m), le prochain passage en clair ;
     // 1.2.7 : ● seulement d'après le temps réel (ici, l'horaire prévu : aucun ●, pas de ligne du haut)
     await gesture('tap');
@@ -398,7 +398,8 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     expect((await until(homeReady)).sel).toBe(5);
     await gesture('up', 'tap');
     const st = await until((x) => x.screen === 'stations' && !x.lines.some((l) => l.endsWith('…')));
-    expect(st).toMatchObject({ title: 'Gares de train', lines: ['Namur   IC 12:42 voie 4', '△▽ choisir   toucher : départs   double : retour'] });
+    // 1.3.1 (B21) : l'accordéon de la gare : la direction du prochain train, puis le train d'après (déjà lu au tableau)
+    expect(st).toMatchObject({ title: 'Gares de train', lines: ['Namur   IC 12:42 voie 4', 'vers Bruxelles-Midi', 'puis IC vers Bruxelles-Midi, 13:42 voie 4', '△▽ choisir   toucher : départs   double : retour'] });
     await gesture('tap');
     const namur = await until((x) => x.screen === 'board' && x.lines.length > 2);
     expect(namur.title).toBe('Namur, train (SNCB) ★');

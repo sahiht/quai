@@ -125,7 +125,7 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
     const f = await h.until(followsReady);
     expect(f.title).toBe('Lignes de bus, tram, métro');
     // les sens rangés par terminus ; la liste ne demande aucun passage
-    expect(f.lines).toEqual(['Bus W vers Braine-l’Alleud Gare', 'Bus W vers Bruxelles Midi', 'Tram 3 vers Churchill', 'Tram 3 vers Esplanade', '△▽ choisir   toucher : la ligne   double : retour']);
+    expect(f.lines).toEqual(['Bus W vers Braine-l’Alleud Gare', 'Bus W vers Bruxelles Midi', 'Tram 3 vers Churchill', 'Tram 3 vers Esplanade', '△▽ choisir   toucher : parcours   double : retour']);
     // variantes et terminus retrouvés à la première ouverture, puis gardés
     await h.until(() => (h.settings.get().follows ?? []).every((x) => x.routes.length > 0));
     expect(h.settings.get().follows?.map((x) => [x.id, x.routes.length, x.ends?.length])).toEqual([
