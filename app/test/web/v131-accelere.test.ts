@@ -57,7 +57,7 @@ interface Frame {
 }
 
 /** Vraies lunettes et essai, comme web/main.ts (sans le canvas : chaque dessin est noté). */
-async function bench(o: { realNow?: number } = {}) {
+async function bench(o: { realNow?: number; visible?: () => boolean } = {}) {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'], now: o.realNow ?? at('06:40') });
   const clock = createClock({ mockNow: Date.now(), perfNow: () => performance.now(), e2e: false });
   const backend = memoryBackend();
@@ -109,6 +109,7 @@ async function bench(o: { realNow?: number } = {}) {
     location,
     clock,
     showGlasses: () => shown.push('lunettes'),
+    ...(o.visible ? { visible: o.visible } : {}),
     e2e: true,
     log: (l) => trialLogs.push(l),
   });
@@ -355,6 +356,43 @@ describe('l’essai dans Quai Web (vrai contrôleur, vrai moteur, vrais écrans)
     expect(b.essai.active()).toBe(true);
     b.essai.gesture('double');
     expect(b.essai.active()).toBe(false);
+  });
+});
+
+describe('page cachée ou visible pendant l’essai (signaux de web/main.ts)', () => {
+  it('pendant l’essai, les signaux de la page vont à l’essai : les vraies lunettes restent en arrière-plan ; essai fini page cachée : elles reprennent au retour de la page', async () => {
+    let visible = true;
+    const b = await bench({ visible: () => visible });
+    await b.essai.tryFavorite(GARE.id);
+    await b.advance(2_000);
+    // page cachée puis visible : l'essai s'arrête de dessiner puis reprend ; les vraies lunettes ne dessinent rien
+    visible = false;
+    b.essai.signal({ kind: 'background' });
+    const n = b.frames.length;
+    await b.advance(3_000);
+    expect(b.frames.length).toBe(n);
+    visible = true;
+    b.essai.signal({ kind: 'foreground' });
+    await b.advance(50);
+    expect(b.frames.length).toBeGreaterThan(n);
+    expect(b.frames.slice(n).every((f) => f.by === 'essai')).toBe(true);
+    // l'essai finit pendant que la page est cachée : rien ne se dessine avant son retour, puis les vraies lunettes
+    visible = false;
+    b.essai.signal({ kind: 'background' });
+    b.essai.stop();
+    const m = b.frames.length;
+    await b.advance(5_000);
+    expect(b.frames.length).toBe(m);
+    visible = true;
+    b.essai.signal({ kind: 'foreground' });
+    await b.advance(50);
+    expect(b.frames.slice(m).length).toBeGreaterThan(0);
+    expect(b.frames.slice(m).every((f) => f.by === 'vraies')).toBe(true);
+    // hors essai, les gestes vont aux vraies lunettes
+    const k = b.frames.length;
+    b.essai.gesture('down');
+    await b.advance(50);
+    expect(b.frames.slice(k).every((f) => f.by === 'vraies')).toBe(true);
   });
 });
 
