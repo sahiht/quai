@@ -55,7 +55,7 @@ import { LABEL_TEXT, labelOf, type LineMatch } from '../core/api';
 import { MESSAGES, QuaiError } from '../core/errors';
 import { NEAR_M, asTrip, endpointPoint, favoriteTitle, placeOf } from '../core/favorites';
 // 1.3.1 (B20) : le soir, les favoris de la règle 5 qui ont un trajet plus tard (homeShown)
-import { answerTime } from '../core/favorites';
+import { answerTime, isLastAnswer } from '../core/favorites';
 import { dismissMoment, guideStatusOf, guideStep, newGuideMemory, replanJourney, replanNone, rideJourney, rideOnJourney } from '../core/guide';
 import type { GuideFix, GuideKind, GuideMemory, GuideState, GuideStatus, LocationNeed, WalkRoute } from '../core/guide-types';
 import { shortAddress } from '../core/text';
@@ -1277,7 +1277,9 @@ export class GlassesController implements GlassesApi {
    * la règle 5 qui ont quand même un trajet plus tard (« demain 05:52 → 06:46 »), dans l'ordre réglé ; jamais « tu y
    * es » ni « aucun trajet ». Un favori encore en calcul (« … ») ne compte pas encore : tant qu'aucun favori ne peut y
    * aller d'après sa réponse, ceux du soir gardent leur place à côté de lui (pas de ligne qui part puis revient pendant
-   * que les réponses arrivent) ; dès qu'un favori peut y aller, la règle de la 1.2.1 seule.
+   * que les réponses arrivent) ; dès qu'un favori peut y aller, la règle de la 1.2.1 seule. Contrôle 1.3.1 : « peut y
+   * aller » se lit dans la réponse elle-même (isLastAnswer), pas seulement dans la règle 5, figée dès que l'accueil est
+   * touché : un favori ajouté ou recalculé ensuite (« aucun trajet », « tu y es », « demain ») ne chasse pas ceux du soir.
    */
   private homeShown(): string[] {
     const s = this.settings();
@@ -1291,7 +1293,7 @@ export class GlassesController implements GlassesApi {
     const run = this.runningFavoriteId();
     const ids = this.validOrder(order).filter((id) => id !== run);
     const now = this.d.clock.now();
-    const sure = ids.some((id) => !last.has(id) && this.answers.has(id));
+    const sure = ids.some((id) => !last.has(id) && canGo(this.answers.get(id), now));
     const evening = (id: string): boolean => !sure && last.has(id) && laterTrip(this.answers.get(id), now);
     return ids.filter((id) => !last.has(id) || evening(id)).slice(0, HOME_FAVORITES);
   }
@@ -4453,6 +4455,14 @@ const answerShown = (a: FavoriteAnswer, now: number): boolean => now < outdatedA
  */
 function laterTrip(a: FavoriteAnswer | undefined, now: number): boolean {
   return !!a && a.state === 'ok' && answerTime(a) !== undefined && answerShown(a, now);
+}
+
+/**
+ * 1.3.1 (B20), contrôle : un favori peut aller sur l'accueil d'après sa réponse (autre chose que « tu y es », « aucun
+ * trajet » ou rien dans les 3 heures, la règle 5 du cœur) ; pas encore de réponse : on ne sait pas.
+ */
+function canGo(a: FavoriteAnswer | undefined, now: number): boolean {
+  return !!a && !isLastAnswer(a, now);
 }
 
 /** Départ du trajet suivi (pour savoir quand le rafraîchir). */
