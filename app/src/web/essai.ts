@@ -22,6 +22,7 @@
 import type { Core, Departure, DepartureStops, FavoriteAnswer, FavoritePlace, FavoriteTrip, GlassesApi, Journey, KV, LatLon, Leg, Settings } from '../core/api';
 import { MESSAGES } from '../core/errors';
 import { asTrip, favoriteTitle } from '../core/favorites';
+import { GUIDE } from '../core/guide';
 import type { WalkRoute } from '../core/guide-types';
 import { knownPoint } from '../core/guide-walk';
 import { JOURNAL_KEY } from '../core/journal';
@@ -120,6 +121,25 @@ export function plannedJourney(j: Journey, leaveBeforeMin: number): Journey {
     rt: rides.every((l) => l.rt === true),
     alerts: [],
   };
+}
+
+/**
+ * Contrôle qualité : la première marche compte les minutes de son vrai chemin quand il est plus long que la marche
+ * prévue (80 m par minute, minute entamée comptée), et le départ avance d'autant : la règle du guidage de la 1.3.1 pour
+ * « Partir maintenant » (core/guide.ts, realFirstWalk), appliquée ici avant de commencer, pour que l'essai commence bien
+ * 1 min avant l'heure de partir et que la marche simulée garde une allure de marche. Mêmes conditions : un vrai chemin
+ * (pas une ligne droite), qui part du départ (40 m) et mène à l'arrêt (30 m), vers un véhicule. Sinon : le trajet donné.
+ */
+export function realFirstWalk(j: Journey, route: WalkRoute | null | undefined, leaveBeforeMin: number): Journey {
+  const w = j.legs[0];
+  const r = j.legs[1];
+  if (!route || route.source !== 'osm' || !Number.isFinite(route.lengthM) || !w || w.kind !== 'walk' || !r || r.kind !== 'ride') return j;
+  if (!knownPoint(w.from) || !knownPoint(w.to) || !knownPoint(route.from) || !knownPoint(route.to)) return j;
+  if (distanceM(route.from, w.from) > GUIDE.leaveM || distanceM(route.to, w.to) > 30) return j;
+  const real = Math.ceil(route.lengthM / GUIDE.walkMPerMin);
+  const planned = Math.max(1, Math.round(w.walkMin ?? (w.arr - w.dep) / 60_000));
+  if (real <= planned) return j;
+  return plannedJourney({ ...j, legs: [{ ...w, walkMin: real }, ...j.legs.slice(1)] }, leaveBeforeMin);
 }
 
 /* ------------------------------ Positions simulées ------------------------------ */
@@ -474,10 +494,17 @@ export function createEssai(deps: EssaiDeps): Essai {
     if (a.state === 'noPosition') return { text: MESSAGES.hereMissing, ok: false };
     const j0 = (a.plan?.journeys ?? []).find((x) => catchable(x, deps.clock.now()));
     if (!j0) return { text: GUIDE_TEXT.noTrip, ok: false };
+    let j = plannedJourney(j0, s.alerts.leaveBeforeMin);
+    // le vrai chemin de la première marche (celui que le guidage demande aussi, mêmes tuiles) : ses minutes, l'heure de partir
+    const w = j.legs[0];
+    if (w?.kind === 'walk' && core.walkRoute && knownPoint(w.from) && knownPoint(w.to)) {
+      const route = await deadline(core.walkRoute({ lat: w.from.lat, lon: w.from.lon }, { lat: w.to.lat, lon: w.to.lon }), CORE_TIMEOUT_MS, 'chemin à pied trop lent').catch(() => null);
+      j = realFirstWalk(j, route, s.alerts.leaveBeforeMin);
+    }
     // une autre demande est arrivée pendant le calcul, ou un vrai guidage a commencé
     if (my !== seq) return { text: '', ok: true };
     if (busy()) return { text: ESSAI_TEXT.busy, ok: false };
-    return launch(core, f, plannedJourney(j0, s.alerts.leaveBeforeMin), s, said);
+    return launch(core, f, j, s, said);
   }
 
   async function launch(real: Core, f: FavoritePlace | FavoriteTrip, j: Journey, s: Settings, said?: Run['said']): Promise<{ text: string; ok: boolean }> {

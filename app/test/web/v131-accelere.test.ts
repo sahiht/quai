@@ -27,7 +27,7 @@ import { createKV, memoryBackend } from '../../src/platform/kv';
 import type { Fix, GlassesPort, LocationPort } from '../../src/platform/types';
 import { SettingsStore } from '../../src/settings';
 import { APP_VERSION } from '../../src/version';
-import { createEssai, ESSAI_LEAD_MS, ESSAI_TEXT, gatedPort, plannedJourney, RIDE_SPEED_MIN, RIDE_WAIT_FROM_END_M, simulatedFix, type Essai } from '../../src/web/essai';
+import { createEssai, ESSAI_LEAD_MS, ESSAI_TEXT, gatedPort, plannedJourney, realFirstWalk, RIDE_SPEED_MIN, RIDE_WAIT_FROM_END_M, simulatedFix, type Essai } from '../../src/web/essai';
 import { createWebGlassesPort } from '../../src/web/port';
 import { BUS6, MIN, P, S, at, firstWalkRoute, journeyOf, offset, route, walkLeg } from '../core/guide-fixtures';
 import { stubCore } from '../glasses/helpers';
@@ -250,6 +250,33 @@ describe('trajet aux heures prévues et positions simulées (fonctions pures)', 
     expect(distanceM(mid, { lat: bus.from.lat + 0.045, lon: bus.from.lon })).toBeLessThan(20);
   });
 
+  it('contrôle : la première marche compte les minutes de son vrai chemin quand il est plus long (80 m par minute), le départ avance d’autant', () => {
+    const j = plannedJourney(trip(), 2);
+    expect(j.legs[0]).toMatchObject({ walkMin: 9, dep: at('07:01'), arr: at('07:10') });
+    // le chemin en U du parc d'Avroy à Monument Gramme : environ 800 m, 11 min ; partir à 06:59, arriver à l'arrêt à 07:10
+    const path = firstWalkRoute();
+    expect(Math.ceil(path.lengthM / GUIDE.walkMPerMin)).toBe(11);
+    const r = realFirstWalk(j, path, 2);
+    expect(r.legs[0]).toMatchObject({ walkMin: 11, dep: at('06:59'), arr: at('07:10'), schedDep: at('06:59') });
+    expect(r).toMatchObject({ id: 'jessai', leaveAt: at('06:59'), dep: at('06:59'), arr: at('07:23') });
+    expect(r.legs.slice(1)).toEqual(j.legs.slice(1));
+    // la marche simulée y garde une allure de marche (80 m par minute)
+    const mid = simulatedFix(r, at('07:04'), { leg: 0, route: path })!;
+    expect(mid.speed).toBeGreaterThan(1.1);
+    expect(mid.speed).toBeLessThan(1.4);
+    // rien ne change : chemin pas plus long, ligne droite, chemin qui ne part pas du départ ou ne mène pas à l'arrêt, pas de chemin
+    expect(realFirstWalk(j, route([P.avroy, P.gramme]), 2)).toBe(j);
+    expect(realFirstWalk(j, { ...path, source: 'straight' }, 2)).toBe(j);
+    expect(realFirstWalk(j, { ...path, from: offset(P.avroy, 60, 0) }, 2)).toBe(j);
+    expect(realFirstWalk(j, { ...path, to: offset(P.gramme, 0, 50) }, 2)).toBe(j);
+    expect(realFirstWalk(j, null, 2)).toBe(j);
+    // ni pour un trajet qui commence par un véhicule, ni pour une marche seule
+    const ride = plannedJourney(journeyOf([j.legs[1], j.legs[2]], 'jbus', j.legs[1].dep), 2);
+    expect(realFirstWalk(ride, path, 2)).toBe(ride);
+    const walk = plannedJourney(journeyOf([j.legs[0]], 'jpied', j.legs[0].dep), 2);
+    expect(realFirstWalk(walk, path, 2)).toBe(walk);
+  });
+
   it('gatedPort : rien n’est dessiné tant que la porte est fermée ; gestes et signaux passent', async () => {
     const painted: number[] = [];
     let open = false;
@@ -269,7 +296,7 @@ describe('trajet aux heures prévues et positions simulées (fonctions pures)', 
 });
 
 describe('l’essai dans Quai Web (vrai contrôleur, vrai moteur, vrais écrans)', () => {
-  it('10 fois plus vite : 6 s réelles = 1 min de l’essai ; il commence 1 min avant de partir, à l’heure prévue (07:01, pas 07:04)', async () => {
+  it('10 fois plus vite : 6 s réelles = 1 min de l’essai ; il commence 1 min avant de partir, à l’heure prévue (06:59 : bus à 07:12, 2 min de marge, 11 min par le vrai chemin ; pas le bus en retard de 07:15)', async () => {
     const b = await bench();
     const r = await b.essai.tryFavorite(GARE.id);
     expect(r).toEqual({ text: ESSAI_TEXT.started, ok: true });
@@ -280,19 +307,19 @@ describe('l’essai dans Quai Web (vrai contrôleur, vrai moteur, vrais écrans)
     expect(textOf(b.essai.banner.querySelector('button'))).toBe('Arrêter l’essai');
     expect(ESSAI_TEXT.banner).toBe('Essai en accéléré : positions simulées, rien n’est enregistré.');
     const t0 = b.essai.now()!;
-    expect(t0).toBe(at('07:01') - ESSAI_LEAD_MS);
+    expect(t0).toBe(at('06:59') - ESSAI_LEAD_MS);
     const real0 = b.clock.now();
     await b.advance(50);
-    expect(lastFrame(b)).toMatchObject({ by: 'essai', clock: '07:00' });
+    expect(lastFrame(b)).toMatchObject({ by: 'essai', clock: '06:58' });
     expect(b.moments()).toEqual([]);
     await b.advance(6_000);
     expect(b.clock.now() - real0).toBe(6_050);
     expect(b.essai.now()! - t0).toBe(60_500);
-    // 07:01 : « Partir maintenant », dessiné dans l'écran des lunettes de la page
+    // 06:59 : « Partir maintenant », dessiné dans l'écran des lunettes de la page, avec les minutes du vrai chemin
     expect(b.moments()).toEqual(['leave']);
     expect(lastFrame(b).by).toBe('essai');
-    expect(lastFrame(b).clock).toBe('07:01');
-    expect(lastFrame(b).text).toMatch(/Partir maintenant/);
+    expect(lastFrame(b).clock).toBe('06:59');
+    expect(lastFrame(b).text).toMatch(/Partir maintenant\n+11 min à pied/);
     // l'heure vraie n'a pas bougé plus que le temps réel
     expect(b.clock.now()).toBe(at('06:40') + 50 + 6_050);
     b.essai.stop();
