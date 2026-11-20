@@ -3059,7 +3059,10 @@ export class GlassesController implements GlassesApi {
 
   private async readNext(j: Journey, k: number, key: string): Promise<void> {
     const l = j.legs[k];
-    const board = await deadline(this.d.core.board(l.from.areaId!, { horizonMin: 90, limit: BOARD.limit }), CORE_TIMEOUT_MS, 'tableau trop lent');
+    // contrôle qualité : jusqu'à 90 min après le départ de la correspondance (le tableau est lu jusqu'à 1 h avant), pour
+    // trouver aussi le passage suivant d'une ligne à l'heure
+    const horizonMin = Math.ceil(Math.max(0, l.dep - this.d.clock.now()) / 60_000) + 90;
+    const board = await deadline(this.d.core.board(l.from.areaId!, { horizonMin, limit: BOARD.limit }), CORE_TIMEOUT_MS, 'tableau trop lent');
     const next = board.departures
       .filter((d) => !d.cancelled && d.line === l.line && (!l.op || d.op === l.op) && (!l.head || sameNames(d.head, l.head)) && d.sched > l.schedDep && d.est > l.dep && (!l.tripId || d.tripId !== l.tripId))
       .sort((a, b) => a.est - b.est)[0];

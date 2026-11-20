@@ -328,6 +328,33 @@ describe('1.3.1, B16 (U4) et A3 (I1) : le départ suivant donné au moteur (Guid
     expect(calls2.filter((c) => c.startsWith('board:'))).toEqual([]);
   });
 
+  it('contrôle qualité : ligne à l’heure, tableau lu une heure avant : le passage suivant, une heure après la correspondance ; une autre ligne vers la même destination ne compte pas', async () => {
+    // bus 4 jusqu'à Monument Gramme (arrivée +56), 1 min à pied, bus 6 à +58 : très juste ; le bus 6 suivant à +118
+    const j = journey('j-heure', [
+      { walk: 3, to: 'Place Général Leman' },
+      { ride: '4', mode: 'bus', dep: NOW + 41 * MIN, arr: NOW + 56 * MIN, from: 'Place Général Leman', to: 'Monument Gramme', head: 'Monument Gramme' },
+      { walk: 1, to: 'Monument Gramme' },
+      { ride: '6', mode: 'bus', dep: NOW + 58 * MIN, arr: NOW + 70 * MIN, from: 'Monument Gramme', to: 'Gare des Guillemins', head: 'Gare des Guillemins' },
+      { walk: 4 },
+    ]);
+    j.legs[3].from.areaId = 'tec:gramme';
+    plan = [j];
+    engine.tight = [3];
+    const calls: string[] = [];
+    const guillemins = N('Gare des Guillemins');
+    // comme le cœur (core/boards.ts, withinUntil) : seulement les départs de l'horizon demandé
+    const hourly = (now: number, horizonMin = 120) =>
+      boardOf('tec:gramme', 'Monument Gramme', [
+        dep(NOW, 58, { line: '6', head: guillemins }),
+        dep(NOW, 70, { line: '9', head: guillemins }),
+        dep(NOW, 118, { line: '6', head: guillemins, rt: false }),
+      ].filter((d) => d.est <= now + horizonMin * MIN));
+    const h = await guided({ stub: { calls, board: (id, now, o) => (id === 'tec:gramme' ? hourly(now, o?.horizonMin) : undefined) } });
+    await h.settle(MIN);
+    expect(calls.filter((c) => c === 'board:tec:gramme')).toHaveLength(1);
+    expect(engine.last().input.nextByLeg?.[3]).toEqual({ vehicle: { op: 'tec', mode: 'bus', line: '6' }, depAt: NOW + 118 * MIN, rt: false });
+  });
+
   it('premier véhicule : le plus tôt des autres trajets proposés depuis le même arrêt', async () => {
     plan = [door('j-bureau', NOW + 2 * MIN, NOW + 75 * MIN), door('j-plus-tard', NOW + 22 * MIN, NOW + 95 * MIN), door('j-suivant', NOW + 12 * MIN, NOW + 85 * MIN)];
     const h = await guided();
