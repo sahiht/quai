@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { apos, shortName } from '../../src/core/typo';
 
@@ -38,5 +40,30 @@ describe('1.3.1 : diminutif d’un nom trop long (shortName)', () => {
     for (const n of ['Bruxelles-Luxembourg', 'Brussel-Noord', 'Saint-Guidon', 'Place', 'Avenue']) {
       expect(shortName(n).length).toBeLessThanOrEqual(n.length);
     }
+  });
+});
+
+describe('1.3.1, contrôle technique final : aucun regard arrière dans les motifs (Safari et WebView d’iOS avant 16.4)', () => {
+  /** La règle d'avant la correction, écrite avec le regard arrière (Node le connaît) : la référence. */
+  const WORDS: [string, string][] = [['Bruxelles', 'Bxl'], ['Brussel', 'Bru.'], ['Sainte', 'Ste'], ['Saint', 'St'], ['Sint', 'St'], ['Boulevard', 'Bd'], ['Avenue', 'Av.'], ['Chaussée', 'Ch.'], ['Place', 'Pl.']];
+  const before = (name: string): string => WORDS.reduce((out, [w, short]) => out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${w}(?![\\p{L}\\p{N}])`, 'gu'), short), name);
+
+  it('même résultat que la règle écrite avec le regard arrière, mots répétés et collés compris', () => {
+    const names = [
+      'Bruxelles-Central', 'Bruxelles Bruxelles', 'Place Place Place', 'Saint-Saint', 'Sainte Saint Sint', 'Place,Avenue;Boulevard/Chaussée',
+      'Avenue de la Place Saint-Lambert', 'Chaussée de Bruxelles', '(Place)', '« Place »', 'Place', 'Placette Place', 'LaPlace Place', 'éPlace', 'Place2', '2Place',
+      'Sint-Pieters-Leeuw Brussel', 'Brusselsesteenweg', 'Saintes', 'Bruxelles-Luxembourg / Brussel-Luxemburg', 'Boulevard du Boulevard', 'place Bruxelles', 'Avenue’Avenue', 'Porte d’Avenue',
+    ];
+    for (const n of names) expect(shortName(n), n).toBe(before(n));
+    expect(shortName('Place Place Place')).toBe('Pl. Pl. Pl.');
+    expect(shortName('Saint-Saint')).toBe('St-St');
+  });
+
+  it('aucun fichier de l’appli (app/src, shared) ne construit un motif avec « (?<! » ou « (?<= »', () => {
+    const files = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(dir, e.name)) : /\.(ts|js|mjs|html)$/.test(e.name) ? [join(dir, e.name)] : []));
+    const root = join(__dirname, '..', '..');
+    const bad = [...files(join(root, 'src')), ...files(join(root, '..', 'shared'))].filter((f) => /\(\?<[!=]/.test(readFileSync(f, 'utf8')));
+    expect(bad).toEqual([]);
   });
 });
