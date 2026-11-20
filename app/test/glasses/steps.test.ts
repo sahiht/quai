@@ -61,14 +61,17 @@ const ALL = [j1, j2, j3];
 /** 1.2.10 : trajet guidé (écran calme allumé) : toucher revient au guidage. */
 const HINT_FOLLOWED = '△▽ étapes   double : retour';
 const HINT_OTHER = '△▽ étapes   double : retour';
-/** Les six rangées du trajet 1 (1.2.10 § 5) : marges des correspondances de 5 min ou moins, sinon l'arrivée. */
+/**
+ * Les six rangées du trajet 1 (1.2.10 § 5) : marges des correspondances de 5 min ou moins, sinon l'arrivée. 1.3.1
+ * (PRD-1.3.1 § 4, B14) : une marche nomme l'arrêt où monter ; la dernière porte l'heure d'arrivée à droite.
+ */
 const J1_ROWS = [
-  '07:38 à pied 5 min',
+  '07:38 à pied 5 min → Maison Arrêt',
   '07:43 Bus 36 → Braine-l’Alleud   07:55',
-  '07:55 à pied 4 min',
+  '07:55 à pied 4 min → Braine-l’Alleud',
   '08:01 IC voie 3 → Bruxelles-Central   marge 2 min',
   '08:27 Métro 2 → Madou   marge 3 min',
-  '08:31 à pied 2 min',
+  '08:31 à pied 2 min   08:33',
 ];
 const HINT_LIST = '△▽ choisir   toucher : voir   double : retour';
 /** 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action d'un trajet pas encore guidé (le trajet suivi par le bouton « Lunettes » aussi). */
@@ -147,7 +150,7 @@ describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
     expect(nb(other.title)).toBe('Bureau');
     // 1.2.5 (gardé en 1.2.10) : départ à pied dans 5 min (07:36) : « Si tu le rates » en haut ; raté à Braine-l'Alleud,
     // l'IC de 08:01 du 1er trajet
-    expect(other.lines).toEqual(['Si tu le rates : arrivée 08:33, 13 min plus tard', '07:36 à pied 19 min', '07:55 IC voie 1 → Bruxelles-Central   08:17', '08:17 à pied 3 min', 'Fin du trajet. ▽ autres trajets', GO, HINT_OTHER]);
+    expect(other.lines).toEqual(['Si tu le rates : arrivée 08:33, 13 min plus tard', '07:36 à pied 19 min → Braine-l’Alleud', '07:55 IC voie 1 → Bruxelles-Central   08:17', '08:17 à pied 3 min   08:20', 'Fin du trajet. ▽ autres trajets', GO, HINT_OTHER]);
     // double toucher : la liste, curseur sur la même entrée
     await h.gesture('double');
     expect(h.last()).toMatchObject({ screen: 'others', sel: 0 });
@@ -248,7 +251,7 @@ describe('CA-121.4 : un trajet de 9 étapes, puis « Autres trajets »', () => {
     expect(st).toMatchObject({ page: 1, followed: true, sel: 0 });
     expect(nb(st.lines.at(-1)!)).toBe('Trajet en cours : vers le bureau');
     // 07:40, en marchant vers l'arrêt, avant le bus : « Si tu le rates » (1.2.5, gardé en 1.2.10)
-    expect(st.lines.slice(0, 2)).toEqual(['Si tu le rates : arrivée 09:03, 30 min plus tard', '07:38 à pied 5 min']);
+    expect(st.lines.slice(0, 2)).toEqual(['Si tu le rates : arrivée 09:03, 30 min plus tard', '07:38 à pied 5 min → Maison Arrêt']);
     // ▼ la 6e étape (« Fin du trajet »), puis ▼ au bout : « Autres trajets »
     await b.gesture('down');
     expect(bottom(b.last())).toBe('Fin du trajet. ▽ 2 autres trajets');
@@ -301,7 +304,7 @@ describe('§ 3 : textes et largeurs', () => {
     walk.legs[0] = { ...walk.legs[0], dep: NOW, arr: NOW + 9 * MIN, schedDep: NOW, schedArr: NOW + 9 * MIN };
     // à pied seulement : une rangée ; guidé : rien à lancer ; sinon « y aller » (le guidage mène aussi à pied)
     const w = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [walk], index: 0, followedId: 'w', fresh: true }, ctx());
-    expect(lines(w)).toEqual(['Départ 07:31   arrivée 07:40', '07:31 à pied 9 min', 'Fin du trajet. Pas d’autre trajet pour l’instant', GO, HINT_FOLLOWED]);
+    expect(lines(w)).toEqual(['Départ 07:31   arrivée 07:40', '07:31 à pied 9 min   07:40', 'Fin du trajet. Pas d’autre trajet pour l’instant', GO, HINT_FOLLOWED]);
     expect(stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [walk], index: 0, fresh: true }, ctx()).tap).toEqual({ kind: 'goGuide' });
   });
 

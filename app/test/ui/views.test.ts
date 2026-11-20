@@ -250,13 +250,13 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     // IC jusqu'à Bruxelles-Nord, puis le tram 3 : cinq étapes, une rangée chacune
     expect(check(v)).toEqual([
       '! Voie modifiée : l’IC part de la voie 6',
-      '07:35 à pied 7 min',
+      '07:35 à pied 7 min → Namur',
       // l'IC a 2 min de retard : son heure estimée ; la voie modifiée au plus clair
       '07:44 IC voie 6 ! → Bruxelles-Nord   08:42',
-      '08:42 à pied 2 min',
+      '08:42 à pied 2 min → Gare du Nord',
       // 1.2.5 (PRD-1.2.5 § 2) : à 08:44 à l'arrêt, le tram à 08:44 : aucune marge
       '~08:44 Tram 3 → Bourse   très juste',
-      '08:49 à pied 9 min',
+      '08:49 à pied 9 min   08:58',
       'Fin du trajet. ▽ 2 autres trajets',
       // 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action, entre la note et les aides ; cinq étapes tiennent encore sur la page
       '▶ Retour au guidage',
@@ -326,7 +326,7 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     const j = await fakeCore(() => later).refresh(journeys[0], s);
     const v = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j, ...journeys.slice(1)], index: 0, followedId: j.id, leaveAt0: journeys[0].leaveAt, fresh: true }, ctxOf(later, s));
     const lines = check(v);
-    expect(lines[1]).toBe('07:35 à pied 7 min');
+    expect(lines[1]).toBe('07:35 à pied 7 min → Namur');
     expect(page(v).sel).toBe(0);
     const inTrain = at(8, 5);
     const v2 = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0, followedId: j.id, leaveAt0: journeys[0].leaveAt, fresh: true }, ctxOf(inTrain, s));
@@ -380,7 +380,7 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     expect(v.log).toEqual({ order: a.order });
     // 1.2.10 : « ! » après le nom (la voie de l'IC change) ; le détail de chaque élément pour la ligne du bas
     expect(v.items.map((i) => [i.head ?? '', nb(i.a), nb(i.c ?? ''), ((i as DetailItem).expand ?? []).map((l) => nb(l.text)).join(' | ')])).toEqual([
-      ['', 'Bureau !', 'dans 4 min → 08:58', 'à pied 7 min, puis IC 07:42 +2 voie 6 ! | voie 6 au lieu de 4, 1 changement : tram 3'],
+      ['', 'Bureau !', 'dans 4 min → 08:58', 'à pied 7 min → Namur | IC 07:42 +2 voie 6 au lieu de 4, 1 changement : tram 3'],
       ['', 'Vers Gand-Saint-Pierre', '07:40 → 08:09', 'IC voie 4 à 07:40, à Bruxelles-Central | direct'],
       ['', 'Maison', 'tu y es', ''],
       ['ADRESSES RÉCENTES', 'Korenmarkt', '07:40 → 08:51', 'Korenmarkt, 9000 Gent'],
@@ -440,7 +440,7 @@ describe('scénario 2 : en ville, gare du Nord (S2, 12:10)', () => {
     expect(inOrder(rows, ['Bureau   maintenant → 12:26', 'Vers Gand-Saint-Pierre   14:10 → 14:39', 'Maison   17:13 → 18:23', 'Autre adresse   sur le téléphone'])).toBe(true);
     expect(rows.at(-1)).toBe('△▽ choisir   toucher : ouvrir   double : retour');
     // 1.3.0 (PRD-1.3.0 § 7) : l'accordéon du favori sous le curseur, plus de ligne du détail en bas
-    expect((list.items[0] as DetailItem).expand?.map((l) => nb(l.text))).toEqual(['à pied 2 min, puis tram 3 12:12', 'direct']);
+    expect((list.items[0] as DetailItem).expand?.map((l) => nb(l.text))).toEqual(['à pied 2 min → Gare du Nord', 'tram 3 12:12, direct']);
     expect(list.log).toMatchObject({ order: a.order });
   });
 
@@ -605,10 +605,10 @@ describe('scénario 3 : l’après-midi vers Gand (S3, 13:55)', () => {
       'Départ 14:10, dans 15 min   arrivée 14:55',
       '14:10 IC voie 4 → Gand-Saint-Pierre   14:39',
       'depuis Bruxelles-Central',
-      '14:39 à pied 1 min',
+      '14:39 à pied 1 min → Gand-Saint-Pierre',
       // 1.2.5 (PRD-1.2.5 § 2) : 4 min entre l'arrivée à pied (14:40) et le tram : la marge
       '14:44 Tram 1 → Korenmarkt, Gand   marge 4 min',
-      '14:54 à pied 1 min',
+      '14:54 à pied 1 min   14:55',
     ]);
   });
 
@@ -661,7 +661,7 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     expect(v.titleRight).toBeUndefined();
     const lines = check(v);
     // 1.2.10 (PRD-1.2.10 § 5) : une rangée, la marche ; guidé : toucher revient au guidage (1.3.0 : ligne d'action)
-    expect(lines).toEqual(['Départ 10:00   arrivée 10:09', '10:00 à pied 9 min', 'Fin du trajet. Pas d’autre trajet pour l’instant', '▶ Retour au guidage', HINT_STEPS]);
+    expect(lines).toEqual(['Départ 10:00   arrivée 10:09', '10:00 à pied 9 min   10:09', 'Fin du trajet. Pas d’autre trajet pour l’instant', '▶ Retour au guidage', HINT_STEPS]);
     expect(v.tap).toEqual({ kind: 'resume' });
     expect(v.action).toBe('▶ Retour au guidage');
     expect(lines.join(' ')).not.toMatch(/direct/);
