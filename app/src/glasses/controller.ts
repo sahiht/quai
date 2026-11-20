@@ -3114,7 +3114,8 @@ export class GlassesController implements GlassesApi {
     this.routeAsked.set(key, now);
     const job = `${key}#${++this.routeSeq}`;
     this.routeJob = job;
-    void deadline(core.walkRoute(ask.from, ask.to), CORE_TIMEOUT_MS, 'chemin à pied trop lent')
+    // 1.3.1 (PRD-1.3.1 § 14, R4) : « Éviter les escaliers » lu à chaque demande (le chemin suivant le suit)
+    void deadline(core.walkRoute(ask.from, ask.to, { avoidSteps: this.settings().avoidSteps === true }), CORE_TIMEOUT_MS, 'chemin à pied trop lent')
       .then((route) => {
         if (this.routeJob !== job) return;
         const cur = this.trip;

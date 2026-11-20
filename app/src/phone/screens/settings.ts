@@ -93,7 +93,7 @@ export function settingsScreen(ctx: PhoneCtx): HTMLElement {
     group(
       'rg-trajets',
       T.groupTrips,
-      h('div', { class: 'box' }, tripSteppers(ctx), h('ul', { class: 'list bordered' }, navRow({ href: '#/bienvenue', icon: icon('lang'), title: T.placeLang, sub: LANG_TEXT[s.lang] }))),
+      h('div', { class: 'box' }, tripSteppers(ctx), stepsSwitch(ctx), h('ul', { class: 'list bordered' }, navRow({ href: '#/bienvenue', icon: icon('lang'), title: T.placeLang, sub: LANG_TEXT[s.lang] }))),
     ),
     group('rg-quai', T.groupQuai, h('ul', { class: 'list box' }, data)),
     h('p', { class: 'foot sources' }, typo(T.sources)),
@@ -105,4 +105,26 @@ export function settingsScreen(ctx: PhoneCtx): HTMLElement {
     else if (sub) sub.textContent = dataSubtitle(ctx);
   }, ANSWER_REFRESH_MS);
   return el;
+}
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 14, R4) : interrupteur « Éviter les escaliers », avec la marche maximale et la marge (carte « Tes
+ * trajets »), éteint par défaut, et sa ligne pâle. Enregistré tout de suite (Settings.avoidSteps, seul `true` est
+ * gardé) : le prochain chemin à pied du guidage évite les marches quand il le peut (core/walk/router.ts). Nommé par son
+ * libellé, décrit par sa ligne pâle (lecteurs d'écran), comme « Me guider pendant un trajet ».
+ */
+function stepsSwitch(ctx: PhoneCtx): HTMLElement {
+  const row = switchRow({
+    label: 'Éviter les escaliers',
+    sub: typo('Un chemin sans marches quand il existe (poussette, valise).'),
+    checked: ctx.settings.get().avoidSteps === true,
+    onChange: (on) => void ctx.settings.update((x) => ({ ...x, avoidSteps: on })),
+  });
+  const id = nextId('escaliers');
+  row.querySelector('.c1')!.id = `${id}-nom`;
+  row.querySelector('.c2')!.id = `${id}-aide`;
+  const input = row.querySelector('input')!;
+  input.setAttribute('aria-labelledby', `${id}-nom`);
+  input.setAttribute('aria-describedby', `${id}-aide`);
+  return h('div', { class: 'bordered steps-switch' }, row);
 }
