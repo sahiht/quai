@@ -5,6 +5,7 @@
  * Jamais de coordonnées à l'écran. Lieux de la 1.0 à adresse libre : « Adresse à vérifier » et « Vérifier l’adresse ».
  */
 import type { AreaSummary, Favorite, FavoritePlace, Mode, NameLang, NearbyItem, Place, Propose } from '../../core/api';
+import { apos } from '../../core/typo';
 import { displayName, mainMode, modeWord } from '../../core/util';
 import { LIMITS, newId } from '../../settings';
 import { normalizeForSearch } from '../../../../shared/names';
@@ -21,7 +22,8 @@ const stationName = (name: string, capital: boolean): string => `${capital ? 'Ga
 
 /** « Métro Madou », « Bus TEC Namur Omalius », « Tram De Lijn Korenmarkt », « Gare de Namur » (mots de l'appli). */
 function stopName(a: AreaSummary, lang: NameLang, capital: boolean): string {
-  const name = displayName(a.n, lang);
+  // 1.3.1 (§ 7) : apostrophe typographique, à l'affichage seulement
+  const name = apos(displayName(a.n, lang));
   const mode = mainMode(a.modes);
   if (mode === 'train') return stationName(name, capital);
   const word = modeWord(mode, a.op);

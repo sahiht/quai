@@ -555,10 +555,13 @@ export function looksLikeAddress(q: string): boolean {
 /** Nombre de lettres d'un texte (aide de saisie : 3 lettres ou plus). */
 export const letterCount = (q: string): number => (q.match(/\p{L}/gu) ?? []).length;
 
-/** Sous-titre d'un lieu (T3) : adresse normalisée, « Près de {arrêt} », « Adresse à vérifier » ; jamais de coordonnées. */
+/**
+ * Sous-titre d'un lieu (T3) : adresse normalisée, « Près de {arrêt} », « Adresse à vérifier » ; jamais de coordonnées.
+ * 1.3.1 (§ 7) : apostrophe typographique à l'affichage (l'adresse gardée ne change pas).
+ */
 export function placeSubtitle(p: Place): string {
-  if (p.src === 'address' && p.address) return p.approx ? `${p.address} (sans numéro)` : p.address;
-  if (p.src === 'stop') return p.address ?? 'Près d’un arrêt';
+  if (p.src === 'address' && p.address) return apos(p.approx ? `${p.address} (sans numéro)` : p.address);
+  if (p.src === 'stop') return apos(p.address ?? 'Près d’un arrêt');
   if (!p.src && p.address) return T.toVerify;
   return 'Position prise sur place';
 }
@@ -579,10 +582,13 @@ export function defaultSlot(name: string): Propose {
 
 /* ------------------------------ Extrémités et favoris ------------------------------ */
 
-/** Nom d'une extrémité pour le téléphone : « Ma position », « Bureau », « Gand-Saint-Pierre », adresse complète. */
+/**
+ * Nom d'une extrémité pour le téléphone : « Ma position », « Bureau », « Gand-Saint-Pierre », adresse complète. 1.3.1
+ * (§ 7) : un nom des données avec l'apostrophe typographique (affichage seulement).
+ */
 export function endpointText(e: Endpoint, settings: Settings): string {
   if (e.type === 'here') return 'Ma position';
-  if (e.type === 'area') return displayName(e.name, settings.lang);
+  if (e.type === 'area') return apos(displayName(e.name, settings.lang));
   if (e.type === 'address') return e.label;
   return placeOf(settings, e.placeId)?.label ?? 'Lieu';
 }
@@ -612,13 +618,14 @@ export function lineName(l: { op: Op; line: string; mode?: Mode }): string {
  * sans filtre, migré) : « Gare du Nord · toutes les lignes ». `mode` : le mode s'il est connu autrement (linesAt).
  */
 export function linePickTitle(p: Pick<LinePick, 'op' | 'name' | 'line' | 'mode'>, lang: NameLang, mode: Mode | undefined = p.mode): string {
-  const stop = displayName(p.name, lang);
+  // 1.3.1 (§ 7) : apostrophe typographique, à l'affichage seulement
+  const stop = apos(displayName(p.name, lang));
   return p.line ? `${lineName({ op: p.op, line: p.line, mode })} · ${stop}` : `${stop} · toutes les lignes`;
 }
 
 /** Ligne trouvée par son numéro (PRD-1.2.2 § 4) : « Bus W TEC, Braine-l’Alleud ↔ Bruxelles Midi ». */
 export function lineMatchText(m: Pick<LineMatch, 'op' | 'mode' | 'line' | 'ends'>, lang: NameLang): string {
-  const ends = m.ends.map((e) => displayName(e, lang)).join(' ↔ ');
+  const ends = m.ends.map((e) => apos(displayName(e, lang))).join(' ↔ ');
   return `${lineName(m)} ${OP_NAME[m.op]}${ends ? `, ${ends}` : ''}`;
 }
 
@@ -869,7 +876,7 @@ export type EmptyState =
 export function emptyState(r: PlanResult, to: Endpoint, settings: Settings, opts: { web?: boolean } = {}): EmptyState {
   switch (r.empty) {
     case 'here':
-      return { kind: 'text', text: `Tu es déjà ${atText(to, settings)}.` };
+      return { kind: 'text', text: apos(`Tu es déjà ${atText(to, settings)}.`) };
     case 'noPosition':
       return { kind: 'text', text: opts.web ? 'Position inconnue : autorise-la dans le navigateur, ou choisis une adresse ou un arrêt (onglet Lunettes, rubrique Position).' : 'Position inconnue : autorise la position pour Quai.' };
     case 'noStopFrom':
@@ -877,7 +884,8 @@ export function emptyState(r: PlanResult, to: Endpoint, settings: Settings, opts
       return { kind: 'text', text: noStopText(r.accessMin ?? settings.maxWalkMin * 2) };
     case 'noTrip':
       if (r.station) {
-        const name = displayName(r.station.name, settings.lang);
+        // 1.3.1 (§ 7) : le nom affiché ; la gare elle-même (r.station) ne change pas
+        const name = apos(displayName(r.station.name, settings.lang));
         return { kind: 'station', text: noFullTripText(name), button: searchTowards(name), station: r.station };
       }
       return { kind: 'text', text: T.noTripNow };

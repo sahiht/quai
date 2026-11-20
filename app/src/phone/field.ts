@@ -9,6 +9,7 @@
  */
 import type { Core, FavoritePlace, GeocodeAnswer, GeocodeResult, NameLang, SearchItem, Settings } from '../core/api';
 import { placesOf } from '../core/favorites';
+import { apos } from '../core/typo';
 import { displayName } from '../core/util';
 import type { LocationPort } from '../platform/types';
 import { LIMITS, type SettingsStore } from '../settings';
@@ -145,7 +146,8 @@ export function placeField(ctx: FieldCtx, o: FieldOptions): PlaceField {
   }
 
   function pick(c: FieldChoice): void {
-    input.value = c.label;
+    // 1.3.1 (§ 7) : une gare ou un arrêt s'écrit avec l'apostrophe typographique (le choix rendu garde le nom des données)
+    input.value = c.kind === 'stop' ? apos(c.label) : c.label;
     picked = true;
     close();
     o.onPick(c);
@@ -173,7 +175,8 @@ export function placeField(ctx: FieldCtx, o: FieldOptions): PlaceField {
     }
     const stops: Option[] = (st.stops ?? []).slice(0, MAX_STOPS).map((it) => {
       const name = displayName(it.n, s.lang);
-      return { label: name, type: it.kindLabel, pick: () => pick({ kind: 'stop', item: it, label: name }) };
+      // 1.3.1 (§ 7) : affiché avec l'apostrophe typographique ; le choix garde le nom des données
+      return { label: apos(name), type: it.kindLabel, pick: () => pick({ kind: 'stop', item: it, label: name }) };
     });
     const geo = st.geo && st.geo !== 'skip' ? st.geo : null;
     const addresses: Option[] = [];
