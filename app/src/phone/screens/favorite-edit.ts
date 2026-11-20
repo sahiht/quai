@@ -236,6 +236,6 @@ function deleteFavorite(ctx: PhoneCtx, id: string): HTMLElement {
 export function favoriteEditScreen(ctx: PhoneCtx, id: string): HTMLElement {
   const f = ctx.settings.get().favorites.find((x) => x.id === id);
   if (!f || f.kind === 'stop') return favoritesScreen(ctx);
-  if (f.kind === 'place') return h('div', { class: 'screen' }, header(ctx, f.label, undefined, BACK), placeForm(ctx, { existing: f }));
+  if (f.kind === 'place') return h('div', { class: 'screen' }, header(ctx, apos(f.label), undefined, BACK), placeForm(ctx, { existing: f }));
   return h('div', { class: 'screen' }, header(ctx, 'Modifier le favori', undefined, BACK), tripForm(ctx, f));
 }

@@ -174,7 +174,7 @@ export function placeForm(ctx: PhoneCtx, o: PlaceFormOptions): HTMLElement {
     field = placeField(ctx, {
       id: 'pl-lieu',
       label: T.favField,
-      value: legacy ? undefined : existing.src === 'stop' ? legacyQuery(existing) : existing.src === 'address' ? existing.address : undefined,
+      value: legacy ? undefined : existing.src === 'stop' ? apos(legacyQuery(existing)) : existing.src === 'address' ? existing.address : undefined,
       here: { label: T.hereOption, type: T.hereSub },
       recent: true,
       // Texte changé après un choix (« 25 » corrigé en « 52 ») : le choix ne vaut plus, il faut en refaire un.
@@ -258,7 +258,7 @@ function deletePlace(ctx: PhoneCtx, place: FavoritePlace): HTMLElement {
   const used = tripsUsing(ctx.settings.get().favorites, place.id).length > 0;
   return confirmInPage({
     trigger: T.removeFavButton,
-    question: typo(used ? removeUsedPlaceText(place.label) : T.removeFav),
+    question: typo(used ? removeUsedPlaceText(apos(place.label)) : T.removeFav),
     confirm: T.remove,
     cancel: T.cancel,
     onConfirm: async () => {

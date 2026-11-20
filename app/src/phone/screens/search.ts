@@ -40,12 +40,13 @@ export function toEndpoint(e: End): Endpoint {
 const areaOf = (a: Pick<AreaSummary, 'id' | 'op' | 'n' | 'lat' | 'lon' | 'modes'>): AreaRef & { modes: Mode[] } => ({ areaId: a.id, op: a.op, name: a.n, lat: a.lat, lon: a.lon, modes: a.modes });
 
 /**
- * 1.3.1 (PRD-1.3.1 § 7) : texte affiché d'une extrémité : une gare ou un arrêt (et « Ma position, … ») avec l'apostrophe
- * typographique ; le libellé gardé (End.label, nom d'un lieu gardé en favori) ne change pas. Rien : ''.
+ * 1.3.1 (PRD-1.3.1 § 7) : texte affiché d'une extrémité : une gare, un arrêt, « Ma position, … » ou un lieu gardé en
+ * favori (son nom vient souvent d'une gare) avec l'apostrophe typographique ; le libellé gardé (End.label) ne change
+ * pas ; une adresse tapée reste telle quelle. Rien : ''.
  */
 export function shownLabel(e: End | null): string {
   if (!e) return '';
-  return e.kind === 'area' || e.kind === 'here' ? apos(e.label) : e.label;
+  return e.kind === 'address' ? e.label : apos(e.label);
 }
 
 /** Choix du champ unique → extrémité de la recherche. */
