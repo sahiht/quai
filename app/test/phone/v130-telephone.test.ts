@@ -607,7 +607,8 @@ describe('1.3.0 : la carte « En cours » montre la vérification (PRD-1.3.0 § 
     const lines = checkLines([{ kind: 'battery', level: 12 }, { kind: 'noPosition' }]);
     const guide = withGuide(hz.glasses, { ...STATUS, check: lines });
     const el = mount(homeScreen(hz.ctx));
-    expect(checks(el)).toEqual(['Lunettes : 12 % de batterie', 'Pas de position : guidage à l’heure']);
+    // 1.3.1 (L3) : « Quai suit l’horaire »
+    expect(checks(el)).toEqual(['Lunettes : 12 % de batterie', 'Pas de position : Quai suit l’horaire']);
     // juste sous « Maintenant », avant « Arrêter le guidage »
     const card = el.querySelector<HTMLElement>('.now-card')!;
     const order = [...card.children].map((c) => c.className.split(' ')[0] || c.tagName.toLowerCase());

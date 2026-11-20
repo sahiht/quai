@@ -440,7 +440,9 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     await gesture('tap');
     expect(last()).toMatchObject({ screen: 'guide', show: 'empty' });
     await gesture('tap');
-    expect(last()).toMatchObject({ screen: 'guide', show: 'where', title: 'Bureau' });
+    // 1.3.1 (PRD-1.3.1 § 3, § 12) : « Où tu en es » s'appelle « Guidage en cours », la destination juste dessous
+    expect(last()).toMatchObject({ screen: 'guide', show: 'where', title: 'Guidage en cours' });
+    expect(last().lines[0]).toBe('Jusqu’au bureau');
     // appui long (menu système) : « Voir tout le trajet » : les étapes du trajet guidé, « ▶ » sur l'étape en cours
     c.onSignal({ kind: 'menu', id: 2 });
     const st = await until((x) => stepsReady(x) && x.followed === true);
@@ -1054,7 +1056,10 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
     fits(p2);
     // toucher : « y aller » : « Moins de marche » est guidé, à la place du trajet suivi
     await h.gesture('tap');
-    expect(await h.until((s) => s.screen === 'guide')).toMatchObject({ screen: 'guide', title: 'Saint-Géry' });
+    // 1.3.1 (PRD-1.3.1 § 3, § 12) : « Où tu en es » au lancement, « Guidage en cours », la destination juste dessous
+    const g = await h.until((s) => s.screen === 'guide');
+    expect(g).toMatchObject({ screen: 'guide', title: 'Guidage en cours' });
+    expect(g.lines[0]).toBe('Jusqu’à Saint-Géry');
     expect(h.c.followed?.journey.id).toBe('lesswalk');
     expect(h.c.followed?.guide?.kind).toBe('trip');
     h.c.stop();
