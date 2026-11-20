@@ -165,3 +165,14 @@ fonctions et synthèse de recherche.
 contrôle de chaque sujet. R1 (sortie du métro) : d'abord mesuré sur les vraies données belges (branche de
 vérification) ; construit seulement si au moins 80 % des arrêts STIB sous terre ont une sortie nommée et que les
 chemins à pied ne régressent pas ; sinon, reporté et expliqué au propriétaire.
+
+## 15. Décisions du propriétaire du 20/11 à 21:15
+
+- Nom trop long de l'arrêt ou de la gare où l'on marche (guidage, écran du trajet, première ligne d'un favori ouvert) :
+  d'abord le nom entier s'il tient ; sinon son diminutif (`shortName` de `app/src/core/typo.ts` : « Bruxelles-Central »
+  → « Bxl-Central », exemple du propriétaire ; liste courte : Bruxelles, Brussel, Saint, Sainte, Sint, Boulevard,
+  Avenue, Chaussée, Place) ; sinon la coupe au mot du § 4. Jamais de diminutif quand le nom entier tient. Seulement à
+  l'affichage. La même règle vaut pour « Sortie : … » (R1).
+- Essai en accéléré (R2) : accepté tel que construit (il montre les messages même si « Me guider pendant un trajet »
+  est éteint, commence une minute avant l'heure de partir, un double toucher en sort). Le propriétaire l'essaiera en
+  situation réelle.
