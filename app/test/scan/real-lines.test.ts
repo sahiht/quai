@@ -227,7 +227,7 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
         // liste « Lignes » : un sens par rangée
         const fv = followsView([{ follow: f, mode: m.mode, heads }], ctx);
         for (const p of pagesOf(fv)) {
-          tally(words, pageCuts(fv, p), `${name}, Lignes`);
+          tally(words, pageCuts(fv, p), `${name}, Lignes`, p);
           const bad = [...overflowing(p), ...wordsOverlap(p)];
           if (bad.length) errors.push(`${name}, Lignes : ${bad.join(' ; ')}`);
           for (const l of p.lines.slice(0, p.visible)) {
@@ -321,7 +321,7 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
           if (wanted) detail.push(`  vers ${fr(heads[dir])} à 08:00 : ${run.stops.filter((x) => x.next.length).length}/${run.stops.length} arrêts avec un passage à venir`);
           const v = lineRunView({ screen: 'lineRun', follow: f.id, dir }, f, run, ctx);
           for (const p of pagesOf(v)) {
-            tally(words, pageCuts(v, p), `${name}, vers ${fr(heads[dir])}`);
+            tally(words, pageCuts(v, p), `${name}, vers ${fr(heads[dir])}`, p);
             const bad = [...overflowing(p), ...wordsOverlap(p)];
             if (bad.length) errors.push(`${name}, vers ${fr(heads[dir])} : ${bad.join(' ; ')}`);
             for (const l of p.lines) {
@@ -351,6 +351,7 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
       `Arrêts de variante (◇) : ${branchDirs} sens sur ${dirsAll}, ${branchStops} arrêts sur ${shownStops} montrés (${pct(branchStops, shownStops)}).${branchSamples.length ? ` Ex. : ${branchSamples.join(' | ')}` : ''}`,
       `Rangées coupées (« … ») : Lignes ${cutF}/${rowsF} (${pct(cutF, rowsF)}), toute la ligne ${cutR}/${rowsR} (${pct(cutR, rowsR)}).${cutSamples.length ? ` Ex. : ${cutSamples.join(' | ')}` : ''}`,
       `Rangées coupées au milieu d'un mot (1.3.0, 0 exigé) : ${words.mid} sur ${words.cut} rangées coupées ; premier mot seul trop long (coupé au caractère) : ${words.first} ; coupes introuvables : ${words.unknown}.${words.samples.length ? ` Ex. : ${words.samples.join(' | ')}` : ''}`,
+      `Rangées à apostrophe droite (1.3.1, 0 exigé) : ${words.straight}.${words.straightSamples.length ? ` Ex. : ${words.straightSamples.join(' | ')}` : ''}`,
       `Couleurs publiées : ${colored}/${matches.length} lignes (${pct(colored, matches.length)}) ; ${[...palette]
         .map(([op, per]) => `${op} ${per.size} pastille(s) différente(s), surtout ${[...per].sort((x, y) => y[1] - x[1]).slice(0, 4).map(([c, n]) => `${c} ×${n}`).join(', ')}`)
         .join(' ; ')}. Texte de l'opérateur remplacé (contraste sous 3:1) : ${replaced} ; contraste du numéro encore sous 3:1 : ${weak.length}${weak.length ? ` (${weak.slice(0, 8).join(', ')})` : ''}.`,
@@ -364,6 +365,8 @@ describe.skipIf(!DIR)('1.2.6 : balayage des lignes de bus, tram et métro (QUAI_
     // 1.3.0 (PRD-1.3.0 § 5) : aucune rangée coupée au milieu d'un mot, chaque coupe comprise
     expect(words.mid).toBe(0);
     expect(words.unknown).toBe(0);
+    // 1.3.1 (PRD-1.3.1 § 7) : aucune apostrophe droite affichée
+    expect(words.straight).toBe(0);
   }, 1_800_000);
 });
 

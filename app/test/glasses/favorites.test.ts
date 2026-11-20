@@ -55,7 +55,10 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
     const bottom = ['Autre adresse   sur le téléphone', '△▽ choisir   toucher : ouvrir   double : retour'];
     expect(s.lines.filter((l) => rows.includes(l))).toEqual(rows);
     expect(s.lines.slice(-2)).toEqual(bottom);
-    expect(s.lines).not.toContain('bus W 07:40, direct');
+    // 1.3.1 (PRD-1.3.1 § 4) : l'accordéon dit le véhicule et son heure sur sa 2e ligne : une seule fois, sous la 1re
+    const k = s.lines.indexOf('bus W 07:40, direct');
+    expect(s.lines.filter((l) => l === 'bus W 07:40, direct')).toHaveLength(1);
+    expect(s.lines[k - 1]).toBe('à pied 5 min → Arrêt');
     await h.gesture('down');
     const e = await h.until((x) => listReady(x) && x.sel === 1);
     expect(e.lines.slice(-2)).toEqual(bottom);
@@ -66,7 +69,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
     // l'accordéon de chaque favori (« ~ » au début de l'heure prévue ; « tu y es » : rien ne s'ouvre)
     const v = favoritesView({ entries: FAVS.map((fav) => ({ fav, answer: answers(fav, NOW) })) }, { now: NOW, settings: settingsWith(FAVS) });
     expect(v.accordion).toBe(true);
-    expect(v.items.slice(0, 3).map((i) => (i as DetailItem).expand?.map((l) => nb(l.text)))).toEqual([undefined, ['à pied 5 min, puis bus W 07:40', 'direct'], ['à pied 5 min, puis bus W ~07:45', 'direct']]);
+    expect(v.items.slice(0, 3).map((i) => (i as DetailItem).expand?.map((l) => nb(l.text)))).toEqual([undefined, ['à pied 5 min → Arrêt', 'bus W 07:40, direct'], ['à pied 5 min → Arrêt', 'bus W ~07:45, direct']]);
   });
 
   it('la ligne 1 de chaque favori est celle de l’accueil (REVUE-USAGE n° 7)', () => {
@@ -130,7 +133,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
     await h.c.replaceRoute({ screen: 'favorites' });
     const s = await h.until((x) => listReady(x) && x.lines.some((l) => l.startsWith('Rue Neuve 1')));
     // 1.3.0 (PRD-1.3.0 § 7) : le curseur est sur « Bureau » : son accordéon ouvert dessous, puis les adresses récentes
-    expect(s.lines.slice(1, 6)).toEqual(['à pied 5 min, puis bus W 07:40', 'direct', 'ADRESSES RÉCENTES', 'Rue Neuve 1   tu y es', 'Autre adresse   dans Réglages']);
+    expect(s.lines.slice(1, 6)).toEqual(['à pied 5 min → Arrêt', 'bus W 07:40, direct', 'ADRESSES RÉCENTES', 'Rue Neuve 1   tu y es', 'Autre adresse   dans Réglages']);
     await h.gesture('down', 'down', 'tap');
     expect(opened).toEqual(['#/recherche']);
     h.c.stop();
@@ -166,7 +169,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
 });
 
 describe('§ 1.2 : textes et largeurs', () => {
-  it('accordéon (PRD-1.3.0 § 7) : la marche puis le véhicule en toutes lettres et son heure, la voie ; le souci et les changements', () => {
+  it('accordéon (PRD-1.3.0 § 7, PRD-1.3.1 § 4) : la marche vers la gare, puis le véhicule en toutes lettres et son heure, la voie ; le souci et les changements', () => {
     const s = settingsWith(FAVS);
     const ic = journey('ic', [{ walk: 7 }, { ride: 'IC', mode: 'train', dep: NOW + 11 * MIN, arr: NOW + 64 * MIN, from: 'Braine-l’Alleud', to: 'Bruxelles-Central', platform: '4' }, { walk: 3 }]);
     const r = ic.legs[1];
@@ -175,7 +178,8 @@ describe('§ 1.2 : textes et largeurs', () => {
       r.newPlatform = '6';
     }
     const texts = (a: FavoriteAnswer) => favoriteDetail(a, NOW, s).map((l) => nb(l.text));
-    expect(texts(tripAnswer(PLACES.bureau, ic))).toEqual(['à pied 7 min, puis IC 07:42 +2 voie 6 !', 'voie 6 au lieu de 4, direct']);
+    // 1.3.1 (PRD-1.3.1 § 4) : la 1re ligne nomme la gare où monter, la 2e le train, son heure et sa voie (la voie modifiée)
+    expect(texts(tripAnswer(PLACES.bureau, ic))).toEqual(['à pied 7 min → Braine-l’Alleud', 'IC 07:42 +2 voie 6 au lieu de 4, direct']);
     // gare de départ hors de portée à pied : « IC voie 4 à 08:01, à Bruxelles-Central »
     const station = journey('st', [{ ride: 'IC', mode: 'train', dep: NOW + 30 * MIN, arr: NOW + 60 * MIN, from: 'Bruxelles-Central', to: 'Gand-Saint-Pierre', platform: '4' }]);
     expect(texts({ ...tripAnswer(PLACES.bureau, station), fromStation: true })).toEqual(['IC voie 4 à 08:01, à Bruxelles-Central', 'direct']);

@@ -593,6 +593,11 @@ export interface GlassesApi {
   /** 1.3.0 (PRD-1.3.0 § 6.1) : test de l'écran des lunettes, mené par le téléphone (Réglages, « Pendant un trajet ») */
   displayTest?(cmd: DisplayTestCmd): Promise<DisplayTestState>;
   onDisplayTest?(cb: (s: DisplayTestState) => void): () => void;
+  /**
+   * 1.3.1 (PRD-1.3.1 § 12, B11) : « Effacer le journal » (Réglages, Données) oublie aussi les arrêts retenus de « j'y
+   * descends » (la liste des arrêts d'un départ s'ouvrait sur eux).
+   */
+  forgetAlights?(): void;
 }
 
 /* ------------------------------ 1.3.0 : test de l'écran des lunettes (PRD-1.3.0 § 6.1) ------------------------------ */

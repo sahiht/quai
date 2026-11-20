@@ -42,20 +42,23 @@ describe('PRD-1.2.4 § 1 : l’arrêt ou la gare où aller, en entier', () => {
 
   it('1.2.10 : une rangée par étape : l’heure, le véhicule et « → » l’arrêt de descente, l’arrivée ou la marge ; la marche en minutes', () => {
     const rows = [
-      '13:25 à pied 7 min',
+      // 1.3.1 (PRD-1.3.1 § 4) : une marche nomme l'arrêt où monter, coupé au mot (« Mont-… », un morceau entier)
+      '13:25 à pied 7 min → Braine-l’Alleud Route de Mont-…',
       '13:32 Bus W → Braine-l’Alleud, Gare   13:41',
-      '13:41 à pied 1 min',
+      '13:41 à pied 1 min → Braine-l’Alleud',
       '14:01 IC voie 2 → Bruxelles-Midi   14:16',
-      '14:16 à pied 3 min',
+      '14:16 à pied 3 min → Gare du Midi',
       '14:22 Métro 2 → Madou   marge 3 min',
-      '14:27 à pied 2 min',
+      // 1.3.1 (B14) : la dernière marche porte l'heure d'arrivée
+      '14:27 à pied 2 min   14:29',
     ];
     // 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action prend une rangée : cinq étapes sur la 1re page, la suite sur la dernière
     const l = lines(steps(j));
     expect(l.slice(0, 7)).toEqual(['Départ 13:25, dans 1 min   arrivée 14:29', ...rows.slice(0, 5), '▽ suite du trajet : 2 étapes']);
     const end = layoutPage(steps(j, 2), { sel: -1, top: 2 }).lines.map(nb);
     expect(end.slice(1, 7)).toEqual([...rows.slice(2), 'Fin du trajet. Pas d’autre trajet pour l’instant']);
-    expect([...l, ...end].join('\n')).not.toContain('…');
+    // les arrêts où descendre, en entier ; 1.3.1 : seul le nom d'un arrêt où monter à pied peut être coupé, au mot
+    expect([...l, ...end].filter((x) => !/ à pied \d+ min → /.test(x)).join('\n')).not.toContain('…');
   });
 
   it('un arrêt de descente trop long : coupé au mot avant l’heure d’arrivée, jamais l’heure', () => {
