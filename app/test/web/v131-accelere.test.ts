@@ -58,7 +58,7 @@ interface Frame {
 }
 
 /** Vraies lunettes et essai, comme web/main.ts (sans le canvas : chaque dessin est noté). */
-async function bench(o: { realNow?: number; visible?: () => boolean } = {}) {
+async function bench(o: { realNow?: number; visible?: () => boolean; guide?: boolean } = {}) {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'], now: o.realNow ?? at('06:40') });
   const clock = createClock({ mockNow: Date.now(), perfNow: () => performance.now(), e2e: false });
   const backend = memoryBackend();
@@ -70,7 +70,7 @@ async function bench(o: { realNow?: number; visible?: () => boolean } = {}) {
       await backend.set(k, v);
     },
   });
-  const settings = new SettingsStore(kv, { ...structuredClone(DEFAULT_SETTINGS), onboarded: true, seenVersion: APP_VERSION, favorites: [GARE], display: { ...DEFAULT_SETTINGS.display, opening: 'home' } } as Settings);
+  const settings = new SettingsStore(kv, { ...structuredClone(DEFAULT_SETTINGS), onboarded: true, seenVersion: APP_VERSION, favorites: [GARE], display: { ...DEFAULT_SETTINGS.display, opening: 'home', ...(o.guide === false ? { guide: false } : {}) } } as Settings);
   const here: Fix = { lat: P.avroy.lat, lon: P.avroy.lon, accuracy: 10, at: clock.now(), source: 'browser' };
   const location: LocationPort = { current: async () => here, last: () => here };
   const frames: Frame[] = [];
@@ -85,6 +85,18 @@ async function bench(o: { realNow?: number; visible?: () => boolean } = {}) {
       walks.push([from, to]);
       // la première marche : le chemin en U du parc d'Avroy à Monument Gramme (deux virages à droite) ; ensuite tout droit
       return distanceM(to, P.gramme) < 30 ? firstWalkRoute() : route([from, to]);
+    },
+  });
+  // ce que l'essai demande au vrai cœur (les vraies lunettes ont le leur, sans ce relevé)
+  const coreCalls: string[] = [];
+  const asked = new Proxy(core, {
+    get(target, key) {
+      const v: unknown = Reflect.get(target, key);
+      if (typeof v !== 'function' || typeof key !== 'string') return v;
+      return (...a: unknown[]) => {
+        coreCalls.push(key);
+        return (v as (...x: unknown[]) => unknown).apply(target, a);
+      };
     },
   });
   let essai: Essai | null = null;
@@ -102,7 +114,7 @@ async function bench(o: { realNow?: number; visible?: () => boolean } = {}) {
     port: () => createWebGlassesPort(screen('essai')),
     core: async () => {
       await controller.ensureInit();
-      return core;
+      return asked;
     },
     freshness: dataFreshness,
     settings,
@@ -136,7 +148,7 @@ async function bench(o: { realNow?: number; visible?: () => boolean } = {}) {
     }
     return s;
   };
-  return { essai: trial, controller, clock, kv, backend, writes, frames, logs, trialLogs, moments, runToEnd, advance, location, here, journal, walks, shown };
+  return { essai: trial, controller, settings, clock, kv, backend, writes, frames, logs, trialLogs, moments, runToEnd, advance, location, here, journal, walks, shown, coreCalls };
 }
 
 type Bench = Awaited<ReturnType<typeof bench>>;
@@ -326,6 +338,89 @@ describe('l’essai dans Quai Web (vrai contrôleur, vrai moteur, vrais écrans)
     expect(b.writes.filter((k) => k.startsWith(TRIP_KEY) || k.startsWith(JOURNAL_KEY) || k.startsWith('quai.settings'))).toEqual([]);
     expect({ trip: b.backend.data.get(TRIP_KEY), journal: b.backend.data.get(JOURNAL_KEY), settings: b.backend.data.get('quai.settings'), list: b.journal.list().length }).toEqual(before);
     expect(b.controller.followed).toBeNull();
+  });
+
+  it('contrôle : « Me guider pendant un trajet » éteint (décision du propriétaire du 20/11) : l’essai montre quand même les messages, et le réglage reste éteint', async () => {
+    const b = await bench({ guide: false });
+    expect(b.settings.get().display.guide).toBe(false);
+    b.writes.length = 0;
+    expect(await b.essai.tryFavorite(GARE.id)).toEqual({ text: ESSAI_TEXT.started, ok: true });
+    await b.advance(8_000);
+    expect(b.moments()).toEqual(['leave']);
+    expect(lastFrame(b).text).toMatch(/Partir maintenant/);
+    await b.runToEnd();
+    expect(inOrder(b.moments(), ['leave', 'turn', 'board', 'alight', 'arrived'])).toBe(true);
+    // le vrai réglage n'a pas bougé (ni en mémoire ni dans le stockage) ; les vraies lunettes ne guident toujours pas
+    expect(b.settings.get().display.guide).toBe(false);
+    expect(b.writes).toEqual([]);
+    expect(b.controller.followed).toBeNull();
+  });
+
+  it('contrôle : réseau : l’essai ne demande au vrai cœur que le calcul du trajet (une fois, avant de commencer) et le chemin à pied ; ni temps réel ni tableau', async () => {
+    const b = await bench();
+    await b.essai.tryFavorite(GARE.id);
+    const first = b.coreCalls.filter((c) => c !== 'status');
+    expect(first[0]).toBe('answer');
+    expect(first.slice(1).every((c) => c === 'walkRoute')).toBe(true);
+    await b.runToEnd();
+    await b.advance(5_000);
+    // status() lit l'état du temps réel dans la page, sans rien demander
+    const asked = [...new Set(b.coreCalls)].sort();
+    expect(asked).toEqual(['answer', 'status', 'walkRoute']);
+    expect(b.coreCalls.filter((c) => c === 'answer')).toHaveLength(1);
+    // le chemin à pied : celui du guidage (la première marche, puis la dernière), demandé depuis des points du trajet
+    expect(b.walks.length).toBe(b.coreCalls.filter((c) => c === 'walkRoute').length);
+    const legs = plannedJourney(trip(), 2).legs;
+    const ends = [legs[0].to, legs[2].to];
+    expect(b.walks.every(([, to]) => ends.some((e) => distanceM(to, e) < 1))).toBe(true);
+  });
+
+  it('contrôle : l’horloge accélérée ne fuit pas : après « Arrêter l’essai » comme après la fin du guidage, plus aucune minuterie de l’essai', async () => {
+    const b = await bench();
+    const idle = vi.getTimerCount();
+    await b.essai.tryFavorite(GARE.id);
+    await b.advance(30_000);
+    expect(vi.getTimerCount()).toBeGreaterThan(idle);
+    b.essai.stop();
+    await b.advance(50);
+    expect(vi.getTimerCount()).toBe(idle);
+    const logs = b.trialLogs.length;
+    const calls = b.coreCalls.length;
+    await b.advance(120_000);
+    expect(vi.getTimerCount()).toBe(idle);
+    expect(b.trialLogs.length).toBe(logs);
+    expect(b.coreCalls.length).toBe(calls);
+    // fin d'elle-même (« Tu y es », puis la fin du guidage)
+    await b.essai.tryFavorite(GARE.id);
+    await b.runToEnd();
+    expect(b.essai.active()).toBe(false);
+    await b.advance(50);
+    expect(vi.getTimerCount()).toBe(idle);
+    expect(b.essai.now()).toBeNull();
+    expect(b.essai.sandbox()).toBeNull();
+  });
+
+  it('contrôle : aucune clé du vrai stockage n’est écrite, quelle qu’elle soit (arrêts retenus « quai.descentes » compris), même avec des gestes dans l’essai', async () => {
+    const b = await bench();
+    // des valeurs déjà là : elles doivent rester telles quelles
+    await b.kv.set('quai.descentes', '{"v":1,"lines":{}}');
+    await b.kv.set(JOURNAL_KEY, '');
+    const before = JSON.stringify([...b.backend.data]);
+    b.writes.length = 0;
+    await b.essai.tryFavorite(GARE.id);
+    await b.advance(3_000);
+    // menu de l'appui long, « Voir tout le trajet », retour au guidage, message masqué : tout reste dans l'essai
+    for (const g of ['long', 'down', 'tap', 'double', 'tap'] as const) {
+      b.essai.gesture(g);
+      await b.advance(400);
+    }
+    expect(b.essai.active()).toBe(true);
+    await b.runToEnd();
+    expect(b.essai.active()).toBe(false);
+    await b.advance(5_000);
+    await b.journal.flush();
+    expect(b.writes).toEqual([]);
+    expect(JSON.stringify([...b.backend.data])).toBe(before);
   });
 
   it('« Arrêter l’essai » : les vraies lunettes reviennent telles quelles (trajet suivi, position, heure vraie), plus rien de l’essai', async () => {
