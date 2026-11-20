@@ -5,10 +5,14 @@
  * par test. Les écrans (lunettes, téléphone, guidage) : test/glasses/v131-vrai-chemin.test.ts et
  * test/phone/v131-vrai-chemin.test.ts. Scène : vrai-chemin-scene.ts (arrêt Esplanade, tram 3 de 07:20, la Bourse).
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Core, FavoriteTrip, Journey, Settings } from '../../src/core/api';
+import type { Core, FavoritePlace, FavoriteTrip, Journey, LatLon, Leg, Settings } from '../../src/core/api';
 import { FIRST_WALK, FirstWalks } from '../../src/core/firstwalk';
+import { createCore } from '../../src/core/index';
 import { hhmm } from '../../src/core/util';
+import { DATA_BASE, FakeServer, MemoryKV, RELAY_BASE } from './support/env';
 import { at, BOURSE, ESPLANADE, MIN, offset, scene, settle, START, TILE, VERSION, type PathKind } from './vrai-chemin-scene';
 
 const TO = { type: 'place' as const, placeId: 'bourse' };
@@ -324,6 +328,77 @@ describe('règles 4 et 5 : heure déjà passée, classement', () => {
       }
     }
     expect(dropped).toBeGreaterThan(0);
+  });
+});
+
+describe('contrôle : deux gardes que les tests ne tenaient pas (mutation)', () => {
+  it('décidé une fois par trajet : un autre chemin connu ensuite, plus près du départ et plus long, ne fait pas sauter l’heure une deuxième fois', async () => {
+    // chemins donnés à la main : 446 m (6 min) depuis un point à 35 m du départ, 560 m (7 min) depuis un point à 10 m
+    const far = offset(START, -35, 0);
+    const near = offset(START, 10, 0);
+    const lengths = new Map<string, number>([[`${far.lat},${far.lon}`, 446], [`${near.lat},${near.lon}`, 560]]);
+    const fw = new FirstWalks(
+      async (from, to) => ({ source: 'osm', lengthM: lengths.get(`${from.lat},${from.lon}`) ?? 0, from, to, coords: [from, to], maneuvers: [], at: 0 }) as never,
+      { now: () => at('07:10') },
+    );
+    const base = (await world(null, '07:10').route()).journeys[0].legs;
+    const from = (p: LatLon): Leg[] => base.map((l, i) => (i === 0 ? { ...l, from: { ...l.from, ...p }, to: { ...l.to } } : { ...l }));
+    fw.ask([{ legs: from(far) }], {});
+    await fw.settle();
+    // le trajet parti du départ prend le chemin connu à 35 m : 6 min pour 3 estimées
+    const legs = from(START);
+    expect(fw.apply(legs, {})).toBe(3);
+    expect(legs[0]).toMatchObject({ walkMin: 6, walkEst: 3 });
+    // un second chemin est connu, à 10 m du départ : 7 min ; un nouveau trajet le prend…
+    fw.ask([{ legs: from(near) }], {});
+    await fw.settle();
+    const fresh = from(START);
+    fw.apply(fresh, {});
+    expect(fresh[0]).toMatchObject({ walkMin: 7, walkEst: 3 });
+    // … le trajet déjà décidé ne bouge plus : toujours 6 min, la même heure de partir
+    const dep = legs[0].dep;
+    expect(fw.apply(legs, {})).toBe(0);
+    expect(fw.extra(legs, {})).toBe(0);
+    expect(legs[0]).toMatchObject({ walkMin: 6, walkEst: 3, dep });
+  });
+
+  it('calcul des trajets : un premier départ impossible par le vrai chemin donne exactement la liste de la 1.3.0 une fois ce départ parti (gare du Nord, trams 3 et 4 vers la Bourse)', async () => {
+    // extrait de test du dépôt (walk-data/fixtures) ; départ à 150 m à l'est de la rue du Progrès : l'arrêt Rogier est à
+    // 5 min d'après l'estimation, à plus de 10 min par le vrai chemin (5 min d'avance, le plafond)
+    const dir = join(__dirname, 'walk-data', 'fixtures');
+    const here = offset({ lat: 50.8582, lon: 4.36 }, 150, 0);
+    const bourse: FavoritePlace = { ...BOURSE };
+    const central: FavoritePlace = { kind: 'place', id: 'central', label: 'Gare Centrale', lat: 50.8454, lon: 4.3571, propose: 'never' };
+    const make = (tiles: boolean) => {
+      const server = new FakeServer();
+      server.scene = 'noRT';
+      if (tiles) for (const f of ['index', '2542_144', '2542_145', '2543_145']) server.overrides.set(`/quai/data/walk/${f}.json`, () => new Response(readFileSync(join(dir, `${f}.json`), 'utf8'), { status: 200 }));
+      const clock = { t: at('09:00') };
+      const core = createCore({ dataBase: DATA_BASE, relayBase: RELAY_BASE, now: () => clock.t, storage: new MemoryKV(), fetch: server.fetch });
+      const s = { ...scene(null).settings(), favorites: [bourse, central] };
+      const list = async (hm: string, to: string = 'bourse') => {
+        clock.t = at(hm);
+        return (await core.route(HERE, { type: 'place', placeId: to }, clock.t, s, here)).journeys.map((j) => `${j.label} ${j.legs[1].line} ${hhmm(j.legs[1].dep)}`);
+      };
+      return { list, core };
+    };
+    const est = make(false);
+    const real = make(true);
+    // vers la gare Centrale à 08:20 : le tram 4 de 08:25 est hors de portée ; le train de 08:41, qui arrive avant le tram
+    // suivant, reste proposé, comme en 1.3.0 une fois ce tram parti (c'est le rôle de outOfReach dans le moteur : sans
+    // lui, les « suivants » seraient ceux du tram raté et le train disparaîtrait de la liste)
+    expect(await est.list('08:20', 'central')).toEqual(['short 4 08:25', 'next IC 08:41', 'later IC 08:56']);
+    const missed2 = await est.list('08:21', 'central');
+    expect(missed2).toEqual(['short 3 08:30', 'next IC 08:41', 'later 3 08:46']);
+    expect(await real.list('08:20', 'central')).toEqual(missed2);
+    // 09:00 d'après l'estimation : le tram 4 de 09:05 (partir à 08:58) ; 09:01 : il est parti, le tram 3 de 09:10 vient
+    expect(await est.list('09:00')).toEqual(['short 4 09:05', 'next 4 09:13', 'later 4 09:21']);
+    const missed = await est.list('09:01');
+    expect(missed).toEqual(['short 3 09:10', 'next 3 09:18', 'later 3 09:26']);
+    // 09:00 avec le vrai chemin : le tram de 09:05 ne peut plus être attrapé : la même liste qu'après un départ raté,
+    // dès le premier calcul (le chemin est connu pendant le calcul), sans réordonner ensuite
+    expect(await real.list('09:00')).toEqual(missed);
+    expect(await real.list('09:00')).toEqual(missed);
   });
 });
 
