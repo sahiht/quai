@@ -18,6 +18,7 @@ import type { Journey, Leg, Names } from '../core/api';
 import type { CheckIssue, GuideKind, GuideState, Moment, Then, VehicleRef, WhereAmI } from '../core/guide-types';
 import { shortName } from '../core/typo';
 import { displayName, hhmm } from '../core/util';
+import { exitLineText } from './exit-line';
 import { SCREEN_W, textWidth } from './font';
 import {
   HINTS,
@@ -502,6 +503,8 @@ function walkMoment(m: Extract<Moment, { kind: 'walk' }>, title: string, ctx: Vi
   const lines: GLine[] = [F('hi', walk)];
   if (m.vehicle && m.depAt !== undefined && kind !== 'dest') lines.push(L('norm', vehicleAtText(m.vehicle, m.depAt, m.rt ?? false, ctx, m.sched)));
   else if (m.arr !== undefined) lines.push(L('norm', `arrivée ${hhmm(m.arr)}`));
+  // 1.3.1 (PRD-1.3.1 § 14, R1) : la sortie du métro vers la suite du chemin, pâle (glasses/exit-line.ts)
+  if (m.exit) lines.push(F('pale', (w) => exitLineText(m.exit, w)));
   return { lines, image: { kind: 'sign', label: 'à pied', value: String(m.walkMin), foot: 'min' }, hints: HINTS.guide };
 }
 
