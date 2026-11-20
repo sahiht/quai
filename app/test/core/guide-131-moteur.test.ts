@@ -361,6 +361,50 @@ describe('A3 (I1) : sans temps réel, le véhicule gardé jusqu’à 15 min avan
     expect(step(r, at('07:59'), fix(P.gramme, at('07:59'), { speed: 0 })).ended).toBe(false);
   });
 
+  it('trajet qui finit par le véhicule (jusqu’à un arrêt) : en retard sans temps réel, attendu à l’arrêt : jamais « Tu y es » à l’heure où il devait arriver, gardé, puis « Nouveau trajet »', () => {
+    // à pied jusqu'à Monument Gramme, bus 6 de 07:12 (arrivée prévue 07:20), le trajet s'arrête là ; le suivant à 07:42
+    const b6 = rideLeg({ op: 'tec', mode: 'bus', line: '6', head: 'Gare des Guillemins', rt: false, stops: [{ p: S.gramme, t: at('07:12') }, { p: S.leman, t: at('07:16') }, { p: S.guilleminsBus, t: at('07:20') }] });
+    const j = journeyOf([walkLeg(S.avroy, S.gramme, at('07:05'), 5), b6], 'jfin', at('07:05'));
+    const r = guide(j, { nextByLeg: { 1: { vehicle: { op: 'tec', mode: 'bus', line: '6' }, depAt: at('07:42'), rt: false } } });
+    // avant : à 07:20, « Tu y es » à l'arrêt de départ, puis fin du guidage à 07:22
+    for (const s of stay(r, P.gramme, at('07:10'), at('07:26:30'), 30)) {
+      expect(s.phase).toEqual({ kind: 'wait', leg: 1 });
+      expect(s.ended).toBe(false);
+      expect(s.moment?.kind === 'arrived' || s.moment?.kind === 'alight' || s.moment?.kind === 'replan').toBe(false);
+      expect(s.replan).toBeUndefined();
+    }
+    // gardé jusqu'à 07:27 (15 min avant le suivant) : un nouveau trajet est demandé, sans « est parti »
+    const s = step(r, at('07:27'), fix(P.gramme, at('07:27'), { speed: 0 }));
+    expect(s.replan).toMatchObject({ reason: 'missed' });
+    expect(s.moment).toBeNull();
+    // monté dans le bus en retard à 07:24 : le guidage continue jusqu'à « Tu y es » à sa descente
+    const r2 = guide(j);
+    stay(r2, P.gramme, at('07:10'), at('07:24'), 30);
+    const on = step(r2, at('07:25'), fix(lerp(P.gramme, P.leman, 0.6), at('07:25'), { speed: 8 }));
+    expect(on.phase).toMatchObject({ kind: 'ride', leg: 1 });
+    expect(on.ended).toBe(false);
+    const near = step(r2, at('07:31:50'), fix(lerp(P.leman, P.guilleminsBus, 0.6), at('07:31:50'), { speed: 6 }));
+    expect(near.phase).toMatchObject({ kind: 'ride', leg: 1 });
+    expect(near.ended).toBe(false);
+  });
+
+  it('trajet qui finit par le véhicule, raté en marchant (temps réel), aucun autre trajet : jamais « Tu y es » ni « Descends » en pleine rue à l’heure où il arrive', () => {
+    const b6 = rideLeg({ op: 'tec', mode: 'bus', line: '6', head: 'Gare des Guillemins', stops: [{ p: S.gramme, t: at('07:12') }, { p: S.leman, t: at('07:16') }, { p: S.guilleminsBus, t: at('07:20') }] });
+    const j = journeyOf([walkLeg(S.avroy, S.gramme, at('07:05'), 5), b6], 'jfin2', at('07:05'));
+    const street = route([P.avroy, P.gramme]);
+    const r = guide(j, { walk: { leg: 0, route: street } });
+    step(r, at('07:11'), fix(P.avroy, at('07:11'), { speed: 0 }));
+    // en marche lente (0,4 m/s) sur le chemin, de 45 m à 285 m du départ, de 07:11:30 à 07:21:30
+    const seen = play(r, trace(street.coords, { t0: at('07:11:30'), fromM: 45, toM: 285, v: 0.4, every: 10 }));
+    const said = seen.find((x) => x.s.moment?.kind === 'replan');
+    expect(hm(said!.t)).toBe(hm(at('07:14')));
+    r.mem = replanNone(r.mem, at('07:14:05'));
+    for (const x of play(r, trace(street.coords, { t0: at('07:14:10'), fromM: 109, toM: 285, v: 0.4, every: 10 }))) {
+      expect(x.s.phase, hm(x.t)).toEqual({ kind: 'walk', leg: 0 });
+      expect(x.s.moment?.kind === 'arrived' || x.s.moment?.kind === 'alight', hm(x.t)).toBe(false);
+    }
+  });
+
   it('avec temps réel : rien ne change (raté 2 min après son départ)', () => {
     const ic = { ...ic742(), rt: true };
     const r = guide(journeyOf([walkLeg(S.avroy, S.guillemins, at('07:25'), 13), ic, walkLeg(S.central, S.gareCentrale, ic.arr, 3)], 'jicrt', at('07:25')), { nextByLeg: next842 });

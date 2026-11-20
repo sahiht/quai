@@ -714,7 +714,11 @@ function arrivedNow(c: Ctx): { yes: boolean; byFix: boolean } {
     if (alightedFrom(m, L - 1)) return carriedOn(c) ? { yes: false, byFix: false } : { yes: true, byFix: true };
     // encore à bord d'après la position (véhicule en retard, ou emporté au-delà de l'arrêt) : pas arrivé
     const aboard = boardedOn(m, L - 1) && (riding(c, L - 1) || (fast(c) && distTo(c, last.to) > GUIDE.alightNearM));
-    if (now >= last.arr && !aboard) return { yes: true, byFix: false };
+    // 1.3.1 (A2, A3 ; contrôle du moteur) : trajet qui finit par un véhicule, jamais monté, et la position dit qu'on
+    // l'attend encore à son arrêt (en retard sans temps réel : gardé) ou qu'on marche encore vers lui : pas arrivé, jamais
+    // « Tu y es » à l'arrêt de départ ou en pleine rue à l'heure où il arrive ; detect dit ensuite s'il est raté
+    const notLeft = c.in.kind === 'trip' && !boardedOn(m, L - 1) && !last.cancelled && (stillAtStop(c, L - 1) || (L >= 2 && c.legs[L - 2].kind === 'walk' && walkingTo(c, L - 2)));
+    if (now >= last.arr && !aboard && !notLeft) return { yes: true, byFix: false };
     return { yes: false, byFix: false };
   }
   if (c.fix && knownPoint(last.to) && distanceM(c.fix, last.to) <= GUIDE.arrivedM) {
