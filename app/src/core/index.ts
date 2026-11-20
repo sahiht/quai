@@ -565,9 +565,11 @@ export function createCore(opts: CoreOptions): Core {
         await walksFor(result.journeys, settings);
       }
       const w = await inTime(rain);
-      if (w !== undefined) markRain(result.journeys, w);
       const t = now();
       const journeys = result.journeys.map((j) => withFirstWalk(j, settings, t, (legs, s) => firstWalks.apply(legs, s)));
+      // la pluie après le vrai chemin (contrôle du 20/11) : une première marche de 3 min estimées qui en compte 6 est
+      // une marche de 5 min ou plus, marquée comme dans la réponse d'un favori (refresh) ; sans correction, rien ne change
+      if (w !== undefined) markRain(journeys, w);
       return journeys.some((j, i) => j !== result.journeys[i]) ? { ...result, journeys } : result;
 
       async function compute(): Promise<PlanResult> {

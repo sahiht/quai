@@ -78,6 +78,34 @@ describe('l’exemple du propriétaire : 3 min estimées, vrai chemin de 446 m (
   });
 });
 
+describe('contrôle : la pluie suit les vraies minutes, pareil dans la recherche et dans le favori', () => {
+  /** Grille du relais : pluie partout, pendant 6 h (format de core/weather.ts). */
+  const wet = (now: number) => ({
+    lat0: 49.5,
+    lon0: 2.55,
+    step: 0.25,
+    rows: 9,
+    cols: 16,
+    t0: Math.floor(now / 900_000) * 900 + 900,
+    h0: Math.floor(now / 3_600_000) * 3600 + 3600,
+    rain: Array.from({ length: 144 }, () => Array<number>(24).fill(10)),
+    prob: Array.from({ length: 144 }, () => Array<number>(7).fill(100)),
+    fetchedAt: '2026-11-10T06:00:00Z',
+  });
+  const rains = (j: Journey) => `${j.legs[0].walkMin} min${j.legs[0].rain ? ', pluie' : ''}`;
+
+  it('3 min estimées (pas de marque sous 5 min), 6 min par le vrai chemin : marche sous la pluie, dans route() comme dans le favori ; sans tuiles : comme en 1.3.0', async () => {
+    const w = world('long', '07:10');
+    w.sc.server.overrides.set('/api/weather', () => new Response(JSON.stringify(wet(w.clock.t)), { status: 200 }));
+    expect(rains((await w.route()).journeys[0])).toBe('6 min, pluie');
+    expect(rains((await w.core.answer(BOURSE, START, w.s)).plan!.journeys[0])).toBe('6 min, pluie');
+    const base = world(null, '07:10');
+    base.sc.server.overrides.set('/api/weather', () => new Response(JSON.stringify(wet(base.clock.t)), { status: 200 }));
+    expect(rains((await base.route()).journeys[0])).toBe('3 min');
+    expect(rains((await base.core.answer(BOURSE, START, base.s)).plan!.journeys[0])).toBe('3 min');
+  });
+});
+
 describe('règle 3 : personne n’attend le chemin', () => {
   it('tuile lente : le trajet sort tout de suite avec l’estimation (0,1 s d’attente au plus) ; chemin connu : un signal, puis 07:12 partout, une seule fois', async () => {
     const w = world('long', '07:10');
