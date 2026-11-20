@@ -757,7 +757,14 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   // (pâle), son texte est dans le conteneur de la colonne a, prolongé jusqu'à elle (plus bas). 1.3.1 (PRD-1.3.1 § 6) :
   // celle de la rangée du curseur (cursorAction), vide sur une rangée qui n'en a pas
   const actionSrc = v.cursorAction ? (message || scroll ? '' : (items[sel]?.actionText ?? '')) : (v.action ?? '');
-  const actionText = g.actionLine ? truncateWordsPx(actionSrc, X_END - X_TEXT - GEO.SAFETY) : '';
+  // 1.3.1 (PRD-1.3.1 § 6) : un gabarit dont la colonne a n'est pas au plus clair (arrêts d'un départ : l'heure, niveau 3)
+  // porte la ligne d'action dans le conteneur du curseur, son texte 1 px après la marge (espaces de 5 px) : coupé 1 px
+  // plus court, il garde à droite la marge de sécurité de tout texte des lunettes (contrôle qualité 1.3.1)
+  const actionInA = g.actionLine && def.a.level === 4;
+  const actionInCursor = g.actionLine && !actionInA;
+  const actionPad = actionInCursor ? ' '.repeat(Math.ceil((X_TEXT - GEO.X_CURSOR) / SPACE_W)) : '';
+  const actionX = actionInCursor ? GEO.X_CURSOR + textWidth(actionPad) : X_TEXT;
+  const actionText = g.actionLine ? truncateWordsPx(actionSrc, X_END - actionX - GEO.SAFETY) : '';
   if (g.actionLine) foot.push('');
   const hintText = opts.toast ? truncateWordsPx(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? truncateWordsPx(v.hints, X_END - X_TEXT - GEO.SAFETY) : '';
   if (g.hintLine) foot.push(hintText);
@@ -795,12 +802,10 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   // porte la ligne d'action dans le conteneur du curseur (au plus clair), élargi jusqu'au bord et prolongé de même ; son
   // texte commence à la marge du texte (5 espaces : 1 px plus loin, jamais avant)
   const footRows = (rows: string[], last: string): string[] => [...rows, ...new Array<string>(Math.max(0, g.capacity - rows.length)).fill(''), ...(g.noteLine ? [''] : []), last];
-  const actionInA = g.actionLine && def.a.level === 4;
-  const actionInCursor = g.actionLine && !actionInA;
   const aRows = actionInA ? footRows(colA, actionText) : colA;
   const footH = ((g.noteLine ? 1 : 0) + 1) * LINE_H;
   const aH = rowsH + (actionInA ? footH : 0);
-  const cursorRows = actionInCursor ? footRows(cursor, actionText ? `${' '.repeat(Math.ceil((X_TEXT - GEO.X_CURSOR) / SPACE_W))}${actionText}` : '') : cursor;
+  const cursorRows = actionInCursor ? footRows(cursor, actionText ? `${actionPad}${actionText}` : '') : cursor;
   const filetY = Math.round((g.rowsY + rowsH + g.footY) / 2);
   const topC: BorderedContainer = filet
     ? { ...C(IDS.top, 'top', X_TEXT, filetY, X_END - X_TEXT, FOOT_MIN_H, '', 2), border: { width: 1, level: 2 } }
