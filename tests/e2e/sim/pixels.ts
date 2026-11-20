@@ -60,6 +60,10 @@ type Seg = { from: number; to: number; text: string; float?: { min: number; max:
 /** Écrans en liste à une colonne de droite (gabarit de chacun, layout.ts). */
 const MENU: Record<string, keyof typeof LAYOUTS> = { favorites: 'favorites', stations: 'stations', keepLine: 'menu', followed: 'menu', menu: 'menu' };
 const CHECKED = new Set(['home', 'steps', 'others', 'lines', 'follows', 'lineRun', 'trainRun', 'line', 'board', 'stops', 'train', ...Object.keys(MENU)]);
+/** Écrans avec une ligne d'action « ▶ … » juste au-dessus des aides : trajet (1.3.0), arrêts d'un départ (1.3.1, § 6). */
+const ACTION_SCREENS = new Set(['steps', 'stops', 'trainRun']);
+/** Écrans en accordéon : « Favoris » (1.3.0, § 7) et « Gares de train » (1.3.1, B21). */
+const ACCORDION_SCREENS = new Set(['favorites', 'stations']);
 /** 1.2.3 : ligne du haut d'un tableau (message de l'opérateur, « Départs de demain ») ; sa note, jamais une ligne de liste. */
 const TOP_BOARD = /^(! |Départs de demain$)/;
 const NOTE_BOARD = /^(~ horaire prévu|Temps réel indisponible|Pas de réseau)/;
@@ -415,7 +419,7 @@ export function accordionLines(s: LoggedScreen): string[] {
   const x = s as LoggedScreen & { expand?: unknown; detail?: unknown };
   if (Array.isArray(x.expand)) return x.expand.map((e) => String(typeof e === 'object' && e && 'text' in e ? (e as { text: unknown }).text : e).replace(/[\u00a0\u202f]/g, ' '));
   if (typeof x.detail === 'string') return [];
-  return s.lines.slice(0, -1).filter((l) => !!l && !l.includes('   ') && l !== 'ADRESSES RÉCENTES');
+  return s.lines.slice(0, -1).filter((l) => !!l && !l.includes('   ') && l !== 'ADRESSES RÉCENTES' && !NOTE.test(l) && !NOTE_BOARD.test(l));
 }
 
 interface Band {
@@ -461,8 +465,9 @@ function bands(s: LoggedScreen): Band[] | null {
     footLines = (note !== undefined ? 1 : 0) + (note !== undefined && hint === undefined ? 0 : 1);
   } else {
     hint = lines.pop();
-    // 1.3.0 (PRD-1.3.0 § 1) : écran du trajet, la ligne d'action (« ▶ Y aller ») juste au-dessus des aides
-    if (s.screen === 'steps' && lines.length && /^▶ /.test(lines[lines.length - 1])) action = lines.pop();
+    // 1.3.0 (PRD-1.3.0 § 1) : écran du trajet, la ligne d'action (« ▶ Y aller ») juste au-dessus des aides ; 1.3.1
+    // (PRD-1.3.1 § 6) : aussi les arrêts d'un départ et tout le trajet d'un train (« ▶ Me guider jusqu'à cet arrêt »)
+    if (ACTION_SCREENS.has(s.screen) && lines.length && /^▶ /.test(lines[lines.length - 1])) action = lines.pop();
     // 1.2.10 (PRD-1.2.10 § 2) : « Favoris », la ligne du détail du favori choisi, fixe en bas au-dessus des aides
     // (journalisée dans `detail`, espaces insécables comprises, alors que les lignes du journal en sont nettoyées),
     // à la place de la note
@@ -511,8 +516,9 @@ function bands(s: LoggedScreen): Band[] | null {
   }
   // accueil : les favoris en retrait sont les lignes entre « Favoris » et la ligne vide
   let underFavorites = false;
-  // 1.3.0 : lignes de l'accordéon de « Favoris » (champ `expand` du journal, sinon les lignes sans colonne de réponse)
-  const open = new Set(s.screen === 'favorites' ? accordionLines(s) : []);
+  // 1.3.0 : lignes de l'accordéon de « Favoris » (champ `expand` du journal, sinon les lignes sans colonne de réponse) ;
+  // 1.3.1 (B21, U7) : aussi « Gares de train », la direction et le train suivant sous la gare du curseur
+  const open = new Set(ACCORDION_SCREENS.has(s.screen) ? accordionLines(s) : []);
   // 1.2.6 : « Lignes » : à la marge, sauf « introuvable » sous la ligne
   const indented = s.screen === 'lines' ? linesIndented(lines) : s.screen === 'follows' ? lines.map((l) => /^introuvable/.test(l)) : [];
   lines.forEach((l, i) => {
@@ -525,7 +531,7 @@ function bands(s: LoggedScreen): Band[] | null {
         segs = homeSegments(l, false);
         underFavorites = false;
       } else segs = homeSegments(l, underFavorites);
-    } else if (s.screen === 'favorites' && open.has(l)) {
+    } else if (ACCORDION_SCREENS.has(s.screen) && open.has(l)) {
       // 1.3.0 (PRD-1.3.0 § 7) : ligne de l'accordéon, pâle et en retrait sous la rangée du curseur (retrait mesuré)
       const x0 = LAYOUTS.favorites.a.x;
       segs = [{ from: x0 + 6, to: x0 + 6 + width(l), text: l, float: { min: x0 + 6, max: x0 + 64 } }];

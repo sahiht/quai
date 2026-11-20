@@ -177,3 +177,47 @@ export function checkGuidePixels(png: Buffer, s: GuideShot, opts: { image: boole
   if (stray.length) bad.push(`pixels allumés hors des lignes journalisées et des images : ${stray.join(', ')}…`);
   return bad;
 }
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 1, B9) : écran calme d'un guidage : seulement « · · · » (trois points), ou à bord la ligne de
+ * progression « ●─●─◎─○ descente dans 4 arrêts » à la même place, au niveau le plus pâle, en bas au centre ; aucun autre
+ * pixel. Rend la liste des écarts (vide : conforme) et ce qui a été mesuré (boîte, luminosité, groupes de colonnes).
+ */
+export function checkCalmPixels(png: Buffer, kind: 'dots' | 'progress', opts: { paleMax?: number } = {}): { bad: string[]; box: Box | null; alpha: number; runs: number } {
+  const img = PNG.sync.read(png);
+  if (img.width !== W || img.height !== H) return { bad: [`capture ${img.width} × ${img.height} au lieu de ${W} × ${H}`], box: null, alpha: 0, runs: 0 };
+  let x0 = W;
+  let x1 = -1;
+  let y0 = H;
+  let y1 = -1;
+  let amax = 0;
+  const cols = new Array<boolean>(W).fill(false);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const a = img.data[(y * W + x) * 4 + 3];
+      if (!a) continue;
+      amax = Math.max(amax, a);
+      cols[x] = true;
+      x0 = Math.min(x0, x);
+      x1 = Math.max(x1, x);
+      y0 = Math.min(y0, y);
+      y1 = Math.max(y1, y);
+    }
+  if (x1 < 0) return { bad: [kind === 'dots' ? '« · · · » absent : écran entièrement noir (PRD-1.3.1 § 1)' : 'ligne de progression absente : écran noir (B9)'], box: null, alpha: 0, runs: 0 };
+  let runs = 0;
+  for (let x = 0; x < W; x++) if (cols[x] && (x === 0 || !cols[x - 1])) runs++;
+  const box = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  const bad: string[] = [];
+  const center = (x0 + x1) / 2;
+  // en bas : sous les deux tiers de l'écran ; au centre : à 12 px près
+  if (y0 < Math.round(H * 0.66)) bad.push(`pixels allumés au-dessus du bas de l’écran (y = ${y0} ; boîte ${JSON.stringify(box)}) : l’écran calme ne montre que ${kind === 'dots' ? '« · · · »' : 'la progression'}, en bas`);
+  if (Math.abs(center - W / 2) > 12) bad.push(`${kind === 'dots' ? '« · · · »' : 'progression'} pas au centre : milieu à x = ${Math.round(center)} au lieu de ${W / 2} (boîte ${JSON.stringify(box)})`);
+  // le plus pâle : jamais plus clair que les lignes pâles (niveau 2 : alpha 197 au simulateur, 196 sur le canvas)
+  const paleMax = opts.paleMax ?? 197;
+  if (amax > paleMax) bad.push(`luminosité ${amax} (alpha) : plus claire que le niveau pâle (${paleMax}), le PRD veut le niveau le plus pâle`);
+  if (kind === 'dots') {
+    if (box.w > 90) bad.push(`« · · · » trop large : ${box.w} px (trois petits points attendus)`);
+    if (runs !== 3) bad.push(`${runs} groupes de pixels au lieu de 3 points (« · · · »)`);
+  } else if (box.w > 508) bad.push(`progression de ${box.w} px (508 au plus, mesure de l’expert E1)`);
+  return { bad, box, alpha: amax, runs };
+}

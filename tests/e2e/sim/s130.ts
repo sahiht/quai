@@ -219,9 +219,15 @@ async function simHome(sim: Sim): Promise<Screen> {
   return lastOrWait(sim, (s) => s.screen === 'home' && loaded(s) && s.lines.some((l) => /^Autour de moi {3}/.test(l)), 25_000, 'accueil chargé');
 }
 
+/** Rang (sel) de « Favoris » sur l'accueil : 0 jusqu'à la 1.3.0, sous « Autour de moi » en 1.3.1 (PRD-1.3.1 § 8). */
+function favIndex(s: { lines: string[] }): number {
+  const items = s.lines.filter((l, i) => l !== '' && !/^△▽ |^Jour férié/.test(l) && !(i === 0 && /^(Temps réel indisponible|Pas de réseau|Horaires |Près de |! )/.test(l)));
+  return Math.max(0, items.findIndex((l) => /^(Favoris {3}\d+|Ajouter un favori)/.test(l)));
+}
+
 async function simFavorites(sim: Sim): Promise<Screen> {
-  await simHome(sim);
-  await sim.select(0);
+  const h = await simHome(sim);
+  await sim.select(favIndex(h));
   await sim.input('click');
   return sim.waitScreen((s) => s.screen === 'favorites' && loaded(s), 25_000, '« Favoris » calculés');
 }
@@ -432,7 +438,8 @@ async function webFollowed(r: Run): Promise<{ journey: O.OJourney; title: string
 }
 /** Depuis l'accueil de Quai Web : « Favoris », le favori `name`, son écran du trajet. */
 async function webOpenFavorite(r: Run, name: string): Promise<GlassesScreen> {
-  for (let i = 0; i < 4 && r.page.lastScreen()?.sel !== 0; i++) await gesture(r, 'up');
+  const fi = favIndex(r.page.lastScreen()!);
+  for (let i = 0; i < 6 && r.page.lastScreen()?.sel !== fi; i++) await gesture(r, (r.page.lastScreen()?.sel ?? 0) < fi ? 'down' : 'up');
   await gesture(r, 'tap');
   const f = await waitGuide(r, '« Favoris »', (s) => s.screen === 'favorites' && loaded(s), 20_000);
   const k = favRows(f as unknown as Screen).findIndex((l) => l.startsWith(`${name}   `) || l.startsWith(`${name} !   `));
@@ -650,7 +657,14 @@ async function s130up(ctx: Ctx130): Promise<void> {
 /* ------------------------------ s130fav : favoris en accordéon (§ 7) ------------------------------ */
 
 /** 2e ligne de l'accordéon (PRD-1.3.0 § 7) : un souci du trajet en tête, puis « direct » ou les changements (au-delà : « … »). */
-const SECOND = /^((voie \S+ au lieu de \S+|.+ supprimé), )?(direct|\d+ changements? : .+)$/;
+const SECOND_130 = /^((voie \S+ au lieu de \S+|.+ supprimé), )?(direct|\d+ changements? : .+)$/;
+/**
+ * 1.3.1 (PRD-1.3.1 § 4) : la 2e ligne garde le premier véhicule et son heure (le souci avec lui), puis les changements
+ * s'ils tiennent ; une gare hors de portée à pied garde la règle de la 1.3.0.
+ */
+const SECOND_131 = /^(IC|S\d+|L|P|EXP|IR|ICE|TGV|train|bus|tram|métro|bus SNCB)\b[^,]*~?\d\d:\d\d( \+\d+)?( voie \S+( !| au lieu de \S+)?| supprimé)?(, .+)?$/;
+const SECOND = { test: (t: string) => SECOND_130.test(t) || SPEC131() && SECOND_131.test(t) };
+const SPEC131 = () => O.SPEC.v131;
 /** Contenu attendu de l'accordéon d'une rangée de « Favoris » (PRD-1.3.0 § 7), d'après la rangée elle-même. */
 function accordionWant(row: string): { n: [number, number]; first?: RegExp; label: string } {
   const answer = row.split('   ').pop() ?? '';
@@ -658,7 +672,9 @@ function accordionWant(row: string): { n: [number, number]; first?: RegExp; labe
   return {
     n: [1, 2],
     // marche puis véhicule ; départ d'une gare hors de portée à pied ; à pied seulement ; adresse récente (l'adresse complète)
-    first: /^(à pied \d+ min, puis .+|(IC|S\d+|L|P|EXP|bus|tram|métro|Bus|Tram|Métro)\b.* à ~?\d\d:\d\d, à .+|à pied \d+ min|.+, \d{4} .+)$/,
+    first: O.SPEC.v131
+      ? /^(à pied \d+ min → .+|depuis .+|(IC|S\d+|L|P|EXP|bus|tram|métro|Bus|Tram|Métro)\b.* à ~?\d\d:\d\d, à .+|à pied \d+ min|.+, \d{4} .+)$/
+      : /^(à pied \d+ min, puis .+|(IC|S\d+|L|P|EXP|bus|tram|métro|Bus|Tram|Métro)\b.* à ~?\d\d:\d\d, à .+|à pied \d+ min|.+, \d{4} .+)$/,
     label: 'marche puis véhicule, gare hors de portée, à pied seulement ou adresse',
   };
 }
@@ -698,8 +714,14 @@ async function s130fav(ctx: Ctx130): Promise<void> {
     // le favori du curseur (Place Fontainas) s'ouvre sur deux lignes : la marche puis l'IC, puis le souci et le changement
     const open = checkScreen(f, 'Favoris');
     check(f.sel === 0 && open.length === 2 && f.lines[1] === open[0], `accordéon sous « ${FONTAINAS} » (curseur) : ${JSON.stringify(f.lines)}`);
-    check(/^à pied \d+ min, puis IC ~?07:4[24]( \+2)? voie 6 !$/.test(O.norm(open[0])), `1re ligne « ${open[0]} » au lieu de « à pied 9 min, puis IC ~07:42 voie 6 ! »`);
-    check(/^voie 6 au lieu de 4\b.*\b1 changement : tram 3$/.test(O.norm(open[1])), `2e ligne « ${open[1]} » : « voie 6 au lieu de 4 » en tête, puis « 1 changement : tram 3 »`);
+    if (O.SPEC.v131) {
+      // 1.3.1 (PRD-1.3.1 § 4) : la 1re ligne nomme la gare où monter, la 2e le premier véhicule, puis les changements
+      check(/^à pied \d+ min → Namur$/.test(O.norm(open[0])), `1re ligne « ${open[0]} » au lieu de « à pied 9 min → Namur » (PRD-1.3.1 § 4)`);
+      check(/^IC (~?07:4[24]|07:42 \+2)( voie 6 !| voie 6 au lieu de 4)?(, 1 changement( : tram 3)?)?$/.test(O.norm(open[1])), `2e ligne « ${open[1]} » au lieu de « IC 07:42 +2 voie 6 au lieu de 4, 1 changement : tram 3 » (PRD-1.3.1 § 4)`);
+    } else {
+      check(/^à pied \d+ min, puis IC ~?07:4[24]( \+2)? voie 6 !$/.test(O.norm(open[0])), `1re ligne « ${open[0]} » au lieu de « à pied 9 min, puis IC ~07:42 voie 6 ! »`);
+      check(/^voie 6 au lieu de 4\b.*\b1 changement : tram 3$/.test(O.norm(open[1])), `2e ligne « ${open[1]} » : « voie 6 au lieu de 4 » en tête, puis « 1 changement : tram 3 »`);
+    }
     // relief : les lignes ouvertes pâles (plus pâles que la rangée), en retrait (contrôle au pixel de l'étape)
     await sleep(300);
     const lv = levels(await sim.rawShot(), f);
@@ -1382,8 +1404,10 @@ async function s130journal(ctx: Ctx130): Promise<void> {
       check(rows.length >= 1 && rows.some((r) => r.includes(FONTAINAS)), `rangée du trajet « ${FONTAINAS} » dans « ${TXT.journalCard} » (.journal-row) : ${JSON.stringify(rows)}`);
       const clicked = await page.eval<boolean>(`(() => { const r = [...document.querySelectorAll('.journal-row')].find((x) => x.textContent.includes(${JSON.stringify(FONTAINAS)})); if (!r) return false; (r.querySelector('button, a, summary') || r).click(); return true; })()`);
       if (!clicked) await page.clickText(FONTAINAS, 'body', 'button,a,[role=button],li,summary');
-      const text = await page.waitFor<string>(`(() => { const e = document.querySelector('.journal-text'); const t = (e ? (e.value || e.innerText || e.textContent) : (document.querySelector('main') || document.body).innerText).replace(/[\\u00a0\\u202f]/g, ' '); return /Journal Quai 1\\.3\\.0, trajet/.test(t) ? t : ''; })()`, 10_000, 'texte du journal (.journal-text)');
-      check(/Journal Quai 1\.3\.0, trajet « Place Fontainas », 10\/11\/2026/.test(text), `en-tête « Journal Quai 1.3.0, trajet « ${FONTAINAS} », 10/11/2026 » absent : « ${text.slice(0, 300)} »`);
+      const text = await page.waitFor<string>(`(() => { const e = document.querySelector('.journal-text'); const t = (e ? (e.value || e.innerText || e.textContent) : (document.querySelector('main') || document.body).innerText).replace(/[\\u00a0\\u202f]/g, ' '); return /Journal Quai \\d+\\.\\d+\\.\\d+, trajet/.test(t) ? t : ''; })()`, 10_000, 'texte du journal (.journal-text)');
+      // version de app.json (1.3.0 à la publication de la 1.3.0, 1.3.1 ensuite : seul le numéro change)
+      const head = `Journal Quai ${ctx.appVersion}, trajet « ${FONTAINAS} », 10/11/2026`;
+      check(text.includes(head), `en-tête « ${head} » absent : « ${text.slice(0, 300)} »`);
       check(/(^|\n)\s*07:3\d:\d\d Partir maintenant affiché\s*($|\n)/.test(text), `ligne « 07:3x:xx Partir maintenant affiché » absente (une ligne par événement, heures de Bruxelles) : « ${text.slice(0, 800)} »`);
       const bad = journalPrivacyIssues(text, pushed, ['Place Fontainas, 1000 Bruxelles']);
       check(!bad.length, `texte du journal : ${bad.join(' ; ')}`);

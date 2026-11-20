@@ -44,6 +44,11 @@ export interface Ctx {
    * trajet (PRD-1.3.0 § 1), favoris en accordéon (§ 7), message « Quai 1.3.0 » (§ 9). Absent : celles de la 1.2.10.
    */
   v130?: boolean;
+  /**
+   * 1.3.1 : attentes de docs/v1.3.1/PRD-1.3.1.md (« masquer », « Où tu en es », trois points, menu de l'appui long,
+   * textes du guidage, accueil dans l'ordre du § 8) ; l'oracle (guide-oracle.ts, `useSpec`) suit la même spécification.
+   */
+  v131?: boolean;
 }
 
 /** 1.3.0 (PRD-1.3.0 § 1) : aides de l'écran du trajet, le « toucher : … » passé dans la ligne d'action au-dessus. */
@@ -287,9 +292,9 @@ async function dismiss(r: Run, label: string): Promise<GlassesScreen> {
 /** « y aller » depuis l'accueil : favori de la place Fontainas, écran du trajet, toucher. */
 async function goFontainas(r: Run): Promise<GlassesScreen> {
   const home = r.page.lastScreen()!;
-  // « Favoris   7 » en tête, puis le favori de la place Fontainas dans la liste
-  check(/^Favoris {3}\d+$/.test(home.lines[0] ?? ''), `accueil : « Favoris   n » attendu en tête, vu ${JSON.stringify(home.lines)}`);
-  for (let i = 0; i < 4 && r.page.lastScreen()?.sel !== 0; i++) await gesture(r, 'up');
+  // « Favoris   7 » en tête (1.3.1, PRD-1.3.1 § 8 : sous « Autour de moi »), puis le favori de la place Fontainas dans la liste
+  check(home.lines.some((l) => /^Favoris {3}\d+$/.test(l)), `accueil : « Favoris   n » attendu, vu ${JSON.stringify(home.lines)}`);
+  await selectHome(r, /^Favoris {3}\d+$/);
   await gesture(r, 'tap');
   const favs = await waitGuideAny(r, 'Favoris', (s) => s.screen === 'favorites' && !s.lines.some((l) => /…$/.test(l)), 15_000);
   // « ! » après le nom d'un favori dont le trajet a un souci (voie modifiée, PRD § 2)
@@ -847,8 +852,10 @@ async function s1210sim(ctx: Ctx): Promise<void> {
   await sim.launch(ctx.pageUrl({ ...START, ...ctx.preset('p/1210.json') }, false));
   await ctx.step('favoris', async () => {
     const h = await sim.waitScreen((s) => s.screen === 'home' && !s.lines.some((l) => /…$|^Chargement/.test(l)), 25_000, 'accueil');
-    check(/^Favoris {3}7$/.test(h.lines[0] ?? ''), `« Favoris   7 » en tête de l’accueil : ${JSON.stringify(h.lines)}`);
-    await sim.select(0);
+    // 1.3.1 (PRD-1.3.1 § 8) : « Favoris   7 » sous « Autour de moi » ; avant : en tête de l'accueil
+    const fi = h.lines.filter((l) => l !== '').findIndex((l) => /^Favoris {3}7$/.test(l));
+    check(fi === (ctx.v131 ? 1 : 0), `« Favoris   7 » ${ctx.v131 ? 'sous « Autour de moi »' : 'en tête de l’accueil'} : ${JSON.stringify(h.lines)}`);
+    await sim.select(fi);
     await sim.input('click');
     const f = await sim.waitScreen((s) => s.screen === 'favorites' && !s.lines.some((l) => /…$/.test(l)), 20_000, 'Favoris');
     const detail = (f as unknown as Record<string, unknown>).detail;
@@ -861,8 +868,14 @@ async function s1210sim(ctx: Ctx): Promise<void> {
       check(!bad.length, `rangées des favoris au format de l’accueil : ${JSON.stringify(bad)} dans ${JSON.stringify(f.lines)}`);
       check(detail === undefined, `champ « detail » encore journalisé (la ligne du détail en bas disparaît, PRD-1.3.0 § 7) : « ${String(detail)} »`);
       check(open.length === 2 && f.lines[1] === open[0] && f.lines[2] === open[1], `accordéon sous « ${FONTAINAS} » (curseur) : 2 lignes attendues juste dessous, vu ${JSON.stringify(f.lines)}`);
-      check(/^à pied \d+ min, puis IC ~?07:4[24]( \+2)? voie 6 !$/.test(O.norm(open[0])), `1re ligne de l’accordéon « ${open[0]} » au lieu de « à pied 9 min, puis IC ~07:42 voie 6 ! » (PRD-1.3.0 § 7)`);
-      check(/^voie 6 au lieu de 4\b.*\b1 changement : tram 3$/.test(O.norm(open[1])), `2e ligne « ${open[1]} » : le souci en tête (« voie 6 au lieu de 4 »), puis « 1 changement : tram 3 » (PRD-1.3.0 § 7)`);
+      if (ctx.v131) {
+        // 1.3.1 (PRD-1.3.1 § 4) : la gare où monter, puis le premier véhicule et son heure, puis les changements
+        check(/^à pied \d+ min → Namur$/.test(O.norm(open[0])), `1re ligne de l’accordéon « ${open[0]} » au lieu de « à pied 9 min → Namur » (PRD-1.3.1 § 4)`);
+        check(/^IC (~?07:4[24]|07:42 \+2)( voie 6 !| voie 6 au lieu de 4)?(, 1 changement( : tram 3)?)?$/.test(O.norm(open[1])), `2e ligne « ${open[1]} » au lieu de « IC 07:42 +2 voie 6 au lieu de 4, 1 changement : tram 3 » (PRD-1.3.1 § 4)`);
+      } else {
+        check(/^à pied \d+ min, puis IC ~?07:4[24]( \+2)? voie 6 !$/.test(O.norm(open[0])), `1re ligne de l’accordéon « ${open[0]} » au lieu de « à pied 9 min, puis IC ~07:42 voie 6 ! » (PRD-1.3.0 § 7)`);
+        check(/^voie 6 au lieu de 4\b.*\b1 changement : tram 3$/.test(O.norm(open[1])), `2e ligne « ${open[1]} » : le souci en tête (« voie 6 au lieu de 4 »), puis « 1 changement : tram 3 » (PRD-1.3.0 § 7)`);
+      }
       return { screen: f };
     }
     // § 2 : une rangée par favori (7 à l'écran), le détail du favori choisi en bas, au-dessus des aides
