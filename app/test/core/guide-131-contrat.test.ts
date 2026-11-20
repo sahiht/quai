@@ -57,3 +57,16 @@ describe('1.3.1 : contrat du guidage', () => {
     expect(MIN).toBe(60_000);
   });
 });
+
+describe('1.3.1 : heure d’un véhicule à prendre (B13)', () => {
+  it('« IC 07:30 +2 » pour un train en retard, « IC à 07:30 » à l’heure, jamais pour un bus', async () => {
+    const { vehicleAtText } = await import('../../src/glasses/guide-views');
+    const { DEFAULT_SETTINGS } = await import('../../src/core/api');
+    const ctx = { now: at('07:20'), settings: DEFAULT_SETTINGS };
+    const ic = { op: 'sncb' as const, mode: 'train' as const, line: 'IC', cat: 'IC' };
+    expect(vehicleAtText(ic, at('07:32'), true, ctx, at('07:30'))).toBe('IC 07:30 +2');
+    expect(vehicleAtText(ic, at('07:30'), true, ctx)).toBe('IC à 07:30');
+    const bus = { op: 'tec' as const, mode: 'bus' as const, line: '6' };
+    expect(vehicleAtText(bus, at('07:14'), true, ctx, at('07:12'))).toBe('bus 6 à 07:14');
+  });
+});
