@@ -353,9 +353,9 @@ export const TROUBLE_MARK = `${NB}!`;
 /**
  * Élément d'un favori dans « Favoris » (1.2.10, PRD-1.2.10 § 2) : une ligne : le nom au plus clair, « ! » s'il a un
  * souci, à droite la réponse au format de l'accueil (« dans 3 min → 08:58 », « tu y es », « … »). Le nom est coupé au
- * mot avant « ! », jamais l'inverse. 1.3.0 (PRD-1.3.0 § 7) : son accordéon (DetailItem.expand, favoriteDetail : « à pied
- * 7 min, puis bus W ~11:49 », « direct »), ouvert sous lui quand le curseur y est ; rien à ouvrir : pas d'`expand`.
- * `planned` : l'accordéon montre un « ~ ».
+ * mot avant « ! », jamais l'inverse. 1.3.0 (PRD-1.3.0 § 7) : son accordéon (DetailItem.expand, favoriteDetail), ouvert
+ * sous lui quand le curseur y est ; rien à ouvrir : pas d'`expand`. 1.3.1 (PRD-1.3.1 § 4) : « à pied 7 min → Flagey »,
+ * puis « bus W ~11:49, 1 changement : métro 2 ». `planned` : l'accordéon montre un « ~ ».
  */
 export function favoriteItem(e: FavoriteEntry, ctx: ViewCtx): { item: DetailItem; planned: boolean } {
   const f = e.fav;
@@ -1374,7 +1374,8 @@ function stepRows(j: Journey, leave: number, ctx: ViewCtx): StepRow[] {
     const tail = rain ? RAIN_TAIL : '';
     const walk = `à pied ${minText(min)}`;
     const right = arrival !== undefined ? hhmm(arrival) : '';
-    const text = to ? fitName(`${walk} → `, apos(to), tail, WALK_ROW_PX - (right ? textWidth(right) + 12 : 0)) : `${walk}${tail}`;
+    // le nom n'est que sur une marche vers un véhicule, qui n'a jamais d'heure à droite (seule la dernière marche en a une)
+    const text = to ? fitName(`${walk} → `, apos(to), tail, WALK_ROW_PX) : `${walk}${tail}`;
     const item: Item = { a: '', segs: [{ t: stepTime(hhmm(time)), hi: true }, { t: text }] };
     if (right) {
       item.bRight = right;
