@@ -22,7 +22,7 @@ import { homeFavoriteText, homeScreen, resetAnswers, rubrics } from '../../src/p
 import { picksScreen, resetKnownLines } from '../../src/phone/screens/picks';
 import { searchScreen, shownLabel } from '../../src/phone/screens/search';
 import { settingsScreen } from '../../src/phone/screens/settings';
-import { arrivalCopyText, copiedText, guideNowLine, guideTitleLine, meansLine, NEWS_130, NEWS_130_WEB, T, TEST_ADVICE, TEST_CHECK, TEST_CHECKED, TEST_LAST } from '../../src/phone/text';
+import { arrivalCopyText, copiedText, guideNowLine, guideTitleLine, meansLine, NEWS_1210, NEWS_1210_WEB, NEWS_130, NEWS_130_WEB, newsLines, T, TEST_ADVICE, TEST_CHECK, TEST_CHECKED, TEST_LAST, typo } from '../../src/phone/text';
 import { at, button, defaults, harness, mount, plain, preset11, SCENARIO, settle, textOf, type, until, withGuide, type Harness } from './helpers';
 import { rideLeg, trip, walkLeg } from './trips';
 
@@ -164,6 +164,41 @@ describe('§ 12, L2 : aide du réglage « Me guider pendant un trajet » ; aucun
     const erasing = Object.entries(T).filter(([, v]) => /effac/i.test(v)).map(([k]) => k);
     expect(erasing.sort()).toEqual(['clearRecent', 'journalClear', 'journalClearAsk', 'journalClearYes', 'journalCleared']);
     for (const l of [...NEWS_130, ...NEWS_130_WEB, ...Object.values(TEST_ADVICE), TEST_CHECK]) expect(l).not.toMatch(/effac/i);
+  });
+});
+
+describe('§ 9 : les nouveautés de la 1.2.10 encore montrées restent vraies (B10, trois petits points)', () => {
+  /** Toutes les lignes que la bannière peut montrer, téléphone et Quai Web, quelle que soit la version d'avant. */
+  const all = (): string[] => {
+    const out = new Set<string>();
+    for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3', '1.2.4', '1.2.5', '1.2.6', '1.2.7', '1.2.8', '1.2.9', '1.2.10']) for (const web of [false, true]) for (const l of newsLines(seen, web)) out.add(l);
+    return [...out];
+  };
+
+  it('Quai Web, appui long : le menu dans l’ordre de B10, « Arrêter le guidage » en dernier, « Voir les arrêts » sauf à pied', () => {
+    const line = NEWS_1210_WEB[4];
+    expect(plain(typo(line))).toBe('Dans l’onglet Lunettes, le bouton « Appui long » ouvre le menu du guidage : « Voir tout le trajet », « Voir les arrêts » (sauf pour un trajet tout à pied), « Arrêter le guidage ».');
+    const at3 = ['« Voir tout le trajet »', '« Voir les arrêts »', '« Arrêter le guidage »'].map((x) => line.indexOf(x));
+    expect(at3.every((i) => i > 0)).toBe(true);
+    expect([...at3].sort((a, b) => a - b)).toEqual(at3);
+    // montrée à qui vient d'avant la 1.2.10, sur Quai Web
+    expect(newsLines('1.2.9', true)).toContain(line);
+    typoOk(typo(line));
+  });
+
+  it('aucune ligne ne cite l’ancien ordre du menu ni un écran « vide » ; la 1re ligne de la 1.2.10 reprend les mots de l’aide (L2)', () => {
+    const lines = all();
+    expect(lines.length).toBeGreaterThan(20);
+    for (const l of lines) {
+      const stop = l.indexOf('« Arrêter le guidage »');
+      const whole = l.indexOf('« Voir tout le trajet »');
+      if (stop >= 0 && whole >= 0) expect(stop, l).toBeGreaterThan(whole);
+      expect(l).not.toMatch(/reste vide|restent vides/);
+      expect(l).not.toMatch(/effac/i);
+    }
+    expect(plain(typo(NEWS_1210[0]))).toBe('« Y aller » : Quai te guide de porte à porte. Les lunettes ne montrent que trois petits points et t’écrivent seulement quand tu dois agir : partir, tourner, monter, descendre.');
+    expect(NEWS_1210_WEB[0]).toBe(NEWS_1210[0]);
+    expect(NEWS_1210[0]).toContain(T.guideHelp.split(' et t’écrivent')[0].replace(/^Les lunettes/, 'Les lunettes'));
   });
 });
 

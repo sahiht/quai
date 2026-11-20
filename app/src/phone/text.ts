@@ -414,22 +414,28 @@ export const NEWS_129_WEB: readonly string[] = [
 
 /**
  * 1.2.10 (PRD-1.2.10 § 7) : nouveautés de la bannière, comme le message « Quai 1.2.10 » des lunettes (« Y aller »,
- * « j'y descends », favoris sur une ligne), puis ce qui change sur le téléphone.
+ * « j'y descends », favoris sur une ligne), puis ce qui change sur le téléphone. Montrées à qui vient d'avant la
+ * 1.2.10 : chacune reste vraie (PRD-1.3.1 § 9). 1.3.1 : l'écran du guidage n'est plus vide (§ 1, trois petits points) :
+ * la 1re ligne le dit avec les mots de l'aide de « Me guider pendant un trajet » (§ 12, L2).
  */
 export const NEWS_1210: readonly string[] = [
-  '« Y aller » : Quai te guide de porte à porte. L’écran des lunettes reste vide et t’écrit seulement quand tu dois agir : partir, tourner, monter, descendre.',
+  '« Y aller » : Quai te guide de porte à porte. Les lunettes ne montrent que trois petits points et t’écrivent seulement quand tu dois agir : partir, tourner, monter, descendre.',
   'Train ou bus déjà pris : dans la liste de ses arrêts, touche celui où tu descends, « j’y descends », et Quai te dit quand descendre.',
   'Favoris des lunettes : une ligne chacun, le détail du favori choisi en bas de l’écran.',
   'Sur l’accueil du téléphone : « Y aller » sur chaque favori et, pendant le trajet, la carte « En cours ». Le réglage « Me guider pendant un trajet » est derrière le bouton « Réglages ».',
 ];
 
-/** 1.2.10 : les mêmes sur Quai Web, où la page du téléphone est l'onglet Réglages, et l'appui long de l'onglet Lunettes. */
+/**
+ * 1.2.10 : les mêmes sur Quai Web, où la page du téléphone est l'onglet Réglages, et l'appui long de l'onglet Lunettes.
+ * 1.3.1 (PRD-1.3.1 § 12, B10) : le menu dans son nouvel ordre, « Arrêter le guidage » en dernier ; « Voir les arrêts »
+ * n'existe pas pour un trajet tout à pied.
+ */
 export const NEWS_1210_WEB: readonly string[] = [
   NEWS_1210[0],
   NEWS_1210[1],
   NEWS_1210[2],
   'Dans l’onglet Réglages : « Y aller » sur chaque favori et, pendant le trajet, la carte « En cours ». Le réglage « Me guider pendant un trajet » est derrière le bouton « Réglages ».',
-  'Dans l’onglet Lunettes, le bouton « Appui long » ouvre le menu du guidage : « Arrêter le guidage », « Voir tout le trajet ».',
+  'Dans l’onglet Lunettes, le bouton « Appui long » ouvre le menu du guidage : « Voir tout le trajet », « Voir les arrêts » (sauf pour un trajet tout à pied), « Arrêter le guidage ».',
 ];
 
 /**

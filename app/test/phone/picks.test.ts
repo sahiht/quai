@@ -940,7 +940,8 @@ describe('bannière « Nouveau » depuis un préréglage 1.1 (accueil de la 1.3.
     const shown = [...el.querySelectorAll('.news p')].map((p) => plain(p.textContent));
     // 1.3.0 (4 lignes), 1.2.10 (3 : le détail des favoris en bas de l'écran n'est plus vrai), 1.2.9 (3), 1.2.8 (2), 1.2.6 (4)…
     expect(shown[0]).toBe('Écran d’un trajet dans les lunettes : une ligne « ▶ Y aller » dit ce que fait un toucher. Dans « Autres trajets », ▲ sur la première ligne ramène au trajet proposé.');
-    expect(shown[4]).toBe('« Y aller » : Quai te guide de porte à porte. L’écran des lunettes reste vide et t’écrit seulement quand tu dois agir : partir, tourner, monter, descendre.');
+    // 1.3.1 (PRD-1.3.1 § 1, § 9 et § 12, L2) : l'écran du guidage montre trois petits points, la ligne reste vraie
+    expect(shown[4]).toBe('« Y aller » : Quai te guide de porte à porte. Les lunettes ne montrent que trois petits points et t’écrivent seulement quand tu dois agir : partir, tourner, monter, descendre.');
     expect(shown[7]).toBe('Dans les lunettes, « imminent » ne s’affiche plus qu’avec le temps réel ; sur l’horaire prévu, c’est « dans ~1 min ».');
     expect(shown[10]).toBe('Dans les lunettes, touche un train au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.');
     expect(shown[12]).toBe('Gares de train, arrêts et lignes de bus, tram, métro : trois rubriques séparées.');
