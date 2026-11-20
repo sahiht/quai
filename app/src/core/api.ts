@@ -193,7 +193,7 @@ export interface Departure {
   stopSeq?: number;
   stopId?: string;
   msg?: string;                 // message de l'opérateur (STIB)
-  last?: boolean;               // dernier passage annoncé de la ligne à cet arrêt (STIB « Dernier passage »)
+  last?: boolean;               // dernier passage de la ligne dans ce sens à cet arrêt (STIB « Dernier passage » ; 1.3.1 : aussi d'après l'horaire, core/boards.ts)
 }
 
 export interface Board {
@@ -309,7 +309,7 @@ export interface Leg {
   fromStop?: string; toStop?: string;     // 1.1 : identifiants temps réel des arrêts physiques de montée et de descente
   platform?: string; newPlatform?: string;
   rt?: boolean; delayMin?: number; cancelled?: boolean;
-  last?: boolean;                         // dernier passage annoncé de la ligne (STIB « Dernier passage »)
+  last?: boolean;                         // dernier passage de la ligne dans ce sens (STIB « Dernier passage » ; 1.3.1 : aussi d'après l'horaire, core/journeys.ts markLast)
   stops?: Stopover[];                     // de la montée à la descente comprises (« Dans le train » ; 1.1 : aussi bus, tram, métro)
   rain?: boolean;                         // 1.2.5 : pluie prévue pendant cette marche (Open-Meteo, grille fixe du relais)
   rtKept?: boolean;                       // 1.2.5 : retard gardé de la mémoire du temps réel (relais muet, 15 min au plus)
