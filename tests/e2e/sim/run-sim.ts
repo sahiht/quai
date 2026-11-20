@@ -248,6 +248,10 @@ const newsFor = (seen: string, web = false): (string | RegExp)[] => {
  * celles qui parlent de « Bus, tram, métro », devenu deux rubriques. 1.2.9 (PRD-1.2.9 § 2.1) : repliée sous « Nouveau
  * dans Quai 1.2.9 », dépliée par « Voir ce qui change ».
  */
+/** 1.3.1 (PRD-1.3.1 § 8) : rang de « Favoris » parmi les rubriques de l'accueil du téléphone (sous « Autour de moi »). */
+const FAV_ROW = V131 ? 1 : 0;
+/** En-tête de « Réglages » : les rubriques dans l'ordre de l'accueil (1.3.1 : gares, lignes, arrêts). */
+const SETTINGS_LEAD = V131 ? 'Favoris, gares, lignes et arrêts se règlent sur l’accueil, dans l’ordre des lunettes.' : 'Favoris, gares, arrêts et lignes se règlent sur l’accueil, dans l’ordre des lunettes.';
 const BANNER_TITLE = V130 ? 'Nouveau dans Quai 1.3.0' : 'Nouveau dans Quai 1.2.10';
 /**
  * 1.3.0 (PRD-1.3.0 § 9 ; app/src/phone/text.ts NEWS_130 et NEWS_130_WEB, formulations finales de l'équipe du
@@ -267,7 +271,10 @@ const BANNER_130_WEB = [
 ];
 /** 1.2.10 (PRD-1.2.10 § 7, app/src/phone/text.ts NEWS_1210) : bannière du téléphone et de l'onglet Réglages de Quai Web. */
 const BANNER_1210 = [
-  '« Y aller » : Quai te guide de porte à porte. L’écran des lunettes reste vide et t’écrit seulement quand tu dois agir : partir, tourner, monter, descendre.',
+  // 1.3.1 (L2, accepté par le directeur) : la ligne dit les trois petits points
+  V131
+    ? '« Y aller » : Quai te guide de porte à porte. Les lunettes ne montrent que trois petits points et t’écrivent seulement quand tu dois agir : partir, tourner, monter, descendre.'
+    : '« Y aller » : Quai te guide de porte à porte. L’écran des lunettes reste vide et t’écrit seulement quand tu dois agir : partir, tourner, monter, descendre.',
   'Train ou bus déjà pris : dans la liste de ses arrêts, touche celui où tu descends, « j’y descends », et Quai te dit quand descendre.',
   'Favoris des lunettes : une ligne chacun, le détail du favori choisi en bas de l’écran.',
   'Sur l’accueil du téléphone : « Y aller » sur chaque favori et, pendant le trajet, la carte « En cours ». Le réglage « Me guider pendant un trajet » est derrière le bouton « Réglages ».',
@@ -275,7 +282,10 @@ const BANNER_1210 = [
 const BANNER_1210_WEB = [
   ...BANNER_1210.slice(0, 3),
   'Dans l’onglet Réglages : « Y aller » sur chaque favori et, pendant le trajet, la carte « En cours ». Le réglage « Me guider pendant un trajet » est derrière le bouton « Réglages ».',
-  'Dans l’onglet Lunettes, le bouton « Appui long » ouvre le menu du guidage : « Arrêter le guidage », « Voir tout le trajet ».',
+  // 1.3.1 (B10) : le menu dans son nouvel ordre
+  V131
+    ? 'Dans l’onglet Lunettes, le bouton « Appui long » ouvre le menu du guidage : « Voir tout le trajet », « Voir les arrêts » (sauf pour un trajet tout à pied), « Arrêter le guidage ».'
+    : 'Dans l’onglet Lunettes, le bouton « Appui long » ouvre le menu du guidage : « Arrêter le guidage », « Voir tout le trajet ».',
 ];
 /**
  * 1.3.0 : pour qui vient d'avant la 1.2.10, la bannière de la 1.2.10 sans sa ligne du détail des favoris « en bas de
@@ -486,6 +496,18 @@ async function selectFirstFavorite(): Promise<void> {
   if (!V131) return;
   await sim.drain();
   if (sim.last?.screen === 'home') await sim.select(firstFavSel(sim.last));
+}
+
+/**
+ * Quai Web et téléphone (lunettes dessinées dans la page) : l'accueil, puis le curseur sur le premier favori. 1.3.1
+ * (PRD-1.3.1 § 8) : il s'ouvre sur « Autour de moi », ▼ jusqu'au premier favori ; avant, il y était déjà.
+ */
+async function webFirstFavorite(page: Page): Promise<void> {
+  const h = await page.waitScreen((s) => s.screen === 'home' && (!V131 || (loaded(s) && homeFavorites(s).length > 0)), 20_000, 'accueil');
+  if (!V131) return;
+  const want = firstFavSel(h);
+  for (let i = 0; i < 8 && page.lastScreen()?.sel !== want; i++) await page.gesture('down');
+  check(page.lastScreen()?.sel === want, `curseur pas arrivé sur le premier favori (sel ${page.lastScreen()?.sel}, attendu ${want})`);
 }
 
 /* ------------------------------ Tableaux complets, arrêts d'un départ (PRD-1.2.3 § 1, § 2) ------------------------------ */
@@ -1471,7 +1493,9 @@ async function s1run(): Promise<void> {
   });
   await step('alight', async () => {
     const s = await sim.waitScreen(is('guide', (x) => x.lines[0] === 'Descends au prochain arrêt' && x.lines[1] === 'Bruxelles-Nord, 08:42'), 150_000, '« Descends au prochain arrêt » avant Bruxelles-Nord');
-    check(s.lines[2] === 'ensuite : tram 3 à ~08:44', `« ${s.lines[2]} » (§ 3.2)`);
+    // 1.3.1 (B16, U4) : la correspondance très juste se dit dès la descente (IC 08:42, 2 min à pied, tram 3 à 08:44 : marge 0)
+    const thenWant = V131 ? 'ensuite : tram 3 à ~08:44, très juste' : 'ensuite : tram 3 à ~08:44';
+    check(s.lines[2] === thenWant, `« ${s.lines[2]} » au lieu de « ${thenWant} » (§ 3.2${V131 ? ', PRD-1.3.1 B16' : ''})`);
     return { screen: s, shot: false };
   });
   await step('arrived', async () => {
@@ -1995,6 +2019,8 @@ async function holiday(): Promise<void> {
       return { screen: s, relief: 'home', deliver: 'g06' };
     });
     await step('steps-1111', async () => {
+      // 1.3.1 (PRD-1.3.1 § 8) : le curseur s'ouvre sur « Autour de moi » : d'abord le premier favori
+      if (V131) await selectFirstFavorite();
       await sim.input('click');
       const s = await sim.waitScreen(is('steps', (x) => field(x, 'page') === 1 && loaded(x)), 25_000, 'trajet du 11/11');
       check(s.title === 'Bureau' && stepsHintOk(s, 'go'), `titre « ${s.title} », aide « ${hint(s)} » (PRD-1.2.10 § 5)`);
@@ -2010,7 +2036,9 @@ async function holiday(): Promise<void> {
     await step('home-1211', async () => {
       const s = await sim.waitScreen(is('home', (x) => homeReady(x) && homeFavorites(x).length >= 2), 25_000, 'accueil le 12/11');
       check(!has(s, /^Jour férié/), `pas de jour férié le 12/11 (CA-121.7) : ${JSON.stringify(s.lines)}`);
-      check(hint(s) === 'Lignes de bus, tram, métro   à choisir', `dernière ligne « ${hint(s)} »`);
+      // 1.3.1 (PRD-1.3.1 § 8) : « Arrêts » est la dernière rubrique
+      const lastRow = V131 ? 'Arrêts de bus, tram, métro   à choisir' : 'Lignes de bus, tram, métro   à choisir';
+      check(hint(s) === lastRow, `dernière ligne « ${hint(s)} » au lieu de « ${lastRow} »`);
       homeCommon(s, false);
       return { screen: s, shot: false };
     });
@@ -2134,6 +2162,8 @@ async function firstrun(): Promise<void> {
     return { screen: s, relief: 'home', tour: ['glasses-home-near.png', 'Accueil sans favori (nouvelle installation) : « Près de Bruxelles-Nord », « Ajouter un favori », les trois rubriques à choisir, aide des gestes les 7 premiers jours'] };
   });
   await step('empty-list', async () => {
+    // 1.3.1 (PRD-1.3.1 § 8) : le curseur s'ouvre sur « Autour de moi » : d'abord « Ajouter un favori »
+    if (V131) await sim.select(homeIndex(sim.last!, /^(Ajouter un favori|Favoris)( {3}|$)/));
     await sim.input('click');
     const s = await sim.waitScreen(is('favorites'), 10_000, '« Favoris » vide');
     check(sameList(s.lines.slice(0, 2), ['Ajouter un favori   sur le téléphone', 'Autre adresse   sur le téléphone']), `lignes ${JSON.stringify(s.lines)} (PRD-1.2.2 § 1.2)`);
@@ -2985,11 +3015,13 @@ async function phone(): Promise<void> {
         await pick(page, 'r-arrivee', 'Rue Neuve 1, 1000 Bruxelles', 'adresse');
         await page.waitFor(`document.querySelectorAll('.result').length === 3`, 15_000, 'trois cartes');
         const cards = await cardsText(page);
-        card(cards[0], 'Le plus court', '07:33 → 08:51', 'IC + tram 3, à pied 7 + 2 + 3 min', 'Arrive le plus tôt.');
+        // 1.3.1 (PRD-1.3.1 § 4, téléphone) : « à pied 7 min → Namur, puis 2 + 3 min » (le nom de la gare où monter)
+        card(cards[0], 'Le plus court', '07:33 → 08:51', V131 ? 'IC + tram 3, à pied 7 min → Namur, puis 2 + 3 min' : 'IC + tram 3, à pied 7 + 2 + 3 min', 'Arrive le plus tôt.');
         // 1.2.5 (PRD-1.2.5 § 3) : la marche finale (08:46 → 08:56, Bruxelles) sous la pluie du faux Open-Meteo
-        card(cards[1], 'Sans changement', '07:33 → 08:56', 'IC, à pied 7 + 10 min, pluie prévue', 'Aucun changement, mais arrive 5 min plus tard.');
+        // (Bruxelles-Central vers la Bourse : 11 min d'après le vrai chemin, 10 à vol d'oiseau ; contrôle du vrai chemin)
+        card(cards[1], 'Sans changement', '07:33 → 08:56', V131 ? /^IC, à pied 7 min → Namur, puis 1[01] min, pluie prévue$/ : 'IC, à pied 7 + 10 min, pluie prévue', 'Aucun changement, mais arrive 5 min plus tard.');
         // « Le suivant » : l'IC d'une heure plus tard, puis le tram 3 ou 4 selon le classement du cœur (PRD-1.2.2 § 7)
-        card(cards[2], 'Le suivant', /^08:33 → \d\d:\d\d$/, /^IC \+ tram [34], à pied 7 \+ 2 \+ 3 min$/, 'Même trajet, départ suivant.');
+        card(cards[2], 'Le suivant', /^08:33 → \d\d:\d\d$/, V131 ? /^IC \+ tram [34], à pied 7 min → Namur, puis 2 \+ 3 min$/ : /^IC \+ tram [34], à pied 7 \+ 2 \+ 3 min$/, 'Même trajet, départ suivant.');
         check(cards.every((c) => c.endsWith('Lunettes')), 'un bouton « Lunettes » par carte');
         check((await page.eval<number>(`document.querySelectorAll('.result .chip, .result .chips').length`)) === 0, 'plus de pastilles de lignes (remplacées par la ligne des moyens)');
         const roles = await page.eval<string>(`document.querySelector('.results').getAttribute('role') + '/' + document.querySelectorAll('.results [role=radio]').length + '/' + document.querySelector('.result button.btn-glasses').getAttribute('aria-label')`);
@@ -3035,9 +3067,10 @@ async function phone(): Promise<void> {
         await pick(page, 'r-arrivee', 'Rue du Progrès 20, 1210 Saint-Josse-ten-Noode', 'adresse');
         await page.waitFor(`document.querySelectorAll('.result').length === 3`, 15_000, 'trois cartes');
         const cards = await cardsText(page);
-        card(cards[0], 'Moins de marche', '07:32 → 08:46', 'bus W + métro 2, à pied 2 + 2 + 3 min', 'Arrive 16 min après le plus rapide, avec moins de marche.');
-        card(cards[1], 'Plus tôt', '07:34 → 08:30', 'S1, à pied 19 + 5 min', 'Plus tôt de 16 min, mais 19 min à pied.');
-        card(cards[2], 'Le suivant', '07:52 → 09:04', 'bus W + métro 2, à pied 2 + 2 + 3 min');
+        const busW = V131 ? 'bus W + métro 2, à pied 2 min → Waterloo Eglise, puis 2 + 3 min' : 'bus W + métro 2, à pied 2 + 2 + 3 min';
+        card(cards[0], 'Moins de marche', '07:32 → 08:46', busW, 'Arrive 16 min après le plus rapide, avec moins de marche.');
+        card(cards[1], 'Plus tôt', '07:34 → 08:30', V131 ? 'S1, à pied 19 min → Waterloo, puis 5 min' : 'S1, à pied 19 + 5 min', 'Plus tôt de 16 min, mais 19 min à pied.');
+        card(cards[2], 'Le suivant', '07:52 → 09:04', busW);
         // REVUE-USAGE n° 13 : la marche dite une fois, dans la ligne des moyens (plus après la durée)
         check(cards[0].split(' | ').includes('1 h 14, 1 changement') && cards[1].split(' | ').includes('56 min, direct'), `durées : ${cards[0]} / ${cards[1]}`);
         return { deliver: 'p03', scroll: '.res-head' };
@@ -3051,7 +3084,7 @@ async function phone(): Promise<void> {
         await page.waitFor(`document.querySelectorAll('.result').length === 3`, 15_000, 'trois cartes');
         const cards = await cardsText(page);
         card(cards[0], 'Moins de marche', '08:32 → 09:43', /^bus W \+ /, 'Arrive 8 min après le plus rapide, avec moins de marche.');
-        card(cards[1], 'Plus tôt', '08:34 → 09:35', /, à pied 19 \+ /, 'Plus tôt de 8 min, mais 19 min à pied.');
+        card(cards[1], 'Plus tôt', '08:34 → 09:35', V131 ? /, à pied 19 min → Waterloo, puis / : /, à pied 19 \+ /, 'Plus tôt de 8 min, mais 19 min à pied.');
         card(cards[2], 'Le suivant', '08:52 → 10:07', /^bus W \+ /);
         const n = page.screens().length;
         await page.click('.result:nth-child(2) button.btn-glasses');
@@ -3380,8 +3413,9 @@ async function webPosition(): Promise<void> {
       await page.reload();
       await page.waitFor(`${N("document.querySelector('.w-pos-box .w-pos-status')?.textContent")} === ${JSON.stringify(chosen)}`, 15_000, 'position gardée au rechargement');
       const h = await page.waitScreen((s) => s.screen === 'home' && loaded(s) && homeFavorites(s).length === 2, 25_000, 'accueil des lunettes dans Quai Web', n);
-      check(h.lines[0] === 'Favoris   3' && /^Bureau {3}(maintenant|dans 1 min) → 08:46$/.test(homeFavorites(h)[0] ?? ''), `accueil ${JSON.stringify(h.lines)}`);
-      check(hint(h) === 'Lignes de bus, tram, métro   à choisir' && !h.lines.some((l) => /ferme simplement|~/.test(l)), `aucun pied sur Quai Web (§ 4.5) : ${JSON.stringify(h.lines)}`);
+      // 1.3.1 (PRD-1.3.1 § 8) : « Autour de moi » en tête, « Favoris » dessous, « Arrêts » en dernier
+      check((V131 ? h.lines[0].startsWith('Autour de moi   ') && h.lines[1] === 'Favoris   3' : h.lines[0] === 'Favoris   3') && /^Bureau {3}(maintenant|dans 1 min) → 08:46$/.test(homeFavorites(h)[0] ?? ''), `accueil ${JSON.stringify(h.lines)}`);
+      check(hint(h) === (V131 ? 'Arrêts de bus, tram, métro   à choisir' : 'Lignes de bus, tram, métro   à choisir') && !h.lines.some((l) => /ferme simplement|~/.test(l)), `aucun pied sur Quai Web (§ 4.5) : ${JSON.stringify(h.lines)}`);
       const tab = await page.eval<string>(`document.querySelector('#w-tab-lunettes')?.getAttribute('aria-selected')`);
       check(tab === 'true', `onglet Lunettes ouvert (${tab})`);
       // relief (§ 4.4 : « À vérifier dans le simulateur et sur Quai Web ») mesuré sur le canvas
@@ -3545,7 +3579,10 @@ async function reopen(): Promise<void> {
       const at = async (days: number): Promise<GlassesScreen> => {
         const n = page.screens().length;
         await page.goto(pageUrl({ ...S1, mockNow: new Date(Date.parse(S1.mockNow) + days * 86_400_000).toISOString() }, '#/'));
-        return page.waitScreen((s) => s.screen === 'home' && s.lines.some((l) => LINES_ROW.test(l)), 20_000, `accueil ${days} jours après le premier lancement`, n);
+        // l'heure de l'écran distingue cette page de la précédente, dont un dernier écran peut encore arriver au journal
+        const t = Date.parse(S1.mockNow) + days * 86_400_000;
+        const clocks = [0, 60_000].map((d) => new Date(t + d).toLocaleTimeString('fr-BE', { timeZone: 'Europe/Brussels', hour: '2-digit', minute: '2-digit' }));
+        return page.waitScreen((s) => s.screen === 'home' && s.lines.some((l) => LINES_ROW.test(l)) && clocks.includes(s.clock ?? ''), 20_000, `accueil ${days} jours après le premier lancement (${clocks[0]})`, n);
       };
       const d6 = await at(6.9);
       check(hint(d6) === H.home, `6,9 jours après : aide « ${hint(d6)} »`);
@@ -3568,7 +3605,7 @@ async function reopen(): Promise<void> {
       // 1.2.10 : « y aller » (guidage), double toucher : « En cours » ; réouverture de Quai à 08:05 dans l'IC : le guidage
       // reprend (état recalculé depuis l'heure, sans rejouer les moments passés, PRD-1.2.10 § 3.7)
       await page.goto(pageUrl({ ...PCUR(S1), mockSpeed: '20' }, '#/'));
-      await page.waitScreen((s) => s.screen === 'home', 20_000, 'accueil');
+      await webFirstFavorite(page);
       await page.gesture('tap');
       await page.waitScreen((s) => s.screen === 'steps' && s.followed === false, 20_000, 'étapes, pas encore guidées');
       await page.gesture('tap');
@@ -3584,7 +3621,9 @@ async function reopen(): Promise<void> {
       }
       const m = page.screens().length;
       const g = r.screen === 'guide' ? r : await page.waitScreen((s) => s.screen === 'guide', 10_000, '« En cours » rouvre le guidage', n);
-      check(g.title === 'Bureau', `titre du guidage repris « ${g.title} »`);
+      // 1.3.1 (§ 3, § 12) : à la reprise, « Où tu en es » s'intitule « Guidage en cours » et dit « Jusqu’au bureau » ; un
+      // moment garde le titre du trajet
+      check(g.title === 'Bureau' || (V131 && g.title === 'Guidage en cours' && g.lines.some((l) => /^Jusqu’au bureau$/.test(nbn(l)))), `titre du guidage repris « ${g.title} » : ${JSON.stringify(g.lines)}`);
       await page.gesture('double');
       const h = await page.waitScreen((s) => s.screen === 'home' && /^En cours : vers le bureau {3}/.test(s.lines[0] ?? ''), 10_000, 'accueil, « En cours » gardée', m);
       return { glasses: h };
@@ -3600,7 +3639,7 @@ async function reopen(): Promise<void> {
   await withChrome(async (page) => {
     await phoneStep(page, 'not-left', async () => {
       await page.goto(pageUrl(PCUR(S1), '#/'));
-      await page.waitScreen((s) => s.screen === 'home', 20_000, 'accueil');
+      await webFirstFavorite(page);
       await page.gesture('tap');
       await page.waitScreen((s) => s.screen === 'steps' && s.followed === false, 20_000, 'étapes à 07:31, pas guidées');
       await page.gesture('tap');
@@ -3738,7 +3777,9 @@ async function s126(): Promise<void> {
   });
   await step('accueil', async () => {
     const s = await back(is('home', (x) => homeReady(x) && has(x, /^Lignes de bus, tram, métro {3}/)), 'accueil');
-    check(sameList(s.lines.slice(-3), ['Gares de train   1 gare', 'Arrêts de bus, tram, métro   1 arrêt', 'Lignes de bus, tram, métro   3 lignes']), `les trois rubriques ${JSON.stringify(s.lines)} (PRD-1.2.6 § 1)`);
+    // 1.3.1 (PRD-1.3.1 § 8) : Gares, Lignes, Arrêts
+    const three = V131 ? ['Gares de train   1 gare', 'Lignes de bus, tram, métro   3 lignes', 'Arrêts de bus, tram, métro   1 arrêt'] : ['Gares de train   1 gare', 'Arrêts de bus, tram, métro   1 arrêt', 'Lignes de bus, tram, métro   3 lignes'];
+    check(sameList(s.lines.slice(-3), three), `les trois rubriques ${JSON.stringify(s.lines)} (PRD-1.2.6 § 1${V131 ? ', ordre du PRD-1.3.1 § 8' : ''})`);
     homeCommon(s, false);
     return { screen: s, relief: 'home' };
   });
@@ -3833,7 +3874,9 @@ async function s126(): Promise<void> {
       await page.goto(pageUrl(P126(S2), '#/'));
       await waitHome(page);
       const rows = (await homeRows(page)).slice(2);
-      check(sameList(rows.map((r) => `${r.t1} : ${r.count}`), ['Gares de train : 1 gare', 'Arrêts de bus, tram, métro : 1 arrêt', 'Lignes de bus, tram, métro : 3 lignes']) && rows[2].t2 === 'W 3 4', `rubriques « Gares », « Arrêts » et « Lignes » : ${JSON.stringify(rows)}`);
+      // 1.3.1 (PRD-1.3.1 § 8) : même ordre que les lunettes : Autour de moi, Favoris, puis Gares, Lignes, Arrêts
+      const want3 = V131 ? ['Gares de train : 1 gare', 'Lignes de bus, tram, métro : 3 lignes', 'Arrêts de bus, tram, métro : 1 arrêt'] : ['Gares de train : 1 gare', 'Arrêts de bus, tram, métro : 1 arrêt', 'Lignes de bus, tram, métro : 3 lignes'];
+      check(sameList(rows.map((r) => `${r.t1} : ${r.count}`), want3) && rows[V131 ? 1 : 2].t2 === 'W 3 4', `rubriques « Gares », « Arrêts » et « Lignes » : ${JSON.stringify(rows)}`);
       await sleep(1_500);
       return { shot: true, scroll: { text: 'Gares de train' } };
     });
@@ -3966,7 +4009,10 @@ async function s128(): Promise<void> {
     check(field<number>(s, 'vehicle') === 2 && field<number>(s, 'passed') === 2, `le train a quitté Namur et Gembloux, il arrive à Ottignies (vehicle ${field<number>(s, 'vehicle')}, passed ${field<number>(s, 'passed')})`);
     check(/^●\s: le train arrive$/.test(s.lines[0] ?? ''), `ligne du haut « ${s.lines[0]} »`);
     // la gare qu'il vient de quitter en pâle avec son heure (07:55 +2), le ● et le curseur sur la même page
-    check(rows[1 - top] === '○ Gembloux voie 1   07:57', `Gembloux quittée : ${JSON.stringify(rows)} (top ${top})`);
+    // 1.3.1 (PRD-1.3.1 § 6) : la ligne d'action prend une rangée à la liste : cinq gares à l'écran, du ● (Ottignies) au
+    // curseur (Bruxelles-Central) ; Gembloux, quittée, est sur la page d'avant
+    if (V131 && top === 2) check(rows.length === 5 && (s.sel ?? 0) - top === 4, `une rangée de moins : du ● au curseur sur la même page (top ${top}, sel ${s.sel}) : ${JSON.stringify(rows)}`);
+    else check(rows[1 - top] === '○ Gembloux voie 1   07:57', `Gembloux quittée : ${JSON.stringify(rows)} (top ${top})`);
     check(/^● Ottignies voie 2 {3}dans 1[01] min$/.test(rows[2 - top] ?? ''), `● Ottignies, dans 11 min (08:09 +2, l'horloge du simulateur avance) : ${JSON.stringify(rows)}`);
     check(/^○ Bruxelles-Nord voie 11 {3}dans 4[23] min$/.test(rows[at - top] ?? ''), `Bruxelles-Nord, départ 08:43 : ${JSON.stringify(rows)}`);
     check(rows.filter((r) => r.startsWith('●')).length === 1, `un seul ● : ${JSON.stringify(rows)}`);
@@ -4031,7 +4077,9 @@ async function s129(): Promise<void> {
       check(sec === `Dans tes lunettes | Mêmes rubriques, même ordre. | Aperçu | ${AFFICHAGE_FROM_HOME}`, `section « Dans tes lunettes » : ${sec}`);
       const rows = await homeRows(page);
       check(sameList(rows.map((r) => r.t1), HOME_TITLES) && sameList(rows.map((r) => r.href), HOME_HREFS), `rubriques des lunettes, dans leur ordre : ${JSON.stringify(rows.map((r) => [r.t1, r.href]))}`);
-      check(rows[0].count === '3' && rows[1].t2 === 'à moins de 500 m' && sameList(rows.slice(2).map((r) => r.count), ['1 gare', '1 arrêt', '2 lignes']) && rows[4].t2 === '3 4', `nombres, rayon et pastilles : ${JSON.stringify(rows)}`);
+      // 1.3.1 (PRD-1.3.1 § 8) : Autour de moi, Favoris, Gares, Lignes (ses pastilles), Arrêts
+      if (V131) check(rows[1].count === '3' && rows[0].t2 === 'à moins de 500 m' && sameList(rows.slice(2).map((r) => r.count), ['1 gare', '2 lignes', '1 arrêt']) && rows[3].t2 === '3 4', `nombres, rayon et pastilles : ${JSON.stringify(rows)}`);
+      else check(rows[0].count === '3' && rows[1].t2 === 'à moins de 500 m' && sameList(rows.slice(2).map((r) => r.count), ['1 gare', '1 arrêt', '2 lignes']) && rows[4].t2 === '3 4', `nombres, rayon et pastilles : ${JSON.stringify(rows)}`);
       // les 3 favoris montrés (HOME_FAVORITES), en retrait sous « Favoris », chacun sa réponse et son bouton « Lunettes »
       const favs = await page.eval<string[]>(`(() => { ${NORM} return [...document.querySelectorAll('.fav-card .fav-row')].map((r) => { const t = n(r.querySelector('.t1')?.textContent); return [t, n(r.querySelector('.answer')?.textContent) ? 'réponse' : 'sans réponse', n(r.querySelector('button.btn-glasses')?.getAttribute('aria-label')) === 'Afficher ' + t + ' dans les lunettes' ? 'Lunettes' : 'sans bouton'].join(' | '); }); })()`);
       check(favs.length === 3 && favs.every((f) => /^\S.* \| réponse \| Lunettes$/.test(f)), `favoris de l’accueil : ${JSON.stringify(favs)}`);
@@ -4055,7 +4103,7 @@ async function s129(): Promise<void> {
       await page.waitFor(`location.hash === '#/reglages'`, 5_000, '« Réglages » ouvre #/reglages');
       await waitText(page, /Marche maximale/, 'écran « Réglages »');
       const hd = await screenHead(page);
-      check(hd.back === 'Accueil' && hd.title === 'Réglages' && hd.lead === 'Favoris, gares, arrêts et lignes se règlent sur l’accueil, dans l’ordre des lunettes.', `en-tête de « Réglages » : ${JSON.stringify(hd)}`);
+      check(hd.back === 'Accueil' && hd.title === 'Réglages' && hd.lead === SETTINGS_LEAD, `en-tête de « Réglages » : ${JSON.stringify(hd)} (attendu : « ${SETTINGS_LEAD} »)`);
       const groups = (await page.eval<string[]>(`[...document.querySelectorAll('.screen .group-title')].map((g) => g.textContent)`)).map(nbn);
       check(sameList(groups, ['Dans les lunettes', 'Pendant un trajet', 'Tes trajets', 'Quai']), `groupes : ${JSON.stringify(groups)} (1.2.10 : « Pendant un trajet », PRD-1.2.10 § 4.1)`);
       // Affichage (rayon, « ~ », pluie), Alertes, Position et langue, Données ; plus de « Mes favoris »
@@ -4179,9 +4227,9 @@ async function s129(): Promise<void> {
       await page.goto(pageUrl(PEMPTY(S2), '#/'));
       await waitHome(page);
       const rows = await homeRows(page);
-      check(rows[0].t1 === 'Favoris' && rows[0].count === 'Aucun favori', `« Favoris » sans favori : ${JSON.stringify(rows[0])}`);
+      check(rows[FAV_ROW].t1 === 'Favoris' && rows[FAV_ROW].count === 'Aucun favori', `« Favoris » sans favori : ${JSON.stringify(rows[FAV_ROW])}`);
       check(nbn(await page.eval<string>(`document.querySelector('.fav-card .add-link')?.textContent`)) === 'Ajouter un favori' && (await page.eval<string>(`document.querySelector('.fav-card .add-link')?.getAttribute('href')`)) === '#/favoris/nouveau', 'lien « Ajouter un favori »');
-      check(sameList(rows.slice(2).map((r) => `${r.count} ${r.href}`), ['à choisir #/gares/ajouter', 'à choisir #/arrets/ajouter', 'à choisir #/lignes/ajouter']), `rubriques vides : ${JSON.stringify(rows.slice(2))}`);
+      check(sameList(rows.slice(2).map((r) => `${r.count} ${r.href}`), V131 ? ['à choisir #/gares/ajouter', 'à choisir #/lignes/ajouter', 'à choisir #/arrets/ajouter'] : ['à choisir #/gares/ajouter', 'à choisir #/arrets/ajouter', 'à choisir #/lignes/ajouter']), `rubriques vides : ${JSON.stringify(rows.slice(2))}`);
       await page.eval(`(() => { ${NORM} [...document.querySelectorAll('.mirror .nav-row')].find((a) => n(a.querySelector('.t1')?.textContent) === 'Gares de train').click(); return true; })()`);
       await page.waitFor(`location.hash === '#/gares/ajouter'`, 5_000, '« Gares de train » vide ouvre l’ajout');
       await waitText(page, /Aucune gare|Ajouter une gare/, 'écran « Gares de train »');
@@ -4194,7 +4242,7 @@ async function s129(): Promise<void> {
       await page.goto(pageUrl(PMANY(S1), '#/'));
       await waitHome(page);
       const rows = await homeRows(page);
-      check(rows[0].t1 === 'Favoris' && rows[0].count === '5', `« Favoris   5 » : ${JSON.stringify(rows[0])}`);
+      check(rows[FAV_ROW].t1 === 'Favoris' && rows[FAV_ROW].count === '5', `« Favoris   5 » : ${JSON.stringify(rows[FAV_ROW])}`);
       const shown = await page.eval<number>(`document.querySelectorAll('.fav-card .fav-row').length`);
       const more = nbn(await page.eval<string>(`document.querySelector('.fav-card .more-favs')?.textContent`));
       check(shown === 3 && more === 'Voir les 2 autres favoris', `3 favoris, puis « ${more} » (${shown} montrés)`);
@@ -4202,14 +4250,19 @@ async function s129(): Promise<void> {
       await page.waitFor(`document.querySelectorAll('.fav-card .fav-row').length === 5 && !document.querySelector('.fav-card .more-favs')`, 5_000, 'les 2 autres favoris montrés');
       check(await page.eval<boolean>(`document.activeElement === document.querySelectorAll('.fav-card .fav-row')[3]?.querySelector('button.btn-glasses')`), 'curseur sur le bouton « Lunettes » du premier favori ajouté');
       await page.waitFor(`(() => { const a = [...document.querySelectorAll('.fav-card .fav-row .answer')]; return a.length === 5 && a.every((x) => x.textContent && !x.textContent.endsWith('…')); })()`, 25_000, 'réponses des 5 favoris');
-      const favs = await page.eval<string[]>(`(() => { ${NORM} return [...document.querySelectorAll('.fav-card .fav-row')].map((r) => { const t = n(r.querySelector('.t1')?.textContent); return n(r.querySelector('button.btn-glasses')?.getAttribute('aria-label')) === 'Afficher ' + t + ' dans les lunettes' ? t : 'sans bouton'; }); })()`);
+      const favs = await page.eval<string[]>(`(() => { ${NORM} return [...document.querySelectorAll('.fav-card .fav-row')].map((r) => { const t = n(r.querySelector('.t1')?.textContent)${V131 ? ".replace(/ !( .*)?$/, '')" : ''}; return n(r.querySelector('button.btn-glasses')?.getAttribute('aria-label')) === 'Afficher ' + t + ' dans les lunettes' ? t : 'sans bouton'; }); })()`);
+      // (1.3.1, B15 : le « ! » d'un favori à souci, et ses mots pour les lecteurs d'écran, suivent le nom ; le nom du bouton reste sans « ! »)
       check(favs.length === 5 && !favs.includes('sans bouton'), `les 5 favoris et leur bouton « Lunettes » : ${JSON.stringify(favs)}`);
       check(new Set(favs).size === 5, `cinq favoris différents : ${JSON.stringify(favs)}`);
       // le bouton d'un favori ajouté : ce favori dans les lunettes, le message à côté du bouton
       const n = page.screens().length;
-      await page.eval(`document.querySelectorAll('.fav-card .fav-row')[4].querySelector('button.btn-glasses').click(), true`);
-      const g = await page.waitScreen((x) => x.screen === 'steps' && x.title.startsWith(favs[4]), 20_000, `« ${favs[4]} » dans les lunettes`, n);
-      const msg = nbn(await page.waitFor<string>(`document.querySelectorAll('.fav-card .fav-row')[4].querySelector('.msg')?.textContent`, 10_000, 'message à côté du bouton'));
+      // un des deux favoris ajoutés qui a un trajet (« Maison », où l'on est à 07:31, n'ouvre que « Tu es déjà à la maison. » ;
+      // 1.3.1 : l'ordre des favoris de l'accueil peut le mettre en dernier)
+      const answers = await page.eval<string[]>(`(() => { ${NORM} return [...document.querySelectorAll('.fav-card .fav-row')].map((r) => n(r.querySelector('.answer')?.textContent)); })()`);
+      const k = [4, 3].find((i) => /^(départ|partir|dans|maintenant)/.test(answers[i] ?? '')) ?? 4;
+      await page.eval(`document.querySelectorAll('.fav-card .fav-row')[${k}].querySelector('button.btn-glasses').click(), true`);
+      const g = await page.waitScreen((x) => x.screen === 'steps' && (x.title.startsWith(favs[k]) || x.title === favs[k].replace(/^Vers /, '')), 20_000, `« ${favs[k]} » dans les lunettes (réponses des favoris : ${JSON.stringify(answers)})`, n);
+      const msg = nbn(await page.waitFor<string>(`document.querySelectorAll('.fav-card .fav-row')[${k}].querySelector('.msg')?.textContent`, 10_000, 'message à côté du bouton'));
       check(/^Affiché dans les lunettes/.test(msg), `message « ${msg} »`);
       return { shot: true, scroll: '.fav-card', glasses: g };
     });
