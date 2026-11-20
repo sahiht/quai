@@ -92,7 +92,9 @@ describe('PRD-1.3.1 § 12, B21 : « Gares de train » en accordéon', () => {
 
   it('le « ~ » du train d’après demande la note « ~ horaire prévu » ; en calcul, introuvable, aucun train : rien ne s’ouvre', () => {
     const v = stationsView([{ pick: pick('a', 'Namur'), next: s1, after: { ...ic, rt: false }, state: 'ok' }], ctx());
-    expect(nb(v.note ?? '')).toBe('~ horaire prévu, sans temps réel');
+    // contrôle 1.3.1 : la note suit ce qui est à l'écran (notePlanned) : dite sous la gare ouverte et son « ~ »
+    expect(v.note).toBeUndefined();
+    expect(lines(v).slice(-2)).toEqual(['~ horaire prévu, sans temps réel', nb(HINTS.stations)]);
     const quiet = stationsView([{ pick: pick('a', 'Namur') }, { pick: pick('b', 'Gembloux'), state: 'missing' }, { pick: pick('c', 'Wavre'), state: 'none' }], ctx());
     expect((quiet.items as DetailItem[]).every((i) => !i.expand)).toBe(true);
     // un prochain train déjà parti (réponse vieille de plus de 30 s) : ni rangée ni accordéon jusqu'au rafraîchissement

@@ -317,6 +317,15 @@ export function createCore(opts: CoreOptions): Core {
       }
     },
 
+    /** 1.3.1 (PRD-1.3.1 § 14, R1) : sorties du métro (data/exits.json), par le même client. Jamais d'exception. */
+    async walkExits() {
+      try {
+        return await data.walkExits();
+      } catch {
+        return null;
+      }
+    },
+
     /** 1.2.10 : date des chemins à pied publiés (écran Données), par le même client que les autres données. */
     async walkIndex(): Promise<{ date: string; tiles?: number } | null> {
       try {

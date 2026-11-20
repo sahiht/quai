@@ -54,10 +54,12 @@ import type {
 import { LABEL_TEXT, labelOf, type LineMatch } from '../core/api';
 import { MESSAGES, QuaiError } from '../core/errors';
 import { NEAR_M, asTrip, endpointPoint, favoriteTitle, placeOf } from '../core/favorites';
+import { exitByLegOf } from '../core/exits';
 // 1.3.1 (B20) : le soir, les favoris de la règle 5 qui ont un trajet plus tard (homeShown)
 import { answerTime, isLastAnswer } from '../core/favorites';
 import { dismissMoment, guideStatusOf, guideStep, newGuideMemory, replanJourney, replanNone, rideJourney, rideOnJourney, tightLegs } from '../core/guide';
 import type { GuideFix, GuideKind, GuideMemory, GuideState, GuideStatus, LocationNeed, VehicleRef, WalkRoute } from '../core/guide-types';
+import type { ExitsFile } from '../core/walk/exits-format';
 import { shortAddress } from '../core/text';
 import { displayName, distanceM, mainMode } from '../core/util';
 import type { Mode, Names, Op } from '../../../shared/types';
@@ -279,6 +281,8 @@ export const WATCH_OPTS = {
 const FIX_ACCURACY_MAX_M = 75;
 /** 1.2.10 : chemin à pied impossible : nouvel essai pour la même étape au plus tôt 2 min après. */
 const ROUTE_RETRY_MS = 2 * 60_000;
+/** 1.3.1 (R1) : sorties du métro absentes ou en échec : nouvelle lecture au plus tôt 10 min plus tard. */
+const EXITS_RETRY_MS = 10 * 60_000;
 /**
  * 1.2.10 (§ 3.8) : un chemin tout juste reçu n'est pas redemandé pour la même étape avant 10 s (le moteur ne le redemande
  * qu'après 10 s hors du chemin).
@@ -705,6 +709,9 @@ export class GlassesController implements GlassesApi {
   private nextFound = new Map<string, { vehicle: VehicleRef; depAt: number; rt: boolean }>();
   /** Batterie des lunettes au dernier signal `device` (absente : inconnue), donnée au moteur (GuideInput.battery). */
   private battery: number | undefined;
+  /** 1.3.1 (R1) : sorties du métro publiées (exits.json), lues au premier guidage de trajet ; null tant qu'inconnues */
+  private exits: ExitsFile | null = null;
+  private exitsAskedAt: number | undefined;
   /** Lunettes connectées au dernier signal `device` (journal) ; null : aucun signal encore. */
   private glassesOn: boolean | null = null;
   /** Lunettes connectées et portées au dernier signal `device` ; faux : rien n'est affiché (rappel suspendu). */
@@ -3026,6 +3033,7 @@ export class GlassesController implements GlassesApi {
     const walk = g.walk && g.walk.journeyId === j.id ? { leg: g.walk.leg, route: g.walk.route } : undefined;
     const missed = missedOf(j, t.journeys.map((x) => this.journeyOf(x)));
     const nextByLeg = g.kind === 'trip' ? this.nextByLegOf(t, j) : undefined;
+    const exitByLeg = g.kind === 'trip' ? this.exitByLegFor(j, now) : undefined;
     return {
       kind: g.kind,
       journey: j,
@@ -3042,7 +3050,28 @@ export class GlassesController implements GlassesApi {
       ...(this.battery !== undefined ? { battery: this.battery } : {}),
       // 1.3.1 (A3, B16) : le départ suivant depuis le même arrêt, s'il est connu
       ...(nextByLeg ? { nextByLeg } : {}),
+      // 1.3.1 (R1) : la sortie du métro à prendre, par rang de marche
+      ...(exitByLeg ? { exitByLeg } : {}),
     };
+  }
+
+  /**
+   * 1.3.1 (PRD-1.3.1 § 14, R1) : sortie du métro par rang de marche (GuideInput.exitByLeg), avec les sorties publiées
+   * (data/exits.json). Elles sont lues une fois, au lancement d'un guidage de trajet, bien avant la première descente ;
+   * absentes ou en échec : nouvel essai 10 min plus tard au plus tôt, jamais d'erreur affichée (sans elles, l'écran de
+   * la marche n'a simplement pas de ligne « Sortie »). Rien n'est envoyé : la sortie se choisit ici.
+   */
+  private exitByLegFor(j: Journey, now: number): Record<number, string> | undefined {
+    const core = this.d.core;
+    if (!this.exits && core.walkExits && !(this.exitsAskedAt !== undefined && now - this.exitsAskedAt < EXITS_RETRY_MS)) {
+      this.exitsAskedAt = now;
+      void deadline(core.walkExits(), CORE_TIMEOUT_MS, 'sorties du métro trop lentes')
+        .then((f) => {
+          if (f) this.exits = f;
+        })
+        .catch((e: unknown) => console.warn('[Quai] sorties du métro', errText(e)));
+    }
+    return exitByLegOf(j, this.exits);
   }
 
   /** Arrêts suivants donnés au moteur : « j'y descends », `beyond` ; genre trip, ceux des étapes lues de ce trajet-là. */

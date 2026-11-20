@@ -46,6 +46,12 @@ export const ESSAI_SPEED = 10;
 /** Il commence 1 min avant l'heure de partir (« Où tu en es », puis « Partir maintenant » à l'heure). */
 export const ESSAI_LEAD_MS = 60_000;
 
+/**
+ * Lecteur d'écran (contrôle qualité) : une zone « status » n'est lue que si son texte change alors qu'elle est déjà à
+ * l'écran. Le texte du bandeau se voit tout de suite (sans être lu), et il entre dans la zone ce délai après son affichage.
+ */
+export const ESSAI_SAY_MS = 200;
+
 /** Textes de l'essai (téléphone et bandeau de Quai Web). */
 export const ESSAI_TEXT = {
   button: 'Essayer en accéléré',
@@ -372,6 +378,17 @@ export function gatedPort<P extends GlassesPort>(port: P, open: () => boolean): 
   return out;
 }
 
+/**
+ * Place du bandeau dans la page de Quai Web (contrôle qualité). Grand écran (`wide`, les deux vues côte à côte) :
+ * au-dessus de l'écran des lunettes (`stage`), dans la vue Lunettes, toujours en vue. Écran étroit (une vue à la fois) :
+ * juste avant les vues (`main`), sous la barre du haut, où le style le garde collé : le bandeau et « Arrêter l'essai »
+ * se voient aussi dans la vue Réglages. Déjà en place : rien n'est déplacé (le curseur reste où il est).
+ */
+export function placeBanner(banner: HTMLElement, o: { wide: boolean; stage: Element | null; main: Element | null }): void {
+  const next = o.wide ? o.stage : o.main;
+  if (next && banner.nextElementSibling !== next) next.before(banner);
+}
+
 /* ------------------------------ L'essai ------------------------------ */
 
 export interface EssaiDeps {
@@ -428,6 +445,8 @@ interface Run {
   loc: SimLocation;
   clock: Clock;
   off: (() => void) | null;
+  /** minuterie de l'annonce du bandeau (ESSAI_SAY_MS) */
+  say?: ReturnType<typeof setTimeout>;
   said?: { hub: MessageHub; slot: HTMLElement };
 }
 
@@ -454,6 +473,7 @@ export function createEssai(deps: EssaiDeps): Essai {
     r.port.close();
     r.loc.stop();
     r.sandbox.stop();
+    clearTimeout(r.say);
     banner.hidden = true;
     text.textContent = '';
     if (r.said?.slot.isConnected) r.said.hub.say(r.said.slot, ESSAI_TEXT.ended);
@@ -573,9 +593,14 @@ export function createEssai(deps: EssaiDeps): Essai {
     });
     await sandbox.start();
     if (run !== r) return { text: '', ok: true };
-    text.textContent = ESSAI_TEXT.banner;
+    // le texte se voit tout de suite (même place, rien ne bouge ensuite) mais sans être dans la zone « status » ; il y
+    // entre juste après l'affichage du bandeau, pour qu'un lecteur d'écran l'annonce
+    text.replaceChildren(h('span', { 'aria-hidden': 'true' }, ESSAI_TEXT.banner));
     banner.hidden = false;
     deps.showGlasses?.();
+    r.say = setTimeout(() => {
+      if (run === r) text.textContent = ESSAI_TEXT.banner;
+    }, ESSAI_SAY_MS);
     return { text: ESSAI_TEXT.started, ok: true };
   }
 

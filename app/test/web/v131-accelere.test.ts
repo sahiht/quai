@@ -29,7 +29,7 @@ import { createKV, memoryBackend } from '../../src/platform/kv';
 import type { Fix, GlassesPort, LocationPort } from '../../src/platform/types';
 import { SettingsStore } from '../../src/settings';
 import { APP_VERSION } from '../../src/version';
-import { createEssai, ESSAI_LEAD_MS, ESSAI_TEXT, gatedPort, plannedJourney, realFirstWalk, RIDE_SPEED_MIN, RIDE_WAIT_FROM_END_M, simulatedFix, type Essai } from '../../src/web/essai';
+import { createEssai, ESSAI_LEAD_MS, ESSAI_SAY_MS, ESSAI_TEXT, gatedPort, placeBanner, plannedJourney, realFirstWalk, RIDE_SPEED_MIN, RIDE_WAIT_FROM_END_M, simulatedFix, type Essai } from '../../src/web/essai';
 import { createWebGlassesPort } from '../../src/web/port';
 import { BUS6, MIN, P, S, at, firstWalkRoute, journeyOf, offset, route, walkLeg } from '../core/guide-fixtures';
 import { stubCore } from '../glasses/helpers';
@@ -625,6 +625,85 @@ describe('page cachée ou visible pendant l’essai (signaux de web/main.ts)', (
     b.essai.gesture('down');
     await b.advance(50);
     expect(b.frames.slice(k).every((f) => f.by === 'vraies')).toBe(true);
+  });
+});
+
+describe('retouches : le bandeau annoncé et toujours en vue', () => {
+  it('lecteur d’écran : le texte du bandeau se voit tout de suite, et il entre dans la zone « status » juste après l’affichage', async () => {
+    const b = await bench();
+    const status = b.essai.banner.querySelector<HTMLElement>('[role="status"]')!;
+    expect(status.childNodes.length).toBe(0);
+    await b.essai.tryFavorite(GARE.id);
+    // affiché : le texte est là pour les yeux, pas encore dans la zone lue (un seul enfant, caché des lecteurs d'écran)
+    expect(b.essai.banner.hidden).toBe(false);
+    expect(status.textContent).toBe(ESSAI_TEXT.banner);
+    expect([...status.childNodes].map((n) => [n.nodeType, (n as Element).getAttribute?.('aria-hidden')])).toEqual([[1, 'true']]);
+    await b.advance(ESSAI_SAY_MS - 1);
+    expect(status.firstChild?.nodeType).toBe(1);
+    await b.advance(1);
+    // juste après : le même texte, cette fois dans la zone « status » (un nœud de texte ajouté : c'est ce qui est annoncé)
+    expect([...status.childNodes].map((n) => n.nodeType)).toEqual([3]);
+    expect(status.textContent).toBe(ESSAI_TEXT.banner);
+    expect(b.essai.banner.hidden).toBe(false);
+    b.essai.stop();
+    expect(status.textContent).toBe('');
+    // essai arrêté avant l'annonce : rien n'est écrit ensuite dans le bandeau caché, aucune minuterie ne reste
+    const idle = vi.getTimerCount();
+    await b.essai.tryFavorite(GARE.id);
+    b.essai.stop();
+    expect(vi.getTimerCount()).toBe(idle);
+    await b.advance(ESSAI_SAY_MS * 2);
+    expect(status.textContent).toBe('');
+    expect(b.essai.banner.hidden).toBe(true);
+  });
+
+  it('place du bandeau : écran étroit, sous la barre du haut, hors des vues (visible dans Lunettes et dans Réglages) ; grand écran, au-dessus de l’écran des lunettes', () => {
+    const el = (cls: string, ...kids: HTMLElement[]): HTMLElement => {
+      const d = document.createElement('div');
+      d.className = cls;
+      d.append(...kids);
+      return d;
+    };
+    const stage = el('w-stage');
+    const lunettes = el('w-panel w-panel-lunettes', el('w-panel-title'), stage);
+    const reglages = el('w-panel w-panel-reglages');
+    const main = el('w-main', lunettes, reglages);
+    const top = el('w-top');
+    const app = el('w-app', top, main);
+    document.body.append(app);
+    const banner = el('w-essai');
+    const stop = document.createElement('button');
+    banner.append(stop);
+    // écran étroit : enfant direct de .w-app, entre la barre du haut et les vues : il ne dépend d'aucune des deux vues
+    placeBanner(banner, { wide: false, stage, main });
+    expect([...app.children]).toEqual([top, banner, main]);
+    expect(lunettes.contains(banner) || reglages.contains(banner)).toBe(false);
+    // déjà en place : rien n'est déplacé, le curseur reste sur « Arrêter l'essai »
+    stop.focus();
+    expect(document.activeElement).toBe(stop);
+    placeBanner(banner, { wide: false, stage, main });
+    expect(document.activeElement).toBe(stop);
+    // grand écran : dans la vue Lunettes (toujours en vue), juste au-dessus de l'écran
+    placeBanner(banner, { wide: true, stage, main });
+    expect([...app.children]).toEqual([top, main]);
+    expect(stage.previousElementSibling).toBe(banner);
+    placeBanner(banner, { wide: false, stage, main });
+    expect(main.previousElementSibling).toBe(banner);
+    // page sans ces éléments : rien ne casse
+    expect(() => placeBanner(banner, { wide: true, stage: null, main: null })).not.toThrow();
+    expect(main.previousElementSibling).toBe(banner);
+  });
+
+  it('Quai Web : le bandeau est placé au lancement et à chaque changement de vue ou de largeur ; collé sous la barre du haut par le style de Quai Web seulement', () => {
+    const APP = fileURLToPath(new NodeURL('../../', import.meta.url));
+    const main = readFileSync(join(APP, 'src/web/main.ts'), 'utf8');
+    expect(main).toMatch(/const banner = \(\): void => placeBanner\(trial\.banner, \{ wide: shell\.wide\(\), stage: shell\.canvas\.closest\('\.w-stage'\), main: shell\.root\.querySelector\('\.w-main'\) \}\);\n\s+banner\(\);\n\s+shell\.onChange\(banner\);/);
+    const css = readFileSync(join(APP, 'src/web/web.css'), 'utf8');
+    expect(css).toMatch(/\.w-app > \.w-essai \{\s+position: sticky; top: var\(--w-top, 69px\); z-index: 9; width: auto;/);
+    // téléphone à l'horizontale : seulement pendant l'essai (bandeau montré), l'écran des lunettes lui laisse sa hauteur
+    expect(css).toMatch(/\.w-app > \.w-essai:not\(\[hidden\]\) ~ \.w-main \.w-stage \{/);
+    // rien de cela dans les styles du téléphone (appli Even)
+    for (const f of ['src/phone/styles.css', 'src/phone/lists.css']) expect(readFileSync(join(APP, f), 'utf8')).not.toMatch(/w-essai|w-try/);
   });
 });
 

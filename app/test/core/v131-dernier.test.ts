@@ -4,18 +4,19 @@
  * gares et des arrêts (comme le « Dernier passage » de la STIB), écran du trajet (« 23:12  IC voie 4 → Namur, dernier
  * 00:05 »). Pièges prouvés ici : variantes d'une ligne, voyages après minuit (jour de service), les deux jours publiés,
  * ligne sans départ le lendemain (fin de semaine), « Dernier passage » de la STIB (une seule marque), train en retard
- * qui passe après le dernier. « Si tu le rates » se tait quand rien ne repart. Rien de nouveau sur le réseau. Lieux
+ * qui passe après le dernier. « Si tu le rates » se tait quand rien ne repart. Écran du trajet : pas de marque quand un
+ * autre trajet déjà calculé part plus tard avant demain. Rien de nouveau sur le réseau. Lieux
  * publics seulement.
  */
 import { describe, expect, it } from 'vitest';
 import type { AreaFile, Meta, Mode, Names, Op, TrainsDay } from '../../../shared/types';
 import { DEFAULT_SETTINGS, type Departure, type Journey, type Leg } from '../../src/core/api';
 import { prepareArea } from '../../src/core/areas';
-import { lastCover, lastLineKey, scheduleLast, tomorrowAt, trainLegLast } from '../../src/core/boards';
+import { lastCover, lastLineKey, legLast, scheduleLast, tomorrowAt, trainLegLast } from '../../src/core/boards';
 import { markLast, type RefreshEnv } from '../../src/core/journeys';
 import { indexDay } from '../../src/core/trains';
 import { brusselsParts, gtfsTime, hhmm } from '../../src/core/util';
-import { boardView, missLine, stepsPage, type ViewCtx } from '../../src/glasses/views';
+import { boardView, laterJourney, missLine, stepsPage, type ViewCtx } from '../../src/glasses/views';
 import { journey, lines, PLACES, settingsWith } from '../glasses/helpers';
 import { FakeServer, makeEnv } from './support/env';
 
@@ -208,14 +209,21 @@ describe('R3 : la règle, sur un fichier de zone', () => {
     expect(marked(g)).toEqual(['109a Charleroi Gare Centrale 1 03:48', '84 Jurbise Gare 1 00:15']);
   });
 
-  it('variantes d’un numéro (20a et 20b, 27 et 27/, 86A et 86C) : une seule ligne dans le même sens ; N10, X64 et T39 restent d’autres lignes', () => {
+  it('famille d’un numéro (lettre devant ou derrière : 20a et 20b, 27 et 27/, X70, N10, T39, E109) : une seule ligne dans le même sens', () => {
     expect(lastLineKey('delijn', 'bus', '20a')).toBe(lastLineKey('delijn', 'bus', '20b'));
     expect(lastLineKey('delijn', 'bus', '20a')).toBe(lastLineKey('delijn', 'bus', '20'));
     expect(lastLineKey('tec', 'bus', '27/')).toBe(lastLineKey('tec', 'bus', '027'));
     expect(lastLineKey('tec', 'bus', '86C')).toBe(lastLineKey('tec', 'bus', '86A'));
-    expect(lastLineKey('stib', 'bus', 'N10')).not.toBe(lastLineKey('stib', 'bus', '10'));
-    expect(lastLineKey('delijn', 'bus', 'X64')).not.toBe(lastLineKey('delijn', 'bus', '64'));
-    expect(lastLineKey('stib', 'bus', 'T39')).not.toBe(lastLineKey('stib', 'tram', '39'));
+    // décision du propriétaire (20/11 à 21:58) : la personne peut prendre le X70 qui suit le dernier 70
+    expect(lastLineKey('stib', 'bus', 'N10')).toBe(lastLineKey('stib', 'bus', '10'));
+    expect(lastLineKey('delijn', 'bus', 'X70')).toBe(lastLineKey('delijn', 'bus', '70'));
+    expect(lastLineKey('stib', 'bus', 'T39')).toBe(lastLineKey('stib', 'tram', '39'));
+    expect(lastLineKey('tec', 'bus', 'E109')).toBe(lastLineKey('tec', 'bus', '109a'));
+    expect(lastLineKey('tec', 'metro', 'M1ab')).toBe(lastLineKey('tec', 'bus', '1'));
+    // d'autres chiffres, une ligne sans chiffre, un autre réseau : d'autres lignes
+    expect(lastLineKey('delijn', 'bus', '70')).not.toBe(lastLineKey('delijn', 'bus', '7'));
+    expect(lastLineKey('delijn', 'tram', 'KT')).not.toBe(lastLineKey('delijn', 'bus', 'K'));
+    expect(lastLineKey('tec', 'bus', 'W')).toBe('tec:w');
     expect(lastLineKey('tec', 'bus', '20a')).not.toBe(lastLineKey('delijn', 'bus', '20a'));
     const f = areaFile(
       'delijn:R3s',
@@ -224,8 +232,10 @@ describe('R3 : la règle, sur un fichier de zone', () => {
         ['20b', 'F. Rooseveltplaats', ['delijn:r1', 'delijn:r3']],
         // l'autre sens : le 20b n'y passe plus, le 20a y est bien le dernier
         ['20a', 'Veemarkt', ['delijn:v1', 'delijn:v2']],
-        // une lettre devant : une autre ligne, même chemin
+        // une lettre devant, même chemin : la même famille (le 20a qui suit se prend aussi)
         ['X20', 'F. Rooseveltplaats', ['delijn:r1', 'delijn:r2']],
+        // d'autres chiffres, même chemin : une autre ligne
+        ['21', 'F. Rooseveltplaats', ['delijn:r1', 'delijn:r2']],
       ],
       [
         [0, '23:13', 0],
@@ -233,9 +243,10 @@ describe('R3 : la règle, sur un fichier de zone', () => {
         [0, '24:13', 1],
         [0, '23:23', 2],
         [0, '22:50', 3],
+        [0, '22:55', 4],
       ],
     );
-    expect(marked(f)).toEqual(['20b F. Rooseveltplaats 0 24:13', '20a Veemarkt 0 23:23', 'X20 F. Rooseveltplaats 0 22:50']);
+    expect(marked(f)).toEqual(['20b F. Rooseveltplaats 0 24:13', '20a Veemarkt 0 23:23', '21 F. Rooseveltplaats 0 22:55']);
   });
 
   it('les deux jours publiés : rien avant 04:00 du premier (la veille manque), rien après 04:00 du second (le surlendemain manque)', () => {
@@ -508,18 +519,103 @@ describe('R3 : étapes du trajet (le cœur), sans rien demander au réseau', () 
     expect(marked(stationArea(first))).toEqual([]);
   });
 
-  it('train : un L après minuit vers Ottignies (même sens) enlève la marque de l’IC de 23:12', async () => {
+  it('train : « dernier » d’après la gare de descente ; un L après minuit vers Ottignies ne l’enlève que pour qui descend à Ottignies', async () => {
+    const OTT = 'sncb:8811601';
     const l = trip('L-0020', 'L', 'Ottignies', [
       [0, null, '24:20', '4'],
       [1, '24:52', null],
     ]);
     const env = makeEnv({ now: at(FRI, '22:50'), server: server([...FRI_TRAINS, l]) });
+    // vers Namur : le L n'y va pas, l'IC de 23:12 reste le dernier train que la personne peut prendre
     const [j] = await env.core.trains(BXC, 'sncb:8863008', T(FRI, '22:50'));
     expect(hhmm(rideOf(j)!.schedDep)).toBe('23:12');
-    expect(rideOf(j)?.last).toBeUndefined();
-    // la règle seule, sur les mêmes jours : le L est le dernier de son sens
+    expect(rideOf(j)?.last).toBe(true);
+    // vers Ottignies : le L de 00:20 s'y arrête, l'IC de 23:12 n'est pas le dernier
+    const [o] = await env.core.trains(BXC, OTT, T(FRI, '22:50'));
+    expect(hhmm(rideOf(o)!.schedDep)).toBe('23:12');
+    expect(rideOf(o)?.last).toBeUndefined();
+    // le tableau de la gare ne connaît pas la descente : même sens, l'IC n'y est pas le dernier, le L l'est
+    const b = await env.core.board(BXC);
+    expect(said(b.departures).filter((x) => /Namur|Ottignies/.test(x)).slice(0, 2)).toEqual(['23:12 IC Namur', '00:20 L Ottignies, dernier']);
+    // la règle seule, sur les mêmes jours
     const days = [indexDay(day(FRI, [...FRI_TRAINS, l])), indexDay(day(SAT, SAT_TRAINS))];
-    expect(trainLegLast(days, { op: 'sncb', from: { name: N('Bruxelles-Central'), lat: 0, lon: 0, areaId: BXC }, tripId: 'L-0020', schedDep: T(FRI, '24:20') })).toBe(true);
+    const leg = (tripId: string, time: string, to?: string) => ({ op: 'sncb' as Op, from: { name: N('Bruxelles-Central'), lat: 0, lon: 0, areaId: BXC }, tripId, schedDep: T(FRI, time), ...(to ? { to: { name: N(to), lat: 0, lon: 0, areaId: to } } : {}) });
+    expect(trainLegLast(days, leg('L-0020', '24:20'))).toBe(true);
+    expect(trainLegLast(days, leg('IC-2312', '23:12'))).toBe(false);
+    expect(trainLegLast(days, leg('L-0020', '24:20', OTT))).toBe(true);
+    expect(trainLegLast(days, leg('IC-2312', '23:12', OTT))).toBe(false);
+    expect(trainLegLast(days, leg('IC-2312', '23:12', 'sncb:8861200'))).toBe(true);
+    expect(trainLegLast(days, leg('IC-2225', '22:25', 'sncb:8863008'))).toBe(false);
+  });
+
+  it('train : un train plus tard qui passe à la gare de descente sans qu’on puisse y descendre ne compte pas', () => {
+    // train de nuit de 23:50 : montée seulement à Namur (descente interdite), descente permise à Gembloux
+    const nj = trip('NJ-2350', 'EUR', 'Gembloux', [
+      [0, null, '23:50', '4'],
+      [3, null, '24:45'],
+      [2, '25:00', null],
+    ]);
+    const days = [indexDay(day(FRI, [...FRI_TRAINS, nj])), indexDay(day(SAT, SAT_TRAINS))];
+    const leg = (to: string) => ({ op: 'sncb' as Op, from: { name: N('Bruxelles-Central'), lat: 0, lon: 0, areaId: BXC }, to: { name: N(to), lat: 0, lon: 0, areaId: to }, tripId: 'IC-2312', schedDep: T(FRI, '23:12') });
+    expect(trainLegLast(days, leg('sncb:8863008'))).toBe(true);
+    expect(trainLegLast(days, leg('sncb:8861200'))).toBe(false);
+  });
+
+  it('bus, tram, métro : « dernier » si aucun départ plus tard ne dessert l’arrêt de descente, quelle que soit la ligne', () => {
+    const f = areaFile(
+      'tec:R3x',
+      [
+        ['36', 'Waterloo Gare', ['tec:a1', 'tec:a2', 'tec:a3']],
+        // une autre ligne qui passe aussi par a2
+        ['40', 'Braine Centre', ['tec:a2', 'tec:b9']],
+        // un 36 express qui ne s'arrête qu'à a3 : même famille, même sens
+        ['36', 'Waterloo Gare', ['tec:a3']],
+      ],
+      [
+        [0, '22:10', 0, 'T-2210'],
+        [0, '23:10', 0, 'T-2310'],
+        [0, '23:30', 1, 'T-2330'],
+        [0, '23:40', 2, 'T-2340'],
+        [1, '06:10', 0, 'T-0610'],
+      ],
+    );
+    const prep = prepareArea(f, META([FRI, SAT]));
+    const leg = (line: string, time: string, tripId: string, to: string) => ({ op: 'tec' as Op, mode: 'bus' as Mode, line, schedDep: T(FRI, time), tripId, to: { name: N(to), lat: 0, lon: 0, areaId: to } });
+    // le tableau (descente inconnue) : le 36 de 23:10 est suivi d'un 36 du même sens
+    expect(marked(f)).toEqual(['40 Braine Centre 0 23:30', '36 Waterloo Gare 0 23:40']);
+    // pour a1 : l'express ne s'y arrête pas, la personne ne peut pas le prendre : le 36 de 23:10 est son dernier
+    expect(legLast(prep, leg('36', '23:10', 'T-2310', 'tec:a1'))).toBe(true);
+    expect(legLast(prep, leg('36', '22:10', 'T-2210', 'tec:a1'))).toBe(false);
+    // pour a2 : le 40 de 23:30 y passe ; pour a3 : l'express de 23:40 y passe
+    expect(legLast(prep, leg('36', '23:10', 'T-2310', 'tec:a2'))).toBe(false);
+    expect(legLast(prep, leg('40', '23:30', 'T-2330', 'tec:a2'))).toBe(true);
+    expect(legLast(prep, leg('36', '23:10', 'T-2310', 'tec:a3'))).toBe(false);
+    expect(legLast(prep, leg('36', '23:40', 'T-2340', 'tec:a3'))).toBe(true);
+    // zone de descente inconnue du motif (ancien identifiant) : la règle des tableaux, même famille et même sens
+    expect(legLast(prep, leg('36', '23:10', 'T-2310', 'tec:ancien'))).toBe(false);
+    expect(legLast(prep, leg('36', '23:40', 'T-2340', 'tec:ancien'))).toBe(true);
+    // un départ introuvable : jamais de marque
+    expect(legLast(prep, leg('36', '23:11', 'T-xxxx', 'tec:a1'))).toBe(false);
+  });
+
+  it('bus : un motif à la liste pleine (60 zones) du même sens peut encore passer par la descente : pas de marque', () => {
+    const far = Array.from({ length: 60 }, (_, i) => `tec:z${i}`);
+    const pats: Pat[] = [
+      ['36', 'Waterloo Gare', ['tec:a1', 'tec:a2']],
+      ['36', 'Waterloo Gare', far],
+    ];
+    const deps: Dep[] = [
+      [0, '23:10', 0, 'T-2310'],
+      [0, '23:50', 1, 'T-2350'],
+    ];
+    const leg = { op: 'tec' as Op, mode: 'bus' as Mode, line: '36', schedDep: T(FRI, '23:10'), tripId: 'T-2310', to: { name: N('a1'), lat: 0, lon: 0, areaId: 'tec:a1' } };
+    expect(legLast(prepareArea(areaFile('tec:R3f', pats, deps), META([FRI, SAT])), leg)).toBe(false);
+    // la même liste, plus courte : toute la suite est connue, a1 n'y est pas
+    const short: Pat[] = [pats[0], ['36', 'Waterloo Gare', far.slice(0, 59)]];
+    expect(legLast(prepareArea(areaFile('tec:R3g', short, deps), META([FRI, SAT])), leg)).toBe(true);
+    // une autre ligne à la liste pleine, d'un autre sens : ne compte pas
+    const other: Pat[] = [pats[0], ['52', 'Nivelles Gare', far]];
+    expect(legLast(prepareArea(areaFile('tec:R3h', other, deps), META([FRI, SAT])), leg)).toBe(true);
   });
 
   it('bus, tram, métro : d’après la zone de montée déjà connue (tableau ouvert) ; inconnue, aucune demande au réseau', async () => {
@@ -637,12 +733,81 @@ describe('R3 : écran du trajet et « Si tu le rates »', () => {
     ]);
     expect(missLine(j, [j, other], j.leaveAt, NOW)).toBeNull();
     expect(rows(j, [j, other])[0]).not.toMatch(/Si tu le rates/);
-    // un bus de nuit repart de la même gare plus tard : « Si tu le rates » donne son arrivée, l'IC reste le dernier train
+    // seul calculé : la marque du cœur reste ; avec cet autre trajet qui part plus tard, la personne peut encore partir
+    expect(rows(j)).toContain('23:12 IC voie 4 → Namur, dernier   00:05');
+    expect(rows(j, [j, other])).toContain('23:12 IC voie 4 → Namur   00:05');
+    // un bus de nuit repart de la même gare plus tard : « Si tu le rates » donne son arrivée, et l'IC n'est plus « dernier »
     const bus = journey('jb', [
       { walk: 6, to: 'Bruxelles-Central' },
       { ride: 'N', mode: 'bus', dep: T(FRI, '23:50'), arr: T(FRI, '25:20'), from: 'Bruxelles-Central', to: 'Namur' },
       { walk: 9 },
     ]);
     expect(missLine(j, [j, bus], j.leaveAt, NOW)?.replace(/\u00a0/g, ' ')).toBe('Si tu le rates : arrivée 01:29, 1 h 15 plus tard');
+    expect(rows(j, [j, bus])).toContain('23:12 IC voie 4 → Namur   00:05');
+  });
+
+  it('autres trajets déjà calculés : pas de « , dernier » quand un autre part plus tard avant demain (autre ligne, autre réseau, changement)', () => {
+    type Steps = Parameters<typeof journey>[1];
+    // tram de la STIB marqué « dernier » par le cœur
+    const tram = (id = 'jt'): Journey => {
+      const j = journey(id, [
+        { walk: 4, to: 'Bourse' },
+        { ride: '3', mode: 'tram', dep: T(FRI, '23:10'), arr: T(FRI, '23:31'), from: 'Bourse', to: 'Churchill', head: 'Churchill' },
+        { walk: 5 },
+      ]);
+      j.legs[1].last = true;
+      return j;
+    };
+    const other = (id: string, steps: Steps): Journey => journey(id, steps);
+    const j = tram();
+    const WITH = '23:10 Tram 3 → Churchill, dernier   23:31';
+    const WITHOUT = '23:10 Tram 3 → Churchill   23:31';
+    const shown = (journeys: Journey[]) => rows(j, journeys).find((l) => l.startsWith('23:10'));
+    // aucun autre trajet calculé : la règle du cœur, la marque
+    expect(shown([j])).toBe(WITH);
+    expect(laterJourney(j.legs[1], j, [j])).toBe(false);
+    // un bus d'un autre réseau, d'un autre arrêt, plus tard dans les autres trajets : pas de marque
+    const bus = other('jb', [{ walk: 7, to: 'De Brouckère' }, { ride: '48', mode: 'bus', dep: T(FRI, '23:40'), arr: T(FRI, '24:02'), from: 'De Brouckère', to: 'Churchill' }, { walk: 5 }]);
+    expect(bus.legs[1].op).not.toBe(j.legs[1].op);
+    expect(shown([j, bus])).toBe(WITHOUT);
+    expect(shown([bus, j])).toBe(WITHOUT);
+    // avec un changement, après minuit (même nuit) : pas de marque
+    const change = other('jc', [
+      { walk: 4, to: 'Bourse' },
+      { ride: 'N10', mode: 'bus', dep: T(FRI, '24:20'), arr: T(FRI, '24:35'), from: 'Bourse', to: 'Albert' },
+      { ride: 'N11', mode: 'bus', dep: T(FRI, '24:45'), arr: T(FRI, '24:55'), from: 'Albert', to: 'Churchill' },
+      { walk: 5 },
+    ]);
+    expect(shown([j, change])).toBe(WITHOUT);
+    // autre trajet seulement demain (04:00 passé) : la marque reste
+    const tomorrow = other('jd', [{ walk: 4, to: 'Bourse' }, { ride: '3', mode: 'tram', dep: T(SAT, '05:12'), arr: T(SAT, '05:33'), from: 'Bourse', to: 'Churchill' }, { walk: 5 }]);
+    expect(shown([j, tomorrow])).toBe(WITH);
+    // un trajet plus tôt, le même trajet rafraîchi (même identifiant), un trajet à pied, un trajet dont un véhicule est
+    // supprimé : la marque reste
+    const earlier = other('je', [{ walk: 4, to: 'Bourse' }, { ride: '4', mode: 'tram', dep: T(FRI, '22:50'), arr: T(FRI, '23:12'), from: 'Bourse', to: 'Churchill' }, { walk: 5 }]);
+    const sameTime = other('js', [{ walk: 7, to: 'De Brouckère' }, { ride: '48', mode: 'bus', dep: T(FRI, '23:10'), arr: T(FRI, '23:35'), from: 'De Brouckère', to: 'Churchill' }, { walk: 5 }]);
+    const onFoot = other('jw', [{ walk: 48 }]);
+    const cancelled = other('jx', [{ walk: 7, to: 'De Brouckère' }, { ride: '48', mode: 'bus', dep: T(FRI, '23:40'), arr: T(FRI, '24:02'), from: 'De Brouckère', to: 'Churchill' }, { walk: 5 }]);
+    cancelled.legs[1].cancelled = true;
+    // le même trajet relu avec 2 min de retard (même identifiant) n'est pas « un autre trajet »
+    const again = tram('jt');
+    again.legs[1].dep += 120_000;
+    expect(shown([j, earlier, sameTime, again, onFoot, cancelled])).toBe(WITH);
+    // une correspondance marquée « dernier » : seul un trajet qui part après elle retire la marque
+    const two = journey('j2', [
+      { walk: 4, to: 'Bourse' },
+      { ride: '4', mode: 'tram', dep: T(FRI, '23:20'), arr: T(FRI, '23:30'), from: 'Bourse', to: 'Albert' },
+      { ride: '51', mode: 'tram', dep: T(FRI, '23:50'), arr: T(FRI, '23:58'), from: 'Albert', to: 'Churchill' },
+      { walk: 5 },
+    ]);
+    two.legs[2].last = true;
+    const second = (journeys: Journey[]) => lines(stepsPage(route, { journeys, index: journeys.indexOf(two), fresh: true }, ctx)).find((l) => l.includes('Tram 51'));
+    expect(second([two])).toMatch(/Tram 51 → Churchill, dernier/);
+    expect(second([two, bus])).toMatch(/Tram 51 → Churchill, dernier/);
+    expect(second([two, change])).not.toMatch(/dernier/);
+    // le trajet qui part plus tard garde sa propre marque
+    const last = other('jl', [{ walk: 7, to: 'De Brouckère' }, { ride: '48', mode: 'bus', dep: T(FRI, '23:40'), arr: T(FRI, '24:02'), from: 'De Brouckère', to: 'Churchill' }, { walk: 5 }]);
+    last.legs[1].last = true;
+    expect(lines(stepsPage(route, { journeys: [j, last], index: 1, fresh: true }, ctx)).find((l) => l.startsWith('23:40'))).toBe('23:40 Bus 48 → Churchill, dernier   00:02');
   });
 });

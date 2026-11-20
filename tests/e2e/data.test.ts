@@ -268,4 +268,24 @@ describe('1.2.10 : tuiles piétonnes (walk/) dans les données', () => {
       put(d, 'index.json', { ...i, licence: 'aucune' });
     }).join(' ')).toMatch(/licence ODbL absente/);
   });
+
+  it('1.3.1 (R1) : exits.json à la racine accepté s’il est valide et de la version des tuiles, signalé sinon', () => {
+    const version = (JSON.parse(readFileSync(join(wdir, 'walk', 'index.json'), 'utf8')) as { version: string }).version;
+    const exits = { v: 1, version, builtAt: '2026-11-16T01:30:00.000Z', source: 'OpenStreetMap', licence: 'ODbL 1.0', attribution: '© les contributeurs d’OpenStreetMap', stops: { '8362': { s: 'Bourse', x: [['Boulevard Anspach', 50.8484, 4.3497, 60]] } } };
+    const check = (x: unknown) => {
+      const d = mkdtempSync(join(tmpdir(), 'quai-e2e-exits-'));
+      try {
+        cpSync(wdir, d, { recursive: true });
+        writeFileSync(join(d, 'exits.json'), JSON.stringify(x));
+        return validateData(d);
+      } finally {
+        rmSync(d, { recursive: true, force: true });
+      }
+    };
+    const ok = check(exits);
+    expect(ok.errors).toEqual([]);
+    expect(ok.warnings).toEqual([]);
+    expect(check({ ...exits, version: '1999-01-01' }).errors.join(' ')).toMatch(/exits\.json : version « 1999-01-01 »/);
+    expect(check({ ...exits, stops: { '8362': { s: 'Bourse', x: [] } } }).errors.join(' ')).toMatch(/exits\.json : invalide/);
+  });
 });

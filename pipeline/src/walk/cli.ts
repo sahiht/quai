@@ -5,6 +5,7 @@
  *   node --experimental-strip-types src/walk/cli.ts weekly --cache <dossier> [--stops <données>] [--url <adresse>] [--force]
  *   node --experimental-strip-types src/walk/cli.ts publish --cache <dossier> --data <données>
  *   node --experimental-strip-types src/walk/cli.ts local --data <données> [--input <extrait>]
+ *   node --experimental-strip-types src/walk/cli.ts exits --tiles <tuiles> --input <extrait .osm.pbf> [--stops <données>] [--url <adresse>] [--key ref:STIB_MIVB]
  *
  * weekly : tuiles de la semaine dans le cache (extrait Geofabrik téléchargé au plus une fois par semaine) ; code 1 en
  * cas d'échec (les tuiles d'avant restent). publish : copie dans les données de la nuit ; toujours code 0 (sans
@@ -12,11 +13,19 @@
  * local : sans réseau, tuiles construites depuis un extrait local (--input, sinon la variable QUAI_WALK_OSM) dans
  * <données>/walk, licence comprise ; tests de bout en bout : fixtures/pipeline/osm/namur-bruxelles.osm. Code 1 si
  * l'extrait est inutilisable.
+ * exits (1.3.1, PRD-1.3.1 § 14, R1 ; branche de vérification seulement) : arrêts STIB sous terre d'OpenStreetMap et
+ * sorties nommées par les couloirs, sur les tuiles piétonnes (exits.ts) ; bilan dans le journal, rien n'est écrit.
+ * Extrait absent : téléchargé à cet endroit (--url, sinon Geofabrik), MD5 contrôlé. Code 1 si la mesure échoue.
  */
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildWalk, sizeLine } from './build.ts';
-import { localWalk, publishWalk, weeklyWalk } from './weekly.ts';
+import { exitReport, isUnderStop, loadExitGraph, officialMetroStations, publishedRailStops, publishedStibStops, readStibFeatures, STIB_KEY } from './exits.ts';
+import { downloadExtract, GEOFABRIK_URL, localWalk, publishedMd5, publishWalk, weeklyWalk } from './weekly.ts';
+
+/** Message d'une commande du journal GitHub (« % », retours à la ligne). */
+const ghEscape = (m: string) => m.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
 
 function args(argv: string[]): { cmd: string; opts: Record<string, string | true> } {
   const [cmd = '', ...rest] = argv;
@@ -101,7 +110,53 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv, log: (m: stri
     }
     return 0;
   }
-  log('Usage : cli.ts build|weekly|publish|local (voir l’en-tête de pipeline/src/walk/cli.ts)');
+  if (cmd === 'exits') {
+    const tilesDir = str('tiles');
+    const input = str('input');
+    if (!tilesDir || !input) {
+      log('Erreur : --tiles et --input sont obligatoires');
+      return 2;
+    }
+    const key = typeof opts.key === 'string' ? opts.key : STIB_KEY;
+    try {
+      const t0 = Date.now();
+      if (!existsSync(input)) {
+        const url = typeof opts.url === 'string' ? opts.url : GEOFABRIK_URL;
+        log(`Sorties du métro : téléchargement de ${url}`);
+        // 30 min au plus pour le téléchargement : l'étape (45 min) garde le temps de mesurer
+        const got = await downloadExtract(url, input, { log, timeoutMs: 30 * 60_000 });
+        const expected = await publishedMd5(url);
+        if (expected && expected !== got.md5) throw new Error('extrait reçu incomplet (empreinte MD5 différente)');
+        log(`Sorties du métro : extrait reçu, ${(got.bytes / 1e6).toFixed(1).replace('.', ',')} Mo en ${Math.round((Date.now() - t0) / 1000)} s${expected ? ', MD5 vérifié' : ''}`);
+      }
+      const t1 = Date.now();
+      const { features, timestamp } = readStibFeatures(input, key);
+      const graph = await loadExitGraph(tilesDir, features.filter(isUnderStop));
+      if (!graph) {
+        log(`Erreur : pas de tuiles piétonnes lisibles dans ${tilesDir}`);
+        return 1;
+      }
+      const stopsDir = str('stops');
+      const stations = stopsDir ? await officialMetroStations(stopsDir) : null;
+      const osmDate = timestamp ? new Date(timestamp * 1000).toISOString().slice(0, 10) : undefined;
+      const published = stopsDir ? await publishedStibStops(stopsDir) : null;
+      const rail = stopsDir ? await publishedRailStops(stopsDir) : null;
+      const r = exitReport(graph, features, stations, { key, ...(osmDate ? { osmDate } : {}), published, rail });
+      for (const l of r.lines) log(l);
+      log(`Sorties du métro : mesure en ${Math.round((Date.now() - t1) / 1000)} s`);
+      if (ci) {
+        const main = r.lines.find((l) => l.includes('sortie nommée par les couloirs'));
+        const off = r.lines.find((l) => l.includes('données officielles'));
+        const join = r.lines.find((l) => l.includes('retrouvés par l\'appli'));
+        for (const l of [main, off, join]) if (l) log(`::notice title=Sorties du métro (R1)::${ghEscape(l)}`);
+      }
+      return 0;
+    } catch (e) {
+      log(`Erreur : ${(e as Error).message}`);
+      return 1;
+    }
+  }
+  log('Usage : cli.ts build|weekly|publish|local|exits (voir l’en-tête de pipeline/src/walk/cli.ts)');
   return 2;
 }
 

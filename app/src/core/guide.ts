@@ -82,6 +82,12 @@ export const GUIDE = {
   passedMs: 3 * MIN,
   /** arrêt dépassé, nouveau trajet qui garde le véhicule : la dernière minute avant sa descente est à « Descends » */
   passedKeptMs: 1 * MIN,
+  /**
+   * 1.3.1 (contrôle du moteur, remarque 10) : après une descente constatée, « resté à bord » seulement dans les 10 min
+   * qui la suivent, et si une position était encore à 150 m de l'arrêt (alightNearM) dans les 3 dernières minutes
+   */
+  passedAfterMs: 10 * MIN,
+  passedSeenMs: 3 * MIN,
   /** « Tu y es » : à 50 m de la destination ; 2 min, puis fin */
   arrivedM: 50,
   arrivedMs: 2 * MIN,
@@ -216,6 +222,11 @@ export interface GuideInput {
    * (tightLegs), le suivant de la même ligne, même destination, lu au tableau de l'arrêt par le contrôleur.
    */
   nextByLeg?: Record<number, { vehicle: VehicleRef; depAt: number; rt: boolean }>;
+  /**
+   * 1.3.1 (PRD-1.3.1 § 14, R1) : sortie du métro ou du prémétro par rang de la marche qui suit une descente à un arrêt
+   * STIB sous terre (contrôleur : exits.json, core/exits.ts) ; le moment walk (B17) la dit en 3e ligne pâle.
+   */
+  exitByLeg?: Record<number, string>;
 }
 
 /* ------------------------------ Mémoire ------------------------------ */
@@ -301,6 +312,11 @@ interface Mem extends GuideMemory {
    * éloigne ensuite au pas le long de la ligne est le véhicule (bouchon, zone piétonne) : montée constatée (observe)
    */
   atStop?: { leg: number; at: number };
+  /**
+   * 1.3.1 (remarque 10) : rang de l'étape en véhicule dont on a quitté l'arrêt de descente à pied (une position au pas à
+   * plus de 150 m de lui après la descente constatée) : ce véhicule ne nous emporte plus (justLeft)
+   */
+  walkedOff?: number;
 }
 
 const ISSUE_KINDS: readonly CheckIssue['kind'][] = ['battery', 'noPosition', 'positionLost'];
@@ -357,6 +373,7 @@ function readMem(mem: GuideMemory | null | undefined): Mem {
     if (Number.isFinite(x.walk0.at)) out.walk0.at = x.walk0.at;
   }
   if (x.atStop && Number.isInteger(x.atStop.leg) && Number.isFinite(x.atStop.at)) out.atStop = { leg: x.atStop.leg, at: x.atStop.at };
+  if (Number.isInteger(x.walkedOff)) out.walkedOff = x.walkedOff;
   return out;
 }
 
@@ -698,6 +715,10 @@ function observe(c: Ctx): void {
     const l = legs[b];
     if (now >= l.arr - GUIDE.alightFromMs && slow(c) && distTo(c, l.to) <= GUIDE.alightNearM) m.alighted = { leg: b, at: now };
   }
+  // 1.3.1 (remarque 10) : descendu, puis au pas à plus de 150 m de l'arrêt : reparti à pied (vitesse connue seulement :
+  // une position seule au réveil du téléphone ne dit pas l'allure)
+  const al = m.alighted;
+  if (al && c.speed !== undefined && slow(c) && knownPoint(legs[al.leg]?.to) && distTo(c, legs[al.leg].to) > GUIDE.alightNearM) m.walkedOff = al.leg;
 }
 
 /* ------------------------------ Où l'on est ------------------------------ */
@@ -888,10 +909,29 @@ function passedAt(c: Ctx, loc: Loc): number {
   const cands: number[] = [];
   if (loc.phase.kind === 'ride') cands.push(loc.phase.leg);
   // descente constatée (immobile à quai), puis on roule : peut-être resté dans ce véhicule, même quand l'heure dit déjà
-  // le véhicule suivant (pas encore monté dedans)
-  if (m.alighted && fast(c) && !cands.includes(m.alighted.leg) && !(loc.phase.kind === 'ride' && boardedOn(m, loc.phase.leg))) cands.push(m.alighted.leg);
+  // le véhicule suivant (pas encore monté dedans). 1.3.1 (contrôle du moteur, remarque 10) : seulement si l'on vient de
+  // quitter cet arrêt avec lui (justLeft) : sinon, montée non constatée dans le véhicule suivant, « Tu as passé … »
+  // venait à tort pour l'arrêt d'avant, devant « Descends », avec un nouveau trajet demandé
+  if (m.alighted && fast(c) && !cands.includes(m.alighted.leg) && !(loc.phase.kind === 'ride' && boardedOn(m, loc.phase.leg)) && justLeft(c, m.alighted.leg)) cands.push(m.alighted.leg);
   for (const k of cands) if (passedLeg(c, k)) return k;
   return -1;
+}
+
+/**
+ * 1.3.1 (contrôle du moteur, remarque 10) : après la descente constatée de l'étape `k`, peut-on encore être resté à bord
+ * de ce véhicule ? Seulement si l'on vient de quitter son arrêt avec lui : descente constatée il y a 10 min au plus (le
+ * temps d'un arrêt en gare), jamais reparti à pied de l'arrêt depuis (mémoire `walkedOff`, tenue par observe), et une
+ * position encore à 150 m de l'arrêt dans les 3 dernières minutes (rester à bord se voit dans la minute qui suit le
+ * départ). Sans cela, toute montée non constatée dans le véhicule suivant (téléphone verrouillé, pas de position sous
+ * terre, quai loin du point de la gare) donnait plus tard « Tu as passé … » pour l'arrêt d'avant.
+ */
+function justLeft(c: Ctx, k: number): boolean {
+  const to = c.legs[k]?.to;
+  const f0 = c.fix;
+  const al = c.m.alighted;
+  if (!f0 || !al || !knownPoint(to)) return false;
+  if (c.now - al.at > GUIDE.passedAfterMs || c.m.walkedOff === k) return false;
+  return fixesOf(c.in).some((f) => f.at <= f0.at && f0.at - f.at <= GUIDE.passedSeenMs && distanceM(f, to) <= GUIDE.alightNearM);
 }
 
 /** L'arrêt de descente de l'étape `k` est-il dépassé (voir passedAt) ? */
@@ -1001,6 +1041,7 @@ function detect(c: Ctx, loc: Loc): void {
       // (rideOnJourney, par le contrôleur) ; sinon seulement « Descends à … »
       if (kind === 'ride' && !(nx && knownPoint(nx))) found.local = true;
       if (m.alighted && m.alighted.leg >= k) delete m.alighted;
+      if (m.walkedOff === k) delete m.walkedOff;
       m.boarded = { leg: k, at: m.boarded?.leg === k ? m.boarded.at : now };
       // le véhicule où l'on est : le nouveau trajet qui le garde jusqu'à l'arrêt suivant le retrouve (adopt)
       found.onBoard = { ...(legs[k].tripId ? { tripId: legs[k].tripId } : {}), schedDep: legs[k].schedDep, at: m.boarded.at };
@@ -1664,6 +1705,9 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
           const pl = platformOf(r);
           if (pl && isTrain(r)) mo.platform = pl;
         } else if (final) mo.arr = j.arr;
+        // 1.3.1 (PRD-1.3.1 § 14, R1) : la sortie du métro à prendre, si le contrôleur la connaît (core/exits.ts)
+        const exit = c.in.exitByLeg?.[w];
+        if (exit) mo.exit = exit;
         return mo;
       },
     });
@@ -1981,6 +2025,7 @@ function adopt(m: Mem, j: Journey, now: number): void {
     delete m.rideNext;
     delete m.turnDist;
     delete m.atStop;
+    delete m.walkedOff;
   }
   m.jid = j.id;
 }
