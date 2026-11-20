@@ -430,12 +430,19 @@ export function tomorrowAt(t: number): number {
   return gtfsTime(p.h < DAY_START_HOUR ? p.date : addDays(p.date, 1), DAY_START_HOUR * 60);
 }
 
+/** Fenêtre des départs connus : de `from` à `to` ; `ends` : les 04:00 (débuts de « demain ») des jours, dans l'ordre. */
+export interface LastCover {
+  from: number;
+  to: number;
+  ends: number[];
+}
+
 /**
  * Instants dont tous les départs sont connus, d'après les jours publiés (ou chargés) `dates`, consécutifs depuis le
  * premier : de 04:00 du premier (avant, les voyages de la veille après minuit manquent) au début du jour qui suit le
  * dernier (ses voyages d'avant 04:00, écrits sur ce jour-là, manquent). null : aucun jour.
  */
-export function lastCover(dates: readonly string[] | undefined): { from: number; to: number } | null {
+export function lastCover(dates: readonly string[] | undefined): LastCover | null {
   const sorted = [...new Set(dates ?? [])].sort();
   if (!sorted.length) return null;
   let last = sorted[0];
@@ -443,7 +450,9 @@ export function lastCover(dates: readonly string[] | undefined): { from: number;
     if (d !== addDays(last, 1)) break;
     last = d;
   }
-  return { from: gtfsTime(sorted[0], DAY_START_HOUR * 60), to: serviceDayBase(addDays(last, 1)) };
+  const ends: number[] = [];
+  for (let d = sorted[0]; d <= addDays(last, 1); d = addDays(d, 1)) ends.push(gtfsTime(d, DAY_START_HOUR * 60));
+  return { from: ends[0], to: serviceDayBase(addDays(last, 1)), ends };
 }
 
 /** Un départ vu par « , dernier » : instant, sens (même nombre : même ligne, même sens), identité (`same`, doublons). */
@@ -451,21 +460,21 @@ interface WayDep {
   t: number;
   way: number;
   /** Ligne et destination : à la même minute, le même départ (voyage en double, doublon SNCB), jamais un « suivant ». */
-  same: string;
+  same: number;
 }
 
 /**
- * Pour chaque départ, 1 s'il est le dernier de son sens avant demain (tomorrowAt), d'après l'horaire : toute la fenêtre
- * jusqu'à demain dans les départs connus (`cover`), et aucun autre départ du même sens dans [t, demain), même ligne et
- * même destination à la même minute exceptées (le même départ). Deux départs différents du même sens à la même minute :
- * aucun des deux n'est le dernier.
+ * Pour chaque départ, 1 s'il est le dernier de son sens avant demain (04:00 qui suit), d'après l'horaire : toute la
+ * fenêtre jusqu'à demain dans les départs connus (`cover`), et aucun autre départ du même sens dans [t, demain), même
+ * ligne et même destination à la même minute exceptées (le même départ). Deux départs différents du même sens à la même
+ * minute : aucun des deux n'est le dernier.
  */
-function lastFlags(deps: readonly WayDep[], cover: { from: number; to: number } | null): Uint8Array {
+function lastFlags(deps: readonly WayDep[], cover: LastCover | null): Uint8Array {
   const out = new Uint8Array(deps.length);
   if (!cover) return out;
   const byWay = new Map<number, number[]>();
   deps.forEach((d, i) => {
-    if (d.way < 0 || !Number.isFinite(d.t)) return;
+    if (d.way < 0 || !Number.isFinite(d.t) || d.t < cover.from) return;
     const list = byWay.get(d.way);
     if (list) list.push(i);
     else byWay.set(d.way, [i]);
@@ -474,8 +483,7 @@ function lastFlags(deps: readonly WayDep[], cover: { from: number; to: number } 
     list.sort((a, b) => deps[a].t - deps[b].t || a - b);
     for (let j = 0; j < list.length; j++) {
       const d = deps[list[j]];
-      if (d.t < cover.from) continue;
-      const end = tomorrowAt(d.t);
+      const end = cover.ends.find((e) => e > d.t) ?? Infinity;
       if (!(end <= cover.to)) continue;
       let alone = true;
       for (let k = j - 1; k >= 0 && alone && deps[list[k]].t === d.t; k--) if (deps[list[k]].same !== d.same) alone = false;
@@ -507,6 +515,16 @@ function unionWays(n: number, keys: (i: number) => Iterable<string>): Int32Array
   return Int32Array.from({ length: n }, (_, i) => find(i));
 }
 
+/** Numéro de chaque valeur distincte (même ligne et même destination : même numéro). */
+function numbering(): (key: string) => number {
+  const ids = new Map<string, number>();
+  return (key) => {
+    let id = ids.get(key);
+    if (id === undefined) ids.set(key, (id = ids.size));
+    return id;
+  };
+}
+
 const WAYS = new WeakMap<PreparedArea, Int32Array>();
 const LAST = new WeakMap<PreparedArea, Uint8Array>();
 
@@ -536,8 +554,10 @@ export function scheduleLastFlags(prep: PreparedArea): Uint8Array {
   if (hit) return hit;
   const ways = lastWays(prep);
   const pats = prep.file.patterns;
+  const id = numbering();
+  const same = pats.map((p, i) => id(`${p?.line ?? ''}|${prep.headKeys[i] ?? ''}`));
   const flags = lastFlags(
-    prep.file.deps.map((d, i) => ({ t: prep.times[i], way: pats[d[2]] ? ways[d[2]] : -1, same: `${pats[d[2]]?.line ?? ''}|${prep.headKeys[d[2]] ?? ''}` })),
+    prep.file.deps.map((d, i) => ({ t: prep.times[i], way: pats[d[2]] ? ways[d[2]] : -1, same: same[d[2]] ?? -1 })),
     lastCover(prep.dates),
   );
   LAST.set(prep, flags);
@@ -630,9 +650,9 @@ export function legDepartureIn(prep: PreparedArea, leg: Pick<Leg, 'op' | 'mode' 
   return cands.every((di) => ways[deps[di][2]] === w) ? cands[0] : -1;
 }
 
-/** Départs d'une gare dans les jours de trains chargés, avec leurs sens et leurs marques (une fois par jeu de jours). */
+/** Départs d'une gare dans les jours de trains chargés : voyage (identifiant normalisé) → rangs ; instants ; marques. */
 interface StationLast {
-  trips: string[];
+  byTrip: Map<string, number[]>;
   t: number[];
   flags: Uint8Array;
 }
@@ -640,8 +660,8 @@ const STATION_LAST = new WeakMap<DayIndex, Map<string, StationLast>>();
 
 /**
  * 1.3.1 (R3) : départs de la gare `station` dans les trains des jours chargés (trains/{date}.json), là où l'on peut
- * monter : même règle que les fichiers de zone (tous les trains, sens par destination ou gare suivante commune, une gare
- * suivante étant une gare où l'on peut descendre), fenêtre couverte par les jours chargés.
+ * monter : même règle que les fichiers de zone (tous les trains, sens par destination ou gare suivante commune où l'on
+ * peut descendre, de proche en proche), fenêtre couverte par les jours chargés. Une fois par gare et par jeu de jours.
  */
 function stationLast(days: readonly DayIndex[], station: string): StationLast {
   const sorted = [...days].sort((a, b) => a.base - b.base);
@@ -650,31 +670,71 @@ function stationLast(days: readonly DayIndex[], station: string): StationLast {
   let memo = holder ? STATION_LAST.get(holder) : undefined;
   const hit = memo?.get(memoKey);
   if (hit) return hit;
-  const items: { t: number; line: string; same: string; head: string; next: string[]; trip: string }[] = [];
+  // tout en nombres (une gare très chargée : 8 000 départs, 50 000 gares suivantes) : ligne, destination, gare
+  const K = 1 << 20;
+  const lineNum = numbering();
+  const headNum = numbering();
+  const catNum = numbering();
+  const stationNum = numbering();
+  const lines = new Map<string, number>();
+  const heads = new Map<string, number>();
+  const t: number[] = [];
+  const same: number[] = [];
+  const trips: string[] = [];
+  const parent: number[] = [];
+  const find = (i: number): number => {
+    while (parent[i] !== i) i = parent[i] = parent[parent[i]];
+    return i;
+  };
+  const firstOf = new Map<number, number>();
+  const join = (i: number, key: number): void => {
+    const j = firstOf.get(key);
+    if (j === undefined) firstOf.set(key, i);
+    else parent[find(i)] = find(j);
+  };
+  const here = stationNum(station);
   for (const d of sorted) {
     const at = d.byStation.get(station) ?? [];
+    const sid = new Int32Array(d.file.stations.length).fill(-1);
     for (let i = 0; i + 1 < at.length; i += 2) {
       const trip = d.file.trips[at[i]];
       const p = at[i + 1];
       const s = trip?.s;
       if (!s || !s[p] || s[p][2] < 0) continue;
-      const next: string[] = [];
+      let line = lines.get(trip.cat);
+      if (line === undefined) lines.set(trip.cat, (line = lineNum(lastLineKey('sncb', isSncbBus({ op: 'sncb', cat: trip.cat }) ? 'bus' : 'train', trip.cat))));
+      const fr = trip.head?.fr ?? '';
+      let head = heads.get(fr);
+      if (head === undefined) heads.set(fr, (head = headNum(headKey(fr))));
+      const k = t.length;
+      parent.push(k);
+      let next = 0;
       for (let q = p + 1; q < s.length; q++) {
-        const id = d.file.stations[s[q][0]]?.id;
-        if (id && id !== station && s[q][1] >= 0) next.push(id);
+        if (s[q][1] < 0) continue;
+        const x = s[q][0];
+        if (sid[x] < 0) sid[x] = d.file.stations[x]?.id ? stationNum(d.file.stations[x].id) : here;
+        if (sid[x] === here) continue;
+        join(k, (2 * line + 1) * K + sid[x]);
+        next++;
       }
-      if (!next.length) continue;
-      const mode = isSncbBus({ op: 'sncb', cat: trip.cat }) ? 'bus' : 'train';
-      const head = headKey(trip.head?.fr ?? '');
-      items.push({ t: d.base + s[p][2] * 60_000, line: lastLineKey('sncb', mode, trip.cat), same: `${trip.cat}|${head}`, head, next, trip: trip.id });
+      if (!next) {
+        parent.pop();
+        continue;
+      }
+      join(k, 2 * line * K + head);
+      t.push(d.base + s[p][2] * 60_000);
+      same.push(catNum(trip.cat) * K + head);
+      trips.push(normalizeId(trip.id));
     }
   }
-  const ways = unionWays(items.length, (i) => [`${items[i].line}|>${items[i].head}`, ...items[i].next.map((z) => `${items[i].line}|@${z}`)]);
-  const flags = lastFlags(
-    items.map((x, i) => ({ t: x.t, way: ways[i], same: x.same })),
-    lastCover(sorted.map((d) => d.file.date)),
-  );
-  const out: StationLast = { trips: items.map((x) => x.trip), t: items.map((x) => x.t), flags };
+  const deps: WayDep[] = t.map((x, i) => ({ t: x, way: find(i), same: same[i] }));
+  const byTrip = new Map<string, number[]>();
+  trips.forEach((id, i) => {
+    const list = byTrip.get(id);
+    if (list) list.push(i);
+    else byTrip.set(id, [i]);
+  });
+  const out: StationLast = { byTrip, t, flags: lastFlags(deps, lastCover(sorted.map((d) => d.file.date))) };
   if (holder) {
     if (!memo) STATION_LAST.set(holder, (memo = new Map()));
     memo.set(memoKey, out);
@@ -690,7 +750,6 @@ export function trainLegLast(days: readonly DayIndex[], leg: Pick<Leg, 'op' | 'f
   const station = leg.from?.areaId;
   if (leg.op !== 'sncb' || !station || !leg.tripId || !days.length) return false;
   const x = stationLast(days, station);
-  const trip = normalizeId(leg.tripId);
-  for (let i = 0; i < x.trips.length; i++) if (Math.abs(x.t[i] - leg.schedDep) <= 30_000 && normalizeId(x.trips[i]) === trip) return x.flags[i] === 1;
+  for (const i of x.byTrip.get(normalizeId(leg.tripId)) ?? []) if (Math.abs(x.t[i] - leg.schedDep) <= 30_000) return x.flags[i] === 1;
   return false;
 }
