@@ -10,7 +10,8 @@
  * l'ouvre ; l'aperçu se lit par son nom (« Aperçu dans les lunettes : … »). Ouvert depuis l'accueil (?retour=accueil),
  * Affichage y revient, et l'écran de l'ouverture revient à cet Affichage-là.
  * 1.3.1 (PRD-1.3.1 § 14, R5) : « Plein soleil » dans « Sur tous les écrans », après la pluie ; l'aperçu le suit. Avec ce
- * quatrième interrupteur, Affichage dépasse 390 × 844 d'environ 55 px (arbitrage signalé, test de display.test.ts).
+ * quatrième interrupteur, Affichage tient toujours dans 390 × 844 : rien de retiré, espaces resserrés (styles.css,
+ * 833 px mesurés dans Chrome ; test de display.test.ts).
  */
 import type { Settings } from '../../core/api';
 import { header, type PhoneCtx } from '../app';
