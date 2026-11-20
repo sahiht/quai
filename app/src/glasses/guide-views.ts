@@ -63,7 +63,10 @@ export const GUIDE_TEXT = {
   alight: 'Descends au prochain arrêt',
   platform: 'Voie modifiée',
   platformBoard: 'voie modifiée',
-  /** « Où tu en es » à bord, quand le prochain arrêt est la descente */
+  /**
+   * 1.2.10 : « Où tu en es » à bord, quand le prochain arrêt est la descente. 1.3.1 (§ 12) : plus affiché (« Ensuite :
+   * descente à … » et la progression le disent) ; gardé pour qui le lit encore.
+   */
   alightHere: 'c’est ta descente',
   /** 1.3.0 (PRD-1.3.0 § 4) : marche hors de l'extrait de Belgique */
   offMap: 'Hors de Belgique',
