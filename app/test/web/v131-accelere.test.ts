@@ -58,7 +58,7 @@ interface Frame {
 }
 
 /** Vraies lunettes et essai, comme web/main.ts (sans le canvas : chaque dessin est noté). */
-async function bench(o: { realNow?: number; visible?: () => boolean; guide?: boolean } = {}) {
+async function bench(o: { realNow?: number; visible?: () => boolean; guide?: boolean; direct?: boolean } = {}) {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'], now: o.realNow ?? at('06:40') });
   const clock = createClock({ mockNow: Date.now(), perfNow: () => performance.now(), e2e: false });
   const backend = memoryBackend();
@@ -84,7 +84,8 @@ async function bench(o: { realNow?: number; visible?: () => boolean; guide?: boo
     async walkRoute(from: LatLon, to: LatLon) {
       walks.push([from, to]);
       // la première marche : le chemin en U du parc d'Avroy à Monument Gramme (deux virages à droite) ; ensuite tout droit
-      return distanceM(to, P.gramme) < 30 ? firstWalkRoute() : route([from, to]);
+      // `direct` : un chemin droit du parc à l'arrêt, pas plus long que la marche prévue
+      return distanceM(to, P.gramme) < 30 && !o.direct ? firstWalkRoute() : route([from, to]);
     },
   });
   // ce que l'essai demande au vrai cœur (les vraies lunettes ont le leur, sans ce relevé)
@@ -322,6 +323,24 @@ describe('l’essai dans Quai Web (vrai contrôleur, vrai moteur, vrais écrans)
     expect(lastFrame(b).text).toMatch(/Partir maintenant\n+11 min à pied/);
     // l'heure vraie n'a pas bougé plus que le temps réel
     expect(b.clock.now()).toBe(at('06:40') + 50 + 6_050);
+    b.essai.stop();
+  });
+
+  it('contrôle : chemin pas plus long que la marche prévue : heures prévues quand même (07:01, 9 min ; pas 07:04, le bus en retard de 3 min du temps réel)', async () => {
+    const b = await bench({ direct: true });
+    expect(trip().legs[1]).toMatchObject({ dep: at('07:15'), delayMin: 3 });
+    await b.essai.tryFavorite(GARE.id);
+    expect(b.essai.now()).toBe(at('07:01') - ESSAI_LEAD_MS);
+    const j = b.essai.sandbox()!.followed!.journey;
+    expect(j.legs.map((l) => [hhmm(l.dep), hhmm(l.arr)])).toEqual([
+      ['07:01', '07:10'],
+      ['07:12', '07:20'],
+      ['07:20', '07:23'],
+    ]);
+    expect(j.legs[1]).toMatchObject({ rt: false, delayMin: 0 });
+    await b.advance(6_500);
+    expect(lastFrame(b).text).toMatch(/Partir maintenant\n+9 min à pied/);
+    expect(lastFrame(b).text).toMatch(/bus 6 à ~07:12/);
     b.essai.stop();
   });
 
