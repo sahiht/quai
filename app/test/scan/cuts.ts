@@ -85,7 +85,8 @@ function lineCuts(lines: readonly string[], texts: readonly (string | undefined)
  */
 export function pageCuts(v: GlassesView, p: PageSpec): Cut[] {
   if (!p.lines.some(glued)) return [];
-  const viewTexts = [v.top?.text, ...(v.top?.cols ?? []), v.note, v.notePlanned, v.hints, v.action];
+  // 1.3.1 (PRD-1.3.1 § 6) : la ligne d'action qui suit le curseur (« ▶ Me guider jusqu'à … ») est un texte du pied
+  const viewTexts = [v.top?.text, ...(v.top?.cols ?? []), v.note, v.notePlanned, v.hints, v.action, ...(v.cursorAction && p.sel >= 0 ? [v.items[p.sel]?.actionText] : [])];
   // écran de message (lignes recoupées à la largeur) ou du guidage : les textes de toute la vue
   if (v.layout === 'message' || v.layout === 'guide') return lineCuts(p.lines, [...viewTexts, ...v.items.flatMap(itemTexts)], 0);
   const out: Cut[] = [];
@@ -96,7 +97,7 @@ export function pageCuts(v: GlassesView, p: PageSpec): Cut[] {
   }
   for (let i = p.top; i < p.top + p.visible; i++) {
     const it = v.items[i];
-    const alone: GlassesView = { ...v, items: [it], top: undefined, note: undefined, notePlanned: undefined, reserveNote: false, hints: '', action: undefined, compactFoot: true, scroll: false, mark: undefined, paged: false, initialSel: undefined, initialTop: undefined, accordion: !!v.accordion && i === p.sel, log: undefined };
+    const alone: GlassesView = { ...v, items: [it], top: undefined, note: undefined, notePlanned: undefined, reserveNote: false, hints: '', action: undefined, cursorAction: undefined, compactFoot: true, scroll: false, mark: undefined, paged: false, initialSel: undefined, initialTop: undefined, accordion: !!v.accordion && i === p.sel, log: undefined };
     const n = layoutPage(alone, { sel: 0, top: 0 }).lines.length;
     out.push(...lineCuts(p.lines.slice(k, k + n), itemTexts(it), k));
     k += n;
@@ -105,19 +106,43 @@ export function pageCuts(v: GlassesView, p: PageSpec): Cut[] {
   return out;
 }
 
-/** Bilan des coupes de plusieurs pages : rangées coupées (« … »), au milieu d'un mot, premier mot seul, introuvables. */
+/**
+ * Bilan des coupes de plusieurs pages : rangées coupées (« … »), au milieu d'un mot, premier mot seul, introuvables.
+ * 1.3.1 (PRD-1.3.1 § 7) : rangées affichées avec une apostrophe droite (`straight`, 0 exigé : un nom des données
+ * s'affiche avec « ’ »), comptées sur les pages données à `tally`.
+ */
 export interface CutTally {
   cut: number;
   mid: number;
   first: number;
   unknown: number;
   samples: string[];
+  straight: number;
+  straightSamples: string[];
 }
 
-export const newTally = (): CutTally => ({ cut: 0, mid: 0, first: 0, unknown: 0, samples: [] });
+export const newTally = (): CutTally => ({ cut: 0, mid: 0, first: 0, unknown: 0, samples: [], straight: 0, straightSamples: [] });
 
-/** Ajoute les coupes d'une page au bilan (une rangée compte une fois, à sa pire coupe). */
-export function tally(t: CutTally, cuts: readonly Cut[], label = ''): void {
+/**
+ * 1.3.1 (PRD-1.3.1 § 7) : rangées d'une page qui montrent une apostrophe droite : son titre, son journal (ce qui se lit)
+ * et le texte de chaque conteneur envoyé aux lunettes.
+ */
+export function straightApostrophes(p: PageSpec): string[] {
+  const rows = [p.title, ...p.lines, ...p.containers.flatMap((c) => c.content.split('\n'))];
+  return rows.filter((r) => r.includes("'"));
+}
+
+/**
+ * Ajoute les coupes d'une page au bilan (une rangée compte une fois, à sa pire coupe) ; 1.3.1 : avec la page (`p`), ses
+ * rangées à apostrophe droite.
+ */
+export function tally(t: CutTally, cuts: readonly Cut[], label = '', p?: PageSpec): void {
+  if (p) {
+    for (const r of straightApostrophes(p)) {
+      t.straight++;
+      if (t.straightSamples.length < 8) t.straightSamples.push(`${label ? `${label} : ` : ''}${r.replace(NBSP, ' ')}`);
+    }
+  }
   const byRow = new Map<number, { line: string; kind: CutKind }>();
   const rank: Record<CutKind, number> = { word: 0, first: 1, unknown: 2, mid: 3 };
   for (const c of cuts) {
