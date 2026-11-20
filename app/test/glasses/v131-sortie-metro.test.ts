@@ -134,6 +134,80 @@ describe('R1 : choix de la sortie (core/exits.ts)', () => {
   });
 });
 
+/* ------------------------------ Correspondance dans la même station ------------------------------ */
+
+/**
+ * Run de vérification du 20/11 à 22:15 : 31 arrêts de tram de stations du fichier n'y sont pas (OpenStreetMap ne leur
+ * donne pas de numéro sous terre), dont les quais du prémétro de Gare du Midi (0631, 0636). Règle prudente : aucune
+ * sortie pour une correspondance vers un tram ou un métro de la même station (même zone, sinon même nom).
+ */
+describe('R1 : correspondance vers un tram ou un métro de la même station (règle prudente du 20/11)', () => {
+  const MIDI = stop('Gare du Midi', { lat: 50.83703, lon: 4.3376 }, 'stib:0631');
+  const PORTE_DE_HAL = stop('Porte de Hal', { lat: 50.8334, lon: 4.3447 }, 'stib:hal');
+  const LOUISE = stop('Louise', { lat: 50.83573, lon: 4.3554 }, 'stib:1087');
+  const LOUISE_TRAM = stop('Louise', { lat: 50.8361, lon: 4.3551 }, 'stib:1087');
+  const STEPHANIE = stop('Stéphanie', { lat: 50.8332, lon: 4.3583 }, 'stib:stephanie');
+  const SIMONIS = stop('Simonis', { lat: 50.86312, lon: 4.33048 }, 'stib:45');
+  const BOCKSTAEL = stop('Bockstael', { lat: 50.8775, lon: 4.3489 }, 'stib:bockstael');
+  const POELAERT = stop('Poelaert', { lat: 50.8373, lon: 4.3523 }, 'stib:poelaert');
+  const PLACE_STEPHANIE = stop('Place Stéphanie', { lat: 50.8334, lon: 4.3581 });
+  const FILE: ExitsFile = {
+    ...EXITS,
+    stops: {
+      // Gare du Midi : les quais du métro (8351, 8352) sont au fichier, ceux du prémétro (0631, 0636) n'y sont pas
+      '8352': { s: 'Gare du Midi', x: [['Rue d\'Angleterre', 50.8362, 4.3371, 61], ['Avenue Fonsny', 50.8366, 4.3383, 101]] },
+      '8322': { s: 'Louise', x: [['Place Louise', 50.8362, 4.3549, 40], ['Avenue de la Toison d\'Or', 50.8366, 4.3561, 52]] },
+      '8764': { s: 'Simonis', x: [['Rue Gemba', 50.8633, 4.3301, 44], ['Avenue de la Liberté', 50.8628, 4.3312, 95]] },
+      '0470': { s: 'Simonis', x: [['Rue Gemba', 50.8633, 4.3301, 30]] },
+    },
+  };
+  const metro = (to: typeof MIDI, toStop: string): Leg => ({ ...rideLeg({ op: 'stib', mode: 'metro', line: '2', head: 'Simonis', stops: [{ p: PORTE_DE_HAL, t: at('08:10') }, { p: to, t: at('08:14') }] }), fromStop: '8342', toStop });
+  const next = (mode: Leg['mode'], line: string, from: typeof MIDI, to: typeof MIDI, fromStop: string, op: Leg['op'] = 'stib'): Leg => ({ ...rideLeg({ op, mode, line, head: to.name.fr, stops: [{ p: from, t: at('08:20') }, { p: to, t: at('08:26') }] }), fromStop, toStop: '9999' });
+  /** Métro jusqu'à `at0`, marche jusqu'à l'arrêt de `n`, puis `n`, puis dernière marche. */
+  const via = (m: Leg, n: Leg, last = PLACE_STEPHANIE): Journey => journeyOf([m, walkLeg(m.to as typeof MIDI, n.from as typeof MIDI, m.arr, 3), n, walkLeg(n.to as typeof MIDI, last, n.arr, 4)], 'jr6', at('08:10'));
+
+  it('Gare du Midi, métro vers prémétro (quai 0631, absent du fichier) : aucune sortie', () => {
+    expect(exitByLegOf(via(metro(MIDI, '8352'), next('tram', '4', MIDI, PORTE_DE_HAL, '0631')), FILE)).toBeUndefined();
+    expect(exitByLegOf(via(metro(MIDI, '8352'), next('tram', '10', MIDI, PORTE_DE_HAL, '0636')), FILE)).toBeUndefined();
+    // sans numéro d'arrêt physique pour le tram : pareil
+    const t = next('tram', '4', MIDI, PORTE_DE_HAL, '0631');
+    delete t.fromStop;
+    expect(exitByLegOf(via(metro(MIDI, '8352'), t), FILE)).toBeUndefined();
+  });
+
+  it('Simonis, métro vers tram : aucune sortie, que le quai du tram soit au fichier (0470) ou non (0471)', () => {
+    expect(exitByLegOf(via(metro(SIMONIS, '8764'), next('tram', '19', SIMONIS, BOCKSTAEL, '0470')), FILE)).toBeUndefined();
+    expect(exitByLegOf(via(metro(SIMONIS, '8764'), next('tram', '9', SIMONIS, BOCKSTAEL, '0471')), FILE)).toBeUndefined();
+    // même zone d'arrêts, nom écrit autrement : la même station
+    expect(exitByLegOf(via(metro(SIMONIS, '8764'), next('tram', '9', { ...SIMONIS, name: N('Simonis (Léopold II)') }, BOCKSTAEL, '0471')), FILE)).toBeUndefined();
+  });
+
+  it('Louise, métro vers tram de surface de la même station : aucune sortie (une sortie utile perdue, accepté)', () => {
+    expect(exitByLegOf(via(metro(LOUISE, '8322'), next('tram', '92', LOUISE_TRAM, STEPHANIE, '6314')), FILE)).toBeUndefined();
+    // même nom de station sans zone connue, ou écrit autrement : la même station
+    const bare = { ...LOUISE_TRAM, name: N('LOUISE') };
+    delete (bare as { areaId?: string }).areaId;
+    expect(exitByLegOf(via(metro(LOUISE, '8322'), next('tram', '92', bare, STEPHANIE, '6314')), FILE)).toBeUndefined();
+    // vers un métro de la même station dont le quai n'est pas au fichier : pareil
+    expect(exitByLegOf(via(metro(LOUISE, '8322'), next('metro', '6', LOUISE, PORTE_DE_HAL, '8321')), FILE)).toBeUndefined();
+  });
+
+  it('la ligne reste : vers un bus de la même station, vers un tram d’une autre station, et pour la dernière marche', () => {
+    // bus à Louise (même zone, même nom) : on sort
+    const bus = next('bus', '33', LOUISE_TRAM, STEPHANIE, '1087');
+    expect(exitByLegOf(via(metro(LOUISE, '8322'), bus), FILE)).toEqual({ 1: 'Place Louise' });
+    // tram pris à un arrêt d'une autre station (Poelaert), à pied depuis Louise : on sort
+    expect(exitByLegOf(via(metro(LOUISE, '8322'), next('tram', '92', POELAERT, STEPHANIE, '6312')), FILE)).toEqual({ 1: 'Place Louise' });
+    // dernière marche vers la destination : la sortie vers elle
+    const m = metro(LOUISE, '8322');
+    expect(exitByLegOf(journeyOf([m, walkLeg(LOUISE, PLACE_STEPHANIE, m.arr, 5)], 'jr7', at('08:10')), FILE)).toEqual({ 1: 'Place Louise' });
+    // et à Gare du Midi, après le métro, vers un bus ou vers la destination
+    expect(exitByLegOf(via(metro(MIDI, '8352'), next('bus', '49', MIDI, PORTE_DE_HAL, '2531')), FILE)).toEqual({ 1: 'Rue d\'Angleterre' });
+    const g = metro(MIDI, '8352');
+    expect(exitByLegOf(journeyOf([g, walkLeg(MIDI, stop('Avenue Fonsny', { lat: 50.8364, lon: 4.3392 }), g.arr, 4)], 'jr8', at('08:10')), FILE)).toEqual({ 1: 'Avenue Fonsny' });
+  });
+});
+
 /* ------------------------------ Moteur ------------------------------ */
 
 const walkOf = (s: GuideState): Extract<Moment, { kind: 'walk' }> => {
