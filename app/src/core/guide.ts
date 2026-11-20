@@ -162,6 +162,11 @@ export const GUIDE = {
   uturnAccM: 20,
   uturnFixes: 3,
   uturnAheadM: 5,
+  /**
+   * 1.3.1 (A6, contrôle du moteur) : chemin en épingle : pas de demi-tour si une partie du chemin, à 30 m au plus
+   * (offRouteM), va dans le sens de la marche à 60° près
+   */
+  uturnWithDeg: 60,
   /** 1.3.1 (B18, P6) : virage suivant à 30 m au plus : annoncé avec celui-ci (« puis à gauche ») */
   turnThenM: 30,
   /** 1.3.1 (B18, P8) : distance d'un virage : médiane des 3 dernières positions (10 s au plus), jamais en hausse */
@@ -280,9 +285,10 @@ interface Mem extends GuideMemory {
   turnDist?: { id: string; d: number };
   /**
    * 1.3.1 (R4, realFirstWalk) : trajet `jid`, première fois (epoch ms) où le vrai chemin de la première marche s'est
-   * montré plus long que la marche prévue : l'heure de partir n'est jamais avancée avant cet instant
+   * montré plus long que la marche prévue : l'heure de partir n'est jamais avancée avant cet instant ; `min` : ses
+   * vraies minutes, gardées pour tout le guidage de ce trajet (l'heure de partir ne change plus avec le chemin gardé)
    */
-  walk0?: { jid: string; at: number };
+  walk0?: { jid: string; at: number; min?: number };
 }
 
 const ISSUE_KINDS: readonly CheckIssue['kind'][] = ['battery', 'noPosition', 'positionLost'];
@@ -334,7 +340,9 @@ function readMem(mem: GuideMemory | null | undefined): Mem {
   if (chk) out.chk = chk;
   if (x.rideNext && Number.isInteger(x.rideNext.leg) && Number.isInteger(x.rideNext.s)) out.rideNext = { leg: x.rideNext.leg, s: x.rideNext.s };
   if (x.turnDist && typeof x.turnDist.id === 'string' && Number.isFinite(x.turnDist.d)) out.turnDist = { id: x.turnDist.id, d: x.turnDist.d };
-  if (x.walk0 && typeof x.walk0.jid === 'string' && Number.isFinite(x.walk0.at)) out.walk0 = { jid: x.walk0.jid, at: x.walk0.at };
+  if (x.walk0 && typeof x.walk0.jid === 'string' && Number.isFinite(x.walk0.at)) {
+    out.walk0 = { jid: x.walk0.jid, at: x.walk0.at, ...(Number.isInteger(x.walk0.min) && (x.walk0.min as number) > 0 ? { min: x.walk0.min } : {}) };
+  }
   return out;
 }
 
@@ -1024,6 +1032,10 @@ function motionOn(pts: LatLon[], cum: number[], fx: TimedPoint[], i: number, min
   const pf = projectAlong(pts, f, cum);
   const pa = projectAlong(pts, a, cum);
   if (pf.offM > GUIDE.offRouteM || pa.offM > GUIDE.offRouteM) return undefined;
+  // chemin en épingle (rampe, aller et retour jusqu'au passage piéton quand les trottoirs sont séparés) : la position,
+  // bruitée, se projette sur l'autre branche, qui va dans l'autre sens. Si une partie du chemin à 30 m au plus va dans
+  // le sens de la marche, on ne sait pas sur quelle branche on est : jamais « Fais demi-tour » dans le doute
+  if (start && routeGoesWith(pts, cum, f, bearingDeg(a, f))) return undefined;
   const total = cum[cum.length - 1];
   let from = Math.max(0, pf.alongM);
   if (total - from < LAST_TURN_FREE_M) {
@@ -1032,6 +1044,25 @@ function motionOn(pts: LatLon[], cum: number[], fx: TimedPoint[], i: number, min
   }
   const dir = bearingDeg(pointAlong(pts, cum, from), pointAlong(pts, cum, Math.min(total, from + GUIDE.uturnM)));
   return { angle: Math.abs(relativeDeg(bearingDeg(a, f), dir)), back: pf.alongM <= pa.alongM + GUIDE.uturnAheadM };
+}
+
+/**
+ * 1.3.1 (A6, contrôle du moteur) : une partie du chemin, à 30 m au plus de `p`, va-t-elle dans le sens `moveDeg` (à 60°
+ * près : direction de chaque segment proche, ou du chemin sur les 15 m qui suivent son point le plus proche) ?
+ */
+function routeGoesWith(pts: LatLon[], cum: number[], p: LatLon, moveDeg: number): boolean {
+  const total = cum[cum.length - 1];
+  for (let s = 0; s + 1 < pts.length; s++) {
+    const pr = projectOn([pts[s], pts[s + 1]], p);
+    if (pr.offM > GUIDE.offRouteM) continue;
+    const from = cum[s] + pr.alongM;
+    if (total - from < GUIDE.uturnAheadM) continue;
+    // la direction du segment lui-même, ou celle des 15 m qui suivent (avant un coin, elles diffèrent)
+    const ahead = bearingDeg(pointAlong(pts, cum, from), pointAlong(pts, cum, Math.min(total, from + GUIDE.uturnM)));
+    const own = cum[s + 1] - cum[s] >= 1 ? bearingDeg(pts[s], pts[s + 1]) : ahead;
+    if ([own, ahead].some((dir) => Math.abs(relativeDeg(dir, moveDeg)) <= GUIDE.uturnWithDeg)) return true;
+  }
+  return false;
 }
 
 /** Une position (ou une moyenne de positions) datée. */
@@ -1449,6 +1480,8 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
           // tableau par le contrôleur), « Si tu le rates : tram 3 à 08:51 » ; jamais sinon
           const mg = connectionMargin(legs, k);
           const nx = c.in.nextByLeg?.[k];
+          // très juste dit comme à « Descends » (Then.tight) : la même correspondance, le même mot (A4 : le moteur le dit)
+          if (mg !== undefined && mg <= GUIDE.tightMin) mo.tight = true;
           if (mg !== undefined && mg <= GUIDE.tightMin && nx && Number.isFinite(nx.depAt) && nx.depAt > l.dep) {
             mo.ifMissed = { vehicle: { ...nx.vehicle }, depAt: nx.depAt, rt: !!nx.rt };
           }
@@ -1955,8 +1988,11 @@ function endedNow(c: Ctx, loc: Loc): boolean {
  *   vient tout de suite, et si le véhicule ne peut plus être pris, c'est le départ raté d'aujourd'hui (« très juste »,
  *   « Si tu le rates », puis le véhicule parti) ;
  * - rien ne change si le chemin n'est pas plus long, n'est pas un vrai chemin (ligne droite : hors de Belgique, pas de
- *   données), ne part pas du point de départ (40 m ; recalculé en route : la position dit déjà la marche restante) ou
- *   ne mène pas à l'arrêt (30 m) ; ni pour un trajet à pied seul (aucun véhicule à prendre), ni pour « j'y descends ».
+ *   données), ne part pas du point de départ (40 m) ou ne mène pas à l'arrêt (30 m) ; ni pour un trajet à pied seul
+ *   (aucun véhicule à prendre), ni pour « j'y descends » ;
+ * - décidé une fois par trajet (contrôle du moteur) : les vraies minutes sont gardées (mémoire `walk0.min`) ; le chemin
+ *   recalculé en route depuis la position (chemin quitté 10 s) ne ramène pas l'heure de partir à l'heure prévue, et ne
+ *   la déplace pas d'une minute : la position dit déjà la marche restante.
  * Les marches de correspondance gardent leurs minutes prévues (on ne choisit pas l'heure d'une descente).
  * Le seul endroit de cette règle : le trajet rendu sert à tout le calcul du pas (même identifiant, même arrivée).
  */
@@ -1964,16 +2000,21 @@ function realFirstWalk(input: GuideInput, m: Mem): Journey {
   const j = input.journey;
   const w = j.legs[0];
   const r = j.legs[1];
-  const route = input.walk?.leg === 0 ? input.walk.route : undefined;
-  if (input.kind !== 'trip' || !w || w.kind !== 'walk' || !r || r.kind !== 'ride' || !route || route.source !== 'osm') return j;
-  if (!Number.isFinite(route.lengthM) || !Number.isFinite(j.leaveAt)) return j;
-  const start = knownPoint(input.origin) ? input.origin : knownPoint(w.from) ? w.from : undefined;
-  if (!start || !knownPoint(route.from) || distanceM(route.from, start) > GUIDE.leaveM) return j;
-  if (!knownPoint(w.to) || !knownPoint(route.to) || distanceM(route.to, w.to) > 30) return j;
-  const real = minutesFor(route.lengthM, false);
+  if (input.kind !== 'trip' || !w || w.kind !== 'walk' || !r || r.kind !== 'ride' || !Number.isFinite(j.leaveAt)) return j;
+  // décidé une fois par trajet (mémoire `walk0`) : un chemin recalculé en route (depuis la position, plus court ou qui
+  // ne part plus du départ) ou absent un instant ne ramène pas l'heure de partir en arrière, ni ne la déplace
+  let real = m.walk0?.jid === j.id ? m.walk0.min : undefined;
+  if (real === undefined) {
+    const route = input.walk?.leg === 0 ? input.walk.route : undefined;
+    if (!route || route.source !== 'osm' || !Number.isFinite(route.lengthM)) return j;
+    const start = knownPoint(input.origin) ? input.origin : knownPoint(w.from) ? w.from : undefined;
+    if (!start || !knownPoint(route.from) || distanceM(route.from, start) > GUIDE.leaveM) return j;
+    if (!knownPoint(w.to) || !knownPoint(route.to) || distanceM(route.to, w.to) > 30) return j;
+    real = minutesFor(route.lengthM, false);
+  }
   const extra = real - walkMinOf(w);
   if (extra <= 0) return j;
-  if (m.walk0?.jid !== j.id) m.walk0 = { jid: j.id, at: input.now };
+  m.walk0 = { jid: j.id, at: m.walk0?.jid === j.id ? m.walk0.at : input.now, min: real };
   const leaveAt = Math.min(j.leaveAt, Math.max(j.leaveAt - extra * MIN, m.walk0.at));
   const shift = j.leaveAt - leaveAt;
   const legs = j.legs.slice();

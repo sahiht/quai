@@ -404,6 +404,29 @@ describe('A6 (P3) : « Fais demi-tour »', () => {
     }
   });
 
+  it('chemin en épingle (deux branches à 8 m, bruit de ± 8 m) : jamais « Fais demi-tour » à qui marche dans le bon sens', () => {
+    // 150 m au sud, 8 m à l'ouest, 150 m au nord (retour par l'autre trottoir), puis 300 m à l'ouest jusqu'à l'arrêt :
+    // sur la seconde branche, la position bruitée se projette sur la première, qui va dans l'autre sens
+    const a = P.avroy;
+    const b = offset(a, 0, -150);
+    const c = offset(b, -8, 0);
+    const d = offset(c, 0, 150);
+    const e = offset(d, -300, 0);
+    const hairpin = route([a, b, c, d, e], [{ at: 1, turn: 'right' }, { at: 2, turn: 'right' }, { at: 3, turn: 'left' }]);
+    const stopE = { ...S.gramme, ...e };
+    const j = journeyOf([walkLeg(S.avroy, stopE, at('07:05'), 9), rideLeg({ op: 'tec', mode: 'bus', line: '6', head: 'Gare des Guillemins', stops: [{ p: stopE, t: at('07:16') }, { p: S.leman, t: at('07:20') }, { p: S.guilleminsBus, t: at('07:24') }] })], 'jepingle', at('07:05'));
+    const wrong: number[] = [];
+    for (let seed = 1; seed <= 40; seed++) {
+      const r = guide(j, { walk: { leg: 0, route: hairpin } });
+      const fx = trace(hairpin.coords, { t0: at('07:05'), toM: 560, every: 2, noise: 8, seed });
+      if (fx.some((f) => isUturn(step(r, f.at, f)))) wrong.push(seed);
+    }
+    expect(wrong).toEqual([]);
+    // limite voulue : sur l'épingle même, dans le doute (une branche à 30 m va dans le sens de la marche), rien n'est
+    // dit ; le chemin quitté plus de 10 s demande toujours un nouveau chemin. Les vrais demi-tours (départ du mauvais
+    // côté, virage raté) : tests ci-dessus, inchangés
+  });
+
   it('jamais à l’arrêt d’attente ni avant de partir', () => {
     const r = guide(prdTrip(), { walk: { leg: 0, route: street() } });
     // avant l'heure, à la porte puis 25 m du mauvais côté : phase « avant », rien
@@ -485,8 +508,19 @@ describe('B16 (U4) : correspondance très juste dite avant', () => {
     expect(m(s.moment, 'board')).toMatchObject({ stop: S.gareCentrale.name, depAt: at('08:34'), ifMissed: { vehicle: { line: '71' }, depAt: at('08:41'), rt: true } });
   });
 
+  it('marge d’exactement 1 min : « très juste » à « Descends » et à « Monter » (le même mot pour la même correspondance), même sans suivant connu', () => {
+    // IC arrivé à 08:30, 3 min à pied, bus 71 à 08:34 : 1 min de marge. Déjà à l'arrêt du bus à 08:29:50 (descente constatée)
+    const r = guide(prdTrip({ icDelay: 3 }));
+    expect(m(step(r, at('08:26:30')).moment, 'alight').then).toMatchObject({ kind: 'ride', tight: true });
+    const b = m(step(r, at('08:29:50'), fix(P.gareCentrale, at('08:29:50'), { speed: 0 })).moment, 'board');
+    // la marge restante arrondie vaut encore 1 min : sans `tight`, l'écran écrivait « marge 1 min » après « très juste »
+    expect(b).toMatchObject({ walkMin: 3, marginMin: 1, tight: true });
+    expect(b.ifMissed).toBeUndefined();
+  });
+
   it('pas très juste (4 min), suivant inconnu ou pas plus tard : pas de « Si tu le rates »', () => {
     const ok = guide(prdTrip(), { nextByLeg: bus71(at('08:41')) });
+    expect(m(step(ok, at('08:31'), fix(P.gareCentrale, at('08:31'), { speed: 0 })).moment, 'board').tight).toBeUndefined();
     expect(m(step(ok, at('08:31'), fix(P.gareCentrale, at('08:31'), { speed: 0 })).moment, 'board').ifMissed).toBeUndefined();
     const unknown = guide(prdTrip({ icDelay: 3 }));
     expect(m(step(unknown, at('08:33'), fix(P.gareCentrale, at('08:33'), { speed: 0 })).moment, 'board').ifMissed).toBeUndefined();

@@ -392,6 +392,10 @@ describe('PRD-1.3.1 § 4 et § 12 (U3, L2) : le nom de l’arrêt où l’on mar
     expect(corr.lines).toEqual(['Tram 3 dans ~1 min', 'vers Churchill', '2 min à pied → Gare du Nord, très juste', HINT]);
     expect(levels(corr.p).pale[2]).toBe('2 min à pied → Gare du Nord, très juste');
     expect(moment(board({ walkMin: 2, marginMin: 6, stop: N('Gare du Nord') })).lines[2]).toBe('2 min à pied → Gare du Nord, marge 6 min');
+    // contrôle du moteur (B16, A4) : marge d'exactement 1 min, que « Descends » vient de dire « très juste » : le moteur le
+    // dit aussi à « monter » (`tight`), jamais « marge 1 min » ; sans `tight`, la règle de la marge (1.2.5) reste
+    expect(moment(board({ walkMin: 2, marginMin: 1, tight: true, stop: N('Gare du Nord') })).lines[2]).toBe('2 min à pied → Gare du Nord, très juste');
+    expect(moment(board({ walkMin: 2, marginMin: 1, stop: N('Gare du Nord') })).lines[2]).toBe('2 min à pied → Gare du Nord, marge 1 min');
     expect(moment(board({ vehicle: IC, depAt: T(7, 35), rt: true, platform: '3', head: N('Bruxelles-Midi'), walkMin: 3, marginMin: 4, stop: N('Namur') })).lines[2]).toBe('3 min à pied → Namur, marge 4 min');
     // un nom qui ne tient pas : 1.3.1 (§ 15, décision du 20/11 à 21:15) son diminutif d'abord (« Bxl-Central ») ; sans
     // diminutif : coupé au mot (ici après le trait d'union), la marge entière
