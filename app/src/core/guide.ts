@@ -1296,7 +1296,9 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
     const base = `replan:${re.jid}:${re.reason}:${re.leg}`;
     const lost = re.lost;
     const reason = re.reason as 'missed' | 'cancelled' | 'late';
-    // 1.3.1 (A3, I1) : véhicule sans temps réel, resté à l'arrêt : « Nouveau trajet : … » sans « est parti »
+    // 1.3.1 (A3, I1) : véhicule sans temps réel, resté à l'arrêt : « Nouveau trajet : … » sans « est parti ». `planned`
+    // seulement avec le nouveau trajet : avant qu'il soit connu, aucun moment (l'écran n'aurait que « est parti » à écrire,
+    // et rien ne dit que le véhicule est passé) ; aucun trajet trouvé : le moment de la 1.3.0, sans `planned`
     const planned = re.planned ? { planned: true } : {};
     if (re.swap && re.swap.jid === jid) {
       // premier véhicule du nouveau trajet (pas celui où l'on est encore, gardé devant par replanJourney)
@@ -1316,13 +1318,13 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
       const none = re.none;
       out.push({
         id: `${base}:none`, kind: 'replan', trig: now < none + GUIDE.replanMs, end: now >= none + GUIDE.replanMs,
-        make: (since) => ({ kind: 'replan', id: `${base}:none`, since, until: none + GUIDE.replanMs, leg: re.leg, reason, lost, none: true, ...planned }),
+        make: (since) => ({ kind: 'replan', id: `${base}:none`, since, until: none + GUIDE.replanMs, leg: re.leg, reason, lost, none: true }),
       });
-    } else if (re.jid === jid) {
+    } else if (re.jid === jid && !re.planned) {
       const until = re.t + GUIDE.replanMs;
       out.push({
         id: base, kind: 'replan', trig: now < until, end: now >= until,
-        make: (since) => ({ kind: 'replan', id: base, since, until, leg: re.leg, reason, lost, ...planned }),
+        make: (since) => ({ kind: 'replan', id: base, since, until, leg: re.leg, reason, lost }),
       });
     }
   }

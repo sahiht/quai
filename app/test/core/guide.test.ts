@@ -500,10 +500,12 @@ describe('positions', () => {
       expect(s.ended, hm).toBe(false);
       expect(s.phase, hm).toEqual({ kind: 'wait', leg: 1 });
     }
-    // toujours à l'arrêt 10 min après l'heure (sans temps réel) : « Ton bus 6 de 07:12 est parti », nouveau trajet
+    // toujours à l'arrêt 10 min après l'heure (sans temps réel) : nouveau trajet demandé ; 1.3.1 (A3, I1) : rien ne dit
+    // que le bus est passé, pas de « Ton bus 6 de 07:12 est parti » : le message vient avec le nouveau trajet
     const s = step(r, at('07:22:30'), fix(P.gramme, at('07:22:30')));
     expect(s.ended).toBe(false);
-    expect(m(s.moment, 'replan')).toMatchObject({ reason: 'missed' });
+    expect(s.replan).toMatchObject({ reason: 'missed' });
+    expect(s.moment).toBeNull();
     // revenu au point de lancement : la règle s'applique de nouveau
     const r2 = guide(prdTrip({ bus6Rt: false }), { origin, startedAt: at('07:00') });
     step(r2, at('07:08'), fix(P.gramme, at('07:08')));

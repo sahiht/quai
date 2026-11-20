@@ -175,8 +175,9 @@ describe('A2 (P1) : bus raté en marchant', () => {
       expect(s.replan).toBeUndefined();
     }
     const s = step(r, at('07:25'), fix(P.gramme, at('07:25'), { speed: 0 }));
-    expect(m(s.moment, 'replan')).toMatchObject({ reason: 'missed', planned: true });
+    // nouveau trajet demandé depuis l'arrêt ; aucun message avant qu'il soit connu (jamais « est parti »)
     expect(s.replan).toMatchObject({ reason: 'missed', from: { areaId: 'tec:LGgram' } });
+    expect(s.moment).toBeNull();
   });
 
   it('pas parti (règle 1.2.x) : toujours vrai pour qui reste chez soi', () => {
@@ -231,9 +232,30 @@ describe('A3 (I1) : sans temps réel, le véhicule gardé jusqu’à 15 min avan
       expect(s.moment?.kind).not.toBe('alight');
     }
     const s = step(r, at('08:27'), fix(P.guillemins, at('08:27'), { speed: 0 }));
-    expect(m(s.moment, 'replan')).toMatchObject({ reason: 'missed', planned: true, lost: { vehicle: IC, depAt: at('07:42') } });
+    // le nouveau trajet est demandé depuis la gare ; tant qu'il n'est pas connu, aucun message (rien ne dit « est parti »)
     expect(s.replan).toMatchObject({ reason: 'missed', from: { areaId: 'sncb:8841004' } });
+    expect(s.moment).toBeNull();
     expect(s.wakeAt).toBeLessThanOrEqual(at('08:28'));
+    expect(step(r, at('08:27:04'), fix(P.guillemins, at('08:27:04'), { speed: 0 })).moment).toBeNull();
+    // le nouveau trajet adopté (IC de 08:42) : « Nouveau trajet : … » avec `planned`, le véhicule et l'arrivée
+    const ic2 = rideLeg({
+      op: 'sncb', mode: 'train', line: 'IC', cat: 'IC', head: 'Ostende', rt: false, platform: '3',
+      stops: [{ p: S.guillemins, t: at('08:42'), platform: '3' }, { p: S.ans, t: at('08:49') }, { p: S.louvain, t: at('09:17') }, { p: S.nord, t: at('09:34') }, { p: S.central, t: at('09:39') }],
+    });
+    r.j = journeyOf([ic2, walkLeg(S.central, S.gareCentrale, ic2.arr, 3)], 'jic842', at('08:42'));
+    const s2 = step(r, at('08:27:08'), fix(P.guillemins, at('08:27:08'), { speed: 0 }));
+    expect(m(s2.moment, 'replan')).toMatchObject({ reason: 'missed', planned: true, lost: { vehicle: IC, depAt: at('07:42') }, next: { vehicle: IC, depAt: at('08:42'), platform: '3' }, arr: at('09:42'), laterMin: 60 });
+    expect(s2.replan).toBeUndefined();
+  });
+
+  it('resté sur le quai, aucun autre trajet trouvé : le message de la 1.3.0, jamais `planned` sans nouveau trajet', () => {
+    const r = guide(icTrip(), { nextByLeg: next842, missed, startedAt: at('07:20') });
+    stay(r, P.guillemins, at('07:38'), at('08:26:30'), 60);
+    expect(step(r, at('08:27'), fix(P.guillemins, at('08:27'), { speed: 0 })).moment).toBeNull();
+    r.mem = replanNone(r.mem, at('08:27:05'));
+    const s = step(r, at('08:27:06'), fix(P.guillemins, at('08:27:06'), { speed: 0 }));
+    expect(m(s.moment, 'replan')).toMatchObject({ reason: 'missed', none: true });
+    expect(s.moment).not.toHaveProperty('planned');
   });
 
   it('sans départ suivant connu : gardé 10 min, comme avant ; « Nouveau trajet » sans « est parti »', () => {
@@ -241,7 +263,8 @@ describe('A3 (I1) : sans temps réel, le véhicule gardé jusqu’à 15 min avan
     stay(r, P.guillemins, at('07:38'), at('07:51:30'));
     expect(step(r, at('07:51:50'), fix(P.guillemins, at('07:51:50'), { speed: 0 })).replan).toBeUndefined();
     const s = step(r, at('07:52'), fix(P.guillemins, at('07:52'), { speed: 0 }));
-    expect(m(s.moment, 'replan')).toMatchObject({ reason: 'missed', planned: true });
+    expect(s.replan).toMatchObject({ reason: 'missed' });
+    expect(s.moment).toBeNull();
   });
 
   it('bus d’heure en heure sur un trajet court : attendu à l’arrêt sans fin du guidage ni « Descends », puis « Nouveau trajet »', () => {
@@ -256,7 +279,8 @@ describe('A3 (I1) : sans temps réel, le véhicule gardé jusqu’à 15 min avan
     }
     const s = step(r, at('07:57'), fix(P.gramme, at('07:57'), { speed: 0 }));
     expect(s.ended).toBe(false);
-    expect(m(s.moment, 'replan')).toMatchObject({ reason: 'missed', planned: true });
+    expect(s.replan).toMatchObject({ reason: 'missed' });
+    expect(s.moment).toBeNull();
     expect(step(r, at('07:59'), fix(P.gramme, at('07:59'), { speed: 0 })).ended).toBe(false);
   });
 
