@@ -21,6 +21,15 @@
  * publiés, une marque contredite dans un tableau, une marque coupée ou une rangée qui dépasse, une exception. Mesuré et
  * écrit dans le journal : départs, départs marqués par réseau, tableaux, exemples, accord des trains avec les zones.
  *
+ * Décision du propriétaire du 20/11 à 21:58 (« est-ce que l'usager peut le prendre ou pas ») : pour les tableaux, la
+ * famille d'un numéro (mêmes chiffres, lettres devant ou derrière : « 70 » et « X70 », « 10 » et « N10 ») est une seule
+ * ligne. Pour l'écran du trajet, chaque étape possible est relue : chaque départ d'une zone vers chacune des zones où
+ * son véhicule s'arrête ensuite (bus, tram, métro : destinationLastFlags), chaque train du premier jour de chaque gare
+ * de montée vers chaque gare de descente (trainLegLast avec la descente). Une étape marquée n'a aucun départ plus tard,
+ * avant demain, de n'importe quelle ligne, dont le véhicule s'arrête aussi à la descente. Comptées : les étapes
+ * marquées, celles que le tableau ne marque pas (un express suit, il ne s'arrête pas à la descente) et les étapes non
+ * marquées alors que le tableau marque leur départ (une autre ligne va encore à la descente).
+ *
  * Lancé seulement avec QUAI_SCAN_DATA (dossier des données de la nuit, ex. ../site/data) ; sans lui, ignoré.
  */
 import { readdir, readFile } from 'node:fs/promises';
@@ -28,7 +37,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { AreaFile, Meta, Op, TrainsDay } from '../../../shared/types';
 import { prepareArea, type PreparedArea } from '../../src/core/areas';
-import { buildBoards, scheduleLast, scheduleLastFlags, trainLegLast } from '../../src/core/boards';
+import { buildBoards, destinationLastFlags, lastWays, scheduleLast, scheduleLastFlags, trainLegLast } from '../../src/core/boards';
 import type { RealtimeClient } from '../../src/core/realtime';
 import { headKey } from '../../src/core/rtmerge';
 import { addDays } from '../../src/core/freshness';
@@ -45,14 +54,17 @@ const OPS: Op[] = ['sncb', 'stib', 'delijn', 'tec'];
 const MIN = 60_000;
 
 /**
- * Ligne du contrôle : tous les trains SNCB ensemble, ses bus à part ; ailleurs le numéro sans casse ni zéro de tête, et
- * sans les lettres ou la barre qui suivent des chiffres (« 20a », « 20b » et « 20 » : une ligne ; « N10 », « X64 » : non).
+ * Ligne du contrôle : tous les trains SNCB ensemble, ses bus à part ; ailleurs la famille du numéro : les chiffres, sans
+ * les lettres devant ni les lettres ou la barre derrière, sans zéro de tête (« 70 », « X70 », « 70a » : une ligne) ; une
+ * ligne sans chiffre, ou à plusieurs nombres, reste elle-même.
  */
 const lineOf = (op: Op, mode: string, line: string): string => {
   if (op === 'sncb' && mode === 'train') return 'sncb train';
-  const key = String(line).replace(/\s+/g, '').toLowerCase().replace(/^0+(?=.)/, '');
-  const digits = /^\d+/.exec(key)?.[0] ?? '';
-  return `${op} ${digits && /^[a-z/]+$/.test(key.slice(digits.length)) ? digits : key}`;
+  const key = String(line).replace(/\s+/g, '').toLowerCase();
+  const numbers = key.match(/\d+/g) ?? [];
+  const around = key.split(/\d+/);
+  const family = numbers.length === 1 && /^[a-z]*$/.test(around[0]) && /^[a-z/]*$/.test(around[1]);
+  return `${op} ${family ? String(Number(numbers[0])) : key}`;
 };
 const HOUR = 60 * MIN;
 
@@ -101,6 +113,7 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
     const preps = new Map<string, PreparedArea>();
     const at = [gtfsTime(dates[0], 22 * 60 + 30), gtfsTime(dates[0], 24 * 60 + 30), gtfsTime(dates[0], 27 * 60 + 30)];
     let followed = 0;
+    const trip = new Map<Op, { legs: number; marked: number; notBoard: number; boardOnly: number; ms: number }>();
 
     for (const op of OPS) {
       const s = { areas: 0, deps: 0, window: 0, marked: 0, evening: 0, boards: 0, boardsMarked: 0, rows: 0, views: 0, cutWord: 0, ms: 0, worst: 0, worstName: '', biggest: 0, biggestMs: 0, boardMs: 0, boardName: '' };
@@ -176,6 +189,55 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
             }
             if (ex.length < 6 && f.deps[i][0] === 0 && (ex.length < 3 || r.t >= gtfsTime(dates[0], 22 * 60))) ex.push(`${f.n.fr} : ${r.pl} vers ${f.patterns[f.deps[i][2]].head.fr} ${hhmm(r.t)}`);
           });
+          // écran du trajet (bus, tram, métro) : chaque départ vers chaque zone où son véhicule s'arrête ensuite
+          if (op !== 'sncb') {
+            const tr = trip.get(op) ?? { legs: 0, marked: 0, notBoard: 0, boardOnly: 0, ms: 0 };
+            trip.set(op, tr);
+            const ways = lastWays(prep);
+            const byZone = new Map<string, number[]>();
+            raw.forEach((r, i) => {
+              for (const z of r.next) {
+                const list = byZone.get(z);
+                if (list) list.push(i);
+                else byZone.set(z, [i]);
+              }
+            });
+            const keys = new Map<string, { zone: string; way: number }>();
+            f.patterns.forEach((p, pi) => p.next.forEach(([z]) => keys.set(`${ways[pi]}|${z}`, { zone: z, way: ways[pi] })));
+            for (const { zone, way } of keys.values()) {
+              const d0 = performance.now();
+              const fl = destinationLastFlags(prep, zone, way);
+              tr.ms += performance.now() - d0;
+              const serving = byZone.get(zone) ?? [];
+              for (const i of serving) {
+                if (ways[f.deps[i][2]] !== way) continue;
+                const r = raw[i];
+                const end = demain(r.t);
+                if (r.t >= from && end <= to) tr.legs++;
+                if (!fl[i]) {
+                  if (flags[i]) tr.boardOnly++;
+                  continue;
+                }
+                tr.marked++;
+                if (!flags[i]) tr.notBoard++;
+                const what = `étape ${f.n.fr} (${f.id}) vers ${zone} : ${r.pl} vers ${f.patterns[f.deps[i][2]].head.fr} à ${hhmm(r.t)} marquée`;
+                if (r.t < from || end > to) err(`${what} hors des jours publiés`);
+                let before = -Infinity;
+                let after = Infinity;
+                let taken = -1;
+                for (const k of serving) {
+                  const o = raw[k];
+                  if (k === i || (o.t === r.t && o.head === r.head && o.pl === r.pl)) continue;
+                  if (o.t < r.t) {
+                    if (o.t >= from) before = Math.max(before, o.t);
+                  } else if (o.t >= end) after = Math.min(after, o.t);
+                  else taken = k;
+                }
+                if (taken >= 0) err(`${what}, mais ${raw[taken].pl} vers ${f.patterns[f.deps[taken][2]].head.fr} à ${hhmm(raw[taken].t)} y va encore`);
+                if (Number.isFinite(after) && (after - r.t < 2 * HOUR || (r.min < 24 * 60 && end - r.t <= 4 * HOUR && after - r.t <= r.t - before))) err(`${what}, le suivant à ${hhmm(after)} (ligne qui roule ou premier du matin)`);
+              }
+            }
+          }
           // tableaux, horaire seul : 22:30 le premier jour et 00:30 dans la nuit
           if (flags.some((x) => x === 1)) {
             for (const now of at) {
@@ -241,7 +303,7 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
     ).filter((d): d is NonNullable<typeof d> => d !== null);
     // contrôle indépendant sur les trains eux-mêmes : départs d'une gare (deux jours), ligne (trains ensemble, bus SNCB à
     // part), destination, gares suivantes où l'on peut descendre
-    const byStation = new Map<string, { t: number; line: string; cat: string; head: string; next: Set<string> }[]>();
+    const byStation = new Map<string, { t: number; m: number; line: string; cat: string; head: string; next: Set<string> }[]>();
     const trainDeps = (station: string) => {
       let list = byStation.get(station);
       if (list) return list;
@@ -252,7 +314,7 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
             if (d.file.stations[x[0]]?.id !== station || x[2] < 0) return;
             const next = new Set(tr.s.slice(p + 1).filter((y) => y[1] >= 0).map((y) => d.file.stations[y[0]]?.id ?? '').filter((id) => id && id !== station));
             if (!next.size) return;
-            list!.push({ t: d.base + x[2] * MIN, line: /^bus$/i.test(tr.cat) ? 'bus' : 'train', cat: tr.cat, head: headKey(tr.head.fr), next });
+            list!.push({ t: d.base + x[2] * MIN, m: x[2], line: /^bus$/i.test(tr.cat) ? 'bus' : 'train', cat: tr.cat, head: headKey(tr.head.fr), next });
           });
       byStation.set(station, list);
       return list;
@@ -333,6 +395,60 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
       });
     }
 
+    // écran du trajet en train : chaque train du premier jour, de chaque gare de montée vers chaque gare de descente,
+    // par couple de gares (le calcul d'un couple est gardé)
+    const pairs = new Map<string, { station: string; dest: string; legs: { id: string; cat: string; head: string; t: number; m: number; plain: boolean }[] }>();
+    for (const tr of d0?.file.trips ?? []) {
+      tr.s.forEach((x, p) => {
+        const station = d0!.file.stations[x[0]]?.id;
+        if (x[2] < 0 || !station) return;
+        const schedDep = d0!.base + x[2] * MIN;
+        const plain = trainLegLast(days, { op: 'sncb', from: { name: { fr: '', nl: '' }, lat: 0, lon: 0, areaId: station }, tripId: tr.id, schedDep });
+        const seen = new Set<string>();
+        for (const y of tr.s.slice(p + 1)) {
+          const dest = d0!.file.stations[y[0]]?.id;
+          if (y[1] < 0 || !dest || dest === station || seen.has(dest)) continue;
+          seen.add(dest);
+          const key = `${station}>${dest}`;
+          let g = pairs.get(key);
+          if (!g) pairs.set(key, (g = { station, dest, legs: [] }));
+          g.legs.push({ id: tr.id, cat: tr.cat, head: headKey(tr.head.fr), t: schedDep, m: x[2], plain });
+        }
+      });
+    }
+    const tt = { legs: 0, marked: 0, notBoard: 0, boardOnly: 0, ms: 0 };
+    const nameOf = new Map((d0?.file.stations ?? []).map((st) => [st.id, st.n.fr] as const));
+    for (const g of pairs.values()) {
+      const serving = trainDeps(g.station).filter((o) => o.next.has(g.dest));
+      for (const leg of g.legs) {
+        const end = demain(leg.t);
+        const m0 = performance.now();
+        const mine = trainLegLast(days, { op: 'sncb', from: { name: { fr: '', nl: '' }, lat: 0, lon: 0, areaId: g.station }, to: { name: { fr: '', nl: '' }, lat: 0, lon: 0, areaId: g.dest }, tripId: leg.id, schedDep: leg.t });
+        tt.ms += performance.now() - m0;
+        tt.legs++;
+        if (!mine) {
+          if (leg.plain) tt.boardOnly++;
+          continue;
+        }
+        tt.marked++;
+        if (!leg.plain) tt.notBoard++;
+        const what = `étape en train ${nameOf.get(g.station)} vers ${nameOf.get(g.dest)} : ${leg.cat} de ${hhmm(leg.t)} marquée`;
+        if (leg.t < from || end > to) err(`${what} hors des jours publiés`);
+        let before = -Infinity;
+        let after = Infinity;
+        let taken: (typeof serving)[number] | undefined;
+        for (const o of serving) {
+          if (o.t === leg.t && o.cat === leg.cat && o.head === leg.head) continue;
+          if (o.t < leg.t) {
+            if (o.t >= from) before = Math.max(before, o.t);
+          } else if (o.t >= end) after = Math.min(after, o.t);
+          else taken = o;
+        }
+        if (taken) err(`${what}, mais un ${taken.cat} de ${hhmm(taken.t)} y va encore`);
+        if (Number.isFinite(after) && (after - leg.t < 2 * HOUR || (leg.m < 24 * 60 && end - leg.t <= 4 * HOUR && after - leg.t <= leg.t - before))) err(`${what}, le suivant à ${hhmm(after)} (ligne qui roule ou premier du matin)`);
+      }
+    }
+
     const lines: string[] = [];
     lines.push(`Balayage de « , dernier » (${dates.join(', ')}, horaire seul) en ${Math.round((Date.now() - t0) / 1000)} s.`);
     for (const op of OPS) {
@@ -344,6 +460,11 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
     lines.push(
       `Trains (écran du trajet), ${dates[0]} : ${legs} montées, ${legMarked} marquées « dernier » (${pct(legMarked, legs)}), ${trainsChecked} contrôlées sur les trains eux-mêmes, ${followed} sur la zone de la gare ; accord avec la zone : ${agree} sur ${legs - noArea} (${pct(agree, legs - noArea)}), dernier selon les trains seulement : ${onlyTrains}, selon la zone seulement : ${onlyArea}, gare sans zone ou sans ce départ : ${noArea}.${diffEx.length ? ` Ex. : ${diffEx.join(' | ')}` : ''}`,
     );
+    lines.push('Écran du trajet, d’après l’arrêt de descente (décision du 20/11 à 21:58) : étapes possibles (un départ, une descente), marquées « dernier », dont non marquées au tableau (un départ du même sens suit, mais ne s’arrête pas à la descente), et étapes non marquées alors que le tableau marque leur départ (une autre ligne va encore à la descente) :');
+    for (const op of OPS) {
+      const x = op === 'sncb' ? tt : trip.get(op);
+      if (x) lines.push(`${op} : ${x.legs} étapes, ${x.marked} marquées (${pct(x.marked, x.legs)}), dont ${x.notBoard} non marquées au tableau ; ${x.boardOnly} non marquées alors que le tableau marque ; calcul ${Math.round(x.ms)} ms.`);
+    }
     lines.push(errors.length ? `Erreurs : ${errors.length}. ${errors.slice(0, 20).join(' | ')}` : 'Aucune erreur.');
     process.stdout.write(`${lines.join('\n')}\n`);
     expect(errors).toEqual([]);
