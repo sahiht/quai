@@ -34,6 +34,11 @@ export const HINTS = {
   stops: `△▽ arrêts   toucher${NB}: j’y descends   double${NB}: retour`,
   /** 1.2.8 : tout le trajet d'un train ; 1.2.10 : même liste, mêmes aides que les arrêts d'un départ (§ 3.1). */
   trainRun: `△▽ arrêts   toucher${NB}: j’y descends   double${NB}: retour`,
+  /**
+   * 1.3.1 (PRD-1.3.1 § 6) : arrêts d'un départ et trajet d'un train, réglage « Me guider » allumé : le toucher quitte
+   * l'aide, la ligne d'action le dit au-dessus (« ▶ Me guider jusqu'à … », GUIDE_TO).
+   */
+  stopsGuide: `△▽ arrêts   double${NB}: retour`,
   /** 1.2.10 (§ 3.2, § 3.3) : un moment du guidage ou « Où tu en es ». */
   guide: `toucher${NB}: effacer   appui long${NB}: arrêter`,
   /** 1.2.10 : « Tu y es ». */
@@ -94,6 +99,22 @@ export const ACTION = {
   follow: '▶ Suivre ce trajet',
   followed: '▶ Trajet suivi',
 } as const;
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 6, § 12 B11) : ligne d'action des arrêts d'un départ et du trajet d'un train, sur un arrêt où le
+ * toucher lance « j'y descends » (réglage « Me guider » allumé) : « ▶ Me guider jusqu'à Bruxelles-Central », le nom de
+ * l'arrêt du curseur, coupé au mot s'il ne tient pas (guideToText) ; sans nom : « ▶ Me guider jusqu'à cet arrêt ».
+ */
+export const GUIDE_TO = {
+  prefix: '▶ Me guider jusqu’à ',
+  stop: '▶ Me guider jusqu’à cet arrêt',
+} as const;
+
+/** « ▶ Me guider jusqu'à Bruxelles-Central » dans `maxPx`, le nom coupé au mot (sans nom : « … cet arrêt »). */
+export function guideToText(name: string, maxPx: number): string {
+  const n = name.trim();
+  return n ? fitName(GUIDE_TO.prefix, n, '', maxPx) : GUIDE_TO.stop;
+}
 
 /**
  * 1.2.2 : textes des rubriques « Gares » et « Bus, tram, métro » (PRD-1.2.2 § 1.1 à § 3, REVUE-USAGE n° 6), en un seul

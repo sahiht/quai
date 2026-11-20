@@ -43,7 +43,9 @@ describe('1.2.8 : tout le trajet d’un train', () => {
       '○ Bruxelles-Nord voie 11   dans 40 min',
       '○ Louvain voie 9   à 09:02',
       '○ Liège-Guillemins voie 5   à 09:38',
-      '△▽ arrêts   toucher : j’y descends   double : retour',
+      // 1.3.1 (PRD-1.3.1 § 6) : la ligne d'action de la gare du curseur, l'aide sans « toucher »
+      '▶ Me guider jusqu’à Louvain',
+      '△▽ arrêts   double : retour',
     ]);
     // 1.2.10 : le curseur sur la première gare où descendre (Louvain), la gare de la montée au-dessus
     expect(page(v).sel).toBe(3);

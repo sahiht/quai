@@ -11,6 +11,7 @@ import { bridgeStorage } from '../../src/platform/even';
 import { createKV } from '../../src/platform/kv';
 import { SerialQueue } from '../../src/platform/queue';
 import { SETTINGS_KEY, loadSettings } from '../../src/settings';
+import { APP_VERSION } from '../../src/version';
 import { PLACES, at, settingsWith, setup } from './helpers';
 
 const NOW = at('2026-11-15', 7, 31);
@@ -93,9 +94,9 @@ describe('point 3 : réglages illisibles au lancement', () => {
     const k = await setup({ now: NOW, kv: p.kv, settings });
     await k.settle(200);
     expect(k.settings.unread).toBe(false);
-    // message « Quai 1.3.0 » vu : la version est écrite, les favoris avec
+    // message « Quai 1.3.0 » vu : la version de l'appli est écrite (1.3.1 : APP_VERSION), les favoris avec
     const saved = JSON.parse(p.store.get(SETTINGS_KEY)!);
-    expect(saved.seenVersion).toBe('1.3.0');
+    expect(saved.seenVersion).toBe(APP_VERSION);
     expect(saved.favorites.map((f: { id: string }) => f.id)).toEqual([PLACES.bureau.id]);
     k.c.stop();
   });
@@ -107,7 +108,7 @@ describe('point 3 : réglages illisibles au lancement', () => {
     const k = await setup({ now: NOW, kv: p.kv, settings });
     await k.settle(200);
     expect(k.settings.unread).toBe(false);
-    expect(JSON.parse(p.store.get(SETTINGS_KEY)!).seenVersion).toBe('1.3.0');
+    expect(JSON.parse(p.store.get(SETTINGS_KEY)!).seenVersion).toBe(APP_VERSION);
     // premier lancement : sa date (maintenant), comme avant
     expect(Number(p.store.get(FIRST_USE_KEY))).toBe(NOW);
     k.c.stop();
