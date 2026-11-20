@@ -305,7 +305,8 @@ describe('A5 (P2) : « Partir maintenant » devant le premier virage', () => {
     const r = guide(prdTrip(), { walk: { leg: 0, route: rt } });
     step(r, at('07:04:50'), fix(a, at('07:04:50'), { speed: 0 }));
     const s0 = step(r, at('07:05'), fix(a, at('07:05'), { speed: 0 }));
-    expect(m(s0.moment, 'leave')).toMatchObject({ walkMin: 5, depAt: at('07:12'), vehicle: { line: '6' } });
+    // 1.3.1 (R4, vrai chemin de la première marche) : ce chemin mesure 461 m, 6 min au lieu des 5 min prévues
+    expect(m(s0.moment, 'leave')).toMatchObject({ walkMin: 6, depAt: at('07:12'), vehicle: { line: '6' } });
     // en marche : 3,9 m toutes les 3 s ; 15,6 m à 07:05:32 (une seule position au-delà de 15 m), 19,5 m à 07:05:35
     const seen = play(r, trace([a, b, c], { t0: at('07:05:20'), toM: 40, every: 3 }));
     for (const x of seen.filter((y) => y.t < at('07:05:35'))) expect(x.s.moment?.kind, hm(x.t)).toBe('leave');

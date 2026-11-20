@@ -278,6 +278,11 @@ interface Mem extends GuideMemory {
   rideNext?: { leg: number; s: number };
   /** 1.3.1 (B18, P8) : distance du virage montré au dernier pas (elle ne remonte pas) */
   turnDist?: { id: string; d: number };
+  /**
+   * 1.3.1 (R4, realFirstWalk) : trajet `jid`, première fois (epoch ms) où le vrai chemin de la première marche s'est
+   * montré plus long que la marche prévue : l'heure de partir n'est jamais avancée avant cet instant
+   */
+  walk0?: { jid: string; at: number };
 }
 
 const ISSUE_KINDS: readonly CheckIssue['kind'][] = ['battery', 'noPosition', 'positionLost'];
@@ -329,6 +334,7 @@ function readMem(mem: GuideMemory | null | undefined): Mem {
   if (chk) out.chk = chk;
   if (x.rideNext && Number.isInteger(x.rideNext.leg) && Number.isInteger(x.rideNext.s)) out.rideNext = { leg: x.rideNext.leg, s: x.rideNext.s };
   if (x.turnDist && typeof x.turnDist.id === 'string' && Number.isFinite(x.turnDist.d)) out.turnDist = { id: x.turnDist.id, d: x.turnDist.d };
+  if (x.walk0 && typeof x.walk0.jid === 'string' && Number.isFinite(x.walk0.at)) out.walk0 = { jid: x.walk0.jid, at: x.walk0.at };
   return out;
 }
 
@@ -466,6 +472,8 @@ interface Ctx {
   walkPr?: { leg: number; alongM: number; offM: number; remainingM: number; route: WalkRoute };
   /** 1.3.0 : problèmes vrais maintenant (vérification, guidage avec messages seulement) */
   issues: CheckIssue[];
+  /** 1.3.1 (R4, realFirstWalk) : l'heure de partir est avancée (le vrai chemin de la première marche est plus long) */
+  leaveMoved?: boolean;
 }
 
 function fixesOf(input: GuideInput): GuideFix[] {
@@ -1717,6 +1725,8 @@ function whereOf(c: Ctx, loc: Loc): WhereAmI {
       walk.offMap = true;
       if (crowM !== undefined) walk.crowM = Math.round(crowM);
     }
+    // 1.3.1 (R4, realFirstWalk) : avant de partir, l'heure de partir avancée (« Ensuite : partir à 07:12 »)
+    if (ph.kind === 'before' && c.leaveMoved) walk.leaveAt = j.leaveAt;
     w.walk = walk;
   } else if (ph.kind === 'before' && legs[ph.leg]?.kind === 'ride') {
     w.wait = waitOf(ph.leg);
@@ -1933,11 +1943,52 @@ function endedNow(c: Ctx, loc: Loc): boolean {
  * Un pas du moteur : l'état du guidage maintenant, et la mémoire à garder. Pur, déterministe ; à rappeler à chaque
  * position, à `wakeAt` et à chaque rafraîchissement du temps réel du trajet suivi.
  */
+/**
+ * 1.3.1 (PRD-1.3.1 § 14, R4 ; contrôle du 20/11, règle du directeur) : la première marche d'un trajet « Y aller », à la
+ * longueur de son vrai chemin. L'heure de partir du trajet vient d'une marche prévue (ligne droite × 1,3) ; dès que le
+ * vrai chemin de cette marche est connu (GuideInput.walk, rendu par Core.walkRoute, avec ou sans « Éviter les
+ * escaliers ») et qu'il est plus long (80 m par minute, minute entamée comptée), la marche compte ses vraies minutes et
+ * le départ avance d'autant : phase « avant », « Partir maintenant » (heure, minutes, marge, « très juste »), « Où tu en
+ * es » avant de partir, carte « En cours », réveil du moteur, tout suit, parce que tout lit le trajet rendu ici. Marche
+ * prévue 3 min, chemin de 446 m (6 min), bus à 07:20, marge 2 min : partir à 07:12 au lieu de 07:15.
+ * - jamais avant l'instant où le chemin plus long a été connu (mémoire `walk0`) : connu trop tard, « Partir maintenant »
+ *   vient tout de suite, et si le véhicule ne peut plus être pris, c'est le départ raté d'aujourd'hui (« très juste »,
+ *   « Si tu le rates », puis le véhicule parti) ;
+ * - rien ne change si le chemin n'est pas plus long, n'est pas un vrai chemin (ligne droite : hors de Belgique, pas de
+ *   données), ne part pas du point de départ (40 m ; recalculé en route : la position dit déjà la marche restante) ou
+ *   ne mène pas à l'arrêt (30 m) ; ni pour un trajet à pied seul (aucun véhicule à prendre), ni pour « j'y descends ».
+ * Les marches de correspondance gardent leurs minutes prévues (on ne choisit pas l'heure d'une descente).
+ * Le seul endroit de cette règle : le trajet rendu sert à tout le calcul du pas (même identifiant, même arrivée).
+ */
+function realFirstWalk(input: GuideInput, m: Mem): Journey {
+  const j = input.journey;
+  const w = j.legs[0];
+  const r = j.legs[1];
+  const route = input.walk?.leg === 0 ? input.walk.route : undefined;
+  if (input.kind !== 'trip' || !w || w.kind !== 'walk' || !r || r.kind !== 'ride' || !route || route.source !== 'osm') return j;
+  if (!Number.isFinite(route.lengthM) || !Number.isFinite(j.leaveAt)) return j;
+  const start = knownPoint(input.origin) ? input.origin : knownPoint(w.from) ? w.from : undefined;
+  if (!start || !knownPoint(route.from) || distanceM(route.from, start) > GUIDE.leaveM) return j;
+  if (!knownPoint(w.to) || !knownPoint(route.to) || distanceM(route.to, w.to) > 30) return j;
+  const real = minutesFor(route.lengthM, false);
+  const extra = real - walkMinOf(w);
+  if (extra <= 0) return j;
+  if (m.walk0?.jid !== j.id) m.walk0 = { jid: j.id, at: input.now };
+  const leaveAt = Math.min(j.leaveAt, Math.max(j.leaveAt - extra * MIN, m.walk0.at));
+  const shift = j.leaveAt - leaveAt;
+  const legs = j.legs.slice();
+  // la marche arrive à la même heure (la marge du trajet reste), elle part plus tôt
+  legs[0] = { ...w, walkMin: real, dep: w.dep - shift };
+  return { ...j, legs, leaveAt, dep: j.dep === w.dep ? j.dep - shift : j.dep };
+}
+
 export function guideStep(input: GuideInput, mem: GuideMemory): { state: GuideState; mem: GuideMemory } {
   const m = readMem(mem);
-  const j = input.journey;
-  adopt(m, j, input.now);
-  const c = context(input, m);
+  adopt(m, input.journey, input.now);
+  // 1.3.1 (R4) : la première marche à la longueur de son vrai chemin (realFirstWalk) ; tout le pas lit ce trajet
+  const j = realFirstWalk(input, m);
+  const c = context(j === input.journey ? input : { ...input, journey: j }, m);
+  c.leaveMoved = j !== input.journey;
   const now = c.now;
   observe(c);
   let loc: Loc;
@@ -2174,7 +2225,8 @@ export function guideNowText(state: GuideState, journey: Journey, lang: NameLang
     case 'before': {
       const l = legs[ph.leg];
       if (!l) return '';
-      if (l.kind === 'walk') return `partir à ${hhmm(journey.leaveAt)}`;
+      // 1.3.1 (R4, realFirstWalk) : l'heure avancée par le moteur quand le vrai chemin est plus long
+      if (l.kind === 'walk') return `partir à ${hhmm(state.where.walk?.leaveAt ?? journey.leaveAt)}`;
       return `${rideName(l)} à ${hhmm(l.dep)}`;
     }
     case 'walk': {

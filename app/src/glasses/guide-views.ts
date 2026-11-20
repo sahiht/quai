@@ -709,7 +709,8 @@ function whereRows(s: GuideState, j: Journey, ctx: ViewCtx, maxPx: number): Wher
     const toward = nameOf(walk.toward, ctx);
     if (before) {
       // « 9 min à pied jusqu’à la gare de Namur » (dernière marche : la destination est dite au-dessus)
-      push(then(`partir à ${hhmm(j.leaveAt)}`));
+      // 1.3.1 (R4) : l'heure de partir avancée par le moteur quand le vrai chemin de la marche est plus long
+      push(then(`partir à ${hhmm(walk.leaveAt ?? j.leaveAt)}`));
       const min = Math.max(1, walk.remainingMin);
       push(F('norm', (px) => (dest || !toward ? `${minText(min)} à pied` : leaveWalkText(min, toward, train ? 'station' : 'stop', w.title, px))));
       if (veh) push(L('norm', `${veh}${plat}`));
