@@ -659,4 +659,19 @@ describe('au pixel, avec les noms les plus longs des vraies données', () => {
       expect(pages[10].lines.some((l) => /descente dans 28 arrêts$/.test(l))).toBe(true);
     }
   });
+
+  it('contrôle du sujet : un nom qui tient à 1 px près ne fait jamais perdre l’heure (la largeur d’une rangée n’est pas la somme de ses morceaux)', () => {
+    // vrais arrêts (publication du 13/11) : « Ensuite : descente à Rhisnes Nouvelle Route de Suarlée, 08:42 » mesure 543 px
+    // pour 542 ; la mise en page recoupait la rangée entière : l'heure de la descente disparaissait (« … Suarlée… »),
+    // et « Prochain arrêt : … Petits…… » finissait par deux « … »
+    const s = onBoard({ where: { title: 'Bureau', arr: T(8, 58), rt: true, chain: [], ride: { ...IC_RIDE, nextStop: N('Ronse/renaix Molekenst./Rue des Petits Moulins'), nextAt: T(7, 11), alight: N('Rhisnes Nouvelle Route de Suarlée') } } });
+    const { p, lines } = where(s, JN);
+    expect(lines[1]).toBe('Ensuite : descente à Rhisnes Nouvelle Route de…, 08:42');
+    expect(lines[3]).toBe('Prochain arrêt : Ronse/renaix Molekenst./Rue des…, 07:11');
+    for (const c of ['colA', 'colB', 'colC']) for (const row of container(p, c).content.split('\n')) expect(textWidth(row), row).toBeLessThanOrEqual(GUIDE.FULL_W);
+    // à côté d'une image (374 px) : « 1 min à pied jusqu’à Wevelgem Wezelstraat » mesure 375 px : coupé au mot, une seule fois
+    const lv = moment(leave({ walkMin: 1, toward: N('Wevelgem Wezelstraat') }));
+    expect(lv.lines[1]).toBe('1 min à pied jusqu’à Wevelgem…');
+    for (const l of [...lines, ...lv.lines]) expect(l).not.toMatch(/……/);
+  });
 });
