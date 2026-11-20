@@ -7,6 +7,7 @@
  */
 import type { Core, HealthResponse, Meta } from '../../core/api';
 import type { JournalTrip, TripJournal } from '../../core/journal-types';
+import { apos } from '../../core/typo';
 import { brusselsParts, hhmm, localDate } from '../../core/util';
 import type { Op } from '../../../../shared/types';
 import { APP_VERSION } from '../../version';
@@ -143,8 +144,9 @@ export function journalCard(ctx: PhoneCtx): HTMLElement | null {
     const lines = text.split('\n').filter((l) => l.trim());
     const block = h(
       'div',
-      { class: 'journal-text', id: `${blockId}-texte`, role: 'group', 'aria-label': typo(`Journal du trajet « ${t.title} »`) },
-      lines.map((l, i) => h('p', { class: i === 0 ? 'jl jl-head' : 'jl' }, l)),
+      { class: 'journal-text', id: `${blockId}-texte`, role: 'group', 'aria-label': typo(`Journal du trajet « ${apos(t.title)} »`) },
+      // 1.3.1 (PRD-1.3.1 § 7) : les noms des données avec « ’ », à l'affichage seulement (« Copier » rend le journal tel quel)
+      lines.map((l, i) => h('p', { class: i === 0 ? 'jl jl-head' : 'jl' }, apos(l))),
     );
     const copy = h('button', { type: 'button', class: 'btn btn-secondary journal-copy' }, T.journalCopy);
     const msg = h('p', { class: 'msg', role: 'status' });
@@ -163,7 +165,7 @@ export function journalCard(ctx: PhoneCtx): HTMLElement | null {
     const btn = h(
       'button',
       { type: 'button', class: 'row journal-row', 'aria-expanded': 'false' },
-      h('span', { class: 'txt' }, h('span', { class: 't1' }, t.title), h('span', { class: 't2' }, typo(journalTripLine(t)))),
+      h('span', { class: 'txt' }, h('span', { class: 't1' }, apos(t.title)), h('span', { class: 't2' }, typo(journalTripLine(t)))),
       h('span', { class: 'chev', html: ICON.chevron }),
     );
     const li = h('li', null, btn);

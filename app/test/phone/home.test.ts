@@ -111,16 +111,16 @@ describe('« Dans tes lunettes » : les rubriques des lunettes, mêmes mots, mê
     expect(() => button(el, 'Retirer')).toThrow();
   });
 
-  it('les mêmes mots et le même contenu à droite que l’accueil des lunettes (homeView)', () => {
-    // 1.3.1 (PRD-1.3.1 § 8) : l'ordre de chaque côté suit la spécification (téléphone : v131-telephone.test.ts ; lunettes :
-    // tests de l'accueil des lunettes) ; ici, les mêmes mots et le même contenu à droite, rubrique par rubrique
-    const byName = (rows: string[][]) => [...rows].sort((a, b) => a[0].localeCompare(b[0]));
+  it('les mêmes rubriques dans le même ordre, les mêmes mots et le même contenu à droite que l’accueil des lunettes (homeView)', () => {
+    // 1.3.1 (PRD-1.3.1 § 8) : test croisé, après la fusion de l'accueil des lunettes et du téléphone : l'ordre des
+    // rubriques est comparé tel quel (Gares de train ; Lignes ; Arrêts), avec les mêmes mots et le même contenu à droite
     for (const s of [defaults(), defaults({ stations: [NAMUR, CENTRAL], lines: [GDN], follows: [T3] }), defaults({ stations: [NAMUR], follows: [T3, T4, W] })]) {
       const glasses = homeView({ favorites: [], nearbyCount: 3 }, { now: SCENARIO.s3.now, settings: s })
         .items.filter((i) => i.segs)
         .map((i) => [i.segs!.map((g) => g.t).join(' '), plain(i.bRight)]);
       const el = mount(homeScreen(harness({ settings: s }).ctx));
-      expect(byName(navRows(el).slice(2).map(([t, , right]) => [t!, right!]))).toEqual(byName(glasses));
+      expect(navRows(el).slice(2).map(([t, , right]) => [t!, right!])).toEqual(glasses);
+      expect(glasses.map(([t]) => t)).toEqual(['Gares de train', 'Lignes de bus, tram, métro', 'Arrêts de bus, tram, métro']);
       // et le même ordre que rubrics() (sans DOM)
       expect(rubrics(s).map((r) => `${r.key} ${r.qual}`)).toEqual(navRows(el).slice(2).map(([t]) => t));
     }
