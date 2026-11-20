@@ -148,6 +148,12 @@ describe('règle 3 : personne n’attend le chemin', () => {
     expect(w.sc.walkCalls()).toHaveLength(n);
     // jamais plus tard que l'estimation, quel que soit le point de départ
     for (const j of near.journeys) expect(j.legs[0].walkMin!).toBeGreaterThanOrEqual(j.legs[0].walkEst!);
+    expect(near.journeys[0].legs[0]).toMatchObject({ walkMin: 6, walkEst: 4 });
+    // à 60 m (240 m de l'arrêt, 4 min estimées) : le chemin de 07:12 ne sert pas ; celui d'ici est calculé (60 m jusqu'à
+    // la rue, puis les 446 m : 7 min), dans les tuiles déjà en mémoire
+    const far = await w.route(w.core, offset(START, 0, -60));
+    expect(far.journeys[0].legs[0]).toMatchObject({ walkMin: 7, walkEst: 4 });
+    expect(w.sc.walkCalls()).toHaveLength(n);
   });
 });
 
