@@ -13,7 +13,7 @@ import { prettyName } from '../../../shared/names';
 import { namesOf, scopeTexts, stibMessageText, TRIP_BUDGET, type AlertScope, type ScopeStop } from './alerts';
 import type { Alert, Journey, Leg, Settings } from './api';
 import type { PreparedArea } from './areas';
-import { legDepartureIn, scheduleLast, stibPassages, trainLegLast, type StibPassage } from './boards';
+import { legLast, stibPassages, trainLegLast, type StibPassage } from './boards';
 import type { RealtimeClient, RtTrip, StibEntry } from './realtime';
 import { stibPoint } from './realtime';
 import { delayMinutes, headKey, headScore, platformOfStopId, RT_MAX_SHIFT_MS, rtAtStop, rtAtStopShown, rtOccurrence, sameStop, type TripContext } from './rtmerge';
@@ -400,8 +400,9 @@ export async function applyRealtime(legs: Leg[], env: RefreshEnv, followed = fal
 /**
  * 1.3.1 (R3, PRD-1.3.1 § 14) : « , dernier » d'après l'horaire sur les étapes en véhicule (après applyRealtime), sans
  * rien demander au réseau : un train d'après les trains des jours déjà chargés (trainLegLast) ; un bus, un tram, un
- * métro d'après le fichier de sa zone de montée s'il est déjà connu (env.cachedArea, scheduleLast). Une étape STIB suivie
- * en direct garde la seule parole de la STIB (« Dernier passage », applyStib) : jamais deux marques.
+ * métro d'après le fichier de sa zone de montée s'il est déjà connu (env.cachedArea, legLast). Décision du 20/11 à
+ * 21:58 : « dernier » quand aucun départ plus tard, avant demain, ne va de l'arrêt de montée à l'arrêt de descente.
+ * Une étape STIB suivie en direct garde la seule parole de la STIB (« Dernier passage », applyStib) : jamais deux marques.
  */
 export async function markLast(legs: Leg[], env: RefreshEnv): Promise<void> {
   const rides = legs.filter((l) => l.kind === 'ride' && !(l.op === 'stib' && (l.last || l.rt)));
@@ -418,8 +419,7 @@ export async function markLast(legs: Leg[], env: RefreshEnv): Promise<void> {
     if (l.op === 'sncb') last = trainLegLast(days, l);
     else {
       const prep = l.from.areaId ? preps.get(l.from.areaId) : null;
-      const di = prep ? legDepartureIn(prep, l) : -1;
-      last = !!prep && di >= 0 && scheduleLast(prep, di);
+      last = !!prep && legLast(prep, l);
     }
     if (last) l.last = true;
     else delete l.last;
