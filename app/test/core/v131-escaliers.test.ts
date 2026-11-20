@@ -24,6 +24,7 @@ import { routeOn, shortestPath, snapPoint, type Snap } from '../../src/core/walk
 import { WalkRouter } from '../../src/core/walk/router';
 import { settingsScreen } from '../../src/phone/screens/settings';
 import { validateSettings } from '../../src/settings';
+import { walkMinutes } from '../../src/core/util';
 import type { Intent } from '../../src/glasses/types';
 import { at as atTime, firstWalkRoute, guide, journeyOf, P, prdTrip, rideLeg, stop, step, walkLeg, fix as guideFix } from './guide-fixtures';
 import { cleanupKit, guideSetup } from '../glasses/controller-guide-kit';
@@ -231,6 +232,8 @@ describe('R4 : vraies tuiles (centre d’Helsinki)', () => {
     let plain = 0;
     let same = 0;
     const detours: number[] = [];
+    const late: number[] = [];
+    const lateUsual: number[] = [];
     const warm: number[] = [];
     while (n < 300) {
       const a = pts[Math.floor(rnd() * pts.length)];
@@ -266,6 +269,10 @@ describe('R4 : vraies tuiles (centre d’Helsinki)', () => {
       checkRoute(free, a, b);
       // détour (négatif quand l'accroche sans marches tombe mieux que celle de l'escalier)
       detours.push(free.lengthM - usual.lengthM);
+      // minutes de la marche prévue par le trajet (vol d'oiseau × 1,3, util.ts walkMinutes) : « Partir maintenant » s'y fie
+      const planned = walkMinutes(d);
+      late.push(Math.ceil(free.lengthM / 80) - planned);
+      lateUsual.push(Math.ceil(usual.lengthM / 80) - planned);
     }
     expect(withSteps).toBeGreaterThan(0);
     expect(freed).toBeGreaterThan(0);
@@ -274,7 +281,8 @@ describe('R4 : vraies tuiles (centre d’Helsinki)', () => {
     console.log(
       `Helsinki, « Éviter les escaliers » : ${withSteps}/${n} marches prennent un escalier ; ${freed} ont un chemin sans marches ` +
         `(détour médian ${Math.round(median(detours))} m, p95 ${Math.round(p95(detours))} m, de ${Math.round(Math.min(...detours))} à ${Math.round(Math.max(...detours))} m) ; sans escalier : ${same}/${plain} chemins identiques ; ` +
-        `calcul p95 ${p95(warm).toFixed(1)} ms`,
+        `calcul p95 ${p95(warm).toFixed(1)} ms ; plus long que la marche prévue du trajet : ${late.filter((x) => x > 0).length}/${freed} sans marches ` +
+        `(jusqu'à ${Math.max(0, ...late)} min), ${lateUsual.filter((x) => x > 0).length}/${freed} avec l'escalier (jusqu'à ${Math.max(0, ...lateUsual)} min)`,
     );
   });
 });
