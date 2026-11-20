@@ -62,6 +62,15 @@ export const GUIDE_MENU: MenuItem[] = [
   { id: MENU_IDS.stopGuide, label: 'Arrêter le guidage' },
 ];
 
+/**
+ * 1.3.1 (B10, contrôle du sujet, remarque 6) : les choix du menu pour ce trajet : « Voir les arrêts » seulement s'il a un
+ * véhicule (comme le menu envoyé par le contrôleur ; le journal QUAI_SCREEN dit les mêmes choix).
+ */
+export function guideMenuOf(journey: Pick<Journey, 'legs'>): MenuItem[] {
+  const rides = journey.legs.some((l) => l.kind === 'ride');
+  return GUIDE_MENU.filter((m) => rides || m.id !== MENU_IDS.stops).map((m) => ({ ...m }));
+}
+
 /** Textes fixes du guidage (PRD § 3.2, § 3.3). */
 export const GUIDE_TEXT = {
   leave: 'Partir maintenant',
@@ -759,7 +768,7 @@ export function calmFoot(state: GuideState, journey: Journey): string {
  * : titre « Guidage en cours » (1.3.1, § 3), l'heure à droite.
  */
 export function guideView(state: GuideState, show: GuideShow, journey: Journey, ctx: ViewCtx): GlassesView {
-  const v: GlassesView = { screen: 'guide', layout: 'guide', title: '', clock: '', items: [], hints: '', tap: { kind: 'guideTap' }, menu: GUIDE_MENU.map((m) => ({ ...m })) };
+  const v: GlassesView = { screen: 'guide', layout: 'guide', title: '', clock: '', items: [], hints: '', tap: { kind: 'guideTap' }, menu: guideMenuOf(journey) };
   const moment = show === 'moment' ? state.moment : null;
   const gestureHints = ctx.settings.display.gestureHints;
   if (show === 'empty' || (show === 'moment' && !moment)) {
