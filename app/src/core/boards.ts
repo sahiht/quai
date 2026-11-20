@@ -415,17 +415,19 @@ export async function buildBoards(reqs: BoardRequest[], rt: RealtimeClient, now:
 /* ------------------------------ 1.3.1 (R3) : « , dernier » d'après l'horaire ------------------------------ */
 
 /**
- * « Ligne » d'un départ pour « , dernier » : le numéro sans casse, espaces ni zéros de tête (« 036 » = « 36 »), quel que
- * soit le mode. Tous les trains de la SNCB n'en font qu'une (IC, L, P, S… : quand un L suit le dernier IC, l'IC n'est
- * pas le dernier train), ses bus à part. Les variantes d'un numéro (lettres ou barre après les chiffres : « 20a » et
- * « 20b » de De Lijn, « 27 » et « 27/ », « 86A » et « 86C » du TEC) n'en font qu'une : quand un 20b suit le dernier
- * 20a dans le même sens, le 20a n'est pas le dernier (contrôle du 20/11 : 1 857 marques des vraies données). Une lettre
- * devant le numéro (N10 de nuit, X64 express, T39) reste une autre ligne.
+ * « Ligne » d'un départ pour « , dernier » : la famille du numéro, quel que soit le mode. Décision du propriétaire du
+ * 20/11 (« est-ce que l'usager peut le prendre ou pas ») : « dernier » ne veut pas dire « dernier de ce numéro ». Mêmes
+ * chiffres avec des lettres devant ou derrière, ou une barre : une seule famille (« 70 » et « X70 », « 10 » et « N10 »,
+ * « 39 » et « T39 », « 109a » et « E109 », « 20a » et « 20b », « 27 » et « 27/ »), sans casse, espaces ni zéros de tête
+ * (« 036 » = « 36 »). Une ligne sans chiffre (« KT », « W ») reste elle-même. Tous les trains de la SNCB n'en font
+ * qu'une (IC, L, P, S… : quand un L suit le dernier IC, l'IC n'est pas le dernier train), ses bus à part. La famille ne
+ * fait que retirer des marques : il faut encore le même sens (lastWays).
  */
 export function lastLineKey(op: Op, mode: Mode, line: string): string {
   if (op === 'sncb' && mode === 'train') return 'sncb:train';
-  const key = String(line ?? '').replace(/\s+/g, '').toLowerCase().replace(/^0+(?=.)/, '');
-  return `${op}:${key.replace(/^(\d+)[a-z/]+$/, '$1')}`;
+  const key = String(line ?? '').replace(/\s+/g, '').toLowerCase();
+  const family = /^[a-z]*(\d+)[a-z/]*$/.exec(key);
+  return `${op}:${family ? family[1].replace(/^0+(?=.)/, '') : key}`;
 }
 
 /** Début de « demain » pour un départ à `t` : 04:00 (heure belge) qui suit ; avant, c'est la nuit en cours (dayWord). */
@@ -679,6 +681,64 @@ export function legDepartureIn(prep: PreparedArea, leg: Pick<Leg, 'op' | 'mode' 
   return cands.every((di) => ways[deps[di][2]] === w) ? cands[0] : -1;
 }
 
+/** Liste `next` d'un motif pleine (60 zones au plus dans les fichiers de zone) : la suite du voyage n'y est pas toute. */
+const NEXT_FULL = 60;
+const DEST_LAST = new WeakMap<PreparedArea, Map<string, Uint8Array>>();
+
+/**
+ * 1.3.1 (R3, décision du 20/11 à 21:58) : pour qui descend dans la zone `to`, 1 pour chaque départ de la zone qui est le
+ * dernier à y aller avant demain, toutes lignes confondues : aucun départ plus tard dont le véhicule s'arrête aussi à
+ * `to` (un express qui n'y passe pas ne compte pas, une autre ligne qui y passe compte). Même règle d'horaire que les
+ * tableaux (lastFlags : jours publiés, 2 h, premier départ du matin). Un motif dont la liste est pleine et qui ne dit
+ * pas `to` peut encore y passer plus loin : compté comme un départ possible s'il est du sens `way` (prudence).
+ */
+export function destinationLastFlags(prep: PreparedArea, to: string, way = -1): Uint8Array {
+  let memo = DEST_LAST.get(prep);
+  if (!memo) DEST_LAST.set(prep, (memo = new Map()));
+  const memoKey = `${way}|${to}`;
+  const hit = memo.get(memoKey);
+  if (hit) return hit;
+  const pats = prep.file.patterns;
+  const ways = lastWays(prep);
+  const serves = pats.map((p, i) => {
+    const next = p?.next ?? [];
+    return next.some(([z]) => z === to) || (next.length >= NEXT_FULL && way >= 0 && ways[i] === way);
+  });
+  const id = numbering();
+  const same = pats.map((p, i) => id(`${p?.line ?? ''}|${prep.headKeys[i] ?? ''}`));
+  // seulement les départs qui vont à `to` (une petite part d'une zone chargée), puis leurs marques à leur rang
+  const at: number[] = [];
+  const going: WayDep[] = [];
+  prep.file.deps.forEach((d, i) => {
+    if (!serves[d[2]]) return;
+    at.push(i);
+    going.push({ t: prep.times[i], way: 0, same: same[d[2]] ?? -1, m: d[1] });
+  });
+  const flags = new Uint8Array(prep.file.deps.length);
+  lastFlags(going, lastCover(prep.dates)).forEach((x, k) => {
+    if (x) flags[at[k]] = 1;
+  });
+  if (memo.size >= 64) memo.clear();
+  memo.set(memoKey, flags);
+  return flags;
+}
+
+/**
+ * 1.3.1 (R3, décision du 20/11 à 21:58) : une étape en bus, tram ou métro est la dernière façon d'aller de son arrêt de
+ * montée à son arrêt de descente avant demain, d'après le fichier de la zone de montée : aucun départ plus tard, de
+ * n'importe quelle ligne de ce réseau, ne dessert la zone de descente (destinationLastFlags). Zone de descente inconnue
+ * du motif (identifiant ancien, liste pleine) : la règle des tableaux (même famille de lignes, même sens). Faux si le
+ * départ de l'étape est introuvable.
+ */
+export function legLast(prep: PreparedArea, leg: Pick<Leg, 'op' | 'mode' | 'line' | 'schedDep' | 'tripId' | 'fromStop' | 'to'>): boolean {
+  const di = legDepartureIn(prep, leg);
+  if (di < 0) return false;
+  const pi = prep.file.deps[di][2];
+  const to = leg.to?.areaId;
+  if (to && to !== prep.file.id && (prep.file.patterns[pi]?.next ?? []).some(([z]) => z === to)) return destinationLastFlags(prep, to, lastWays(prep)[pi])[di] === 1;
+  return scheduleLast(prep, di);
+}
+
 /** Départs d'une gare dans les jours de trains chargés : voyage (identifiant normalisé) → rangs ; instants ; marques. */
 interface StationLast {
   byTrip: Map<string, number[]>;
@@ -774,12 +834,63 @@ function stationLast(days: readonly DayIndex[], station: string): StationLast {
 }
 
 /**
- * 1.3.1 (R3) : une étape en train (ou en bus SNCB) est le dernier train de son sens avant demain, d'après les trains des
- * jours chargés : son voyage à sa gare de montée, à sa minute prévue. Faux s'il est introuvable.
+ * 1.3.1 (R3, décision du 20/11 à 21:58) : départs de la gare `station` dont le train (ou le bus SNCB) s'arrête plus loin
+ * à la gare `to`, où l'on peut descendre, dans les trains des jours chargés : un seul groupe, toutes catégories. Le
+ * dernier d'entre eux avant demain est la dernière façon d'aller de `station` à `to` (lastFlags).
  */
-export function trainLegLast(days: readonly DayIndex[], leg: Pick<Leg, 'op' | 'from' | 'tripId' | 'schedDep'>): boolean {
+function stationLastTo(days: readonly DayIndex[], station: string, to: string): StationLast {
+  const sorted = [...days].sort((a, b) => a.base - b.base);
+  const memoKey = `${sorted.map((d) => d.file.date).join(',')}|${station}>${to}`;
+  const holder = sorted[0];
+  let memo = holder ? STATION_LAST.get(holder) : undefined;
+  const hit = memo?.get(memoKey);
+  if (hit) return hit;
+  const id = numbering();
+  const t: number[] = [];
+  const deps: WayDep[] = [];
+  const byTrip = new Map<string, number[]>();
+  for (const d of sorted) {
+    const at = d.byStation.get(station) ?? [];
+    for (let i = 0; i + 1 < at.length; i += 2) {
+      const trip = d.file.trips[at[i]];
+      const p = at[i + 1];
+      const s = trip?.s;
+      if (!s || !s[p] || s[p][2] < 0) continue;
+      let serves = false;
+      for (let q = p + 1; q < s.length && !serves; q++) serves = s[q][1] >= 0 && d.file.stations[s[q][0]]?.id === to;
+      if (!serves) continue;
+      const k = t.length;
+      t.push(d.base + s[p][2] * 60_000);
+      deps.push({ t: t[k], way: 0, same: id(`${trip.cat}|${headKey(trip.head?.fr ?? '')}`), m: s[p][2] });
+      const tid = normalizeId(trip.id);
+      const list = byTrip.get(tid);
+      if (list) list.push(k);
+      else byTrip.set(tid, [k]);
+    }
+  }
+  const out: StationLast = { byTrip, t, flags: lastFlags(deps, lastCover(sorted.map((d) => d.file.date))) };
+  if (holder) {
+    if (!memo) STATION_LAST.set(holder, (memo = new Map()));
+    if (memo.size >= 256) memo.clear();
+    memo.set(memoKey, out);
+  }
+  return out;
+}
+
+/**
+ * 1.3.1 (R3) : une étape en train (ou en bus SNCB) est la dernière avant demain, d'après les trains des jours chargés :
+ * son voyage à sa gare de montée, à sa minute prévue. Avec sa gare de descente (`to`, décision du 20/11 à 21:58) : aucun
+ * train plus tard ne va de l'une à l'autre (stationLastTo). Sans elle : le dernier train de son sens (stationLast, comme
+ * les tableaux). Faux s'il est introuvable.
+ */
+export function trainLegLast(days: readonly DayIndex[], leg: Pick<Leg, 'op' | 'from' | 'tripId' | 'schedDep'> & Partial<Pick<Leg, 'to'>>): boolean {
   const station = leg.from?.areaId;
   if (leg.op !== 'sncb' || !station || !leg.tripId || !days.length) return false;
+  const to = leg.to?.areaId;
+  if (to && to !== station) {
+    const y = stationLastTo(days, station, to);
+    for (const i of y.byTrip.get(normalizeId(leg.tripId)) ?? []) if (Math.abs(y.t[i] - leg.schedDep) <= 30_000) return y.flags[i] === 1;
+  }
   const x = stationLast(days, station);
   for (const i of x.byTrip.get(normalizeId(leg.tripId)) ?? []) if (Math.abs(x.t[i] - leg.schedDep) <= 30_000) return x.flags[i] === 1;
   return false;
