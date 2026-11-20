@@ -154,6 +154,13 @@ export const GUIDE = {
   uturnDeg: 135,
   uturnSpeedMs: 0.5,
   uturnBackM: 10,
+  /**
+   * positions comptées pour le demi-tour : précision de 20 m ou mieux, lissées sur trois, trois de suite ; « sans
+   * avancer » : 5 m près (raccord de la porte)
+   */
+  uturnAccM: 20,
+  uturnFixes: 3,
+  uturnAheadM: 5,
   /** 1.3.1 (B18, P6) : virage suivant à 30 m au plus : annoncé avec celui-ci (« puis à gauche ») */
   turnThenM: 30,
   /** 1.3.1 (B18, P8) : distance d'un virage : médiane des 3 dernières positions (10 s au plus), jamais en hausse */
@@ -989,30 +996,51 @@ function walkedAlong(c: Ctx, w: number, d: number): boolean {
  * plus récente à `minM` mètres au moins (60 s au plus), comparé à la direction du chemin devant le point le plus proche
  * (sur 15 m). `angle` : 0 dans le sens du chemin, 180 à contresens ; `back` : la progression le long du chemin (prolongé
  * avant son début : départ du mauvais côté) n'avance pas. Rien à mesurer (undefined) : pas assez de marche, une des deux
- * positions à plus de 30 m du chemin, ou (sauf `nearEnd`) moins de 20 m de chemin devant.
+ * positions à plus de 30 m du chemin, ou, pour lancer le demi-tour (`start`), moins de 20 m de chemin devant ou une
+ * allure qui n'est pas celle d'une marche (0,5 à 2,5 m/s sur ce déplacement : le bruit d'une position immobile saute
+ * plus vite).
  */
-function motionOn(pts: LatLon[], cum: number[], fx: GuideFix[], i: number, minM: number, nearEnd = false): { angle: number; back: boolean } | undefined {
+function motionOn(pts: LatLon[], cum: number[], fx: TimedPoint[], i: number, minM: number, start: boolean): { angle: number; back: boolean } | undefined {
   const f = fx[i];
-  let a: GuideFix | undefined;
-  for (let k = i - 1; k >= 0 && !a; k--) if (distanceM(fx[k], f) >= minM) a = fx[k];
-  if (!a) return undefined;
+  let ka = -1;
+  for (let k = i - 1; k >= 0 && ka < 0; k--) if (distanceM(fx[k], f) >= minM) ka = k;
+  if (ka < 0) return undefined;
+  const a = fx[ka];
+  if (start) {
+    const v = distanceM(a, f) / Math.max(1, (f.at - a.at) / SEC);
+    if (v < GUIDE.uturnSpeedMs || v > GUIDE.walkMaxMs) return undefined;
+    // une marche s'éloigne de son point de départ sans revenir (2 m près) ; un bruit va et vient
+    for (let k = ka + 2; k <= i; k++) if (distanceM(a, fx[k]) < distanceM(a, fx[k - 1]) - 2) return undefined;
+  }
   const pf = projectAlong(pts, f, cum);
   const pa = projectAlong(pts, a, cum);
   if (pf.offM > GUIDE.offRouteM || pa.offM > GUIDE.offRouteM) return undefined;
   const total = cum[cum.length - 1];
   let from = Math.max(0, pf.alongM);
   if (total - from < LAST_TURN_FREE_M) {
-    if (!nearEnd) return undefined;
+    if (start) return undefined;
     from = Math.max(0, total - GUIDE.uturnM);
   }
   const dir = bearingDeg(pointAlong(pts, cum, from), pointAlong(pts, cum, Math.min(total, from + GUIDE.uturnM)));
-  return { angle: Math.abs(relativeDeg(bearingDeg(a, f), dir)), back: pf.alongM <= pa.alongM + 2 };
+  return { angle: Math.abs(relativeDeg(bearingDeg(a, f), dir)), back: pf.alongM <= pa.alongM + GUIDE.uturnAheadM };
+}
+
+/** Une position (ou une moyenne de positions) datée. */
+type TimedPoint = LatLon & { at: number };
+
+/** 1.3.1 (A6) : chaque position remplacée par la moyenne d'elle et des deux d'avant (le bruit d'une position immobile s'y fond). */
+function smoothed(fx: readonly GuideFix[]): TimedPoint[] {
+  return fx.map((f, i) => {
+    const w = fx.slice(Math.max(0, i - 2), i + 1);
+    return { lat: w.reduce((s, x) => s + x.lat, 0) / w.length, lon: w.reduce((s, x) => s + x.lon, 0) / w.length, at: f.at };
+  });
 }
 
 /**
  * 1.3.1 (A6, P3) : « Fais demi-tour » sur le chemin de la marche `w` (vrai chemin ; le chemin ne crée de virage qu'aux
- * carrefours) : 15 m à contresens du chemin (plus de 135°, sans avancer le long de lui), pour les deux dernières
- * positions, à 0,5 m/s au moins (jamais à l'arrêt). Couvre le départ du mauvais côté (le raccord de la porte à la rue
+ * carrefours) : 15 m à contresens du chemin (plus de 135°, sans avancer le long de lui ; deux fois la précision annoncée
+ * si elle est moins bonne que 7,5 m), positions lissées sur trois, pour les trois dernières, à 0,5 m/s au moins (jamais
+ * à l'arrêt). Couvre le départ du mauvais côté (le raccord de la porte à la rue
  * compris) et le virage raté (le nouveau chemin, calculé depuis la position, repart en arrière). Une fois par chemin
  * (id avec builtAt) ; fini après 10 m dans le bon sens (moins de 90°, deux positions) ou d'un toucher ; un nouveau
  * chemin le remplace. Moment `turn` (flèche demi-tour), sans rue : « vers l'arrêt X » sous « Fais demi-tour ».
@@ -1022,18 +1050,23 @@ function uturnCand(c: Ctx, w: number, route: WalkRoute, pts: LatLon[], cum: numb
   const id = `turn:${c.j.id}:${w}:u:${route.builtAt}`;
   const f0 = c.fix;
   if (!f0 || m.dismissed.includes(id)) return null;
-  const fx = recentFixes(c, GUIDE.freshMs);
-  const n = fx.length;
+  // positions précises seulement (20 m) ; pour lancer, lissées sur trois : une position qui saute ne fait pas faire
+  // demi-tour ; pour finir, telles quelles (la flèche s'efface dès qu'on va dans le bon sens)
+  const raw = recentFixes(c, GUIDE.freshMs).filter((f) => (f.accuracy ?? 0) <= GUIDE.uturnAccM);
+  const n = raw.length;
   const wl = c.legs[w];
   const make = (since: number): Moment => ({ kind: 'turn', id, since, until: f0.at + GUIDE.freshMs, leg: w, turn: 'uturn', distM: 0, toward: wl.to.name, final: w === c.legs.length - 1 });
-  const last2 = (minM: number, nearEnd: boolean) => (n >= 2 ? [n - 2, n - 1].map((i) => motionOn(pts, cum, fx, i, minM, nearEnd)) : []);
+  const lastK = (k: number, fx: TimedPoint[], minM: number, start: boolean) => (n >= k && raw[n - 1] === f0 ? Array.from({ length: k }, (_, j) => motionOn(pts, cum, fx, n - k + j, minM, start)) : []);
   if (m.shown[id] === undefined) {
     if ((c.speed ?? 0) < GUIDE.uturnSpeedMs) return null;
-    const both = last2(GUIDE.uturnM, false);
-    const wrong = both.length === 2 && both.every((x) => !!x && x.angle > GUIDE.uturnDeg && x.back);
+    // au moins 15 m, et deux fois la précision annoncée (une position qui saute de 10 m n'est pas une marche) ; trois
+    // positions de suite
+    const minM = Math.max(GUIDE.uturnM, 2 * Math.max(0, ...raw.slice(-3).map((f) => f.accuracy ?? 0)));
+    const all = lastK(GUIDE.uturnFixes, smoothed(raw), minM, true);
+    const wrong = all.length === GUIDE.uturnFixes && all.every((x) => !!x && x.angle > GUIDE.uturnDeg && x.back);
     return wrong ? { id, kind: 'turn', trig: true, end: false, make } : null;
   }
-  const both = last2(GUIDE.uturnBackM, true);
+  const both = lastK(2, raw, GUIDE.uturnBackM, false);
   const end = both.length === 2 && both.every((x) => !!x && x.angle < 90);
   // une fois par chemin, même fini caché derrière un autre moment
   if (end) m.dismissed.push(id);
@@ -1874,9 +1907,9 @@ function endedNow(c: Ctx, loc: Loc): boolean {
     const last = legs[legs.length - 1];
     const nearing = !!c.fix && !!c.prev && knownPoint(last.to) && distanceM(c.fix, last.to) <= 2_000 && distanceM(c.fix, last.to) < distanceM(c.prev, last.to) - 5;
     const going = now < j.arr + 30 * MIN && ((ph.kind === 'ride' && boardedOn(m, ph.leg) && riding(c, ph.leg)) || (ph.kind === 'walk' && ph.leg === legs.length - 1 && walkingStill(c, ph.leg) && nearing));
-    // 1.3.1 (A3, I1) : encore à l'arrêt d'un véhicule sans temps réel, gardé (keptUntil), puis le temps du nouveau
-    // trajet demandé : pas fini (bus d'heure en heure, trajet court)
-    const kept = ph.kind === 'wait' && !legs[ph.leg].rt && stillAtStop(c, ph.leg) && (now < keptUntil(c, ph.leg) || (!!m.re && m.re.jid === j.id && !m.re.swap && m.re.none === undefined));
+    // 1.3.1 (A3, I1) : encore à l'arrêt d'un véhicule sans temps réel, gardé (keptUntil, plus 60 s : le recalcul se
+    // demande après ce test), puis le temps du nouveau trajet demandé : pas fini (bus d'heure en heure, trajet court)
+    const kept = ph.kind === 'wait' && !legs[ph.leg].rt && stillAtStop(c, ph.leg) && (now < keptUntil(c, ph.leg) + GUIDE.replanMs || (!!m.re && m.re.jid === j.id && !m.re.swap && m.re.none === undefined));
     if (!going && !kept) return true;
   }
   const r0 = nextRide(legs, 0);
