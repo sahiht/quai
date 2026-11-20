@@ -147,7 +147,8 @@ export function placeField(ctx: FieldCtx, o: FieldOptions): PlaceField {
 
   function pick(c: FieldChoice): void {
     // 1.3.1 (§ 7) : une gare ou un arrêt s'écrit avec l'apostrophe typographique (le choix rendu garde le nom des données)
-    input.value = c.kind === 'stop' ? apos(c.label) : c.label;
+    // (un lieu gardé aussi : son nom vient souvent d'une gare ; le lieu rendu ne change pas)
+    input.value = c.kind === 'stop' || c.kind === 'place' ? apos(c.label) : c.label;
     picked = true;
     close();
     o.onPick(c);
@@ -163,7 +164,7 @@ export function placeField(ctx: FieldCtx, o: FieldOptions): PlaceField {
     }
     if (o.places) {
       // 1.2.2 (revue d'usage n° 5) : un lieu est un favori, plus « mon lieu ».
-      for (const p of placesOf(s)) if (!q || matchesQuery(q, p.label)) items.push({ label: p.label, type: 'favori', pick: () => pick({ kind: 'place', place: p, label: p.label }) });
+      for (const p of placesOf(s)) if (!q || matchesQuery(q, p.label)) items.push({ label: apos(p.label), type: 'favori', pick: () => pick({ kind: 'place', place: p, label: p.label }) });
     }
     const recentLabels = new Set<string>();
     if (o.recent) {

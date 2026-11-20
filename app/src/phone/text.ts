@@ -596,7 +596,8 @@ export function endpointText(e: Endpoint, settings: Settings): string {
   if (e.type === 'here') return 'Ma position';
   if (e.type === 'area') return apos(displayName(e.name, settings.lang));
   if (e.type === 'address') return e.label;
-  return placeOf(settings, e.placeId)?.label ?? 'Lieu';
+  // 1.3.1 (§ 7) : le nom d'un lieu gardé (souvent celui d'une gare) s'affiche comme sur l'accueil et dans les lunettes
+  return apos(placeOf(settings, e.placeId)?.label ?? 'Lieu');
 }
 
 /**
