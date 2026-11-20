@@ -13,7 +13,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { EXITS_FILE, isExitsFile, type ExitsFile } from '../../app/src/core/walk/exits-format.ts';
 import { buildWalk } from '../src/walk/build.ts';
 import { main } from '../src/walk/cli.ts';
-import { byCode, exitReport, exitsFile, featureOf, isStreetName, isUnderStop, joinPublished, loadExitGraph, measureFeature, publishedStibStops, readStibFeatures, stibCode, writeExits, type FeatureResult, type StibFeature } from '../src/walk/exits.ts';
+import { byCode, exitReport, exitsFile, featureOf, isStreetName, isUnderStop, joinPublished, loadExitGraph, measureFeature, publishedRailStops, publishedStibStops, readStibFeatures, sameStationMissing, stibCode, writeExits, type FeatureResult, type StibFeature } from '../src/walk/exits.ts';
 import { readKeyedNodes, PbfFile } from '../src/walk/pbf.ts';
 import { publishExits, publishWalk, weeklyWalk } from '../src/walk/weekly.ts';
 import { cleanupTempDirs, tempDir } from './helpers.ts';
@@ -135,7 +135,7 @@ function fixture(o: { plainNodes?: boolean; sorted?: boolean; perBlock?: number 
   // fichiers de ligne publiés : arrêts physiques que l'appli donne à ses étapes, toujours sans lettre (8001 ; 8011,
   // écrit « 8011F » dans OpenStreetMap ; 8007 n'est desservi par aucune ligne publiée)
   mkdirSync(join(data, 'lines', 'stib'), { recursive: true });
-  writeFileSync(join(data, 'lines', 'stib', '3.json'), JSON.stringify({ v: 1, id: 'stib:3', op: 'stib', line: '3', mode: 'tram', pats: [{ s: ['8001', '', '9001'] }, { s: ['8011', '8002'] }] }));
+  writeFileSync(join(data, 'lines', 'stib', '3.json'), JSON.stringify({ v: 1, id: 'stib:3', op: 'stib', line: '3', mode: 'tram', areas: [['stib:1', blat, blon, { fr: 'Bourse', nl: 'Beurs' }], ['stib:2', flat, flon, { fr: 'Station lointaine' }]], pats: [{ a: [0, 0, 0], s: ['8001', '', '9001'] }, { a: [0, 1], s: ['8011', '8002'] }] }));
   writeFileSync(join(data, 'lines', 'stib', 'casse.json'), '{ illisible');
   return { dir, pbf, data, tiles: join(dir, 'tiles') };
 }
@@ -260,6 +260,8 @@ describe('1.3.1 : sorties du métro (mesure de vérification R1)', () => {
     expect(text).toMatch(/Sorties du métro : fichier des sorties : 3 arrêts, 3 sorties, 2 noms, \d+ octets ; nom le plus long : « Avenue de la Toison d’Or » \(24 caractères\)\n/);
     expect(text).toContain('Sorties du métro : arrêts de l\'appli : 4 arrêts physiques STIB publiés (fichiers de ligne) ; numéros du fichier des sorties retrouvés par l\'appli 2 sur 3 (66,7 %)');
     expect(text).toContain('Sorties du métro : numéros du fichier sans arrêt publié : Louise (8007)');
+    // contrôle : un arrêt de tram de la même station (Bourse, 9001) absent du fichier ; 8002 est seul dans sa station
+    expect(text).toContain('Sorties du métro : arrêts de métro ou de tram des mêmes stations absents du fichier (en surface : normal ; sous terre : à corriger) : Bourse (9001, tram)\n');
     const notes = log.filter((l) => l.startsWith('::notice title=Sorties du métro (R1)::'));
     expect(notes).toHaveLength(3);
     expect(notes[2]).toContain('retrouvés par l\'appli 2 sur 3');
@@ -279,6 +281,13 @@ describe('1.3.1 : sorties du métro (mesure de vérification R1)', () => {
     // la publication n'a jamais de lettre : une clé « 8011F » du fichier ne serait retrouvée par personne (d'où stibCode)
     expect(joinPublished(file, pub!)).toEqual({ reached: ['8001', '8011'], lost: ['8007', '8011F'] });
     expect(joinPublished({ ...file, stops: { '8011': file.stops['8011'] } }, pub!)).toEqual({ reached: ['8011'], lost: [] });
+    // arrêts de métro et de tram publiés, avec leur station ; ceux d'une station du fichier qui n'y sont pas
+    const rail = await publishedRailStops(fx.data);
+    expect([...rail!.entries()].map(([id, r]) => `${id} ${r.area} ${r.name} ${r.mode}`).sort()).toEqual(['8001 stib:1 Bourse tram', '8002 stib:2 Station lointaine tram', '8011 stib:1 Bourse tram', '9001 stib:1 Bourse tram']);
+    expect(await publishedRailStops(join(fx.dir, 'rien'))).toBeNull();
+    expect(sameStationMissing(file, rail!)).toEqual(['Bourse (9001, tram)']);
+    expect(sameStationMissing({ ...file, stops: { '8002': file.stops['8001'], '9001': file.stops['8001'] } }, rail!)).toEqual(['Bourse (8001, tram)', 'Bourse (8011, tram)']);
+    expect(sameStationMissing({ ...file, stops: {} }, rail!)).toEqual([]);
     // contrôle du 20/11 (Simonis 0470F et 0473F, Albert 0711F et 0712F) : le numéro du fichier est celui de l'appli
     expect(stibCode('0470F')).toBe('0470');
     expect(stibCode('2285G')).toBe('2285');

@@ -704,6 +704,61 @@ export function joinPublished(file: ExitsFile, published: ReadonlySet<string>): 
   return { reached: keys.filter((k) => hit.has(k)), lost: keys.filter((k) => !hit.has(k)) };
 }
 
+/** Arrêt physique de métro ou de tram publié : sa station (zone des fichiers de ligne), le nom de celle-ci, son mode. */
+export interface RailStop {
+  area: string;
+  name: string;
+  mode: 'metro' | 'tram';
+}
+
+/**
+ * Arrêts physiques de métro et de tram de la STIB publiés, avec leur station (data/lines/stib/*.json : `mode`, `areas`,
+ * `pats[].a` et `pats[].s`). null : pas de fichiers de ligne lisibles.
+ */
+export async function publishedRailStops(dataDir: string): Promise<Map<string, RailStop> | null> {
+  const dir = join(dataDir, 'lines', 'stib');
+  let files: string[];
+  try {
+    files = (await readdir(dir)).filter((x) => x.endsWith('.json')).sort();
+  } catch {
+    return null;
+  }
+  const out = new Map<string, RailStop>();
+  for (const n of files) {
+    try {
+      const f = JSON.parse(await readFile(join(dir, n), 'utf8')) as { mode?: unknown; areas?: unknown[]; pats?: { a?: unknown; s?: unknown }[] };
+      if (f.mode !== 'metro' && f.mode !== 'tram') continue;
+      for (const p of f.pats ?? []) {
+        if (!Array.isArray(p.s) || !Array.isArray(p.a)) continue;
+        for (let i = 0; i < p.s.length; i++) {
+          const id = p.s[i];
+          const area = Array.isArray(f.areas) ? f.areas[p.a[i] as number] : undefined;
+          if (typeof id !== 'string' || !id || !Array.isArray(area) || typeof area[0] !== 'string') continue;
+          const names = area[3] as { fr?: unknown } | undefined;
+          // le métro d'abord : un arrêt servi par les deux garde « metro »
+          if (out.get(id)?.mode !== 'metro') out.set(id, { area: area[0], name: typeof names?.fr === 'string' ? names.fr : area[0], mode: f.mode });
+        }
+      }
+    } catch {
+      /* fichier illisible : ignoré */
+    }
+  }
+  return out.size ? out : null;
+}
+
+/**
+ * Contrôle du 20/11 : arrêts de métro et de tram d'une station du fichier qui n'y sont pas eux-mêmes. En surface, c'est
+ * normal. Sous terre, c'est un trou d'OpenStreetMap : l'appli croirait qu'une correspondance vers eux sort à la rue et
+ * montrerait une sortie à tort (core/exits.ts ne tait la sortie que si le quai suivant est dans le fichier).
+ */
+export function sameStationMissing(file: ExitsFile, rail: ReadonlyMap<string, RailStop>): string[] {
+  const stations = new Set<string>();
+  for (const [id, r] of rail) if (exitKey(file, id) !== null) stations.add(r.area);
+  const out: string[] = [];
+  for (const [id, r] of rail) if (stations.has(r.area) && exitKey(file, id) === null) out.push(`${r.name} (${id}, ${r.mode === 'metro' ? 'métro' : 'tram'})`);
+  return out.sort((a, b) => a.localeCompare(b, 'fr', { numeric: true }));
+}
+
 const groundM = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => metres(a.lat / WALK_UNIT, a.lon / WALK_UNIT, b.lat / WALK_UNIT, b.lon / WALK_UNIT);
 
 /* ------------------------------ Bilan ------------------------------ */
@@ -726,7 +781,7 @@ const quantile = (xs: number[], q: number) => {
 };
 
 /** Mesure complète et lignes du journal (préfixe « Sorties du métro »). */
-export function exitReport(g: ExitGraph, features: readonly StibFeature[], stations: readonly OfficialStation[] | null, meta: { osmDate?: string; key?: string; published?: ReadonlySet<string> | null } = {}): ExitReport {
+export function exitReport(g: ExitGraph, features: readonly StibFeature[], stations: readonly OfficialStation[] | null, meta: { osmDate?: string; key?: string; published?: ReadonlySet<string> | null; rail?: ReadonlyMap<string, RailStop> | null } = {}): ExitReport {
   const key = meta.key ?? STIB_KEY;
   const P = 'Sorties du métro';
   const lines: string[] = [];
@@ -769,6 +824,12 @@ export function exitReport(g: ExitGraph, features: readonly StibFeature[], stati
     lines.push(`${P} : arrêts de l'appli : ${meta.published.size} arrêts physiques STIB publiés (fichiers de ligne) ; numéros du fichier des sorties retrouvés par l'appli ${j.reached.length} sur ${total} (${pct(j.reached.length, total)})`);
     const lost = j.lost.map((k) => `${file.stops[k].s || '?'} (${k})`);
     for (let i = 0; i < lost.length; i += 12) lines.push(`${P} : numéros du fichier sans arrêt publié : ${lost.slice(i, i + 12).join(', ')}`);
+  }
+  if (meta.rail) {
+    const miss = sameStationMissing(file, meta.rail);
+    const label = `${P} : arrêts de métro ou de tram des mêmes stations absents du fichier (en surface : normal ; sous terre : à corriger)`;
+    if (!miss.length) lines.push(`${label} : aucun`);
+    for (let i = 0; i < miss.length; i += 12) lines.push(`${label} : ${miss.slice(i, i + 12).join(', ')}`);
   }
   const fails = codes.filter((c) => c.cls !== 'E');
   const failLine = (cls: ExitClass[], label: string) => {
