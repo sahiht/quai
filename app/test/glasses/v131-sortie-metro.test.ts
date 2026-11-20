@@ -96,6 +96,26 @@ describe('R1 : choix de la sortie (core/exits.ts)', () => {
     expect(exitByLegOf(trip(FONTAINAS, tram4('8362', { cancelled: true })), EXITS)).toBeUndefined();
   });
 
+  it('bout de la marche inconnu : jamais une sortie au hasard (rien s’il y en a plusieurs, la seule s’il n’y en a qu’une)', () => {
+    const nowhere = { ...FONTAINAS, lat: 0, lon: 0 };
+    expect(exitByLegOf(trip(nowhere), EXITS)).toBeUndefined();
+    expect(exitByLegOf(trip({ ...FONTAINAS, lat: Number.NaN }), EXITS)).toBeUndefined();
+    expect(exitByLegOf(trip(nowhere, tram4('8292')), EXITS)).toEqual({ 2: 'Place De Brouckère' });
+  });
+
+  it('la sortie la plus proche du quai n’est pas toujours la bonne : celle du chemin le plus court, couloir compris', () => {
+    // Arts-Loi, quai 8032 : rue de la Loi à 45 m de couloir, avenue des Arts à 70 m
+    const m1 = { ...rideLeg({ op: 'stib', mode: 'metro', line: '1', head: 'Stockel', stops: [{ p: BROUCKERE, t: at('08:20') }, { p: ARTS_LOI, t: at('08:25') }] }), fromStop: '8292', toStop: '8032' };
+    const to = (dest: typeof ARTS_LOI) => exitByLegOf(journeyOf([walkLeg(PLACE_ROGIER, BROUCKERE, at('08:06'), 9), m1, walkLeg(ARTS_LOI, dest, m1.arr, 6)], 'jr4', at('08:06')), EXITS);
+    // vers le sud-est (au-delà de l'avenue des Arts) : l'avenue, malgré 25 m de couloir en plus
+    expect(to(stop('Square Frère-Orban', { lat: 50.8437, lon: 4.3713 }))).toEqual({ 2: 'Avenue des Arts' });
+    // vers l'ouest (parc de Bruxelles) : la rue de la Loi
+    expect(to(stop('Parc de Bruxelles', { lat: 50.8455, lon: 4.3640 }))).toEqual({ 2: 'Rue de la Loi' });
+    // tout près de la sortie lointaine, mais un long couloir en plus ne vaut pas le détour : la plus courte au total
+    const far: ExitsFile = { ...EXITS, stops: { '8032': { s: 'Arts-Loi', x: [['Rue de la Loi', 50.8456, 4.3686, 10], ['Avenue des Arts', 50.8451, 4.3693, 250]] } } };
+    expect(exitByLegOf(journeyOf([walkLeg(PLACE_ROGIER, BROUCKERE, at('08:06'), 9), m1, walkLeg(ARTS_LOI, stop('Avenue des Arts', { lat: 50.8451, lon: 4.3694 }), m1.arr, 6)], 'jr5', at('08:06')), far)).toEqual({ 2: 'Rue de la Loi' });
+  });
+
   it('correspondance : une sortie vers un arrêt de surface ; rien vers un autre quai sous terre ni vers un train', () => {
     const t4 = tram4('8362');
     const then = (walkTo: typeof BOURSE, next: Leg, last = FONTAINAS): Journey =>
@@ -160,12 +180,33 @@ function screen(m: Moment, c: ViewCtx = ctx()) {
   return { p, raw: p.lines, lines: p.lines.map(nb), pale: rowsOf(container(p, 'colC')), hi: rowsOf(container(p, 'colA')), norm: rowsOf(container(p, 'colB')) };
 }
 
-/** Noms de sortie vus dans la mesure du 20/11 sur les données belges (run 44798744102), le plus long compris. */
+/**
+ * Noms de sortie du fichier fait sur les données belges le 20/11 (run 44812228430, après le tri des noms : rues et
+ * places), du plus court au plus long ; le dernier est le seul qui ne tient pas entier.
+ */
 const REAL_NAMES = [
-  'Boulevard Anspach', 'Rue Jules Van Praet', 'Place De Brouckère', 'Avenue de la Toison d\'Or', 'Boulevard du Jardin Botanique', 'Rue du Champ de la Couronne',
-  'Square Émile Vander Bruggen', 'Rue de l\'Hôtel des Monnaies', 'Avenue de la Porte de Hal', 'Avenue Impératrice Charlotte', 'Rue Théophile De Baisieux',
-  'Avenue Herrmann-Debroux', 'Boulevard de Smet de Naeyer', 'Cours Paul-Henri Spaak', 'Quai au Bois à Brûler', 'Rue Jean-Baptiste Serkeyn', 'Esplanade de l\'Europe',
-  'Allée Adrienne Gommers & Anne-Marie van Oost-de-Gerlache',
+  'Rue Blaes', 'Rue Gemba', 'Rue Neuve', 'Rue Grétry', 'Avenue Besme', 'Place Louise', 'Rue Martin V', 'Rue Montoyer', 'Rue de Loxum',
+  'Rue du Lycée', 'Avenue Albert', 'Avenue Fonsny', 'Avenue Gounod', 'Place du Nord', 'Rue Archimède', 'Rue Brialmont', 'Rue Dumonceau',
+  'Rue Solleveld', 'Rue Verheyden', 'Rue de Laeken', 'Rue de Trèves', 'Rue de la Loi', 'Rue du Heysel', 'Avenue Boileau', 'Avenue Jupiter',
+  'Avenue Lambeau', 'Place du Repos', 'Rue Ravenstein', 'Rue d\'Aerschot', 'Rue de l\'Angle', 'Rue du Marquis', 'Rue du Progrès', 'Avenue Albertyn',
+  'Avenue des Arts', 'Place de l\'Alma', 'Rue Edgar Tinel', 'Rue Paul Devaux', 'Rue de l\'Évêque', 'Avenue de l\'Yser', 'Chaussée de Gand',
+  'Chaussée de Mons', 'Place Anneessens', 'Quai aux Briques', 'Rue Dubois-Thorn', 'Rue Saint-Lazare', 'Rue Sainte-Marie', 'Rue d\'Angleterre',
+  'Rue de Quatrecht', 'Rue des Artistes', 'Rue des Colonies', 'Avenue des Celtes', 'Boulevard Anspach', 'Boulevard Belgica', 'Boulevard du Midi',
+  'Chaussée de Wavre', 'Rue Félicien Rops', 'Rue Gisèle Halimi', 'Rue de Birmingham', 'Rue de Ribaucourt', 'Rue de l\'Escadron', 'Rue du Grand Cerf',
+  'Rue du Luxembourg', 'Allée du Parlement', 'Avenue Paul Hymans', 'Avenue de Kraainem', 'Avenue des Gaulois', 'Boulevard Baudouin',
+  'Boulevard d\'Anvers', 'Chaussée d\'Ixelles', 'Chaussée de Forest', 'Chaussée de Ninove', 'Cours Saint Guidon', 'Place De Brouckère',
+  'Rue Charles Demeer', 'Rue de la Clinique', 'Avenue Jacques Brel', 'Avenue de Tervueren', 'Avenue des Athlètes', 'Avenue du Boulevard',
+  'Boulevard du Régent', 'Parvis Saint-Gilles', 'Pont Fernand Demany', 'Promenade de l\'Alma', 'Rue Jules Van Praet', 'Rue des Trois Ponts',
+  'Avenue de l\'Héliport', 'Avenue de la Liberté', 'Avenue des Amandiers', 'Avenue des Rogations', 'Chaussée d\'Etterbeek', 'Chaussée de Waterloo',
+  'Place Charles Rogier', 'Rue Charles Legrelle', 'Avenue de Broqueville', 'Boulevard Adolphe Max', 'Boulevard de Waterloo',
+  'Esplanade de l\'Europe', 'Quai au Bois à Brûler', 'Rue François Debelder', 'Rue Houzeau de Lehaie', 'Rue Sergent De Bruyne',
+  'Avenue Roger Lallemand', 'Avenue des Citronniers', 'Avenue des Volontaires', 'Boulevard du Souverain', 'Cours Paul-Henri Spaak',
+  'Square Patrice Lumumba', 'Avenue Herrmann-Debroux', 'Avenue Louis Gribaumont', 'Avenue Paul-Henri Spaak', 'Avenue du Roi Chevalier',
+  'Boulevard Josse Leemans', 'Boulevard des Invalides', 'Rue Père Eudore Devroye', 'Avenue Houba-de Strooper', 'Avenue de la Toison d\'Or',
+  'Avenue Émile Vandervelde', 'Boulevard Auguste Reyers', 'Boulevard Brand Whitlock', 'Boulevard Jules Graindor', 'Avenue de la Porte de Hal',
+  'Boulevard Émile Bockstael', 'Rue Jean-Baptiste Serkeyn', 'Rue Théophile De Baisieux', 'Boulevard Maurice Lemonnier',
+  'Boulevard de Smet de Naeyer', 'Rue de l\'Hôtel des Monnaies', 'Rue du Champ de la Couronne', 'Square Émile Vander Bruggen',
+  'Avenue Impératrice Charlotte', 'Boulevard du Jardin Botanique', 'Allée Adrienne Gommers & Anne-Marie van Oost-de-Gerlache',
 ];
 
 describe('R1 : la ligne « Sortie : … » de l’écran de la marche', () => {
@@ -360,6 +401,24 @@ describe('R1 : contrôleur, du fichier des sorties à l’écran de la marche', 
       expect(h.screens().some((x) => x.screen === 'error')).toBe(false);
       cleanupKit();
     }
+  });
+
+  it('fichier qui tarde ou ne répond jamais : le guidage n’attend pas, la marche paraît à l’heure, sans ligne « Sortie » ni erreur', async () => {
+    let asked = 0;
+    const h = await launched(() => ({
+      walkExits: () => {
+        asked++;
+        return new Promise<ExitsFile | null>(() => undefined);
+      },
+    }));
+    expect(asked).toBe(1);
+    expect(h.c.followed?.guide?.kind).toBe('trip');
+    const s = await afterAlight(h);
+    expect(momentId(s)).toBe('walk:jr1:2');
+    expect(s.lines.map(nb)).toEqual(['5 min à pied jusqu’à la place Fontainas', 'arrivée 08:19', HINT]);
+    expect(h.screens().some((x) => x.screen === 'error')).toBe(false);
+    // la lecture trop lente est abandonnée, puis redemandée une fois, 10 min après la première
+    expect(asked).toBe(2);
   });
 
   it('arrêt de surface ou autre réseau : rien, même avec le fichier', async () => {

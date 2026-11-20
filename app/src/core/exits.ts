@@ -8,7 +8,8 @@
  * - la marche ne mène pas à un autre quai sous terre (correspondance de métro ou de prémétro : on ne sort pas) ni à un
  *   train (la gare se rejoint par ses couloirs, pas par une rue).
  * La sortie est choisie vers le bout de cette marche (chooseExit : couloir plus vol d'oiseau jusqu'à l'arrêt suivant ou
- * la destination). Calcul sur le téléphone, avec le fichier public des sorties : rien n'est envoyé.
+ * la destination) ; bout inconnu : la sortie seulement si l'arrêt n'en a qu'une. Calcul sur le téléphone, avec le
+ * fichier public des sorties : rien n'est envoyé.
  */
 import type { Journey, Leg } from './api';
 import { chooseExit, exitsOf, type ExitsFile } from './walk/exits-format';
@@ -36,6 +37,8 @@ export function exitByLegOf(j: Journey, f: ExitsFile | null | undefined): Record
     if (w.kind !== 'walk' || p.kind !== 'ride' || p.cancelled) continue;
     const exits = exitsOf(f, p.op, p.toStop);
     if (!exits.length || staysInside(f, j.legs[i + 1])) continue;
+    // bout de la marche inconnu : avec plusieurs sorties, on ne saurait pas laquelle dire (jamais une sortie au hasard)
+    if (!known(w.to) && exits.length > 1) continue;
     const e = chooseExit(exits, known(w.to) ? w.to : null);
     if (e) out[i] = e.name;
   }
