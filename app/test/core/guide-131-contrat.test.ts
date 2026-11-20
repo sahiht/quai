@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Moment } from '../../src/core/guide-types';
 import { connectionMargin, tightLegs } from '../../src/core/guide';
-import { at, fix, guide, MIN, P, prdTrip, S, step } from './guide-fixtures';
+import { at, fix, guide, IC, journeyOf, MIN, P, prdTrip, S, step, toward, walkLeg } from './guide-fixtures';
 
 const m = <K extends Moment['kind']>(x: Moment | null, kind: K): Extract<Moment, { kind: K }> => {
   expect(x?.kind).toBe(kind);
@@ -55,6 +55,58 @@ describe('1.3.1 : contrat du guidage', () => {
     expect(m(s2.moment, 'board').sched).toBeUndefined();
     expect(s2.where.wait?.sched).toBeUndefined();
     expect(MIN).toBe(60_000);
+  });
+});
+
+describe('1.3.1 : contrat, heure prévue d’un train en retard dans les autres messages du moteur (B13)', () => {
+  /** À pied 13 min jusqu'à la gare de Liège-Guillemins, IC de 07:30, à pied 3 min. */
+  const icFirst = (o: Parameters<typeof IC>[0] = {}, id = 'jic') => {
+    const ic = IC(o);
+    return journeyOf([walkLeg(S.avroy, S.guillemins, at('07:15'), 13), ic, walkLeg(S.central, S.gareCentrale, ic.arr, 3, ic.schedArr)], id, at('07:15'));
+  };
+
+  it('« Partir maintenant » et « Où tu en es » à pied : l’IC en retard de 2 min, 07:32 et son heure prévue 07:30', () => {
+    const r = guide(icFirst({ icDelay: 2 }), { startedAt: at('07:10') });
+    const s = step(r, at('07:15:05'), fix(P.avroy, at('07:15:05'), { speed: 0 }));
+    expect(m(s.moment, 'leave')).toMatchObject({ depAt: at('07:32'), sched: at('07:30'), rt: true });
+    expect(s.where.walk).toMatchObject({ depAt: at('07:32'), sched: at('07:30') });
+    // à l'heure : pas d'heure prévue à part
+    const r2 = guide(icFirst(), { startedAt: at('07:10') });
+    const s2 = step(r2, at('07:15:05'), fix(P.avroy, at('07:15:05'), { speed: 0 }));
+    expect(m(s2.moment, 'leave').sched).toBeUndefined();
+    expect(s2.where.walk?.sched).toBeUndefined();
+  });
+
+  it('« Voie modifiée » : l’heure prévue du train en retard', () => {
+    const r = guide(icFirst({ icDelay: 2, icNewPlatform: '5' }), { startedAt: at('07:10') });
+    // connue dès le lancement : elle passe devant « Partir maintenant » (2 min)
+    const s = step(r, at('07:15:05'), fix(P.avroy, at('07:15:05'), { speed: 0 }));
+    expect(m(s.moment, 'platform')).toMatchObject({ platform: '5', was: '3', depAt: at('07:32'), sched: at('07:30') });
+  });
+
+  it('« walk » après la descente du bus 6 : vers la gare, l’IC en retard (heure prévue) et sa voie', () => {
+    const r = guide(prdTrip({ icDelay: 2 }));
+    step(r, at('07:18:30'), fix(toward(P.leman, P.guilleminsBus, 300), at('07:18:30'), { speed: 9 }));
+    const s = step(r, at('07:20:20'), fix(P.guilleminsBus, at('07:20:20'), { speed: 0.4 }));
+    expect(r.mem.alighted?.leg).toBe(1);
+    expect(m(s.moment, 'walk')).toMatchObject({ leg: 2, walkMin: 3, toward: S.guillemins.name, final: false, vehicle: { op: 'sncb', mode: 'train', cat: 'IC' }, depAt: at('07:32'), sched: at('07:30'), rt: true, platform: '3' });
+    expect(s.moment).not.toHaveProperty('arr');
+  });
+
+  it('« Nouveau trajet » : le premier train du nouveau trajet, en retard, avec son heure prévue', () => {
+    // IC de 07:30 supprimé ; le nouveau trajet part avec un IC prévu à 08:30, en retard de 3 min
+    const r = guide(icFirst({ icCancelled: true }), { startedAt: at('07:10') });
+    const s = step(r, at('07:16'), fix(toward(P.avroy, P.guillemins, 60), at('07:16'), { speed: 1.3 }));
+    expect(s.replan).toMatchObject({ reason: 'cancelled' });
+    const ic2 = { ...IC({ icDelay: 3 }) };
+    const H = 60 * MIN;
+    for (const k of ['dep', 'arr', 'schedDep', 'schedArr'] as const) ic2[k] += H;
+    ic2.stops = ic2.stops?.map((x) => ({ ...x, sched: x.sched + H, est: x.est + H }));
+    r.j = journeyOf([walkLeg(S.avroy, S.guillemins, at('08:15'), 13), ic2, walkLeg(S.central, S.gareCentrale, ic2.arr, 3, ic2.schedArr)], 'jic2', at('08:15'));
+    const s2 = step(r, at('07:16:10'), fix(toward(P.avroy, P.guillemins, 70), at('07:16:10'), { speed: 1.3 }));
+    const re = m(s2.moment, 'replan');
+    expect(re).toMatchObject({ reason: 'cancelled', next: { depAt: at('08:33'), sched: at('08:30'), platform: '3' } });
+    expect(re).not.toHaveProperty('planned');
   });
 });
 
