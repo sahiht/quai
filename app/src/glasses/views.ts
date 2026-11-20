@@ -14,6 +14,7 @@ import type { Board, CoreStatus, Departure, DepartureStops, Favorite, FavoriteAn
 import { labelOf } from '../core/api';
 import { favoriteTitle, placesOf } from '../core/favorites';
 import { displayLabel, HOLIDAY_TEXT, holidayName, longestWalk, walksMore } from '../core/means';
+import { tomorrowAt } from '../core/boards';
 import { shortAddress } from '../core/text';
 import { areaLabel, displayName, distanceM, hhmm, lineLabel, minutesUntil } from '../core/util';
 import type { Mode, Names } from '../../../shared/types';
@@ -1361,7 +1362,7 @@ const WALK_ROW_PX = WIDTHS.full - STEP_TIME_PX - 10 - 2;
  * commence à bord dit d'où il part (« depuis Bruxelles-Central », 1.2.4), pâle, sous sa rangée. Heures estimées (le
  * temps réel compris), « ~ » devant une heure prévue.
  */
-function stepRows(j: Journey, leave: number, ctx: ViewCtx): StepRow[] {
+function stepRows(j: Journey, leave: number, ctx: ViewCtx, journeys: readonly Journey[] = [j]): StepRow[] {
   const l = lang(ctx);
   const rows: StepRow[] = [];
   /**
@@ -1405,7 +1406,8 @@ function stepRows(j: Journey, leave: number, ctx: ViewCtx): StepRow[] {
     const tight = margin !== undefined && margin <= MARGIN_SHOWN_MAX && ctx.now < leg.dep;
     const right = leg.cancelled ? 'SUPPRIMÉ' : tight ? marginText(margin!) : hhmm(leg.arr);
     // l'arrêt de descente coupé au mot avant la colonne de droite (jamais au milieu d'un mot, jamais l'heure)
-    const tail = lastMark(leg) ?? '';
+    // 1.3.1 (R3) : pas de « , dernier » quand un autre trajet déjà calculé part plus tard avant demain (laterJourney)
+    const tail = (laterJourney(leg, j, journeys) ? undefined : lastMark(leg)) ?? '';
     const room = STEP_ROW_PX - textWidth(vehicle) - textWidth(right);
     const to = `→ ${fitName('', displayName(leg.to.name, l), tail, room - textWidth('→ '))}`;
     const item: Item = {
@@ -1512,7 +1514,7 @@ export function stepsPage(route: Pick<StepsRoute, 'title' | 'label'>, d: StepsDa
   const leave = shownLeave(j, ctx.now, guided ? d.leaveAt0 : undefined);
   const start = journeyStart(j, leave);
   const v = base('steps', 'steps', truncateWords(tripName(stepsTitleOf(route)), WIDTHS.title), ctx);
-  const rows = stepRows(j, leave, ctx);
+  const rows = stepRows(j, leave, ctx, d.journeys);
   for (const r of rows) v.items.push(r.item);
   const alert = j.alerts[0];
   // l'alerte d'abord, puis « Si tu le rates » quand le départ approche (marge et prix du raté), sinon départ et arrivée
@@ -1558,6 +1560,24 @@ export function inMissWindow(j: Journey, now: number, leave = j.leaveAt): boolea
   if (!first || first.cancelled || now >= first.dep) return false;
   const go = j.legs[0]?.kind === 'walk' ? leave : first.dep;
   return go - now <= MISS_WINDOW_MIN * 60_000;
+}
+
+/**
+ * 1.3.1 (R3, règle du propriétaire du 20/11 : « dernier » veut dire « après celui-ci, plus rien que la personne puisse
+ * prendre pour ce déplacement ») : parmi les trajets déjà calculés pour la même destination (autres trajets, « Le
+ * suivant », « Plus tard », celui de « Si tu le rates »), un autre part après ce véhicule et avant demain (04:00 qui
+ * suit, journée de service), quels que soient sa ligne, son réseau et ses changements : son premier véhicule part plus
+ * tard, aucun de ses véhicules n'est supprimé. L'écran du trajet ne dit alors pas « , dernier » sur cette étape. Aucun
+ * calcul ni réseau de plus ; sans autre trajet calculé, faux : la marque du cœur reste. Ne fait que retirer la marque.
+ */
+export function laterJourney(leg: Pick<Leg, 'dep'>, j: Journey, journeys: readonly Journey[]): boolean {
+  const end = tomorrowAt(leg.dep);
+  return journeys.some((x) => {
+    if (x === j || x.id === j.id) return false;
+    const rides = x.legs.filter((r) => r.kind === 'ride');
+    if (!rides.length || rides.some((r) => r.cancelled)) return false;
+    return rides[0].dep > leg.dep && rides[0].dep < end;
+  });
 }
 
 /**
