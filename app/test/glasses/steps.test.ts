@@ -33,7 +33,7 @@ const j1 = journey(
     { ride: '36', mode: 'bus', dep: T(7, 43), arr: T(7, 55), from: 'Maison Arrêt', to: 'Braine-l’Alleud', head: 'Rixensart' },
     { walk: 4, to: 'Braine-l’Alleud' },
     { ride: 'IC', mode: 'train', dep: T(8, 1), arr: T(8, 24), from: 'Braine-l’Alleud', to: 'Bruxelles-Central', head: 'Liers', platform: '3' },
-    { ride: '2', mode: 'metro', dep: T(8, 27), arr: T(8, 31), from: 'Gare Centrale', to: 'Madou', head: 'Simonis' },
+    { ride: '2', mode: 'metro', dep: T(8, 27), arr: T(8, 31), from: 'Gare Centrale', to: 'Louise', head: 'Simonis' },
     { walk: 2 },
   ],
   { label: 'short', reason: 'Moins de marche : 2 changements, à pied 5 + 4 + 2 min' },
@@ -51,7 +51,7 @@ const j3 = journey(
     { ride: '36', mode: 'bus', dep: T(8, 13), arr: T(8, 25), from: 'Maison Arrêt', to: 'Braine-l’Alleud', head: 'Rixensart' },
     { walk: 4, to: 'Braine-l’Alleud' },
     { ride: 'IC', mode: 'train', dep: T(8, 31), arr: T(8, 54), from: 'Braine-l’Alleud', to: 'Bruxelles-Central', head: 'Liers', platform: '3' },
-    { ride: '2', mode: 'metro', dep: T(8, 57), arr: T(9, 1), from: 'Gare Centrale', to: 'Madou', head: 'Simonis' },
+    { ride: '2', mode: 'metro', dep: T(8, 57), arr: T(9, 1), from: 'Gare Centrale', to: 'Louise', head: 'Simonis' },
     { walk: 2 },
   ],
   { label: 'next', reason: 'Le suivant : même trajet, 30 min plus tard' },
@@ -70,7 +70,7 @@ const J1_ROWS = [
   '07:43 Bus 36 → Braine-l’Alleud   07:55',
   '07:55 à pied 4 min → Braine-l’Alleud',
   '08:01 IC voie 3 → Bruxelles-Central   marge 2 min',
-  '08:27 Métro 2 → Madou   marge 3 min',
+  '08:27 Métro 2 → Louise   marge 3 min',
   '08:31 à pied 2 min   08:33',
 ];
 const HINT_LIST = '△▽ choisir   toucher : voir   double : retour';
@@ -285,9 +285,9 @@ describe('§ 3 : textes et largeurs', () => {
       { ride: '36', mode: 'bus', dep: T(7, 43), arr: T(7, 55), from: 'Arrêt', to: 'Gare' },
       { walk: 4, to: 'Gare' },
       { ride: 'IC', mode: 'train', dep: T(8, 1), arr: T(8, 24), from: 'Gare', to: 'Central' },
-      { ride: '2', mode: 'metro', dep: T(8, 27), arr: T(8, 31), from: 'Gare Centrale', to: 'Madou' },
-      { walk: 2, to: 'Madou' },
-      { ride: '92', mode: 'tram', dep: T(8, 36), arr: T(8, 44), from: 'Madou', to: 'Flagey' },
+      { ride: '2', mode: 'metro', dep: T(8, 27), arr: T(8, 31), from: 'Gare Centrale', to: 'Louise' },
+      { walk: 2, to: 'Louise' },
+      { ride: '92', mode: 'tram', dep: T(8, 36), arr: T(8, 44), from: 'Louise', to: 'Flagey' },
       { walk: 3 },
     ]);
     const v = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [long, j2], index: 0, followedId: 's', fresh: true }, ctx());

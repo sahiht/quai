@@ -48,11 +48,12 @@ interface Case {
 const bench = JSON.parse(readFileSync(BENCH, 'utf8')) as { moments: { id: string; label: string; at: string }[]; trips: { id: string; from: Spec; to: Spec; tags: string[] }[] };
 const BRAINE: Spec = { point: 'Braine-l’Alleud Côté du Collège (arrêt)', name: 'Braine-l’Alleud Côté du Collège', lat: 50.68634, lon: 4.39427 };
 const SCHAERBEEK: Spec = { point: 'Schaerbeek Gare (arrêt STIB)', name: 'Schaerbeek Gare (STIB)', lat: 50.87755, lon: 4.37966 };
-const MADOU: Spec = { point: 'Madou (arrêt STIB)', name: 'Madou (STIB)', lat: 50.84969, lon: 4.36949 };
+/** 1.3.1 : la place Louise (arrêt public du métro 2 et 6) remplace l'ancien point d'arrivée des cas B et C. */
+const LOUISE: Spec = { point: 'Louise (arrêt STIB)', name: 'Louise (STIB)', lat: 50.83518, lon: 4.35462 };
 const OWNER: Case[] = [
   { id: 'A', owner: 'A', snap: SNAP11, trip: 'A', moment: 'mer-1942', at: '2026-11-11T19:42:00+01:00', from: BRAINE, to: SCHAERBEEK, tags: ['propriétaire', 'férié'] },
-  { id: 'B', owner: 'B', snap: SNAP11, trip: 'B', moment: 'jeu-0731', at: '2026-11-12T07:31:00+01:00', from: BRAINE, to: MADOU, tags: ['propriétaire'] },
-  { id: 'C', owner: 'C', snap: SNAP11, trip: 'C', moment: 'mer-1330', at: '2026-11-11T13:30:00+01:00', from: BRAINE, to: MADOU, tags: ['propriétaire', 'férié'] },
+  { id: 'B', owner: 'B', snap: SNAP11, trip: 'B', moment: 'jeu-0731', at: '2026-11-12T07:31:00+01:00', from: BRAINE, to: LOUISE, tags: ['propriétaire'] },
+  { id: 'C', owner: 'C', snap: SNAP11, trip: 'C', moment: 'mer-1330', at: '2026-11-11T13:30:00+01:00', from: BRAINE, to: LOUISE, tags: ['propriétaire', 'férié'] },
 ];
 const args = process.argv.slice(2);
 /** Contrôle hors échantillon (--holdout) : les 50 trajets sur l'autre instantané, jeudi 12/11 08:15 et férié 11/11 15:00. */

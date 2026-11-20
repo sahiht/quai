@@ -42,8 +42,8 @@ function maisonBureau(): PlanResult {
   return { journeys: [first, fewer, later] };
 }
 
-/** Braine-l'Alleud Côté du Collège → Madou, 11/11 à 13:30 : bus W, métro 2 (13:39 → 14:47) ; « Plus tôt » : 22 min à pied et IC (14:39). */
-function braineMadou(): PlanResult {
+/** Braine-l'Alleud Côté du Collège → Louise, 11/11 à 13:30 : bus W, métro 2 (13:39 → 14:47) ; « Plus tôt » : 22 min à pied et IC (14:39). */
+function braineLouise(): PlanResult {
   const first = trip('short', nov11(13, 39), [8, [nov11(13, 47), nov11(14, 30), 'bus W'], 1, [nov11(14, 33), nov11(14, 45), 'métro 2'], 2]);
   const earlier = trip('earlier', nov11(13, 46), [22, [nov11(14, 8), nov11(14, 27), 'IC'], 3, [nov11(14, 31), nov11(14, 37), 'métro 2'], 2]);
   const next = trip('next', nov11(14, 11), [8, [nov11(14, 19), nov11(15, 2), 'bus W'], 1, [nov11(15, 5), nov11(15, 17), 'métro 2'], 2]);
@@ -68,7 +68,7 @@ describe('ligne « moyens » (§ 2.3, § 7.2)', () => {
     expect(meansLine(maisonParc().journeys[1])).toBe('IC + IC, à pied 19 min → Départ, puis 9 min');
     expect(meansLine(maisonBureau().journeys[0])).toBe('bus 36 + IC + métro 2, à pied 5 min → Départ, puis 8 min');
     expect(meansLine(trip('short', at(8, 0), [[at(8, 0), at(8, 30), 'IC'], [at(8, 36), at(9, 0), 'IC']]))).toBe('IC + IC');
-    expect(typo(meansLine(braineMadou().journeys[0]))).toBe(`bus W + métro 2, à${NB}pied 8${NB}min${NB}→${NB}Départ, puis 1 + 2${NB}min`);
+    expect(typo(meansLine(braineLouise().journeys[0]))).toBe(`bus W + métro 2, à${NB}pied 8${NB}min${NB}→${NB}Départ, puis 1 + 2${NB}min`);
   });
 
   it('trajet à pied : pas de ligne (la carte dit déjà « 22 min à pied »)', () => {
@@ -98,8 +98,8 @@ describe('cartes des trois cas réels (§ 1.5, marche maximale 5 min)', () => {
     ]);
   });
 
-  it('Braine-l’Alleud → Madou : « Moins de marche » (bus W, métro 2), « Plus tôt de 8 min, mais 22 min à pied. »', () => {
-    expect(texts(braineMadou(), 5)).toEqual([
+  it('Braine-l’Alleud → Louise : « Moins de marche » (bus W, métro 2), « Plus tôt de 8 min, mais 22 min à pied. »', () => {
+    expect(texts(braineLouise(), 5)).toEqual([
       ['Moins de marche', 'bus W + métro 2, à pied 8 min → Départ, puis 1 + 2 min', 'Arrive 8 min après le plus rapide, avec moins de marche.'],
       ['Plus tôt', 'IC + métro 2, à pied 22 min → Départ, puis 3 + 2 min', 'Plus tôt de 8 min, mais 22 min à pied.'],
       ['Le suivant', 'bus W + métro 2, à pied 8 min → Départ, puis 1 + 2 min', 'Même trajet, départ suivant.'],
@@ -197,7 +197,7 @@ describe('phrases des autres propositions (§ 7.2, § 2.2)', () => {
   });
 
   it('aucun tiret long dans les textes des cartes', () => {
-    for (const r of [maisonParc(), maisonBureau(), braineMadou()]) for (const t of texts(r, 5).flat()) expect(t).not.toMatch(/[—–]/);
+    for (const r of [maisonParc(), maisonBureau(), braineLouise()]) for (const t of texts(r, 5).flat()) expect(t).not.toMatch(/[—–]/);
   });
 });
 
@@ -226,7 +226,7 @@ const near = (a: AreaSummary, walkMin: number, distanceM = walkMin * 70): Nearby
 
 describe('accès d’un lieu (§ 2.5)', () => {
   it('exemples : l’arrêt le plus proche nommé d’abord ; la gare seulement avec des IC et dans la marche maximale', () => {
-    expect(accessText([near(zone('sncb:8813045', 'sncb', 'Bruxelles-Congrès', ['train'], ['S2', 'S4']), 11), near(zone('stib:8051', 'stib', 'Madou', ['metro'], ['2', '6']), 2)], 'fr', 10)).toBe('Métro Madou à 2 min à pied');
+    expect(accessText([near(zone('sncb:8813045', 'sncb', 'Bruxelles-Congrès', ['train'], ['S2', 'S4']), 11), near(zone('stib:8051', 'stib', 'Louise', ['metro'], ['2', '6']), 2)], 'fr', 10)).toBe('Métro Louise à 2 min à pied');
     expect(accessText([near(zone('tec:N5', 'tec', 'Namur Omalius', ['bus'], ['4']), 5), near(zone('sncb:8863008', 'sncb', 'Namur', ['train'], ['IC', 'L']), 8)], 'fr', 10)).toBe('Bus TEC Namur Omalius à 5 min à pied ; gare de Namur à 8 min');
     // Bruxelles-Chapelle (S1 seulement) n'est pas citée
     expect(accessText([near(zone('stib:1', 'stib', 'Anneessens', ['tram'], ['3', '4']), 3), near(zone('sncb:8813037', 'sncb', 'Bruxelles-Chapelle', ['train'], ['S1']), 4)], 'fr', 10)).toBe('Tram Anneessens à 3 min à pied');

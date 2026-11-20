@@ -36,7 +36,7 @@ describe('PRD-1.2.4 § 1 : l’arrêt ou la gare où aller, en entier', () => {
     { walk: 1, to: 'Braine-l’Alleud' },
     { ride: 'IC', mode: 'train', dep: T(14, 1), arr: T(14, 16), from: 'Braine-l’Alleud', to: 'Bruxelles-Midi', platform: '2', head: 'Anvers-Central' },
     { walk: 3, to: 'Gare du Midi' },
-    { ride: '2', mode: 'metro', dep: T(14, 22), arr: T(14, 27), from: 'Gare du Midi', to: 'Madou', head: 'Simonis' },
+    { ride: '2', mode: 'metro', dep: T(14, 22), arr: T(14, 27), from: 'Gare du Midi', to: 'Louise', head: 'Simonis' },
     { walk: 2 },
   ]);
 
@@ -48,7 +48,7 @@ describe('PRD-1.2.4 § 1 : l’arrêt ou la gare où aller, en entier', () => {
       '13:41 à pied 1 min → Braine-l’Alleud',
       '14:01 IC voie 2 → Bruxelles-Midi   14:16',
       '14:16 à pied 3 min → Gare du Midi',
-      '14:22 Métro 2 → Madou   marge 3 min',
+      '14:22 Métro 2 → Louise   marge 3 min',
       // 1.3.1 (B14) : la dernière marche porte l'heure d'arrivée
       '14:27 à pied 2 min   14:29',
     ];
