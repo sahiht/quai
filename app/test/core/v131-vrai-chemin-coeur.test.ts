@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Core, FavoriteTrip, Journey, Settings } from '../../src/core/api';
-import { FIRST_WALK } from '../../src/core/firstwalk';
+import { FIRST_WALK, FirstWalks } from '../../src/core/firstwalk';
 import { hhmm } from '../../src/core/util';
 import { at, BOURSE, ESPLANADE, MIN, offset, scene, settle, START, TILE, VERSION, type PathKind } from './vrai-chemin-scene';
 
@@ -107,6 +107,51 @@ describe('règle 3 : personne n’attend le chemin', () => {
     await settle(60);
     expect(news).toBe(1);
     expect(read(await w.core.refresh(fixed, w.s))).toMatchObject({ leave: '07:12', walk: 6 });
+  });
+
+  it('contrôle : tuile qui ne répond pas : seul le premier appel attend 0,1 s ; les trajets, favoris et rafraîchissements suivants sortent sans attendre, avec l’estimation', async () => {
+    const w = world('long', '07:10');
+    w.sc.hold();
+    const r0 = await w.route();
+    // 12 appels pendant que la tuile charge : avec 0,1 s d'attente par appel, ils prendraient plus de 1,2 s
+    const t0 = performance.now();
+    for (let i = 0; i < 4; i++) {
+      expect(read((await w.route()).journeys[0])).toMatchObject({ leave: '07:15', walk: 3, est: undefined });
+      expect(read((await w.core.answer(BOURSE, START, w.s)).plan!.journeys[0])).toMatchObject({ leave: '07:15', walk: 3 });
+      expect(read(await w.core.refresh(r0.journeys[0], w.s))).toMatchObject({ leave: '07:15', walk: 3 });
+    }
+    expect(performance.now() - t0).toBeLessThan(900);
+    expect(w.sc.walkCalls().filter((u) => u.includes(TILE))).toHaveLength(1);
+    // la tuile arrive enfin : 07:12, comme si elle n'avait pas tardé
+    w.sc.release();
+    await settle(60);
+    expect(read((await w.route()).journeys[0])).toMatchObject({ leave: '07:12', walk: 6, est: 3 });
+  });
+
+  it('contrôle : l’attente se compte depuis le début du calcul du chemin (0,1 s), pas depuis chaque appel', async () => {
+    const mono = { t: 0 };
+    let done: (() => void) | undefined;
+    const fw = new FirstWalks(() => new Promise((r) => (done = () => r(null))), { now: () => at('07:10'), mono: () => mono.t });
+    const legs = (await world(null, '07:10').route()).journeys[0].legs;
+    const state = (p: Promise<void>, ms: number) => Promise.race([p.then(() => 'rendu'), new Promise<string>((r) => setTimeout(() => r('attend'), ms))]);
+    // rien en cours : tout de suite
+    expect(await state(fw.settle(), 20)).toBe('rendu');
+    fw.ask([{ legs }], {});
+    // calcul commencé à l'instant : on l'attend (ici plus de 30 ms), 0,1 s au plus
+    const first = fw.settle();
+    expect(await state(first, 30)).toBe('attend');
+    expect(await state(first, 400)).toBe('rendu');
+    // 60 ms après le début du calcul : il reste 40 ms à attendre, pas 100
+    mono.t = 60;
+    const t0 = performance.now();
+    await fw.settle();
+    expect(performance.now() - t0).toBeLessThan(95);
+    // 0,1 s après le début du calcul : plus personne n'attend, tant que la tuile charge
+    mono.t = 100;
+    expect(await state(fw.settle(), 20)).toBe('rendu');
+    mono.t = 20_000;
+    expect(await state(fw.settle(), 20)).toBe('rendu');
+    done?.();
   });
 
   it('réseau coupé pour la tuile : l’estimation partout ; pas redemandée avant 2 min ; puis le chemin, et 07:12', async () => {
@@ -265,6 +310,20 @@ describe('règle 6 : « Éviter les escaliers »', () => {
     const turned = await off.core.refresh(j, { ...off.s, avoidSteps: true });
     await settle();
     expect(read(await off.core.refresh(turned, { ...off.s, avoidSteps: true }))).toMatchObject({ leave: '07:12', walk: 6 });
+  });
+
+  it('contrôle : le réglage change : le favori et la recherche disent la même heure tout de suite, dans les deux sens (jamais le chemin de l’autre réglage)', async () => {
+    const w = world('stairs', '07:10');
+    const on = { ...w.s, avoidSteps: true };
+    const both = async (s: Settings) => [read((await w.core.answer(BOURSE, START, s)).plan!.journeys[0]), read((await w.core.route(HERE, TO, w.clock.t, s, START)).journeys[0])].map((x) => `${x.leave}, ${x.walk} min`);
+    // éteint : par l'escalier (180 m)
+    expect(await both(w.s)).toEqual(['07:15, 3 min', '07:15, 3 min']);
+    // allumé : sans marches (446 m)
+    expect(await both(on)).toEqual(['07:12, 6 min', '07:12, 6 min']);
+    // éteint de nouveau, 30 s plus tard : le favori ne garde pas les 6 min du chemin sans marches
+    w.clock.t += 30_000;
+    expect(await both(w.s)).toEqual(['07:15, 3 min', '07:15, 3 min']);
+    expect(await both(on)).toEqual(['07:12, 6 min', '07:12, 6 min']);
   });
 });
 

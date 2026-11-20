@@ -270,7 +270,9 @@ export function withAccessWalk(plan: PlanResult, here: LatLon, settings: Setting
 
 /** Ce qui change le calcul d'un trajet favori : extrémités (position des lieux comprise), marche maximale, marge. */
 function planKey(fav: FavoriteTrip, settings: Settings): string {
-  return JSON.stringify([fav.from, fav.to, endpointPoint(fav.from, settings), endpointPoint(fav.to, settings), settings.maxWalkMin, settings.alerts.leaveBeforeMin]);
+  // 1.3.1 (vrai chemin partout, contrôle du 20/11) : « Éviter les escaliers » change le chemin de la première marche,
+  // donc l'heure de partir : le plan gardé avec l'autre réglage est recalculé (jamais un mélange des deux chemins)
+  return JSON.stringify([fav.from, fav.to, endpointPoint(fav.from, settings), endpointPoint(fav.to, settings), settings.maxWalkMin, settings.alerts.leaveBeforeMin, settings.avoidSteps === true]);
 }
 
 /** Proposition encore bonne : rien de supprimé, correspondances tenables, premier véhicule pas encore

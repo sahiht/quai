@@ -15,7 +15,8 @@
  *    le départ d'un quart d'heure) ; le dépassement est noté au journal technique (console), jamais à l'écran ;
  * 3. rien ne change sans vrai chemin : pas de tuiles (hors de Belgique, réseau coupé, pas encore chargées), chemin droit,
  *    chemin demandé d'ailleurs (plus de 40 m du départ) ou vers ailleurs (plus de 30 m de l'arrêt). Personne n'attend le
- *    chemin plus de FIRST_WALK.graceMs (0,1 s, quand ses tuiles sont déjà en mémoire) : sinon le trajet sort avec
+ *    chemin plus de FIRST_WALK.graceMs après le début de son calcul (0,1 s : le temps de le calculer quand ses tuiles
+ *    sont déjà en mémoire ; pendant qu'une tuile charge, les appels suivants n'attendent plus) : sinon le trajet sort avec
  *    l'estimation, et `on()` prévient une fois quand le chemin est connu. Une fois montées, les minutes ne redescendent
  *    pas (Leg.walkEst garde l'estimation : la correction ne s'empile jamais) ;
  * 6. le chemin est celui du réglage « Éviter les escaliers » ;
@@ -41,7 +42,7 @@ export const FIRST_WALK = {
   retryMs: 120_000,
   /** chemins gardés en mémoire */
   keep: 32,
-  /** attente au plus d'un chemin en cours de calcul avant de rendre un trajet (ses tuiles sont déjà là : quelques ms) */
+  /** attente au plus, depuis le début de son calcul, d'un chemin avant de rendre un trajet (tuiles déjà là : quelques ms) */
   graceMs: 100,
 } as const;
 
@@ -118,7 +119,11 @@ export interface FirstWalksOptions {
   now: () => number;
   /** journal technique (console par défaut) */
   log?: (text: string) => void;
+  /** horloge qui ne recule pas, en ms (tests) ; par défaut celle du processeur */
+  mono?: () => number;
 }
+
+const monoNow = (): number => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
 
 /** Les vrais chemins des premières marches, gardés par le cœur (voir l'en-tête). */
 export class FirstWalks {
@@ -126,6 +131,8 @@ export class FirstWalks {
   private readonly failed: { from: LatLon; to: LatLon; avoid: boolean; at: number }[] = [];
   private readonly queue: { from: LatLon; to: LatLon; avoid: boolean; est: number }[] = [];
   private running = false;
+  /** début du calcul en cours (horloge `mono`) : l'attente de `settle` se compte depuis lui, pas depuis chaque appel */
+  private busySince = 0;
   private waiters: (() => void)[] = [];
   private readonly listeners = new Set<() => void>();
   private news = false;
@@ -224,6 +231,7 @@ export class FirstWalks {
         const q = this.queue[0];
         let route: WalkRoute | null = null;
         this.asked++;
+        this.busySince = (this.o.mono ?? monoNow)();
         try {
           route = await this.route(q.from, q.to, { avoidSteps: q.avoid });
         } catch {
@@ -262,9 +270,17 @@ export class FirstWalks {
     }
   }
 
-  /** Attend la fin des calculs en cours, `ms` au plus (rien en cours : tout de suite). */
+  /**
+   * Attend la fin des calculs en cours (rien en cours : tout de suite), au plus jusqu'à `ms` après le début du calcul
+   * en cours. Contrôle du 20/11 : l'attente se compte depuis le début du calcul, pas depuis chaque appel. Un chemin dont
+   * les tuiles sont en mémoire est connu en quelques millisecondes ; une tuile lente ou qui ne répond pas (20 s avant
+   * l'abandon) ne coûte donc 0,1 s qu'aux appels du premier dixième de seconde, pas à chaque trajet, favori et
+   * rafraîchissement tant qu'elle charge.
+   */
   async settle(ms: number = FIRST_WALK.graceMs): Promise<void> {
     if (!this.running) return;
+    ms -= Math.max(0, (this.o.mono ?? monoNow)() - this.busySince);
+    if (!(ms > 0)) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
       new Promise<void>((r) => this.waiters.push(r)),
