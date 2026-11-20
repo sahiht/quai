@@ -21,7 +21,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildWalk, sizeLine } from './build.ts';
-import { exitReport, isUnderStop, loadExitGraph, officialMetroStations, readStibFeatures, STIB_KEY } from './exits.ts';
+import { exitReport, isUnderStop, loadExitGraph, officialMetroStations, publishedStibStops, readStibFeatures, STIB_KEY } from './exits.ts';
 import { downloadExtract, GEOFABRIK_URL, localWalk, publishedMd5, publishWalk, weeklyWalk } from './weekly.ts';
 
 /** Message d'une commande du journal GitHub (« % », retours à la ligne). */
@@ -139,13 +139,15 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv, log: (m: stri
       const stopsDir = str('stops');
       const stations = stopsDir ? await officialMetroStations(stopsDir) : null;
       const osmDate = timestamp ? new Date(timestamp * 1000).toISOString().slice(0, 10) : undefined;
-      const r = exitReport(graph, features, stations, { key, ...(osmDate ? { osmDate } : {}) });
+      const published = stopsDir ? await publishedStibStops(stopsDir) : null;
+      const r = exitReport(graph, features, stations, { key, ...(osmDate ? { osmDate } : {}), published });
       for (const l of r.lines) log(l);
       log(`Sorties du métro : mesure en ${Math.round((Date.now() - t1) / 1000)} s`);
       if (ci) {
         const main = r.lines.find((l) => l.includes('sortie nommée par les couloirs'));
         const off = r.lines.find((l) => l.includes('données officielles'));
-        for (const l of [main, off]) if (l) log(`::notice title=Sorties du métro (R1)::${ghEscape(l)}`);
+        const join = r.lines.find((l) => l.includes('retrouvés par l\'appli'));
+        for (const l of [main, off, join]) if (l) log(`::notice title=Sorties du métro (R1)::${ghEscape(l)}`);
       }
       return 0;
     } catch (e) {
