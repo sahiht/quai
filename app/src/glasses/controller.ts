@@ -752,8 +752,8 @@ export class GlassesController implements GlassesApi {
     this.d.core.onGeneration?.(() => this.generationChanged());
     // 1.3.1 (vrai chemin partout, core/firstwalk.ts) : le vrai chemin d'une première marche vient d'être connu et il est
     // plus long : un rafraîchissement tout de suite, celui des 30 s (trajet suivi, favoris de l'écran, écran affiché),
-    // pour que la même heure de partir soit partout ; rien d'autre ne change (même file de calcul des favoris)
-    this.offFirstWalk = this.d.core.onFirstWalk?.(() => void this.refreshCurrent()) ?? null;
+    // pour que la même heure de partir soit partout (firstWalkKnown) ; même file de calcul des favoris
+    this.offFirstWalk = this.d.core.onFirstWalk?.(() => this.firstWalkKnown()) ?? null;
     await this.render(true);
     if (!this.d.configured) {
       this.nav = initNav(this.notConfiguredRoute());
@@ -1258,6 +1258,18 @@ export class GlassesController implements GlassesApi {
         await this.guideMenu(i.id);
         return;
     }
+  }
+
+  /**
+   * 1.3.1 (vrai chemin partout) : le cœur vient de connaître un chemin qui allonge une première marche. Les réponses des
+   * favoris et des adresses récentes déjà calculées sont à refaire (comme après un déplacement : celle qui est montrée
+   * reste en attendant, sans « … »), et l'écran affiché est rafraîchi tout de suite, une fois.
+   */
+  private firstWalkKnown(): void {
+    if (this.stopped) return;
+    this.answerAt.clear();
+    for (const [k, v] of this.recents) this.recents.set(k, { ...v, at: 0 });
+    if (this.ready && !this.paused) void this.refreshCurrent();
   }
 
   /** Après un changement d'écran : afficher tout de suite, rafraîchir si les données sont anciennes. */

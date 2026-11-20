@@ -199,7 +199,9 @@ function favoritesCard(ctx: PhoneCtx): HTMLElement {
     }, { compact: go });
     // « Lunettes » d'abord, « Y aller » au bout de la rangée : même message, à côté d'eux
     const actions = h('span', { class: 'fav-actions' }, button, go ? goButton(hub, message, typo(`${T.goThere} : ${title}`), () => goFavorite(ctx, f.id)) : null);
-    return h('li', { class: 'fav-row' }, h('span', { class: 'txt' }, name, answer), actions, message);
+    // 1.3.1 (R2) : Quai Web, « Essayer en accéléré » sous « Y aller »
+    const tryIt = go && ctx.tryButton ? ctx.tryButton(f.id, title, hub, message) : null;
+    return h('li', { class: 'fav-row' }, h('span', { class: 'txt' }, name, answer), actions, tryIt, message);
   };
   for (const f of shown) list.appendChild(favRow(f));
   if (rest.length) {
@@ -266,6 +268,7 @@ function favoritesCard(ctx: PhoneCtx): HTMLElement {
   void ctx
     .core()
     .then((c) => {
+      watchFirstWalk(c, ctx);
       offWalk = c.onFirstWalk?.(() => {
         if (!first && !list.isConnected) offWalk?.();
         else if (busy) again = true;
@@ -280,6 +283,26 @@ function favoritesCard(ctx: PhoneCtx): HTMLElement {
     } else void refresh();
   }, ANSWER_REFRESH_MS);
   return list;
+}
+
+/**
+ * 1.3.1 (vrai chemin partout) : les réponses gardées d'un affichage à l'autre (lastAnswers : la première peinture de
+ * l'accueil, le bouton « Lunettes ») reprennent tout de suite l'heure de partir du cœur quand un chemin vient d'être
+ * connu, sans réseau (Core.firstWalk), même si l'accueil n'est pas à l'écran. Un abonnement par cœur.
+ */
+let walkWatched: Core | null = null;
+function watchFirstWalk(c: Core, ctx: PhoneCtx): void {
+  if (walkWatched === c || !c.onFirstWalk || !c.firstWalk) return;
+  walkWatched = c;
+  c.onFirstWalk(() => {
+    const st = ctx.settings.get();
+    for (const [id, a] of lastAnswers) {
+      const js = a.plan?.journeys;
+      if (!js?.length || !a.plan) continue;
+      const fixed = js.map((j) => c.firstWalk!(j, st));
+      if (fixed.some((j, i) => j !== js[i])) lastAnswers.set(id, { ...a, plan: { ...a.plan, journeys: fixed } });
+    }
+  });
 }
 
 /* ------------------------------ Carte des rubriques ------------------------------ */

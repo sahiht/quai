@@ -159,7 +159,8 @@ export class FirstWalks {
   /** Minutes à poser sur la première marche de ces étapes d'après un chemin connu ; 0 : rien à changer. */
   private target(legs: readonly Leg[], settings: Pick<Settings, 'avoidSteps'>): { w: Leg; min: number } | null {
     const w = firstWalkLeg(legs);
-    if (!w) return null;
+    // décidé une fois par trajet : une marche déjà allongée ne bouge plus (ni d'une minute, ni avec un autre chemin)
+    if (!w || w.walkEst !== undefined) return null;
     const e = this.entryOf(w, avoidOf(settings));
     if (!e || e.min === null) return null;
     const min = firstWalkMin(w, e.min);
