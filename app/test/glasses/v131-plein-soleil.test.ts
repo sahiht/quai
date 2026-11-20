@@ -19,6 +19,7 @@ import { stepsPage, stopsView, type ViewCtx } from '../../src/glasses/views';
 import type { Brightness, ContainerSpec, GlassesView, PageSpec } from '../../src/glasses/types';
 import { BORDER_COLOR, toTextProperty } from '../../src/platform/even';
 import { LEVEL_ALPHA } from '../../src/web/display';
+import { alertsScreen } from '../../src/phone/screens/alerts';
 import { displayScreen } from '../../src/phone/screens/display';
 import { validateSettings } from '../../src/settings';
 import { at, dep, journey, nb, settingsWith, setup, stopsOf } from './helpers';
@@ -204,5 +205,24 @@ describe('R5 : interrupteur « Plein soleil » (Réglages, Affichage)', () => {
     again.click();
     await until(() => !('sun' in hz.settings.get().display));
     expect(hz.settings.get()).toEqual(defaults());
+  });
+  it('contrôle, remarque 5 : l’exemple d’Alertes suit « Plein soleil », comme l’aperçu d’Affichage', async () => {
+    const off = mount(alertsScreen(harness({ settings: defaults() }).ctx));
+    const pale = opacities(off);
+    expect(pale.length).toBeGreaterThan(0);
+    const sunny = defaults();
+    const hz = harness({ settings: { ...sunny, display: { ...sunny.display, sun: true } } });
+    const on = mount(alertsScreen(hz.ctx));
+    const clear = opacities(on);
+    // mêmes conteneurs, jamais plus pâles, au moins un plus clair ; rien sous le niveau 1 (0,42) en plein soleil
+    expect(clear).toHaveLength(pale.length);
+    clear.forEach((o, i) => expect(Number(o), `conteneur ${i}`).toBeGreaterThanOrEqual(Number(pale[i])));
+    expect(clear.some((o, i) => Number(o) > Number(pale[i]))).toBe(true);
+    expect(clear.every((o) => Number(o) >= 0.42)).toBe(true);
+    // un réglage d'Alertes changé : l'exemple redessiné reste en plein soleil
+    on.querySelector<HTMLInputElement>('.switch-row input')!.click();
+    await hz.settings.flush();
+    await until(() => opacities(on).length === clear.length);
+    expect(opacities(on).every((o) => Number(o) >= 0.42)).toBe(true);
   });
 });
