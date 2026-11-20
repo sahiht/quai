@@ -104,6 +104,11 @@ describe.skipIf(!DIR)('1.3.0 : balayage des vrais noms dans les rangées des lun
         check(`Passages d'une ligne, vers ${name}`, lineView({ screen: 'line', areaId: 'tec:scan', op: 'tec', line: '163b', name: N('Arrêt') }, lb, ctx), [/dans 7 min$/, /dans 9 min$/]);
         // « Lignes » : un sens par rangée
         check(`Lignes, vers ${name}`, followsView([{ follow, mode: 'bus', heads: [N(name), N('Wavre')] }], ctx), []);
+        // 1.3.1 (B21) : « Gares de train » en accordéon : la direction, puis le train d'après, son heure, son retard et sa
+        // voie modifiée entiers
+        const station = { id: 'scan', areaId: 'sncb:scan', name: N('Gare'), lat: 50.8, lon: 4.3 };
+        const after = trainAt(now, 37, { head: N(name), platform: '12', newPlatform: '12a', delayMin: 12, est: now + 49 * MIN });
+        check(`Gares, vers ${name}`, stationsView([{ pick: station, next: trainAt(now, 7, { head: N(name) }), after, state: 'ok' }], ctx), [/^vers /, /, 08:37 \+12 voie 12a !$/]);
       } catch (e) {
         err(`${name} : ${(e as Error).message}`);
       }

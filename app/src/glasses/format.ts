@@ -20,7 +20,11 @@ export const HINTS = {
   home: `△▽ choisir   toucher${NB}: ouvrir   double${NB}: quitter`,
   /** Quai Web : rien à quitter, l'onglet se ferme dans le navigateur. */
   homeWeb: `△▽ choisir   toucher${NB}: ouvrir`,
-  nearby: `△▽ arrêt   toucher${NB}: départs   double${NB}: retour`,
+  /**
+   * 1.3.1 (PRD-1.3.1 § 12, L6) : « Autour de moi », « Gares » et « Arrêts » ouvrent le même tableau d'un toucher : la même
+   * aide, « △▽ choisir   toucher : départs   double : retour » (404 px).
+   */
+  nearby: `△▽ choisir   toucher${NB}: départs   double${NB}: retour`,
   /**
    * 1.2.3 (PRD-1.2.3 § 1) : tableau complet d'une gare ou d'un arrêt, curseur de départ en départ ; toucher un départ :
    * ses arrêts (la ligne ★ en tête garde ou retire la gare, ou ouvre « garder une ligne »). 1.3.0 (PRD-1.3.0 § 3) : le
@@ -50,10 +54,13 @@ export const HINTS = {
   favorites: `△▽ choisir   toucher${NB}: ouvrir   double${NB}: retour`,
   /** 1.2.2 : « Gares » (PRD-1.2.2 § 2). */
   stations: `△▽ choisir   toucher${NB}: départs   double${NB}: retour`,
-  /** 1.2.2 : « Bus, tram, métro » (§ 3) : détail d'une ligne, ou départs d'un arrêt « toutes les lignes ». */
-  lines: `△▽ choisir   toucher${NB}: ouvrir   double${NB}: retour`,
-  /** 1.2.6 : « Lignes », un sens par rangée ; toucher : toute la ligne. */
-  follows: `△▽ choisir   toucher${NB}: la ligne   double${NB}: retour`,
+  /**
+   * 1.2.2 : « Bus, tram, métro » (§ 3) : détail d'une ligne, ou départs d'un arrêt « toutes les lignes ». 1.3.1 (L6) :
+   * « Arrêts » n'a plus que des arrêts (1.2.6) dont le toucher ouvre le tableau : la même aide que « Gares ».
+   */
+  lines: `△▽ choisir   toucher${NB}: départs   double${NB}: retour`,
+  /** 1.2.6 : « Lignes », un sens par rangée ; toucher : toute la ligne. 1.3.1 (L6) : « toucher : parcours » (414 px). */
+  follows: `△▽ choisir   toucher${NB}: parcours   double${NB}: retour`,
   /** 1.2.6 : toute la ligne ; toucher un arrêt : ses passages. */
   lineRun: `△▽ arrêts   toucher${NB}: passages   double${NB}: retour`,
   /**
@@ -798,6 +805,27 @@ function rideLine(j: Journey, r: Leg, time: string, plat: string, maxPx: number)
   return trouble ? fitName(`${base}, `, trouble, '', maxPx) : base;
 }
 
+/**
+ * 1.3.1 (PRD-1.3.1 § 12, B21) : l'accordéon d'une gare de « Gares de train », ouvert sous la rangée du curseur : la
+ * direction du prochain train (celui de la colonne de droite), « vers Bruxelles-Midi » ; puis le train d'après, « puis
+ * IC vers Liège-Guillemins, 07:54 voie 4 » (un autre jour : « demain 05:52 » ; « ~ » sans temps réel ; retard « +2 » ;
+ * voie modifiée « voie 6 ! » ; supprimé : « 07:54 supprimé »). Le nom est coupé au mot, jamais l'heure ni la voie.
+ * Pas de prochain train : rien ; pas de train d'après : la direction seule. `planned` : la ligne montre un « ~ ».
+ */
+export function stationDetail(next: Departure | undefined, after: Departure | undefined, now: number, settings: Settings, maxPx = EXPAND_PX): ExpandLine[] {
+  if (!next) return [];
+  const l = settings.lang;
+  const out: ExpandLine[] = [{ text: fitName('vers ', headText(next.head, l, next.op), '', maxPx) }];
+  if (!after) return out;
+  const planned = !after.rt && !after.cancelled && settings.display.markPlanned;
+  const day = dayWord(after.sched, now);
+  const time = `${planned ? '~' : ''}${day ? `${day} ` : ''}${hhmm(after.sched)}`;
+  const state = after.cancelled ? ' supprimé' : `${delaySuffix(after.delayMin)}${platformText(after.platform, after.newPlatform) ? ` ${platformText(after.platform, after.newPlatform)}` : ''}`;
+  const text = fitName(`puis ${vehicleWords(after)} vers `, headText(after.head, l, after.op), `, ${time}${state}`, maxPx);
+  out.push({ text, ...(planned ? { planned: true } : {}) });
+  return out;
+}
+
 /* ------------------------------ 1.2.2 : Bus, tram, métro ------------------------------ */
 
 /** Titre d'une ligne à son arrêt (PRD-1.2.2 § 3) : « Bus W · Merbraine » ; mode pas encore connu : « Ligne W · … ». */
@@ -1044,14 +1072,23 @@ export { truncateWords };
 
 /**
  * 1.2.10 : un texte en trois parties dont seule celle du milieu (un nom) est raccourcie, au mot : « Prochain arrêt : »
- * et « , 07:16 » restent entiers. Sans place pour le nom, la fin seule.
+ * et « , 07:16 » restent entiers. Sans place pour le nom, la fin seule. 1.3.1 (balayage des vrais noms, « Gares » en
+ * accordéon) : le texte rendu tient vraiment dans `maxPx` : le crénage aux jonctions peut coûter un pixel de plus que la
+ * somme des trois parties (« puis IC vers Kortenaken Krawatenstraat, 08:37 +12 voie 12a ! » : 523 px pour 522), et la
+ * mise en page aurait alors recoupé la fin ; le nom est alors raccourci d'un mot de plus.
  */
 export function fitName(head: string, name: string, tail: string, maxPx: number): string {
   const full = `${head}${name}${tail}`;
   if (textWidth(full) <= maxPx) return full;
-  const room = maxPx - textWidth(head) - textWidth(tail);
-  const n = room > 0 ? truncateWords(name, room) : '';
-  return n ? `${head}${n}${tail}` : truncateWords(full, maxPx);
+  let room = maxPx - textWidth(head) - textWidth(tail);
+  while (room > 0) {
+    const n = truncateWords(name, room);
+    if (!n) break;
+    const t = `${head}${n}${tail}`;
+    if (textWidth(t) <= maxPx) return t;
+    room = Math.min(room - 1, textWidth(n) - 1);
+  }
+  return truncateWords(full, maxPx);
 }
 
 /**

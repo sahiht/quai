@@ -30,7 +30,16 @@ describe('CA-122.3 : « Gares »', () => {
     await h.c.replaceRoute({ screen: 'stations' });
     const s = await h.until(stationsReady);
     expect(s.title).toBe('Gares de train');
-    expect(s.lines).toEqual(['Braine-l’Alleud   IC 07:42 voie 1', 'Bruxelles-Nord   S1 07:55 +3 voie 12 !', 'Namur   aucun train', '△▽ choisir   toucher : départs   double : retour']);
+    // 1.3.1 (PRD-1.3.1 § 12, B21) : la gare du curseur s'ouvre en accordéon : la direction du prochain train, puis le
+    // train d'après
+    expect(s.lines).toEqual([
+      'Braine-l’Alleud   IC 07:42 voie 1',
+      'vers Bruxelles-Midi',
+      'puis IC vers Bruxelles-Midi, 08:12 voie 1',
+      'Bruxelles-Nord   S1 07:55 +3 voie 12 !',
+      'Namur   aucun train',
+      '△▽ choisir   toucher : départs   double : retour',
+    ]);
     await h.gesture('down', 'tap');
     const b = await h.until((x) => x.screen === 'board' && x.lines.length > 1);
     expect(b.title).toBe('Bruxelles-Nord, train (SNCB) ★');

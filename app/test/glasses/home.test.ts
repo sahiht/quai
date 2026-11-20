@@ -288,7 +288,7 @@ describe('aide des gestes les 7 premiers jours, Quai Web', () => {
     expect(s8.lines.some((l) => l.startsWith('△▽'))).toBe(false);
     // du premier favori : Parc, École, puis « Autour de moi », qui garde son aide
     await day8.gesture('down', 'down', 'down', 'tap');
-    expect((await day8.until((x) => x.screen === 'nearby')).lines.at(-1)).toBe('△▽ arrêt   toucher : départs   double : retour');
+    expect((await day8.until((x) => x.screen === 'nearby')).lines.at(-1)).toBe('△▽ choisir   toucher : départs   double : retour');
     day8.c.stop();
   });
 
