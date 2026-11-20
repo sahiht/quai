@@ -16,6 +16,7 @@
  */
 import type { Journey, Leg, Names } from '../core/api';
 import type { CheckIssue, GuideKind, GuideState, Moment, Then, VehicleRef, WhereAmI } from '../core/guide-types';
+import { shortName } from '../core/typo';
 import { displayName, hhmm } from '../core/util';
 import { SCREEN_W, textWidth } from './font';
 import {
@@ -181,15 +182,37 @@ function cutAtWord(cut: string, name: string): boolean {
 }
 
 /**
+ * 1.3.1 (PRD-1.3.1 § 15, décision du propriétaire du 20/11 à 21:15) : le nom de l'arrêt ou de la gare où l'on marche,
+ * entre `head` et `tail`, sur une rangée de `maxPx` : le nom entier s'il tient ; sinon son diminutif (shortName :
+ * « Bruxelles-Central » → « Bxl-Central »), entier lui aussi ; rien (undefined) si aucun des deux ne tient. Jamais de
+ * diminutif quand le nom entier tient. La seule place de cette règle dans les écrans du guidage : « 3 min à pied → … »,
+ * « ensuite : 7 min à pied → … », « vers l’arrêt … », « jusqu’à … », « Où tu en es ».
+ */
+export function wholeWalkName(head: string, name: string, tail: string, maxPx: number): string | undefined {
+  const full = `${head}${name}${tail}`;
+  if (textWidth(full) <= maxPx) return full;
+  const short = shortName(name);
+  if (short === name) return undefined;
+  const brief = `${head}${short}${tail}`;
+  return textWidth(brief) <= maxPx ? brief : undefined;
+}
+
+/** 1.3.1 (§ 15) : la même rangée, toujours rendue : le nom entier, sinon son diminutif, sinon la coupe au mot (fitName). */
+export function fitWalkName(head: string, name: string, tail: string, maxPx: number): string {
+  return wholeWalkName(head, name, tail, maxPx) ?? fitName(head, name, tail, maxPx);
+}
+
+/**
  * 1.3.1 (PRD-1.3.1 § 12, « conflit réglé » ; § 4, U3) : la marche d'une correspondance dans « monter » : « 2 min à pied →
- * Gare du Nord, très juste » si le nom tient (coupé au mot, la fin jamais), sinon « 2 min à pied jusqu’à l’arrêt, très
- * juste » (train : « jusqu’au quai »). `tail` : « , très juste », « , marge 6 min » ou rien.
+ * Gare du Nord, très juste » si le nom tient (§ 15 : entier, sinon son diminutif, sinon coupé au mot ; la fin jamais),
+ * sinon « 2 min à pied jusqu’à l’arrêt, très juste » (train : « jusqu’au quai »). `tail` : « , très juste », « , marge
+ * 6 min » ou rien.
  */
 export function walkToStopText(walkMin: number, stop: string, train: boolean, tail: string, maxPx: number): string {
   const head = `${minText(walkMin)} à pied → `;
   if (stop) {
-    const full = `${head}${stop}${tail}`;
-    if (textWidth(full) <= maxPx) return full;
+    const whole = wholeWalkName(head, stop, tail, maxPx);
+    if (whole !== undefined) return whole;
     const room = maxPx - textWidth(head) - textWidth(tail);
     const cut = room > 0 ? truncateWords(stop, room) : '';
     if (cut && cutAtWord(cut, stop) && textWidth(`${head}${cut}${tail}`) <= maxPx) return `${head}${cut}${tail}`;
@@ -216,14 +239,14 @@ function nextRide(j: Journey, leg: number): Leg | undefined {
  * « vers la voie 3 », « vers la gare de Namur », « vers le bureau » ; 1.3.1 (PRD-1.3.1 § 4, L2, U3) : « vers l’arrêt
  * Flagey », le nom de l'arrêt où l'on marche (sans nom connu : « vers l’arrêt du bus 6 »).
  */
-function towardWords(ride: Leg | undefined, toward: Names | undefined, final: boolean, title: string, ctx: ViewCtx): string {
+function towardWords(ride: Leg | undefined, toward: Names | undefined, final: boolean, title: string, ctx: ViewCtx, maxPx = Number.POSITIVE_INFINITY): string {
   if (final || !ride) return toward && !final ? `vers ${nameOf(toward, ctx)}` : towardTitle(title);
   if (isTrainRef(ride)) {
     const p = ride.newPlatform || ride.platform;
-    return p ? `vers la voie ${p}` : `vers la gare de ${nameOf(ride.from.name, ctx)}`;
+    return p ? `vers la voie ${p}` : fitWalkName('vers la gare de ', nameOf(ride.from.name, ctx), '', maxPx);
   }
   const stop = nameOf(toward, ctx) || nameOf(ride.from.name, ctx);
-  return stop ? `vers l’arrêt ${stop}` : `vers l’arrêt du ${vehicle(ride)}`;
+  return stop ? fitWalkName('vers l’arrêt ', stop, '', maxPx) : `vers l’arrêt du ${vehicle(ride)}`;
 }
 
 /* ------------------------------ Moments (§ 3.2) ------------------------------ */
@@ -252,7 +275,8 @@ export function leaveWalkText(walkMin: number, toward: string, kind: 'stop' | 's
   if (kind === 'dest') return truncateWords(`${walk} ${untilTitle(title)}`, maxPx);
   const full = `${walk} jusqu’à ${kind === 'station' ? 'la gare de' : 'l’arrêt'} ${toward}`;
   if (textWidth(full) <= maxPx) return full;
-  return fitName(`${walk} jusqu’à `, toward, '', maxPx);
+  // sans « l’arrêt » (« la gare de ») : le nom entier, sinon son diminutif (§ 15), sinon coupé au mot
+  return fitWalkName(`${walk} jusqu’à `, toward, '', maxPx);
 }
 
 /** « Si tu le rates : arrivée 09:34, 30 min plus tard » sur une rangée, sinon sans l'écart : « Si tu le rates : arrivée 09:34 ». */
@@ -290,7 +314,8 @@ function turnMoment(m: Extract<Moment, { kind: 'turn' }>, j: Journey, title: str
   const lines: GLine[] = [MAIN(upperFirst(turnText(m.turn, m.distM)))];
   if (m.then) lines.push(L('norm', `puis ${TURN_WORDS[m.then].toLowerCase()}`));
   const street = m.street?.trim();
-  lines.push(L('pale', street || towardWords(m.final ? undefined : nextRide(j, m.leg), m.toward, m.final, title, ctx)));
+  // § 15 : le nom de l'arrêt où l'on marche, entier, sinon son diminutif, sinon coupé au mot
+  lines.push(street ? L('pale', street) : F('pale', (w) => truncateWords(towardWords(m.final ? undefined : nextRide(j, m.leg), m.toward, m.final, title, ctx, w), w)));
   return { lines, image: { kind: 'turn', turn: m.turn }, hints: HINTS.guide };
 }
 
@@ -358,7 +383,7 @@ export function thenText(t: Then, ctx: ViewCtx, maxPx = Number.POSITIVE_INFINITY
     const ride = `${t.platform && isTrainRef(t.vehicle) ? `voie ${t.platform}, ` : ''}${vehicleAtText(t.vehicle, t.depAt, t.rt, ctx, t.sched)}`;
     if (t.tight === true) return `ensuite${NB}: ${ride}, ${GUIDE_TEXT.tight}`;
     const from = nameOf(t.from, ctx);
-    if (t.walkMin > 0 && from) return fitName(`ensuite${NB}: ${minText(t.walkMin)} à pied → `, from, '', maxPx);
+    if (t.walkMin > 0 && from) return fitWalkName(`ensuite${NB}: ${minText(t.walkMin)} à pied → `, from, '', maxPx);
     return `ensuite${NB}: ${ride}`;
   }
   return '';
@@ -697,11 +722,12 @@ function whereRows(s: GuideState, j: Journey, ctx: ViewCtx, maxPx: number): Wher
       }
       if (dest) push(L('norm', `À pied, ${walkLeft(walk)}`));
       else {
-        let to: string;
-        if (walk.toKind === 'platform') to = p ? `vers la voie ${p}` : `vers la gare de ${toward}`;
-        else if (walk.toKind === 'station') to = `vers la gare de ${toward}`;
-        else to = toward ? `vers l’arrêt ${toward}` : walk.vehicle ? `vers l’arrêt du ${vehicle(walk.vehicle)}` : 'vers l’arrêt';
-        push(L('norm', `À pied ${to}`));
+        // § 15 : le nom de l'arrêt ou de la gare où l'on marche, entier, sinon son diminutif, sinon coupé au mot
+        const station = walk.toKind === 'station' || (walk.toKind === 'platform' && !p);
+        if (walk.toKind === 'platform' && p) push(L('norm', `À pied vers la voie ${p}`));
+        else if (station) push(F('norm', (px) => fitWalkName('À pied vers la gare de ', toward, '', px)));
+        else if (toward) push(F('norm', (px) => fitWalkName('À pied vers l’arrêt ', toward, '', px)));
+        else push(L('norm', walk.vehicle ? `À pied vers l’arrêt du ${vehicle(walk.vehicle)}` : 'À pied vers l’arrêt'));
         push(L('norm', walkLeft(walk)));
       }
       if (walk.offMap) push(L('pale', GUIDE_TEXT.offMapWhere));

@@ -393,8 +393,10 @@ describe('PRD-1.3.1 § 4 et § 12 (U3, L2) : le nom de l’arrêt où l’on mar
     expect(levels(corr.p).pale[2]).toBe('2 min à pied → Gare du Nord, très juste');
     expect(moment(board({ walkMin: 2, marginMin: 6, stop: N('Gare du Nord') })).lines[2]).toBe('2 min à pied → Gare du Nord, marge 6 min');
     expect(moment(board({ vehicle: IC, depAt: T(7, 35), rt: true, platform: '3', head: N('Bruxelles-Midi'), walkMin: 3, marginMin: 4, stop: N('Namur') })).lines[2]).toBe('3 min à pied → Namur, marge 4 min');
-    // un nom qui ne tient pas : coupé au mot (ici après le trait d'union), la marge entière
-    expect(moment(board({ vehicle: IC, depAt: T(7, 35), rt: true, platform: '5', head: N('Liège-Guillemins'), walkMin: 3, marginMin: 4, stop: N('Bruxelles-Central') })).lines[2]).toBe('3 min à pied → Bruxelles-…, marge 4 min');
+    // un nom qui ne tient pas : 1.3.1 (§ 15, décision du 20/11 à 21:15) son diminutif d'abord (« Bxl-Central ») ; sans
+    // diminutif : coupé au mot (ici après le trait d'union), la marge entière
+    expect(moment(board({ vehicle: IC, depAt: T(7, 35), rt: true, platform: '5', head: N('Liège-Guillemins'), walkMin: 3, marginMin: 4, stop: N('Bruxelles-Central') })).lines[2]).toBe('3 min à pied → Bxl-Central, marge 4 min');
+    expect(moment(board({ vehicle: IC, depAt: T(7, 35), rt: true, platform: '5', head: N('Ostende'), walkMin: 3, marginMin: 8, stop: N('Liège-Guillemins') })).lines[2]).toBe('3 min à pied → Liège-…, marge 8 min');
     // sans nom : « jusqu’à l’arrêt » (bus, tram, métro), « jusqu’au quai » (train), comme en 1.2.10
     expect(moment(board({ walkMin: 2, marginMin: 0 })).lines[2]).toBe('2 min à pied jusqu’à l’arrêt, très juste');
     // le nom coupé au mot si la place manque, « , très juste » toujours entier ; sans place pour un mot : « jusqu’à l’arrêt »
