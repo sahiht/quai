@@ -3139,7 +3139,12 @@ export class GlassesController implements GlassesApi {
     // contrôle qualité : jusqu'à 90 min après le départ de la correspondance (le tableau est lu jusqu'à 1 h avant), pour
     // trouver aussi le passage suivant d'une ligne à l'heure
     const horizonMin = Math.ceil(Math.max(0, l.dep - this.d.clock.now()) / 60_000) + 90;
-    const board = await deadline(this.d.core.board(l.from.areaId!, { horizonMin, limit: BOARD.limit }), CORE_TIMEOUT_MS, 'tableau trop lent');
+    // contrôle qualité (B16) : seulement la ligne et la destination de la correspondance (filtre du tableau, ses deux noms :
+    // une destination De Lijn a souvent un nom français), sinon, à un arrêt chargé, le plafond du tableau (BOARD.limit)
+    // garde les premiers départs de toutes les lignes, et le suivant n'y est pas
+    const heads = l.head ? [...new Set([l.head.fr, l.head.nl].map((x) => (x ?? '').trim()).filter(Boolean))] : [];
+    const filter: LineFilter[] = heads.map((head) => ({ line: l.line!, head }));
+    const board = await deadline(this.d.core.board(l.from.areaId!, { horizonMin, limit: BOARD.limit, ...(filter.length ? { filter } : {}) }), CORE_TIMEOUT_MS, 'tableau trop lent');
     const next = board.departures
       .filter((d) => !d.cancelled && d.line === l.line && (!l.op || d.op === l.op) && (!l.head || sameNames(d.head, l.head)) && d.sched > l.schedDep && d.est > l.dep && (!l.tripId || d.tripId !== l.tripId))
       .sort((a, b) => a.est - b.est)[0];
