@@ -47,7 +47,10 @@ function withGo(ctx: PhoneCtx, hub: MessageHub, row: HTMLLIElement, f: ShownFavo
   row.classList.add('fav-go');
   row.querySelector('.chev')?.remove();
   const message = hub.slot();
-  row.append(goButton(hub, message, typo(`${T.goThere} : ${title}`), () => goFavorite(ctx, f.id)), message);
+  row.append(goButton(hub, message, typo(`${T.goThere} : ${title}`), () => goFavorite(ctx, f.id)));
+  // 1.3.1 (R2) : Quai Web, « Essayer en accéléré » sous « Y aller »
+  if (ctx.tryButton) row.append(ctx.tryButton(f.id, title, hub, message));
+  row.append(message);
   return row;
 }
 
