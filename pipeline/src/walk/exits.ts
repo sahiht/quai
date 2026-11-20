@@ -5,7 +5,8 @@
  * - Mesure (commande « exits » de cli.ts), lancée seulement par une branche de vérification (flux « Données de nuit »,
  *   verification=true) : rien n'est publié, le bilan va dans le journal, avec les sorties retenues de chaque station.
  *
- * - Arrêts : éléments OSM (nœuds et voies) qui portent ref:STIB_MIVB (plusieurs numéros séparés par « ; »), arrêts ou
+ * - Arrêts : éléments OSM (nœuds et voies) qui portent ref:STIB_MIVB (plusieurs numéros séparés par « ; », lettre
+ *   finale retirée comme dans la publication : stibCode), arrêts ou
  *   quais (public_transport=stop_position|platform, railway=stop|tram_stop|platform), sous terre : location=underground,
  *   ou les mêmes règles que les voies (tunnel, couloir, indoor, couche ou niveau négatifs : filter.ts). Un numéro STIB
  *   compte une fois, avec le meilleur résultat de ses éléments.
@@ -76,7 +77,14 @@ function pick(t: Tags, key: string): Record<string, string> {
   return out;
 }
 
-/** Élément OSM porteur d'un numéro STIB : rôle, mode, sous terre ou non. */
+/**
+ * Numéro STIB tel que l'appli le connaît (`Leg.toStop`, arrêts des fichiers de ligne) : sans sa lettre finale. Les
+ * données officielles et OpenStreetMap écrivent « 0470F » ; la publication garde « 0470 » (rtIdOf, naming.ts). Sans
+ * cela, l'arrêt n'est jamais retrouvé par l'appli (contrôle du 20/11 : Simonis 0470F et 0473F, Albert 0711F et 0712F).
+ */
+export const stibCode = (ref: string): string => ref.replace(/[A-Za-z]+$/, '') || ref;
+
+/** Élément OSM porteur d'un numéro STIB (sans lettre finale : stibCode) : rôle, mode, sous terre ou non. */
 export function featureOf(osm: string, lat: number, lon: number, tags: Record<string, string>, key = STIB_KEY): StibFeature {
   const t = tagsOf(tags);
   const rw = tags.railway;
@@ -99,10 +107,14 @@ export function featureOf(osm: string, lat: number, lon: number, tags: Record<st
         : tags.bus === 'yes' || tags.highway === 'bus_stop'
           ? 'bus'
           : 'other';
-  const codes = (tags[key] ?? '')
-    .split(';')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const codes = [
+    ...new Set(
+      (tags[key] ?? '')
+        .split(';')
+        .map((s) => stibCode(s.trim()))
+        .filter(Boolean),
+    ),
+  ];
   return { osm, lat, lon, codes, name: wayName(t), role, mode, under: tags.location === 'underground' || underground(t) };
 }
 

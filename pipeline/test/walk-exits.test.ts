@@ -13,7 +13,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { EXITS_FILE, isExitsFile, type ExitsFile } from '../../app/src/core/walk/exits-format.ts';
 import { buildWalk } from '../src/walk/build.ts';
 import { main } from '../src/walk/cli.ts';
-import { byCode, exitReport, exitsFile, featureOf, isStreetName, isUnderStop, joinPublished, loadExitGraph, measureFeature, publishedStibStops, readStibFeatures, writeExits, type FeatureResult, type StibFeature } from '../src/walk/exits.ts';
+import { byCode, exitReport, exitsFile, featureOf, isStreetName, isUnderStop, joinPublished, loadExitGraph, measureFeature, publishedStibStops, readStibFeatures, stibCode, writeExits, type FeatureResult, type StibFeature } from '../src/walk/exits.ts';
 import { readKeyedNodes, PbfFile } from '../src/walk/pbf.ts';
 import { publishExits, publishWalk, weeklyWalk } from '../src/walk/weekly.ts';
 import { cleanupTempDirs, tempDir } from './helpers.ts';
@@ -84,7 +84,7 @@ const nodeTags: Record<number, Record<string, string>> = {
 const ways: PbfWay[] = [
   { id: 1001, refs: [1, 14, 3], tags: { highway: 'residential', name: 'Boulevard Anspach' } },
   { id: 1002, refs: [3, 4], tags: { highway: 'residential', name: 'Rue Neuve' } },
-  { id: 2001, refs: [10, 11, 12], tags: { railway: 'platform', public_transport: 'platform', layer: '-1', name: 'Bourse', 'ref:STIB_MIVB': '8001;8011' } },
+  { id: 2001, refs: [10, 11, 12], tags: { railway: 'platform', public_transport: 'platform', layer: '-1', name: 'Bourse', 'ref:STIB_MIVB': '8001;8011F' } },
   { id: 2002, refs: [12, 13], tags: { highway: 'footway', layer: '-1' } },
   { id: 2003, refs: [13, 14], tags: { highway: 'steps', layer: '-1' } },
   { id: 3001, refs: [30, 31, 32], tags: { railway: 'platform', layer: '-1' } },
@@ -132,10 +132,10 @@ function fixture(o: { plainNodes?: boolean; sorted?: boolean; perBlock?: number 
       ],
     }),
   );
-  // fichiers de ligne publiés : arrêts physiques que l'appli donne à ses étapes (8001 exact, 8011 avec sa lettre ;
-  // 8007 n'est desservi par aucune ligne publiée)
+  // fichiers de ligne publiés : arrêts physiques que l'appli donne à ses étapes, toujours sans lettre (8001 ; 8011,
+  // écrit « 8011F » dans OpenStreetMap ; 8007 n'est desservi par aucune ligne publiée)
   mkdirSync(join(data, 'lines', 'stib'), { recursive: true });
-  writeFileSync(join(data, 'lines', 'stib', '3.json'), JSON.stringify({ v: 1, id: 'stib:3', op: 'stib', line: '3', mode: 'tram', pats: [{ s: ['8001', '', '9001'] }, { s: ['8011F', '8002'] }] }));
+  writeFileSync(join(data, 'lines', 'stib', '3.json'), JSON.stringify({ v: 1, id: 'stib:3', op: 'stib', line: '3', mode: 'tram', pats: [{ s: ['8001', '', '9001'] }, { s: ['8011', '8002'] }] }));
   writeFileSync(join(data, 'lines', 'stib', 'casse.json'), '{ illisible');
   return { dir, pbf, data, tiles: join(dir, 'tiles') };
 }
@@ -256,7 +256,7 @@ describe('1.3.1 : sorties du métro (mesure de vérification R1)', () => {
     const text = log.join('\n');
     expect(text).toContain('Sorties du métro : extrait OSM du 2025-11-14');
     expect(text).toContain('Sorties du métro : données officielles : 2 stations STIB de métro publiées');
-    // fichier des sorties et jointure avec les arrêts de l'appli (numéro exact 8001, avec sa lettre 8011F ; 8007 sans ligne)
+    // fichier des sorties et jointure avec les arrêts de l'appli (8001 ; 8011, « 8011F » dans OpenStreetMap ; 8007 sans ligne)
     expect(text).toMatch(/Sorties du métro : fichier des sorties : 3 arrêts, 3 sorties, 2 noms, \d+ octets ; nom le plus long : « Avenue de la Toison d’Or » \(24 caractères\)\n/);
     expect(text).toContain('Sorties du métro : arrêts de l\'appli : 4 arrêts physiques STIB publiés (fichiers de ligne) ; numéros du fichier des sorties retrouvés par l\'appli 2 sur 3 (66,7 %)');
     expect(text).toContain('Sorties du métro : numéros du fichier sans arrêt publié : Louise (8007)');
@@ -272,13 +272,23 @@ describe('1.3.1 : sorties du métro (mesure de vérification R1)', () => {
   it('arrêts physiques publiés (fichiers de ligne) et jointure comme dans l’appli : numéro exact, sinon sans sa lettre', async () => {
     const fx = fixture();
     const pub = await publishedStibStops(fx.data);
-    expect([...pub!].sort()).toEqual(['8001', '8002', '8011F', '9001']);
+    expect([...pub!].sort()).toEqual(['8001', '8002', '8011', '9001']);
     expect(await publishedStibStops(join(fx.dir, 'rien'))).toBeNull();
     const x = (name: string): [string, number, number, number] => [name, 50.85, 4.35, 40];
     const file: ExitsFile = { v: 1, version: '2025-11-14', builtAt: '', source: '', licence: '', attribution: '', stops: { '8001': { s: 'Bourse', x: [x('Rue A')] }, '8011': { s: 'Bourse', x: [x('Rue A')] }, '8007': { s: 'Louise', x: [x('Rue B')] }, '8011F': { s: 'Bourse', x: [x('Rue C')] } } };
-    // 8011F publié : la clé exacte 8011F, pas 8011 (que personne ne retrouve alors)
-    expect(joinPublished(file, pub!)).toEqual({ reached: ['8001', '8011F'], lost: ['8007', '8011'] });
+    // la publication n'a jamais de lettre : une clé « 8011F » du fichier ne serait retrouvée par personne (d'où stibCode)
+    expect(joinPublished(file, pub!)).toEqual({ reached: ['8001', '8011'], lost: ['8007', '8011F'] });
     expect(joinPublished({ ...file, stops: { '8011': file.stops['8011'] } }, pub!)).toEqual({ reached: ['8011'], lost: [] });
+    // contrôle du 20/11 (Simonis 0470F et 0473F, Albert 0711F et 0712F) : le numéro du fichier est celui de l'appli
+    expect(stibCode('0470F')).toBe('0470');
+    expect(stibCode('2285G')).toBe('2285');
+    expect(stibCode('8362')).toBe('8362');
+    expect(stibCode('F')).toBe('F');
+    const tram = featureOf('n1', 50.86, 4.33, { railway: 'tram_stop', location: 'underground', name: 'Simonis', 'ref:STIB_MIVB': '0470F; 0470 ;0473F' });
+    expect(tram.codes).toEqual(['0470', '0473']);
+    const made = exitsFile(byCode([{ f: tram, cls: 'E', underM: 44, names: ['Rue A'], exits: [{ name: 'Rue A', lat: 50.86, lon: 4.33, m: 44 }] }]), { version: '2026-11-19', builtAt: '' });
+    expect(Object.keys(made.stops)).toEqual(['0470', '0473']);
+    expect(joinPublished(made, new Set(['0470', '0473']))).toEqual({ reached: ['0470', '0473'], lost: [] });
   });
 
   it('noms des sorties : rues et places seulement, jamais le nom de la station (consigne du 20/11)', () => {
