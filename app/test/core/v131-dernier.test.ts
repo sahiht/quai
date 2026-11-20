@@ -169,8 +169,13 @@ describe('R3 : la règle, sur un fichier de zone', () => {
         ['82', 'Mons Gare', ['tec:m1', 'tec:m2']],
         // 83 : toutes les 30 min jusqu'à 01:30, reprise à 05:45 : un vrai dernier
         ['83', 'Mons Gare', ['tec:n1', 'tec:n2']],
-        // 84 : un seul départ de nuit à 00:15 (aucun avant depuis 04:00), le suivant à 08:20 : pas la fin d'un service
+        // 84 : un seul départ de nuit à 00:15, écrit sur le samedi (aucun avant depuis 04:00), le suivant à 08:20 : pas la
+        // fin d'un service
         ['84', 'Jurbise Gare', ['tec:j1', 'tec:j2']],
+        // 85 : le même, écrit « 24:15 » sur le vendredi : l'exploitant le compte dans le service du vendredi, c'est son dernier
+        ['85', 'Jurbise Gare', ['tec:k1', 'tec:k2']],
+        // 86 : dernier à 00:20 (« 24:20 »), le précédent à 18:20, le suivant à 05:50 (plus proche) : un vrai dernier quand même
+        ['86', 'Jurbise Gare', ['tec:l1', 'tec:l2']],
       ],
       [
         [0, '12:10', 0],
@@ -184,18 +189,23 @@ describe('R3 : la règle, sur un fichier de zone', () => {
         [0, '25:00', 2],
         [0, '25:30', 2],
         [1, '05:45', 2],
-        [0, '24:15', 3],
+        [1, '00:15', 3],
         [1, '08:20', 3],
+        [0, '24:15', 4],
+        [1, '08:20', 4],
+        [0, '18:20', 5],
+        [0, '24:20', 5],
+        [1, '05:50', 5],
       ],
     );
-    expect(marked(f)).toEqual(['83 Mons Gare 0 25:30']);
+    expect(marked(f)).toEqual(['83 Mons Gare 0 25:30', '85 Jurbise Gare 0 24:15', '86 Jurbise Gare 0 24:20']);
     // sans départ le lendemain (rien ne suit du tout) : le 109a de 03:48 et le 84 de 00:15 sont bien les derniers
     const g = areaFile('tec:R3m', f.patterns.map((p): Pat => [p.line, p.head.fr, p.next.map(([z]) => z)]), [
       [0, '12:10', 0],
       [1, '03:48', 0],
-      [0, '24:15', 3],
+      [1, '00:15', 3],
     ]);
-    expect(marked(g)).toEqual(['109a Charleroi Gare Centrale 1 03:48', '84 Jurbise Gare 0 24:15']);
+    expect(marked(g)).toEqual(['109a Charleroi Gare Centrale 1 03:48', '84 Jurbise Gare 1 00:15']);
   });
 
   it('variantes d’un numéro (20a et 20b, 27 et 27/, 86A et 86C) : une seule ligne dans le même sens ; N10, X64 et T39 restent d’autres lignes', () => {
@@ -483,6 +493,19 @@ describe('R3 : étapes du trajet (le cœur), sans rien demander au réseau', () 
     const later = await early.core.trains(BXC, 'sncb:8863008', T(FRI, '23:00'));
     expect(rideOf(later[0])).toMatchObject({ line: 'IC' });
     expect(rideOf(later[0])?.last).toBeUndefined();
+  });
+
+  it('train après minuit : écrit « 24:01 » (service de la veille), c’est le dernier ; premier du matin écrit « 03:40 », jamais', () => {
+    const leg = (id: string, t: number) => ({ op: 'sncb' as Op, from: { name: N('Bruxelles-Central'), lat: 50.8455, lon: 4.3571, areaId: BXC }, tripId: id, schedDep: t });
+    // le précédent à 14:00, le suivant à 05:40 (plus proche que le précédent) : le train de 00:01 reste le dernier du vendredi
+    const late = [day(FRI, [north('IC-1400', '14:00'), north('IC-2401', '24:01')]), day(SAT, [north('IC-0540', '05:40')])];
+    expect(trainLegLast(late.map(indexDay), leg('IC-2401', T(FRI, '24:01')))).toBe(true);
+    expect(marked(stationArea(late))).toEqual(['IC Anvers-Central 0 24:01']);
+    // le premier train du samedi part à 03:40, le suivant à 06:40 : ni lui ni celui de 14:00 la veille (03:40 suit avant 04:00)
+    const first = [day(FRI, [north('IC-1400', '14:00')]), day(SAT, [north('IC-0340', '03:40'), north('IC-0640', '06:40')])];
+    expect(trainLegLast(first.map(indexDay), leg('IC-0340', T(SAT, '03:40')))).toBe(false);
+    expect(trainLegLast(first.map(indexDay), leg('IC-1400', T(FRI, '14:00')))).toBe(false);
+    expect(marked(stationArea(first))).toEqual([]);
   });
 
   it('train : un L après minuit vers Ottignies (même sens) enlève la marque de l’IC de 23:12', async () => {

@@ -12,8 +12,8 @@
  *
  * Contrôle du 20/11 : 04:00 n'est pas une coupure pour une ligne qui roule. Le contrôle indépendant refuse aussi une
  * marque quand le départ suivant du même sens, après 04:00, part moins de 2 h plus tard (N62 de De Lijn, toute la nuit),
- * et, pour un départ d'avant 04:00, quand ce suivant est aussi proche ou plus proche que le précédent ou qu'aucun ne le
- * précède (premier bus du matin). Les variantes d'un numéro (« 20a » et « 20b », « 27 » et « 27/ ») sont une seule ligne.
+ * et, pour un départ d'avant 04:00 écrit sur le jour qui commence (« 03:48 », pas « 27:48 »), quand ce suivant est aussi
+ * proche ou plus proche que le précédent ou qu'aucun ne le précède (premier bus du matin). Les variantes d'un numéro (« 20a » et « 20b », « 27 » et « 27/ ») sont une seule ligne.
  * Tableaux aussi à 03:30 ; tous les tableaux marqués passent dans les lunettes : la destination devant « , dernier »
  * n'est jamais coupée au milieu d'un mot (test/scan/cuts.ts). Coût du calcul des marques par zone, mesuré.
  *
@@ -130,7 +130,7 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
           // départs bruts, relus sans les tableaux préparés : instant, ligne, destination, zones suivantes
           const raw = f.deps.map((d) => {
             const p = f.patterns[d[2]];
-            return { t: gtfsTime(dates[d[0]], d[1]), line: lineOf(op, p.mode, p.line), head: headKey(p.head?.fr ?? ''), next: new Set(p.next.map(([z]) => z)), pl: p.line, day: d[0] };
+            return { t: gtfsTime(dates[d[0]], d[1]), line: lineOf(op, p.mode, p.line), head: headKey(p.head?.fr ?? ''), next: new Set(p.next.map(([z]) => z)), pl: p.line, day: d[0], min: d[1] };
           });
           const byLine = new Map<string, number[]>();
           raw.forEach((r, i) => {
@@ -172,7 +172,7 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
             if (Number.isFinite(after)) {
               const what = `${f.n.fr} (${f.id}) : ${r.pl} vers ${f.patterns[f.deps[i][2]].head.fr} à ${hhmm(r.t)} marqué`;
               if (after - r.t < 2 * HOUR) err(`${what}, le suivant du même sens à ${hhmm(after)} (moins de 2 h après)`);
-              else if (end - r.t <= 4 * HOUR && after - r.t <= r.t - before) err(`${what} : premier départ du matin (suivant à ${hhmm(after)}, précédent ${Number.isFinite(before) ? `à ${hhmm(before)}` : 'aucun'})`);
+              else if (r.min < 24 * 60 && end - r.t <= 4 * HOUR && after - r.t <= r.t - before) err(`${what} : premier départ du matin (suivant à ${hhmm(after)}, précédent ${Number.isFinite(before) ? `à ${hhmm(before)}` : 'aucun'})`);
             }
             if (ex.length < 6 && f.deps[i][0] === 0 && (ex.length < 3 || r.t >= gtfsTime(dates[0], 22 * 60))) ex.push(`${f.n.fr} : ${r.pl} vers ${f.patterns[f.deps[i][2]].head.fr} ${hhmm(r.t)}`);
           });
@@ -296,7 +296,7 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
             if (o.t < schedDep && o.t >= from) before = Math.max(before, o.t);
             if (o.t >= end) after = Math.min(after, o.t);
           }
-          if (Number.isFinite(after) && (after - schedDep < 2 * HOUR || (end - schedDep <= 4 * HOUR && after - schedDep <= schedDep - before)))
+          if (Number.isFinite(after) && (after - schedDep < 2 * HOUR || (x[2] < 24 * 60 && end - schedDep <= 4 * HOUR && after - schedDep <= schedDep - before)))
             err(`train ${trip.cat} vers ${trip.head.fr} à ${station.n.fr} ${hhmm(schedDep)} : marqué, le suivant à ${hhmm(after)} (ligne qui roule ou premier du matin)`);
         }
         const prep = preps.get(station.id);

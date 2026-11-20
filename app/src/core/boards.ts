@@ -468,6 +468,8 @@ interface WayDep {
   way: number;
   /** Ligne et destination : à la même minute, le même départ (voyage en double, doublon SNCB), jamais un « suivant ». */
   same: number;
+  /** Minutes depuis le début de son jour de service (« 24:05 » : 1445, la fin du service de la veille). */
+  m: number;
 }
 
 /**
@@ -479,7 +481,8 @@ interface WayDep {
  * 04:00 n'est pas une coupure pour une ligne qui roule (contrôle du 20/11, vraies données : le N62 de De Lijn passe
  * toute la nuit, 03:48 puis 04:18 ; le premier bus du matin part parfois à 03:48). Jamais la marque non plus quand le
  * départ suivant du même sens, après 04:00, part moins de 2 h plus tard (LAST_QUIET_MS) ; ni, pour un départ de la nuit
- * (avant 04:00), quand ce suivant est aussi proche ou plus proche que le précédent, ou qu'aucun ne le précède depuis
+ * (avant 04:00) écrit sur le jour qui commence (« 03:48 », pas « 27:48 » : l'exploitant ne le compte pas dans le service
+ * de la veille), quand ce suivant est aussi proche ou plus proche que le précédent, ou qu'aucun ne le précède depuis
  * 04:00 la veille : c'est le premier du matin, pas le dernier de la nuit.
  */
 function lastFlags(deps: readonly WayDep[], cover: LastCover | null): Uint8Array {
@@ -512,7 +515,7 @@ function lastFlags(deps: readonly WayDep[], cover: LastCover | null): Uint8Array
       if (next) {
         const gap = next.t - d.t;
         if (gap < LAST_QUIET_MS) continue;
-        if (end - d.t <= DAY_START_HOUR * 3_600_000) {
+        if (d.m < 1440 && end - d.t <= DAY_START_HOUR * 3_600_000) {
           let p = j - 1;
           while (p >= 0 && deps[list[p]].t === d.t) p--;
           if (p < 0 || gap <= d.t - deps[list[p]].t) continue;
@@ -583,7 +586,7 @@ export function scheduleLastFlags(prep: PreparedArea): Uint8Array {
   const id = numbering();
   const same = pats.map((p, i) => id(`${p?.line ?? ''}|${prep.headKeys[i] ?? ''}`));
   const flags = lastFlags(
-    prep.file.deps.map((d, i) => ({ t: prep.times[i], way: pats[d[2]] ? ways[d[2]] : -1, same: same[d[2]] ?? -1 })),
+    prep.file.deps.map((d, i) => ({ t: prep.times[i], way: pats[d[2]] ? ways[d[2]] : -1, same: same[d[2]] ?? -1, m: d[1] })),
     lastCover(prep.dates),
   );
   LAST.set(prep, flags);
@@ -705,6 +708,7 @@ function stationLast(days: readonly DayIndex[], station: string): StationLast {
   const lines = new Map<string, number>();
   const heads = new Map<string, number>();
   const t: number[] = [];
+  const mins: number[] = [];
   const same: number[] = [];
   const trips: string[] = [];
   const parent: number[] = [];
@@ -749,11 +753,12 @@ function stationLast(days: readonly DayIndex[], station: string): StationLast {
       }
       join(k, 2 * line * K + head);
       t.push(d.base + s[p][2] * 60_000);
+      mins.push(s[p][2]);
       same.push(catNum(trip.cat) * K + head);
       trips.push(normalizeId(trip.id));
     }
   }
-  const deps: WayDep[] = t.map((x, i) => ({ t: x, way: find(i), same: same[i] }));
+  const deps: WayDep[] = t.map((x, i) => ({ t: x, way: find(i), same: same[i], m: mins[i] }));
   const byTrip = new Map<string, number[]>();
   trips.forEach((id, i) => {
     const list = byTrip.get(id);
