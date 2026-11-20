@@ -185,7 +185,8 @@ describe('heure seule (sans position), trajet complet', () => {
     expect(kindOf(s)).toBe('alight');
     expect(s.where.walk).toMatchObject({ toward: N('Liège-Guillemins'), toKind: 'platform', remainingMin: 2, depAt: at('07:30'), marginMin: 7 });
     expect(s.where.chain.map((x) => x.state)).toEqual(['done', 'done', 'now', 'next']);
-    expect(step(r, at('07:22')).moment).toBeNull();
+    // 1.3.1 (B17, P7) : « Descends » fini, la marche suivante (comme « Partir maintenant »), plus l'écran vide
+    expect(m(step(r, at('07:22')).moment, 'walk')).toMatchObject({ walkMin: 3, toward: N('Liège-Guillemins'), final: false, depAt: at('07:30'), platform: '3' });
   });
 
   it('IC : « Monter » à la fin de la marche, voie 3, marge 7 min, descente dans 4 arrêts', () => {
@@ -294,7 +295,9 @@ describe('positions', () => {
     expect(t1.distM).toBeGreaterThanOrEqual(34);
     expect(t1.distM).toBeLessThanOrEqual(36);
     expect(m(step(r, at('07:06:40'), fix(offset(b, -5, 0), at('07:06:40'))).moment, 'turn').distM).toBe(0);
-    expect(step(r, at('07:06:50'), fix(offset(b, -12, 0), at('07:06:50'))).moment).toBeNull();
+    // 1.3.1 (B18, P8) : fini après deux positions à plus de 10 m après le virage (une seule ne suffit plus)
+    expect(kindOf(step(r, at('07:06:50'), fix(offset(b, -12, 0), at('07:06:50'))))).toBe('turn');
+    expect(step(r, at('07:06:55'), fix(offset(b, -18, 0), at('07:06:55'))).moment).toBeNull();
     expect(r.mem.dismissed).toContain('turn:jprd:0:0:1');
     expect(step(r, at('07:09'), fix(offset(c, 80, 0), at('07:09'))).moment).toBeNull();
     const t2 = m(step(r, at('07:10'), fix(offset(c, 32, 0), at('07:10'))).moment, 'turn');
@@ -439,7 +442,8 @@ describe('positions', () => {
     expect(kindOf(step(r, at('07:16:40'), fix(toward(P.leman, P.guilleminsBus, 200), at('07:16:40'), { speed: 7 })))).toBe('alight');
     const s = step(r, at('07:19:40'), fix(offset(P.guilleminsBus, 0, 30), at('07:19:40'), { speed: 0.8 }));
     expect(r.mem.alighted).toEqual({ leg: 1, at: at('07:19:40') });
-    expect(s.moment).toBeNull();
+    // 1.3.1 (B17, P7) : « Descends » fini, la marche suivante
+    expect(m(s.moment, 'walk')).toMatchObject({ walkMin: 3, toward: N('Liège-Guillemins'), depAt: at('07:30') });
     const b = step(r, at('07:21'), fix(offset(P.guillemins, 0, 20), at('07:21'), { speed: 1.2 }));
     expect(b.phase).toEqual({ kind: 'wait', leg: 3 });
     expect(m(b.moment, 'board')).toMatchObject({ walkMin: 3, marginMin: 6, platform: '3' });
@@ -496,10 +500,12 @@ describe('positions', () => {
       expect(s.ended, hm).toBe(false);
       expect(s.phase, hm).toEqual({ kind: 'wait', leg: 1 });
     }
-    // toujours à l'arrêt 10 min après l'heure (sans temps réel) : « Ton bus 6 de 07:12 est parti », nouveau trajet
+    // toujours à l'arrêt 10 min après l'heure (sans temps réel) : nouveau trajet demandé ; 1.3.1 (A3, I1) : rien ne dit
+    // que le bus est passé, pas de « Ton bus 6 de 07:12 est parti » : le message vient avec le nouveau trajet
     const s = step(r, at('07:22:30'), fix(P.gramme, at('07:22:30')));
     expect(s.ended).toBe(false);
-    expect(m(s.moment, 'replan')).toMatchObject({ reason: 'missed' });
+    expect(s.replan).toMatchObject({ reason: 'missed' });
+    expect(s.moment).toBeNull();
     // revenu au point de lancement : la règle s'applique de nouveau
     const r2 = guide(prdTrip({ bus6Rt: false }), { origin, startedAt: at('07:00') });
     step(r2, at('07:08'), fix(P.gramme, at('07:08')));

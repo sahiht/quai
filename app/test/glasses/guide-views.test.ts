@@ -82,19 +82,20 @@ function shown(m: Moment | null, show: GuideShow = 'moment', s: Partial<GuideSta
 /** Rangées de chaque conteneur (au plus clair, normal, pâle), espaces insécables remises. */
 const levels = (p: PageSpec) => ({ hi: rowsOf(container(p, 'colA')), norm: rowsOf(container(p, 'colB')), pale: rowsOf(container(p, 'colC')) });
 
-const HINT = 'toucher : effacer   appui long : arrêter';
+// 1.3.1 (PRD-1.3.1 § 2) : « masquer » (rien n'est effacé, le guidage continue)
+const HINT = 'toucher : masquer   appui long : arrêter';
 
 describe('PRD § 3.2 : écran calme, l’écran vide', () => {
-  it('rien du tout : ni titre, ni heure, ni texte, ni aide, ni image ; toucher = guideTap ; le menu de l’appui long reste', () => {
+  it('ni titre, ni heure, ni texte, ni aide, ni image ; 1.3.1 (PRD-1.3.1 § 1) : « · · · » seuls, au pied ; toucher = guideTap ; le menu de l’appui long reste', () => {
     for (const [m, show] of [[null, 'moment'], [leave(), 'empty']] as const) {
       const { v, p } = shown(m, show);
-      expect(v).toMatchObject({ screen: 'guide', layout: 'guide', title: '', clock: '', items: [], hints: '', tap: { kind: 'guideTap' } });
+      expect(v).toMatchObject({ screen: 'guide', layout: 'guide', title: '', clock: '', items: [], tap: { kind: 'guideTap' } });
       expect(v.images).toBeUndefined();
       expect(p.images).toBeUndefined();
-      expect(p.lines).toEqual([]);
-      for (const c of p.containers) expect(c.content.trim(), c.name).toBe('');
-      // pied d'un pixel : aucune ligne d'aide réservée
-      expect(container(p, 'foot').h).toBe(1);
+      // 1.3.1 : les trois petits points, rien d'autre (leur place au pixel : v131-guidage-ecrans.test.ts)
+      expect(p.lines).toEqual([GUIDE_TEXT.dots]);
+      for (const c of p.containers) if (c.name !== 'foot') expect(c.content.trim(), c.name).toBe('');
+      expect(container(p, 'foot')).toMatchObject({ h: 27, level: 2 });
       // 1.3.1 (B10, E4) : « Arrêter le guidage » en dernier
       expect(p.menu).toEqual([
         { id: MENU_IDS.allSteps, label: 'Voir tout le trajet' },
@@ -149,8 +150,8 @@ describe('PRD § 3.2 : les moments', () => {
     expect(a.y + a.h).toBeLessThanOrEqual(GUIDE.IMG_Y + GUIDE.IMG_H);
     // « Si tu le rates » qui tient (même heure d'arrivée) : entier
     expect(shown(leave({ tight: true, missed: { arr: T(8, 54), laterMin: 0 } })).lines[3]).toBe('Si tu le rates : même heure d’arrivée');
-    // marge d'une minute sans `tight` : très juste quand même
-    expect(shown(leave({ marginMin: 1 })).lines[2]).toBe('bus 6 à 07:12, très juste');
+    // 1.3.1 (A4, P4) : « très juste » seulement quand le moteur le dit (`tight`), jamais d'après la marge arrondie
+    expect(shown(leave({ marginMin: 1 })).lines[2]).toBe('bus 6 à 07:12');
   });
 
   it('leave : dernière marche, « jusqu’au bureau » (le titre du trajet), sans véhicule', () => {
@@ -162,16 +163,16 @@ describe('PRD § 3.2 : les moments', () => {
     expect(untilTitle('Vers chez Karim')).toBe('jusque chez Karim');
   });
 
-  it('turn : « à gauche dans 40 m » au plus clair, la rue ou « vers l’arrêt du bus 6 » pâle ; flèche à gauche', () => {
+  it('turn : « À gauche dans 40 m » au plus clair (1.3.1, B12), la rue ou « vers l’arrêt Monument Gramme » pâle (1.3.1, § 4) ; flèche à gauche', () => {
     const { v, p, lines } = shown(turn());
-    expect(lines).toEqual(['à gauche dans 40 m', 'vers l’arrêt du bus 6', HINT]);
-    expect(levels(p).hi[0]).toBe('à gauche dans 40 m');
-    expect(levels(p).pale[1]).toBe('vers l’arrêt du bus 6');
+    expect(lines).toEqual(['À gauche dans 40 m', 'vers l’arrêt Monument Gramme', HINT]);
+    expect(levels(p).hi[0]).toBe('À gauche dans 40 m');
+    expect(levels(p).pale[1]).toBe('vers l’arrêt Monument Gramme');
     expect(v.images?.[0]).toMatchObject({ id: 9, x: 28, y: 60, w: 144, h: 144, image: { kind: 'turn', turn: 'left' } });
     expect(shown(turn({ street: 'Rue Neuve' })).lines[1]).toBe('Rue Neuve');
-    expect(shown(turn({ turn: 'sharpLeft', distM: 23 })).lines[0]).toBe('franchement à gauche dans 20 m');
-    expect(shown(turn({ turn: 'slightRight', distM: 130 })).lines[0]).toBe('légèrement à droite dans 150 m');
-    expect(shown(turn({ turn: 'right', distM: 8 })).lines[0]).toBe('à droite maintenant');
+    expect(shown(turn({ turn: 'sharpLeft', distM: 23 })).lines[0]).toBe('Franchement à gauche dans 20 m');
+    expect(shown(turn({ turn: 'slightRight', distM: 130 })).lines[0]).toBe('Légèrement à droite dans 150 m');
+    expect(shown(turn({ turn: 'right', distM: 8 })).lines[0]).toBe('À droite maintenant');
     expect(shown(turn({ turn: 'uturn', distM: 30 })).lines[0]).toBe('Fais demi-tour');
     // vers la voie d'un train, vers la destination (dernière marche)
     expect(shown(turn({ leg: 2, toward: N('Liège-Guillemins') })).lines[1]).toBe('vers la voie 3');
@@ -185,17 +186,18 @@ describe('PRD § 3.2 : les moments', () => {
     expect(nb(turnText('straight', 60))).toBe('tout droit dans 60 m');
   });
 
-  it('board : « dans 1 min », « vers … » pâle, « descente dans 4 arrêts » pâle ; panneau « bus / 6 »', () => {
+  it('board : « Bus 6 dans 1 min » (1.3.1, B12), « vers … » pâle, « descente dans 4 arrêts, à … » pâle (E5) ; panneau « bus / 6 »', () => {
     const { v, p, lines } = shown(board());
-    expect(lines).toEqual(['dans 1 min', 'vers Gare des Guillemins', 'descente dans 4 arrêts', HINT]);
-    expect(levels(p).hi[0]).toBe('dans 1 min');
-    expect(levels(p).pale.slice(1)).toEqual(['vers Gare des Guillemins', 'descente dans 4 arrêts']);
+    // 1.3.1 (B12, E5) : l'arrêt de la descente après le nombre d'arrêts, s'il tient
+    expect(lines).toEqual(['Bus 6 dans 1 min', 'vers Gare des Guillemins', 'descente dans 4 arrêts, à Liège-Guillemins', HINT]);
+    expect(levels(p).hi[0]).toBe('Bus 6 dans 1 min');
+    expect(levels(p).pale.slice(1)).toEqual(['vers Gare des Guillemins', 'descente dans 4 arrêts, à Liège-Guillemins']);
     expect(v.images?.[0].image).toEqual({ kind: 'sign', label: 'bus', value: '6' });
     // au-delà de 10 min : l'heure ; « imminent » seulement avec le temps réel ; sans lui : « ~ »
-    expect(shown(board({ depAt: T(7, 12) })).lines[0]).toBe('à 07:12');
-    expect(shown(board({ depAt: NOW + 20_000 })).lines[0]).toBe('imminent');
-    expect(shown(board({ depAt: NOW + 20_000, rt: false })).lines[0]).toBe('dans ~1 min');
-    expect(shown(board({ depAt: T(7, 12), rt: false })).lines[0]).toBe('à ~07:12');
+    expect(shown(board({ depAt: T(7, 12) })).lines[0]).toBe('Bus 6 à 07:12');
+    expect(shown(board({ depAt: NOW + 20_000 })).lines[0]).toBe('Bus 6 imminent');
+    expect(shown(board({ depAt: NOW + 20_000, rt: false })).lines[0]).toBe('Bus 6 dans ~1 min');
+    expect(shown(board({ depAt: T(7, 12), rt: false })).lines[0]).toBe('Bus 6 à ~07:12');
     expect(shown(board({ stopsToAlight: 1 })).lines[2]).toBe('descente au prochain arrêt');
   });
 
@@ -205,7 +207,7 @@ describe('PRD § 3.2 : les moments', () => {
     expect(vehicleSign({ op: 'sncb', mode: 'bus', line: 'BUS' })).toEqual({ kind: 'sign', label: 'bus', value: 'SNCB' });
     const train = shown(board({ vehicle: IC, depAt: T(7, 30), platform: '3', head: N('Ostende'), stopsToAlight: 6 }));
     // contrôle usager du 15/11 : la voie aussi dans le texte (le texte suffit sans l'image, § 3.9)
-    expect(train.lines).toEqual(['IC à 07:30, voie 3', 'vers Ostende', 'descente dans 6 arrêts', HINT]);
+    expect(train.lines).toEqual(['IC à 07:30, voie 3', 'vers Ostende', 'descente dans 6 arrêts, à Liège-Guillemins', HINT]);
     expect(train.v.images?.[0].image).toEqual({ kind: 'sign', label: 'voie', value: '3' });
     expect(shown(board({ vehicle: IC, depAt: T(7, 30), head: N('Ostende') })).v.images?.[0].image).toEqual({ kind: 'sign', label: 'train', value: 'IC' });
     const changed = shown(board({ vehicle: IC, depAt: T(7, 30), platform: '6', platformChanged: true, head: N('Ostende') }));
@@ -251,12 +253,13 @@ describe('PRD § 3.2 : les moments', () => {
     const rp = (p: Partial<Extract<Moment, { kind: 'replan' }>>, kind: GuideState['kind'] = 'trip') =>
       shown({ ...base, id: 'replan:j1', kind: 'replan', reason: 'missed', lost: { vehicle: IC, depAt: T(7, 30) }, ...p }, 'moment', { kind });
     const missed = rp({ next: { vehicle: IC, depAt: T(8, 2), platform: '3' }, arr: T(9, 27), laterMin: 33 });
-    expect(missed.lines).toEqual(['Ton IC de 07:30 est parti', 'Nouveau trajet : IC 08:02, voie 3', 'arrivée 09:27, 33 min plus tard', HINT]);
+    // 1.3.1 (B12, L4) : « Nouveau trajet : IC à 08:02, voie 3 »
+    expect(missed.lines).toEqual(['Ton IC de 07:30 est parti', 'Nouveau trajet : IC à 08:02, voie 3', 'arrivée 09:27, 33 min plus tard', HINT]);
     expect(levels(missed.p).pale[2]).toBe('arrivée 09:27, 33 min plus tard');
     expect(rp({ reason: 'cancelled', none: true }).lines).toEqual(['Ton IC de 07:30 est supprimé', 'Pas d’autre trajet trouvé', HINT]);
     expect(rp({ reason: 'late', lost: { vehicle: BUS71, depAt: T(8, 34) }, next: { vehicle: BUS71, depAt: T(8, 49) }, arr: T(9, 14), laterMin: 15 }).lines.slice(0, 3)).toEqual([
       'Correspondance ratée : bus 71 de 08:34',
-      'Nouveau trajet : bus 71 08:49',
+      'Nouveau trajet : bus 71 à 08:49',
       'arrivée 09:14, 15 min plus tard',
     ]);
     expect(rp({ next: { vehicle: IC, depAt: T(9, 2) }, arr: T(10, 31), laterMin: 92 }).lines[2]).toBe('arrivée 10:31, 1 h 32 plus tard');
@@ -297,7 +300,7 @@ describe('PRD § 3.2 : les moments', () => {
     off.settings.display.gestureHints = false;
     const { v, p, lines } = shown(turn(), 'moment', {}, off);
     expect(v.hints).toBe('');
-    expect(lines).toEqual(['à gauche dans 40 m', 'vers l’arrêt du bus 6']);
+    expect(lines).toEqual(['À gauche dans 40 m', 'vers l’arrêt Monument Gramme']);
     expect(container(p, 'foot').h).toBe(1);
   });
 });
@@ -309,12 +312,13 @@ describe('règles d’affichage du moteur (équipe A)', () => {
   });
 
   it('nombre d’arrêts inconnu (0) : « descente à … », jamais « descente dans 0 arrêts »', () => {
-    expect(shown(board({ stopsToAlight: 0 })).lines).toEqual(['dans 1 min', 'vers Gare des Guillemins', 'descente à Liège-Guillemins', HINT]);
+    expect(shown(board({ stopsToAlight: 0 })).lines).toEqual(['Bus 6 dans 1 min', 'vers Gare des Guillemins', 'descente à Liège-Guillemins', HINT]);
     const n: Moment = { ...base, id: 'next', kind: 'nextStop', stop: N('Louvain'), at: T(7, 50), rt: true, stopsToAlight: 0, alight: N('Bruxelles-Central') };
     expect(shown(n).lines).toEqual(['Prochain arrêt : Louvain', 'descente à Bruxelles-Central', HINT]);
     const ride: NonNullable<WhereAmI['ride']> = { vehicle: BUS6, total: 0, next: 0, nextStop: N('Place Général Leman'), nextAt: T(7, 16), alight: N('Gare des Guillemins'), alightAt: T(7, 20), stopsToAlight: 0, rt: true };
     const w = shown(null, 'where', { phase: { kind: 'ride', leg: 1, next: 0 }, where: { ...WHERE, walk: undefined, ride } }).lines;
-    expect(w.slice(1)).toEqual(['Prochain arrêt : Place Général Leman, 07:16', 'descente : Gare des Guillemins, 07:20', 'arrivée 08:54', HINT]);
+    // 1.3.1 (§ 12) : « Ensuite » dit où descendre ; pas de progression
+    expect(w).toEqual(['Jusqu’au bureau', 'Ensuite : descente à Gare des Guillemins, 07:20', 'Prochain arrêt : Place Général Leman, 07:16', '◎ à pied ─ ○ bus 6 ─ ○ IC', 'arrivée 08:54', HINT]);
     for (const l of w) expect(l).not.toMatch(/dans 0 arrêt/);
   });
 
@@ -322,77 +326,94 @@ describe('règles d’affichage du moteur (équipe A)', () => {
     // IC en temps réel, tram de la correspondance sans : « IC à 07:44 » (comme « Partir maintenant »), arrivée « ~ »
     const walk = { ...WHERE.walk!, vehicle: IC, depAt: T(7, 44), rt: true };
     const w = shown(null, 'where', { where: { ...WHERE, rt: false, walk } }).lines;
-    expect(w[3]).toBe('IC à 07:44, marge 2 min');
-    expect(w[4]).toBe('arrivée ~08:54');
+    // 1.3.1 (§ 3, § 12) : « Ensuite : IC à 07:44 », plus de marge sur cet écran
+    expect(w[1]).toBe('Ensuite : IC à 07:44');
+    expect(w.at(-2)).toBe('arrivée ~08:54');
     // véhicule sans temps réel dans un trajet qui en a : « ~ »
-    expect(shown(null, 'where', { where: { ...WHERE, rt: true, walk: { ...walk, rt: false } } }).lines[3]).toBe('IC à ~07:44, marge 2 min');
+    expect(shown(null, 'where', { where: { ...WHERE, rt: true, walk: { ...walk, rt: false } } }).lines[1]).toBe('Ensuite : IC à ~07:44');
   });
 
   it('marge négative : « très juste », jamais « marge -2 min » ; la voie ne concerne que les trains', () => {
     expect(shown(board({ vehicle: IC, depAt: T(7, 30), platform: '3', head: N('Ostende'), walkMin: 4, marginMin: -2 })).lines[2]).toBe('4 min à pied jusqu’au quai, très juste');
-    expect(shown(null, 'where', { where: { ...WHERE, walk: { ...WHERE.walk!, marginMin: -2 } } }).lines[3]).toBe('bus 6 à 07:12, très juste');
-    expect(shown(leave({ marginMin: -3 })).lines[2]).toBe('bus 6 à 07:12, très juste');
+    // 1.3.1 (§ 3) : plus de marge dans « Où tu en es » ; (A4) au départ, « très juste » seulement si le moteur le dit
+    const wm = shown(null, 'where', { where: { ...WHERE, walk: { ...WHERE.walk!, marginMin: -2 } } }).lines;
+    expect(wm[1]).toBe('Ensuite : bus 6 à 07:12');
+    expect(wm.join('\n')).not.toMatch(/marge|très juste/);
+    expect(shown(leave({ marginMin: -3 })).lines[2]).toBe('bus 6 à 07:12');
+    expect(shown(leave({ marginMin: -3, tight: true })).lines[2]).toBe('bus 6 à 07:12, très juste');
     // un bus avec une « voie modifiée » (donnée incohérente) : rien sur la voie
     const bus = shown(board({ platform: '6', platformChanged: true }));
-    expect(bus.lines[0]).toBe('dans 1 min');
+    expect(bus.lines[0]).toBe('Bus 6 dans 1 min');
     expect(bus.v.images?.[0].image).toEqual({ kind: 'sign', label: 'bus', value: '6' });
   });
 });
 
-describe('PRD § 3.3 : « Où tu en es »', () => {
-  it('à pied : la chaîne, « À pied vers l’arrêt du bus 6 », « 260 m, 4 min », « bus 6 à 07:12, marge 2 min », « arrivée 08:54 »', () => {
+describe('PRD § 3.3, 1.3.1 (PRD-1.3.1 § 3, § 12) : « Où tu en es »', () => {
+  /** La chaîne du trajet, où qu'elle soit dans l'écran. */
+  const chainLine = (ls: string[]): string | undefined => ls.find((l) => /^[●◎○] /.test(l));
+
+  it('à pied : « Guidage en cours », « Jusqu’au bureau », « Ensuite : bus 6 à 07:12 », « À pied vers l’arrêt Monument Gramme », « 260 m, 4 min », la chaîne, l’arrivée', () => {
     const { v, p, lines } = shown(null, 'where');
-    expect(lines).toEqual(['◎ à pied ─ ○ bus 6 ─ ○ IC', 'À pied vers l’arrêt du bus 6', '260 m, 4 min', 'bus 6 à 07:12, marge 2 min', 'arrivée 08:54', HINT]);
+    expect(nb(p.title)).toBe('Guidage en cours');
+    expect(container(p, 'clock').content.trim()).toBe('07:00');
+    expect(lines).toEqual(['Jusqu’au bureau', 'Ensuite : bus 6 à 07:12', 'À pied vers l’arrêt Monument Gramme', '260 m, 4 min', '◎ à pied ─ ○ bus 6 ─ ○ IC', 'arrivée 08:54', HINT]);
     expect(v.images).toBeUndefined();
     expect(v.log).toMatchObject({ show: 'where', moment: null, images: [] });
     // sous le titre, à la marge
     expect(container(p, 'colA')).toMatchObject({ x: 28, y: 33 });
     const lv = levels(p);
-    // en cours au plus clair, à venir pâles
-    expect(lv.hi[0].trim()).toBe('◎ à pied');
-    expect(lv.pale[0].replace(/\s+/g, ' ').trim()).toBe('─ ○ bus 6 ─ ○ IC');
-    expect(lv.hi[1]).toBe('À pied vers l’arrêt du bus 6');
-    expect(lv.pale[4]).toBe('arrivée 08:54');
+    // le prochain geste au plus clair ; dans la chaîne, l'étape en cours au plus clair, à venir pâles
+    expect(lv.norm[0]).toBe('Jusqu’au bureau');
+    expect(lv.hi[1]).toBe('Ensuite : bus 6 à 07:12');
+    expect(lv.hi[4].trim()).toBe('◎ à pied');
+    expect(lv.pale[4].replace(/\s+/g, ' ').trim()).toBe('─ ○ bus 6 ─ ○ IC');
+    expect(lv.pale[5]).toBe('arrivée 08:54');
   });
 
-  it('à pied : vers la voie d’un train, vers la gare, vers la destination ; sans distance ; très juste', () => {
+  it('à pied : vers la voie d’un train, vers la gare, vers la destination ; sans distance ; jamais de marge', () => {
     const w = (walk: Partial<NonNullable<WhereAmI['walk']>>, phase: GuideState['phase'] = { kind: 'walk', leg: 2 }) =>
       shown(null, 'where', { phase, where: { ...WHERE, walk: { ...WHERE.walk!, ...walk } } }).lines;
-    expect(w({ toKind: 'platform', toward: N('Liège-Guillemins'), vehicle: IC, depAt: T(7, 30), marginMin: 6 }).slice(1, 4)).toEqual(['À pied vers la voie 3', '260 m, 4 min', 'IC à 07:30, marge 6 min']);
-    expect(w({ toKind: 'station', toward: N('Namur'), vehicle: IC })[1]).toBe('À pied vers la gare de Namur');
-    expect(w({ toKind: 'dest', toward: N('Bureau'), vehicle: undefined, depAt: undefined, remainingM: 480, remainingMin: 6 }, { kind: 'walk', leg: 4 }).slice(1)).toEqual(['À pied vers le bureau', '480 m, 6 min', 'arrivée 08:54', HINT]);
-    expect(w({ remainingM: undefined, marginMin: 0 }).slice(2, 4)).toEqual(['4 min', 'bus 6 à 07:12, très juste']);
+    // correspondance en gare : la voie une seule fois, « À pied vers la voie 3 »
+    expect(w({ toKind: 'platform', toward: N('Liège-Guillemins'), vehicle: IC, depAt: T(7, 30), marginMin: 6 }).slice(1, 4)).toEqual(['Ensuite : IC à 07:30', 'À pied vers la voie 3', '260 m, 4 min']);
+    // vers une gare : la voie avec le train
+    expect(w({ toKind: 'station', toward: N('Namur'), vehicle: IC }).slice(1, 3)).toEqual(['Ensuite : IC à 07:12, voie 3', 'À pied vers la gare de Namur']);
+    // dernière marche : « Ensuite : arrivée … » ; la destination dite une fois (« Jusqu’au bureau »)
+    expect(w({ toKind: 'dest', toward: N('Bureau'), vehicle: undefined, depAt: undefined, remainingM: 480, remainingMin: 6 }, { kind: 'walk', leg: 4 })).toEqual(['Jusqu’au bureau', 'Ensuite : arrivée 08:54', 'À pied, 480 m, 6 min', '◎ à pied ─ ○ bus 6 ─ ○ IC', HINT]);
+    expect(w({ remainingM: undefined, marginMin: 0 }).slice(1, 4)).toEqual(['Ensuite : bus 6 à 07:12', 'À pied vers l’arrêt Monument Gramme', '4 min']);
   });
 
-  it('à l’arrêt : « À l’arrêt Monument Gramme », « bus 6 dans 1 min, vers Gare des Guillemins » ; gare : « À la gare de Namur », « voie 3 »', () => {
+  it('à l’arrêt : « Ensuite : bus 6 à 07:01 » (l’heure), « À l’arrêt Monument Gramme », pâle « vers Gare des Guillemins » ; gare : « À la gare de Namur », la voie avec le train', () => {
     const wait = (p: Partial<NonNullable<WhereAmI['wait']>>) =>
       shown(null, 'where', { phase: { kind: 'wait', leg: 1 }, where: { ...WHERE, walk: undefined, wait: { stop: N('Monument Gramme'), vehicle: BUS6, head: N('Gare des Guillemins'), depAt: NOW + 60_000, rt: true, ...p } } });
     const bus = wait({});
-    expect(bus.lines.slice(1)).toEqual(['À l’arrêt Monument Gramme', 'bus 6 dans 1 min, vers Gare des Guillemins', 'arrivée 08:54', HINT]);
-    expect(levels(bus.p).hi[1]).toBe('À l’arrêt Monument Gramme');
+    expect(bus.lines).toEqual(['Jusqu’au bureau', 'Ensuite : bus 6 à 07:01', 'À l’arrêt Monument Gramme', 'vers Gare des Guillemins', '◎ à pied ─ ○ bus 6 ─ ○ IC', 'arrivée 08:54', HINT]);
+    expect(levels(bus.p).hi[1]).toBe('Ensuite : bus 6 à 07:01');
+    expect(levels(bus.p).norm[2]).toBe('À l’arrêt Monument Gramme');
+    expect(levels(bus.p).pale[3]).toBe('vers Gare des Guillemins');
     const train = wait({ stop: N('Namur'), vehicle: IC, head: N('Bruxelles-Midi'), depAt: T(7, 30), platform: '3' });
-    expect(train.lines.slice(1)).toEqual(['À la gare de Namur', 'IC à 07:30, vers Bruxelles-Midi', 'voie 3', 'arrivée 08:54', HINT]);
-    expect(wait({ stop: N('Namur'), vehicle: IC, head: N('Bruxelles-Midi'), depAt: T(7, 30), platform: '6', platformChanged: true }).lines[3]).toBe('voie 6 !');
+    expect(train.lines.slice(1, 4)).toEqual(['Ensuite : IC à 07:30, voie 3', 'À la gare de Namur', 'vers Bruxelles-Midi']);
+    expect(wait({ stop: N('Namur'), vehicle: IC, head: N('Bruxelles-Midi'), depAt: T(7, 30), platform: '6', platformChanged: true }).lines[1]).toBe('Ensuite : IC à 07:30, voie 6 !');
   });
 
-  it('à bord : progression et « descente dans 3 arrêts » pâle, « Prochain arrêt : …, 07:16 », pâles la descente et l’arrivée (genre trip)', () => {
+  it('à bord : « Ensuite : descente à …, 07:20 », la progression, « Prochain arrêt : …, 07:16 », la chaîne, l’arrivée (genre trip)', () => {
     const ride: NonNullable<WhereAmI['ride']> = { vehicle: BUS6, head: N('Gare des Guillemins'), total: 6, next: 2, nextStop: N('Place Général Leman'), nextAt: T(7, 16), alight: N('Gare des Guillemins'), alightAt: T(7, 20), stopsToAlight: 3, rt: true };
-    const on = (kind: GuideState['kind']) =>
-      shown(null, 'where', { kind, phase: { kind: 'ride', leg: 1, next: 2 }, where: { ...WHERE, chain: [{ label: 'à pied', state: 'done' }, { label: 'bus 6', state: 'now' }, { label: 'IC', state: 'next' }], walk: undefined, ride } });
+    const chain: WhereAmI['chain'] = [{ label: 'à pied', state: 'done' }, { label: 'bus 6', state: 'now' }, { label: 'IC', state: 'next' }];
+    const on = (kind: GuideState['kind'], title = 'Bureau') => shown(null, 'where', { kind, phase: { kind: 'ride', leg: 1, next: 2 }, where: { ...WHERE, title, chain, walk: undefined, ride } });
     const trip = on('trip');
-    expect(trip.lines).toEqual(['● à pied ─ ◎ bus 6 ─ ○ IC', '●─●─◎─○─○─○ descente dans 3 arrêts', 'Prochain arrêt : Place Général Leman, 07:16', 'descente : Gare des Guillemins, 07:20', 'arrivée 08:54', HINT]);
+    expect(trip.lines).toEqual(['Jusqu’au bureau', 'Ensuite : descente à Gare des Guillemins, 07:20', '●─●─◎─○─○─○ descente dans 3 arrêts', 'Prochain arrêt : Place Général Leman, 07:16', '● à pied ─ ◎ bus 6 ─ ○ IC', 'arrivée 08:54', HINT]);
     const lv = levels(trip.p);
-    expect(lv.norm[0].trim()).toBe('● à pied');
-    expect(lv.norm[1].trim()).toBe('●─●─◎─○─○─○');
-    expect(lv.pale[1].trim()).toBe('descente dans 3 arrêts');
-    expect(lv.hi[2]).toBe('Prochain arrêt : Place Général Leman, 07:16');
-    expect(lv.pale.slice(3, 5)).toEqual(['descente : Gare des Guillemins, 07:20', 'arrivée 08:54']);
-    // genre ride : pas d'arrivée du trajet
-    expect(on('ride').lines.slice(-2)).toEqual(['descente : Gare des Guillemins, 07:20', HINT]);
-    // contrôle usager du 15/11 : le prochain arrêt est la descente : son nom une seule fois
-    const last = shown(null, 'where', { kind: 'trip', phase: { kind: 'ride', leg: 1, next: 5 }, where: { ...WHERE, chain: [{ label: 'à pied', state: 'done' }, { label: 'bus 6', state: 'now' }, { label: 'IC', state: 'next' }], walk: undefined, ride: { ...ride, next: 5, nextStop: N('Gare des Guillemins'), nextAt: T(7, 20), stopsToAlight: 1 } } });
-    expect(last.lines.slice(-4)).toEqual(['Prochain arrêt : Gare des Guillemins, 07:20', 'c’est ta descente', 'arrivée 08:54', HINT]);
-    expect(levels(last.p).pale).toContain('c’est ta descente');
+    expect(lv.hi[1]).toBe('Ensuite : descente à Gare des Guillemins, 07:20');
+    expect(lv.norm[2].trim()).toBe('●─●─◎─○─○─○');
+    expect(lv.pale[2].trim()).toBe('descente dans 3 arrêts');
+    expect(lv.norm[3]).toBe('Prochain arrêt : Place Général Leman, 07:16');
+    expect(lv.norm[4].trim()).toBe('● à pied');
+    expect(lv.pale[5]).toBe('arrivée 08:54');
+    // genre ride (« j'y descends ») : « Jusqu’à … », la descente sans répéter son nom, « Quai te dit quand descendre » ;
+    // ni chaîne ni arrivée (la descente est l'arrivée)
+    expect(on('ride', 'Vers Gare des Guillemins').lines).toEqual(['Jusqu’à Gare des Guillemins', 'Ensuite : descente à 07:20', '●─●─◎─○─○─○ descente dans 3 arrêts', 'Prochain arrêt : Place Général Leman, 07:16', 'Quai te dit quand descendre', HINT]);
+    // le prochain arrêt est la descente : son nom une seule fois (contrôle usager du 15/11), la progression le dit
+    const last = shown(null, 'where', { kind: 'trip', phase: { kind: 'ride', leg: 1, next: 5 }, where: { ...WHERE, chain, walk: undefined, ride: { ...ride, next: 5, nextStop: N('Gare des Guillemins'), nextAt: T(7, 20), stopsToAlight: 1 } } });
+    expect(last.lines).toEqual(['Jusqu’au bureau', 'Ensuite : descente à Gare des Guillemins, 07:20', '●─●─●─●─●─◎ descente au prochain arrêt', '● à pied ─ ◎ bus 6 ─ ○ IC', 'arrivée 08:54', HINT]);
   });
 
   it('chaîne trop longue : « … » au milieu, à la place des étapes les plus loin de celle en cours', () => {
@@ -409,14 +430,14 @@ describe('PRD § 3.3 : « Où tu en es »', () => {
     const row = chainRow(chain, GUIDE.FULL_W);
     const { lines } = shown(null, 'where', { where: { ...WHERE, chain } });
     // la première, celle en cours et la dernière restent ; « … » à la place des autres, de part et d'autre
-    expect(lines[0]).toBe('● à pied ─ … ─ ◎ bus SNCB ─ … ─ ○ bus 162a4');
+    expect(chainLine(lines)).toBe('● à pied ─ … ─ ◎ bus SNCB ─ … ─ ○ bus 162a4');
     expect(Math.max(textWidth(row.a), textWidth(row.b ?? ''), textWidth(row.c ?? ''))).toBeLessThanOrEqual(GUIDE.FULL_W);
     // un trajet ordinaire (marche, bus, train, bus) tient en entier
     const four: WhereAmI['chain'] = [{ label: 'à pied', state: 'done' }, { label: 'bus 6', state: 'now' }, { label: 'IC', state: 'next' }, { label: 'bus 71', state: 'next' }];
-    expect(shown(null, 'where', { where: { ...WHERE, chain: four } }).lines[0]).toBe('● à pied ─ ◎ bus 6 ─ ○ IC ─ ○ bus 71');
+    expect(chainLine(shown(null, 'where', { where: { ...WHERE, chain: four } }).lines)).toBe('● à pied ─ ◎ bus 6 ─ ○ IC ─ ○ bus 71');
     // cinq étapes, la plus loin de celle en cours tombe la première
     const five: WhereAmI['chain'] = [...four.slice(0, 2), { label: 'bus SNCB', state: 'next' }, { label: 'métro 2', state: 'next' }, { label: 'tram 3', state: 'next' }, { label: 'bus 163b4', state: 'next' }, { label: 'bus 162a4', state: 'next' }];
-    const l5 = shown(null, 'where', { where: { ...WHERE, chain: five } }).lines[0];
+    const l5 = chainLine(shown(null, 'where', { where: { ...WHERE, chain: five } }).lines);
     expect(l5).toMatch(/^● à pied ─ ◎ bus 6 ─ ○ bus SNCB ─ .*… ─ ○ bus 162a4$/);
   });
 });
@@ -532,12 +553,14 @@ describe('PRD § 9.4 : chaque texte au pixel, avec les noms les plus longs des v
     for (const name of Object.values(LONG)) {
       const ride: NonNullable<WhereAmI['ride']> = { vehicle: LONG_BUS, head: N(name), total: 40, next: 12, nextStop: N(name), nextAt: T(7, 16), alight: N(name), alightAt: T(7, 20), stopsToAlight: 27, rt: false };
       const r = shown(null, 'where', { phase: { kind: 'ride', leg: 1, next: 12 }, where: { ...WHERE, title: name, walk: undefined, ride, rt: false } }).lines;
-      expect(r[2]).toMatch(/^Prochain arrêt : .*, ~07:16$/);
-      expect(r[3]).toMatch(/^descente : .*, ~07:20$/);
+      // 1.3.1 (§ 12) : la descente dans « Ensuite », l'arrêt suivant, la progression (jamais effacée)
+      expect(r.find((l) => l.startsWith('Ensuite'))).toMatch(/^Ensuite : descente à .*, ~07:20$/);
+      expect(r.find((l) => l.startsWith('Prochain arrêt'))).toMatch(/^Prochain arrêt : .*, ~07:16$/);
+      expect(r.some((l) => /descente dans 27 arrêts$/.test(l))).toBe(true);
       const wt = shown(null, 'where', { phase: { kind: 'wait', leg: 1 }, where: { ...WHERE, walk: undefined, wait: { stop: N(name), vehicle: LONG_BUS, head: N(name), depAt: T(7, 30), rt: true } } }).lines;
-      expect(wt[2]).toMatch(/^bus 163b4 à 07:30, vers /);
+      expect(wt.slice(1, 3)).toEqual(['Ensuite : bus 163b4 à 07:30', expect.stringMatching(/^À l’arrêt /)]);
       const wk = shown(null, 'where', { where: { ...WHERE, title: name, walk: { ...WHERE.walk!, toward: N(name), toKind: 'station', remainingM: 1490 } } }).lines;
-      expect(wk[2]).toBe('1,5 km, 4 min');
+      expect(wk).toContain('1,5 km, 4 min');
       checkWords([...r, ...wt, ...wk], [name, `vers ${name}`]);
     }
   });

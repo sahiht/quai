@@ -123,7 +123,7 @@ describe('contrôleur en mode web', () => {
     await settle();
     expect(last().screen).toBe('favorites');
     const idx = last().lines.findIndex((l) => l.startsWith('Autre adresse'));
-    expect(last().lines[idx]).toBe('Autre adresse   dans Réglages');
+    expect(last().lines[idx]).toBe('Autre adresse   dans l’onglet Réglages');
     for (let i = 0; i < idx; i++) c.onGesture('down');
     await settle();
     c.onGesture('tap');

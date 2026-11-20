@@ -186,6 +186,10 @@ export const viewsModule = {
       ...(images ? { images } : {}),
     };
   },
+  /** 1.3.1 (§ 12) : titre de « j'y descends », « Jusqu’à … » au lieu de « Vers … » (la règle du vrai guideTitleText, en court). */
+  guideTitleText(title: string, kind: 'trip' | 'ride'): string {
+    return kind === 'ride' ? title.replace(/^Vers\s+/, 'Jusqu’à ') : title;
+  },
   menuView(items: MenuItem[], ctx: ViewCtx): GlassesView {
     return { screen: 'menu', layout: 'menu', title: 'Guidage', clock: hhmm(ctx.now), items: items.map((i) => ({ a: i.label })), hints: '△▽ choisir   toucher : choisir   double : retour' };
   },

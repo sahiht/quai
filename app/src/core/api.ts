@@ -116,6 +116,12 @@ export interface Settings {
   onboarded: boolean;
   lang: NameLang;
   maxWalkMin: number;           // 5..20 : préférence (PRD-1.2 § 1.2), plus un mur
+  /**
+   * 1.3.1 (PRD-1.3.1 § 14, R4) : « Éviter les escaliers » : le chemin à pied du guidage évite les marches (escaliers et
+   * escaliers mécaniques) quand un chemin sans marches existe, sinon le chemin habituel. Seul `true` est enregistré ;
+   * absent : éteint.
+   */
+  avoidSteps?: boolean;
   favorites: Favorite[];        // 32 au plus, dans l'ordre choisi sur le téléphone ; 1.2.2 : lieux et trajets
   stations: StationPick[];      // 1.2.2 : 32 au plus, dans l'ordre choisi sur le téléphone
   lines: LinePick[];            // 1.2.2 : 32 au plus, dans l'ordre choisi sur le téléphone
@@ -152,6 +158,11 @@ export interface Settings {
      * utilisé : rappels à l'heure.
      */
     headUp?: { axis: 'x' | 'y' | 'z'; sign: 1 | -1; delta: number; rest?: number };
+    /**
+     * 1.3.1 (PRD-1.3.1 § 14, R5) : « Plein soleil » : les niveaux pâles des lunettes montent d'un cran (glasses/layout.ts,
+     * sunLevel), le curseur et la ligne d'action restent au plus clair. Seul `true` est enregistré ; absent : éteint.
+     */
+    sun?: boolean;
   };
   alerts: {
     platform: boolean;
@@ -193,7 +204,7 @@ export interface Departure {
   stopSeq?: number;
   stopId?: string;
   msg?: string;                 // message de l'opérateur (STIB)
-  last?: boolean;               // dernier passage annoncé de la ligne à cet arrêt (STIB « Dernier passage »)
+  last?: boolean;               // dernier passage de la ligne dans ce sens à cet arrêt (STIB « Dernier passage » ; 1.3.1 : aussi d'après l'horaire, core/boards.ts)
 }
 
 export interface Board {
@@ -309,7 +320,7 @@ export interface Leg {
   fromStop?: string; toStop?: string;     // 1.1 : identifiants temps réel des arrêts physiques de montée et de descente
   platform?: string; newPlatform?: string;
   rt?: boolean; delayMin?: number; cancelled?: boolean;
-  last?: boolean;                         // dernier passage annoncé de la ligne (STIB « Dernier passage »)
+  last?: boolean;                         // dernier passage de la ligne dans ce sens (STIB « Dernier passage » ; 1.3.1 : aussi d'après l'horaire, core/journeys.ts markLast)
   stops?: Stopover[];                     // de la montée à la descente comprises (« Dans le train » ; 1.1 : aussi bus, tram, métro)
   rain?: boolean;                         // 1.2.5 : pluie prévue pendant cette marche (Open-Meteo, grille fixe du relais)
   rtKept?: boolean;                       // 1.2.5 : retard gardé de la mémoire du temps réel (relais muet, 15 min au plus)
@@ -463,8 +474,10 @@ export interface Core {
   /**
    * 1.2.10 : chemin à pied calculé sur le téléphone (graphe piéton OpenStreetMap, tuiles data/walk/). null : impossible
    * (données absentes) ; le chemin droit (`source: 'straight'`) quand les extrémités ne s'accrochent à aucune voie.
+   * 1.3.1 (R4) : `opts.avoidSteps` (réglage « Éviter les escaliers ») : un chemin sans marches s'il en existe un, sinon
+   * le chemin habituel (core/walk/router.ts).
    */
-  walkRoute?(from: LatLon, to: LatLon): Promise<WalkRoute | null>;
+  walkRoute?(from: LatLon, to: LatLon, opts?: { avoidSteps?: boolean }): Promise<WalkRoute | null>;
   /**
    * 1.2.10 : chemins à pied publiés (data/walk/index.json), pour la carte « Chemins à pied » de l'écran Données :
    * `date` = date des données OpenStreetMap (AAAA-MM-JJ), `tiles` = nombre de tuiles. null : pas de chemins à pied

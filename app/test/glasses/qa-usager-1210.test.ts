@@ -65,20 +65,23 @@ function cutAtWord(shown: string, full: string): boolean {
 describe('PRD-1.2.10 § 1, principe 7 : un titre trop long est coupé au mot, jamais au milieu d’un mot', () => {
   const ctx = { now: at('07:10'), settings: settingsWith([]) };
 
-  it('titre du guidage « j’y descends » (« Vers » et l’arrêt touché)', () => {
+  it('titre du guidage « j’y descends » (1.3.1, PRD-1.3.1 § 12 : « Jusqu’à » et l’arrêt touché ; « Où tu en es » : sa 1re ligne)', () => {
     const j = prdTrip();
     for (const name of LONG) {
       const title = `Vers ${name}`;
+      const until = `Jusqu’à ${name}`;
       const st: GuideState = {
         kind: 'ride', journeyId: j.id, phase: { kind: 'wait', leg: 1 }, location: 'off', wakeAt: Infinity, ended: false,
         moment: { kind: 'alight', id: 'a', since: 0, until: 1, leg: 1, stop: { fr: name, nl: name }, at: at('07:20'), rt: true, then: { kind: 'none' } },
         where: { title, arr: at('08:54'), rt: true, chain: [] },
       };
       const p = layoutPage(guideView(st, 'moment', j, ctx), { sel: -1, top: 0 });
-      expect(textWidth(p.title)).toBeLessThan(textWidth(title));
-      expect(cutAtWord(p.title, title), `« ${p.title} »`).toBe(true);
-      const title2 = layoutPage(guideView(st, 'where', j, ctx), { sel: -1, top: 0 }).title;
-      expect(cutAtWord(title2, title), `« ${title2} »`).toBe(true);
+      expect(textWidth(p.title)).toBeLessThan(textWidth(until));
+      expect(cutAtWord(p.title, until), `« ${p.title} »`).toBe(true);
+      // « Où tu en es » : titre « Guidage en cours », la destination juste dessous, coupée au mot
+      const w = layoutPage(guideView(st, 'where', j, ctx), { sel: -1, top: 0 });
+      expect(nb(w.title)).toBe('Guidage en cours');
+      expect(cutAtWord(w.lines[0], until), `« ${w.lines[0]} »`).toBe(true);
     }
   });
 

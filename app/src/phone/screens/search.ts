@@ -9,6 +9,7 @@
 import type { Endpoint, Favorite, FavoriteTrip, Journey, Leg, Mode, PlanResult, Settings } from '../../core/api';
 import { placeOf, placesOf } from '../../core/favorites';
 import { LIMITS, newId } from '../../settings';
+import { apos } from '../../core/typo';
 import { displayName, distanceM, hhmm, mainMode } from '../../core/util';
 import type { AreaSummary, Op } from '../../../../shared/types';
 import type { AreaRef } from '../../glasses/types';
@@ -37,6 +38,16 @@ export function toEndpoint(e: End): Endpoint {
 }
 
 const areaOf = (a: Pick<AreaSummary, 'id' | 'op' | 'n' | 'lat' | 'lon' | 'modes'>): AreaRef & { modes: Mode[] } => ({ areaId: a.id, op: a.op, name: a.n, lat: a.lat, lon: a.lon, modes: a.modes });
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 7) : texte affiché d'une extrémité : une gare, un arrêt, « Ma position, … » ou un lieu gardé en
+ * favori (son nom vient souvent d'une gare) avec l'apostrophe typographique ; le libellé gardé (End.label) ne change
+ * pas ; une adresse aussi (décision du 20/11 : « ’ » partout à l'affichage). Rien : ''.
+ */
+export function shownLabel(e: End | null): string {
+  if (!e) return '';
+  return apos(e.label);
+}
 
 /** Choix du champ unique → extrémité de la recherche. */
 export function endOf(c: FieldChoice): End {
@@ -105,7 +116,8 @@ export function rideDetail(j: Journey, lang: 'fr' | 'nl' | 'local'): string {
   const first = rides(j)[0];
   if (!first) return 'À pied, sans transport';
   const p = first.newPlatform || first.platform;
-  const where = displayName(first.from.name, lang);
+  // 1.3.1 (§ 7) : apostrophe typographique, à l'affichage seulement
+  const where = apos(displayName(first.from.name, lang));
   const delay = first.delayMin ?? 0;
   const status = first.cancelled ? 'supprimé' : delay > 0 ? `retard de ${delay} min annoncé` : first.rt ? 'à l’heure' : 'horaire prévu, sans temps réel';
   if (first.mode === 'train' && p) return `Voie ${p} à ${where}, ${status}`;
@@ -193,7 +205,8 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
       const near = await (await ctx.core()).nearby(fix.lat, fix.lon, 300, { light: true });
       const st = near.find((n) => mainMode(n.area.modes) === 'train') ?? near[0];
       if (st && from?.kind === 'here') {
-        from.label = `Ma position, ${displayName(st.area.n, lang())}`;
+        // « Ma position, … » ne sert qu'à l'affichage (1.3.1, § 7 : apostrophe typographique)
+        from.label = `Ma position, ${apos(displayName(st.area.n, lang()))}`;
         if (document.activeElement !== depField.input && depField.picked()) depField.show(from.label);
       }
     } catch {
@@ -204,8 +217,8 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
   const swap = h('button', { type: 'button', class: 'swap', 'aria-label': 'Inverser départ et arrivée', html: ICON.swap });
   swap.addEventListener('click', () => {
     [from, to] = [to, from];
-    depField.show(from?.label ?? '');
-    arrField.show(to?.label ?? '');
+    depField.show(shownLabel(from));
+    arrField.show(shownLabel(to));
     if (!from) depField.search('');
     void run();
   });
@@ -268,7 +281,8 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
   function card(j: Journey, i: number, r: PlanResult): HTMLElement {
     const now = ctx.clock.now();
     const label = cardTitle(j, r);
-    const means = meansLine(j);
+    // 1.3.1 (PRD-1.3.1 § 4) : la marche nomme l'arrêt où monter, dans la langue des noms
+    const means = meansLine(j, lang());
     const phrase = cardPhrase(j, r, ctx.settings.get().maxWalkMin);
     const radio = h(
       'div',
@@ -294,7 +308,7 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
       paintBelow();
       return;
     }
-    const fromName = from.kind === 'here' ? from.label.replace(/^Ma position, /, '') : from.label;
+    const fromName = from.kind === 'here' ? shownLabel(from).replace(/^Ma position, /, '') : shownLabel(from);
     const t = after ?? ctx.clock.now();
     // Jour férié (§ 5) : sous l'heure de la recherche, au-dessus des résultats, quand un trajet proposé part ce jour-là.
     const holiday = busy || failure ? '' : holidayLine(result);
@@ -305,7 +319,7 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
         h(
           'div',
           { class: 'res-title' },
-          h('h2', null, `${fromName} → ${to.label}`),
+          h('h2', null, `${fromName} → ${shownLabel(to)}`),
           h('span', { class: 'small muted' }, after ? `départs dès ${hhmm(t)}` : `dès ${hhmm(t)}`),
           holiday ? h('span', { class: 'small muted holiday' }, holiday) : null,
         ),
@@ -347,7 +361,7 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
             onclick: () => {
               const op = st.areaId.split(':')[0] as Op;
               to = { kind: 'area', area: { areaId: st.areaId, op, name: st.name, lat: st.lat, lon: st.lon, modes: ['train'] }, label: displayName(st.name, lang()) };
-              arrField.show(to.label);
+              arrField.show(shownLabel(to));
               void run();
             },
           }, empty.button),
@@ -405,8 +419,8 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
       };
       to = await resolve(vers);
       if (de) from = await resolve(de);
-      depField.show(from?.label ?? '');
-      arrField.show(to.label);
+      depField.show(shownLabel(from));
+      arrField.show(shownLabel(to));
       await hereLabel();
       await run();
     } catch (e) {

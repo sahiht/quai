@@ -27,7 +27,8 @@ describe('PRD-1.2.5 § 6 : reprise sans attendre la position', () => {
   it('état gardé : l’écran revient tout de suite ; la position arrivée ensuite remplace la gardée', async () => {
     const a = await setupController();
     await a.until((s) => s.screen === 'home' && s.lines.some((l) => l.startsWith('Bureau')));
-    await a.gesture('tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi », « Favoris », puis le premier favori (le bureau)
+    await a.gesture('down', 'down', 'tap');
     await a.until(stepsReady);
     const snap = a.c.snapshot();
     expect(snap.here).toMatchObject({ lat: 50.4655, lon: 4.859 });
@@ -65,7 +66,8 @@ describe('PRD-1.2.5 § 6 : reprise sans attendre la position', () => {
   it('état gardé dont la position a plus de 2 min : on attend la nouvelle (5 s au plus), comme sans état gardé', async () => {
     const a = await setupController();
     await a.until((s) => s.screen === 'home' && s.lines.some((l) => l.startsWith('Bureau')));
-    await a.gesture('tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi », « Favoris », puis le premier favori (le bureau)
+    await a.gesture('down', 'down', 'tap');
     await a.until(stepsReady);
     // position gardée prise 11 min avant l'instantané (l'horloge de l'instantané revient avec lui)
     const snap = { ...a.c.snapshot(), here: { lat: 50.4655, lon: 4.859, accuracy: 5, at: at(7, 20), source: 'mock' } };
@@ -145,7 +147,8 @@ describe('PRD-1.2.5 § 1 : « Si tu le rates » sur des trajets de repli à jour
       const seen: string[] = [];
       const b = await setupController({ now, wrap: spying(seen) });
       await b.until((s) => s.screen === 'home' && s.lines.some((l) => l.startsWith('Bureau')));
-      await b.gesture('tap');
+      // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi », « Favoris », puis le premier favori (le bureau)
+      await b.gesture('down', 'down', 'tap');
       await b.until(stepsReady);
       seen.length = 0;
       await b.c.refreshCurrent();

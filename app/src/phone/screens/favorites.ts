@@ -7,6 +7,7 @@
  * message dessous ; pas pendant « Changer l’ordre ».
  */
 import type { Favorite, FavoritePlace, FavoriteTrip } from '../../core/api';
+import { apos } from '../../core/typo';
 import { LIMITS } from '../../settings';
 import { header, type PhoneCtx } from '../app';
 import { h, icon, ICON, liveRegion, svgNode } from '../dom';
@@ -20,10 +21,14 @@ import { moveById } from './picks';
 export type ShownFavorite = FavoritePlace | FavoriteTrip;
 export const shownFavorites = (list: readonly Favorite[]): ShownFavorite[] => list.filter((f): f is ShownFavorite => f.kind !== 'stop');
 
-/** Titre d'un favori dans la liste : « Bureau », « Bruxelles-Central → Gand-Saint-Pierre ». */
+/**
+ * Titre d'un favori dans la liste : « Bureau », « Bruxelles-Central → Gand-Saint-Pierre ». 1.3.1 (§ 7) : le nom d'un lieu
+ * (souvent celui d'une gare gardée en favori) avec l'apostrophe typographique, comme sur l'accueil et dans les lunettes ;
+ * le nom enregistré ne change pas.
+ */
 export function favoriteRowTitle(f: ShownFavorite, ctx: Pick<PhoneCtx, 'settings'>): string {
   const s = ctx.settings.get();
-  if (f.kind === 'place') return f.label;
+  if (f.kind === 'place') return apos(f.label);
   return `${endpointText(f.from, s)} → ${endpointText(f.to, s)}`;
 }
 
@@ -123,7 +128,7 @@ export function favoritesScreen(ctx: PhoneCtx): HTMLElement {
         'section',
         { class: 'box pad', 'aria-labelledby': 'recents' },
         h('h2', { id: 'recents' }, T.recentTitle),
-        h('ul', { class: 'plain' }, s.recent.map((r) => h('li', { class: 'small' }, r.label))),
+        h('ul', { class: 'plain' }, s.recent.map((r) => h('li', { class: 'small' }, apos(r.label)))),
         h('button', {
           type: 'button',
           class: 'btn btn-secondary btn-block',

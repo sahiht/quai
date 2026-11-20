@@ -46,10 +46,10 @@ beforeEach(() => views.reset());
 afterEach(() => cleanupKit());
 
 describe('vrai moteur : de l’heure de partir au premier virage', () => {
-  it('position moyenne 10 min avant de partir, chemin demandé ; « Partir maintenant » à 07:05, effacé d’un toucher ; ligne « Maintenant » du téléphone', async () => {
+  it('position moyenne 10 min avant de partir, chemin demandé ; « Partir maintenant » à l’heure du vrai chemin (06:59), effacé d’un toucher ; ligne « Maintenant » du téléphone', async () => {
     const asks: [LatLon, LatLon][] = [];
     const h = await launched({
-      now: at('07:00'),
+      now: at('06:55'),
       walkRoute: async (from, to) => {
         asks.push([from, to]);
         return firstWalkRoute();
@@ -60,10 +60,15 @@ describe('vrai moteur : de l’heure de partir au premier virage', () => {
     expect(asks).toHaveLength(1);
     expect(asks[0][1]).toEqual({ lat: P.gramme.lat, lon: P.gramme.lon });
     expect(h.c.followed!.guide!.walk).toMatchObject({ leg: 0, journeyId: 'jprd', route: { source: 'osm' } });
-    expect(h.c.guideStatus()).toMatchObject({ kind: 'trip', title: 'Bureau', now: 'partir à 07:05', guided: true });
+    // 1.3.1 (R4, vrai chemin de la première marche) : le chemin rendu par le cœur mesure 803 m, 11 min pour 5 min
+    // prévues : l'heure de partir avance de 6 min (06:59 au lieu de 07:05), sur la carte « En cours » aussi
+    expect(h.c.guideStatus()).toMatchObject({ kind: 'trip', title: 'Bureau', now: 'partir à 06:59', guided: true, then: true });
     expect(h.last()).toMatchObject({ screen: 'guide', show: 'where' });
-    // 07:05 : « Partir maintenant »
-    await h.settle(5 * MIN + 1_000);
+    // pas avant 06:59
+    await h.settle(3 * MIN);
+    expect(h.screens().some((s) => s.show === 'moment')).toBe(false);
+    // 06:59 : « Partir maintenant »
+    await h.settle(MIN + 1_000);
     expect(shown(h)).toBe('leave');
     const id = h.last().moment;
     // 1.3.1 (A7) : masqué d'un toucher, affiché depuis au moins 1,5 s

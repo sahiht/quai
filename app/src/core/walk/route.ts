@@ -53,6 +53,8 @@ export function snapPoint(g: RoutingGraph, latU: number, lonU: number, maxM = SN
   let any: Snap | null = null;
   let giant: Snap | null = null;
   const dLat = maxM / M_PER_U;
+  // 1.3.1 (R4) : graphe sans marches (graph.ts, withoutSteps) : ses tronçons écartés ne sont pas des accroches
+  const skip = g.skip ?? 0;
   for (let ti = 0; ti < g.tiles.length; ti++) {
     const tg = g.tiles[ti];
     const t = tg.t;
@@ -61,6 +63,7 @@ export function snapPoint(g: RoutingGraph, latU: number, lonU: number, maxM = SN
     const bb = tg.bbox;
     const ne = t.edgeFrom.length;
     for (let k = 0; k < ne; k++) {
+      if (t.edgeFlags[k] & skip) continue;
       if (latU < bb[4 * k] - dLat || latU > bb[4 * k + 1] + dLat || lonU < bb[4 * k + 2] - dLon || lonU > bb[4 * k + 3] + dLon) continue;
       const e = g.edgeBase[ti] + k;
       const comp = t.edgeComp[k];

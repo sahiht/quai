@@ -14,6 +14,7 @@
 import { getAdvW, getTextWidth } from '@evenrealities/pretext';
 import { LINE_H, SCREEN_H, SCREEN_W } from '../glasses/font';
 import { describeImage, renderImage } from '../glasses/images';
+import { CURSOR } from '../glasses/layout';
 import { pageImages } from '../platform/page';
 import type { GlassesPort } from '../platform/types';
 import type { Brightness, ContainerSpec, ImageSpec } from '../glasses/types';
@@ -86,8 +87,15 @@ export function describeContainers(cs: readonly ContainerSpec[], images: readonl
     const mixed = wa.length > 0 && wb.length > 0 && Math.min(...xs(wb)) < Math.max(...xs(wa)) && Math.max(...xs(wb)) > Math.min(...xs(wa));
     const cols = mixed ? [[...wa, ...wb].sort((p, q) => p.x - q.x).map((w) => w.t).join(' '), c[i]] : [a[i], b[i], c[i]];
     const row = cols.map((x) => clean(x ?? '')).filter(Boolean).join(', ');
-    if (row) lines.push({ y: rowsY + i * LINE_H, t: cursor[i]?.trim() ? `sélection : ${row}` : row });
+    if (row) lines.push({ y: rowsY + i * LINE_H, t: cursor[i]?.trim() === CURSOR ? `sélection : ${row}` : row });
   }
+  // 1.3.1 (PRD-1.3.1 § 6) : arrêts d'un départ, le conteneur du curseur porte aussi la ligne d'action, sous la liste : un
+  // texte à lui, lu à sa place (entre la note et les aides), jamais comme une sélection (contrôle qualité 1.3.1)
+  const cursorY = box('cursor')?.y ?? rowsY;
+  cursor.forEach((t, i) => {
+    const own = clean(t);
+    if (own && own !== CURSOR) lines.push({ y: cursorY + i * LINE_H, t: own });
+  });
   const footY = box('foot')?.y ?? SCREEN_H;
   by('foot').forEach((t, k) => lines.push({ y: footY + k * LINE_H, t: clean(t) }));
   // tri stable : à hauteur égale, la liste d'abord

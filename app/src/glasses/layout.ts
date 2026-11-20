@@ -521,6 +521,28 @@ export function withOptionalTail(text: string, tail: string | undefined, maxPx: 
 export interface LayoutOptions {
   /** Message temporaire affiché dans la ligne d'aides (ex. « ★ Ajouté aux favoris »). */
   toast?: string;
+  /** 1.3.1 (PRD-1.3.1 § 14, R5) : réglage « Plein soleil » (Settings.display.sun) : niveaux de SUN_LEVEL. */
+  sun?: boolean;
+}
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 14, R5) : « Plein soleil », le seul point de réglage de la luminosité : chaque niveau pâle monte
+ * d'un cran, jusqu'au niveau 3 au plus ; le niveau 4 reste seul au plus clair. Le curseur et la ligne d'action (au
+ * niveau 4, dans la colonne a ou dans le conteneur du curseur) restent donc distincts de tout le reste, d'un cran au
+ * moins (3 contre 4, au lieu de 2 contre 4 pour le texte pâle). Les plateformes rendent ces niveaux tels quels
+ * (textColor du SDK, opacité de Quai Web).
+ */
+export const SUN_LEVEL: Readonly<Record<Brightness, Brightness>> = { 0: 1, 1: 2, 2: 3, 3: 3, 4: 4 };
+
+/** Niveau d'un conteneur, « Plein soleil » allumé ou non. */
+export function sunLevel(level: Brightness, sun: boolean): Brightness {
+  return sun ? SUN_LEVEL[level] : level;
+}
+
+/** Page en « Plein soleil » : niveaux des conteneurs et de leurs bordures (filet) ; images et menu inchangés. */
+export function inSun(p: PageSpec): PageSpec {
+  p.containers = p.containers.map((c) => ({ ...c, level: sunLevel(c.level, true), ...(c.border ? { border: { ...c.border, level: sunLevel(c.border.level, true) } } : {}) }));
+  return p;
 }
 
 /**
@@ -603,6 +625,7 @@ function segRowBright(segs: Seg[], indentPx: number, right: string | undefined, 
 
 /** Construit la page complète. `frame` = sélection et défilement courants. */
 export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {}): PageSpec {
+  if (opts.sun) return inSun(layoutPage(v, frame, { ...opts, sun: false }));
   if (v.layout === 'guide') return layoutGuide(v, opts);
   const def = LAYOUTS[v.layout];
   const message = v.layout === 'message';
@@ -761,7 +784,14 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   // (pâle), son texte est dans le conteneur de la colonne a, prolongé jusqu'à elle (plus bas). 1.3.1 (PRD-1.3.1 § 6) :
   // celle de la rangée du curseur (cursorAction), vide sur une rangée qui n'en a pas
   const actionSrc = v.cursorAction ? (message || scroll ? '' : (items[sel]?.actionText ?? '')) : (v.action ?? '');
-  const actionText = g.actionLine ? truncateWordsPx(actionSrc, X_END - X_TEXT - GEO.SAFETY) : '';
+  // 1.3.1 (PRD-1.3.1 § 6) : un gabarit dont la colonne a n'est pas au plus clair (arrêts d'un départ : l'heure, niveau 3)
+  // porte la ligne d'action dans le conteneur du curseur, son texte 1 px après la marge (espaces de 5 px) : coupé 1 px
+  // plus court, il garde à droite la marge de sécurité de tout texte des lunettes (contrôle qualité 1.3.1)
+  const actionInA = g.actionLine && def.a.level === 4;
+  const actionInCursor = g.actionLine && !actionInA;
+  const actionPad = actionInCursor ? ' '.repeat(Math.ceil((X_TEXT - GEO.X_CURSOR) / SPACE_W)) : '';
+  const actionX = actionInCursor ? GEO.X_CURSOR + textWidth(actionPad) : X_TEXT;
+  const actionText = g.actionLine ? truncateWordsPx(actionSrc, X_END - actionX - GEO.SAFETY) : '';
   if (g.actionLine) foot.push('');
   const hintText = opts.toast ? truncateWordsPx(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? truncateWordsPx(v.hints, X_END - X_TEXT - GEO.SAFETY) : '';
   if (g.hintLine) foot.push(hintText);
@@ -799,12 +829,10 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
   // porte la ligne d'action dans le conteneur du curseur (au plus clair), élargi jusqu'au bord et prolongé de même ; son
   // texte commence à la marge du texte (5 espaces : 1 px plus loin, jamais avant)
   const footRows = (rows: string[], last: string): string[] => [...rows, ...new Array<string>(Math.max(0, g.capacity - rows.length)).fill(''), ...(g.noteLine ? [''] : []), last];
-  const actionInA = g.actionLine && def.a.level === 4;
-  const actionInCursor = g.actionLine && !actionInA;
   const aRows = actionInA ? footRows(colA, actionText) : colA;
   const footH = ((g.noteLine ? 1 : 0) + 1) * LINE_H;
   const aH = rowsH + (actionInA ? footH : 0);
-  const cursorRows = actionInCursor ? footRows(cursor, actionText ? `${' '.repeat(Math.ceil((X_TEXT - GEO.X_CURSOR) / SPACE_W))}${actionText}` : '') : cursor;
+  const cursorRows = actionInCursor ? footRows(cursor, actionText ? `${actionPad}${actionText}` : '') : cursor;
   const filetY = Math.round((g.rowsY + rowsH + g.footY) / 2);
   const topC: BorderedContainer = filet
     ? { ...C(IDS.top, 'top', X_TEXT, filetY, X_END - X_TEXT, FOOT_MIN_H, '', 2), border: { width: 1, level: 2 } }
@@ -910,8 +938,11 @@ function layoutGuide(v: GlassesView, opts: LayoutOptions): PageSpec {
     // journal : la rangée telle qu'elle se lit (un seul texte, ou la chaîne composée des trois)
     lines.push(guideRowLog(a, b, c));
   }
-  const hintText = opts.toast ? truncateWordsPx(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? truncateWordsPx(v.hints, X_END - X_TEXT - GEO.SAFETY) : '';
-  if (hintText) lines.push(hintText);
+  // 1.3.1 (PRD-1.3.1 § 1, B9) : le pied de l'écran calme (« · · · », la progression) est centré par la vue, avec des
+  // espaces de tête mesurées : elles restent (le journal les omet)
+  const footLead = !opts.toast && v.hints ? (/^[ \u00a0]*/.exec(v.hints)?.[0] ?? '') : '';
+  const hintText = opts.toast ? truncateWordsPx(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? footLead + truncateWordsPx(v.hints.slice(footLead.length), X_END - X_TEXT - GEO.SAFETY - textWidth(footLead)) : '';
+  if (hintText) lines.push(hintText.trim());
   // titre du trajet guidé (« Vers … » d'un « j'y descends ») coupé au mot, jamais au milieu d'un mot
   const title = v.title ? truncateWordsPx(v.title, TITLE_W - GEO.SAFETY) : '';
   const C = (id: number, name: string, cx: number, y: number, cw: number, h: number, content: string, level: Brightness): ContainerSpec => ({

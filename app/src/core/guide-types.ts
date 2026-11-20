@@ -254,6 +254,11 @@ export interface WhereAmI {
     crowM?: number;
     /** 1.3.1 (B13, U6) : heure prévue du train visé, en retard d'au moins 1 min */
     sched?: number;
+    /**
+     * 1.3.1 (R4) : avant de partir, l'heure de partir quand le moteur l'a avancée (le vrai chemin de la première marche
+     * est plus long que la marche prévue) : « Ensuite : partir à 07:12 » ; absente : celle du trajet (Journey.leaveAt)
+     */
+    leaveAt?: number;
   };
   wait?: {
     stop: Names;

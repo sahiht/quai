@@ -45,7 +45,8 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
   it('titre « Favoris » ; une ligne par favori comme l’accueil ; 1.3.0 : plus de ligne du détail en bas (accordéon, PRD-1.3.0 § 7)', async () => {
     const h = await setup({ now: NOW, settings: settingsWith(FAVS, { seenVersion: '1.3.0' }), core: (now) => stubCore(now, { answers }) });
     await h.until((x) => x.screen === 'home' && x.shown?.length === 2);
-    await h.gesture('up', 'tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi » (curseur à l'ouverture), « Favoris » juste dessous
+    await h.gesture('down', 'tap');
     const s = await h.until(listReady);
     expect(s.title).toBe('Favoris');
     expect(s.order).toEqual(['fav-bureau', 'fav-ecole', 'fav-maison']);
@@ -90,7 +91,8 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
     const plan = (now: number) => [door('j-r', now + 9 * MIN, now + 80 * MIN)];
     const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0', recent: RECENT }), core: (now) => stubCore(now, { answers, plan }) });
     await h.until((x) => x.screen === 'home' && x.shown?.length === 1);
-    await h.gesture('up', 'tap');
+    // 1.3.1 (§ 8) : de « Autour de moi », « Favoris » juste dessous
+    await h.gesture('down', 'tap');
     await h.until(listReady);
     // du favori vers la 1re adresse : la ligne pâle est sautée, elle reste visible au-dessus ; 1.3.0 : l'adresse complète
     // dans l'accordéon (PRD-1.3.0 § 7), plus en bas
@@ -121,7 +123,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
     h.c.stop();
   });
 
-  it('sur place : « tu y es » ; sans position : « sans position » ; Quai Web : « dans Réglages » et #/recherche', async () => {
+  it('sur place : « tu y es » ; sans position : « sans position » ; Quai Web : « dans l’onglet Réglages » (1.3.1, L8) et #/recherche', async () => {
     expect(planHomeText({ journeys: [], empty: 'here' }, NOW)).toBe('tu y es');
     expect(planHomeText({ journeys: [], empty: 'noPosition' }, NOW)).toBe('sans position');
     expect(planHomeText({ journeys: [], empty: 'noTrip' }, NOW)).toBe('aucun trajet');
@@ -133,7 +135,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
     await h.c.replaceRoute({ screen: 'favorites' });
     const s = await h.until((x) => listReady(x) && x.lines.some((l) => l.startsWith('Rue Neuve 1')));
     // 1.3.0 (PRD-1.3.0 § 7) : le curseur est sur « Bureau » : son accordéon ouvert dessous, puis les adresses récentes
-    expect(s.lines.slice(1, 6)).toEqual(['à pied 5 min → Arrêt', 'bus W 07:40, direct', 'ADRESSES RÉCENTES', 'Rue Neuve 1   tu y es', 'Autre adresse   dans Réglages']);
+    expect(s.lines.slice(1, 6)).toEqual(['à pied 5 min → Arrêt', 'bus W 07:40, direct', 'ADRESSES RÉCENTES', 'Rue Neuve 1   tu y es', 'Autre adresse   dans l’onglet Réglages']);
     await h.gesture('down', 'down', 'tap');
     expect(opened).toEqual(['#/recherche']);
     h.c.stop();
@@ -142,8 +144,9 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
   it('sans favori : « Ajouter un favori » en premier ; toucher : comment en ajouter (REVUE-USAGE n° 2)', async () => {
     const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0' }), core: (now) => stubCore(now) });
     const home = await h.until((x) => x.screen === 'home' && x.lines.includes('Autour de moi   9 arrêts'));
-    expect(home.lines.slice(0, 2)).toEqual(['Près de Arrêt 1', 'Ajouter un favori']);
-    await h.gesture('tap');
+    // 1.3.1 (§ 8) : « Autour de moi » en tête, « Ajouter un favori » juste dessous
+    expect(home.lines.slice(0, 3)).toEqual(['Près de Arrêt 1', 'Autour de moi   9 arrêts', 'Ajouter un favori']);
+    await h.gesture('down', 'tap');
     const s = await h.until(listReady);
     expect(s.lines.slice(0, 2)).toEqual(['Ajouter un favori   sur le téléphone', 'Autre adresse   sur le téléphone']);
     await h.gesture('tap');
@@ -151,7 +154,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
     h.c.stop();
     // Quai Web : « Nouveau favori » dans l'onglet Réglages
     const v = favoritesView({}, { now: NOW, settings: settingsWith([]), web: true });
-    expect(v.items[0]).toMatchObject({ a: 'Ajouter un favori', c: 'dans Réglages', action: { kind: 'phone', hash: '#/favoris/nouveau' } });
+    expect(v.items[0]).toMatchObject({ a: 'Ajouter un favori', c: 'dans l’onglet Réglages', action: { kind: 'phone', hash: '#/favoris/nouveau' } });
   });
 
   it('« Aller à… » n’existe plus : ni sur l’accueil, ni comme écran ; un état de la 1.2.1 sur « Aller à… » ouvre « Favoris »', async () => {

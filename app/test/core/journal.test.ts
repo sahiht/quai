@@ -565,7 +565,8 @@ describe('texte à copier', () => {
       '08:02:10 Partir maintenant affiché',
       '08:02:55 Partir maintenant renvoyé (rappel 1)',
       '08:03:10 Partir maintenant vu (tête levée)',
-      '08:03:20 Partir maintenant effacé d’un toucher',
+      // 1.3.1 (PRD-1.3.1 § 2, L2) : « masqué », comme l'aide des lunettes
+      '08:03:20 Partir maintenant masqué d’un toucher',
       `08:05:00 Positions${NB}: 58 reçues, précision médiane 12,5${NB}m, plus long trou 3${NB}min 20${NB}s`,
       '08:07:00 Quai quitté sur les lunettes',
       '08:07:30 Quai revenu au premier plan des lunettes',
@@ -608,9 +609,9 @@ describe('texte à copier', () => {
     const lines = j.text(id).split('\n').slice(2);
     expect(lines).toEqual([
       ...Object.values(JOURNAL_MOMENT_WORDS).map((w, i) => `08:00:${String(i + 1).padStart(2, '0')} ${w} affiché`),
-      // 1.3.1 : le rang suit le nombre de moments (walk ajouté)
-      `08:00:${String(Object.keys(JOURNAL_MOMENT_WORDS).length + 1).padStart(2, '0')} nouveau affiché`,
-      `08:00:${String(Object.keys(JOURNAL_MOMENT_WORDS).length + 2).padStart(2, '0')} constructor affiché`,
+      // 1.3.1 : un mot de plus (« À pied », B17) ; les sortes inconnues suivent
+      `08:00:${String(names.length - 1).padStart(2, '0')} nouveau affiché`,
+      `08:00:${String(names.length).padStart(2, '0')} constructor affiché`,
       '08:01:00 Message affiché',
     ]);
   });

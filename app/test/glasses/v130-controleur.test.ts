@@ -77,7 +77,8 @@ describe('§ 2 : ▲ sur la première rangée de « Autres trajets »', () => {
     const plan = (now: number) => [longTrip('j1', now + 5 * MIN), door('j2', now + 9 * MIN, now + 80 * MIN), door('j3', now + 20 * MIN, now + 95 * MIN)];
     const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { plan } });
     await k.until((s) => s.screen === 'home' && s.lines.some((l) => nb(l).startsWith('Bureau')));
-    await k.gesture('tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi », « Favoris », puis le favori
+    await k.gesture('down', 'down', 'tap');
     await k.until((s) => s.screen === 'steps' && s.page === 1);
     // ▼ jusqu'au bout des étapes, puis « Autres trajets »
     let end = k.last();
@@ -442,7 +443,8 @@ describe('§ 6.1 : le test de l’écran et le guidage ne vont jamais ensemble ;
   it('pendant un guidage, le test ne démarre pas (« guiding ») et le capteur n’est pas touché', async () => {
     const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { plan } });
     await k.until((s) => s.screen === 'home' && s.lines.some((l) => nb(l).startsWith('Bureau')));
-    await k.gesture('tap');
+    // 1.3.1 (§ 8) : de « Autour de moi », « Favoris », puis le favori
+    await k.gesture('down', 'down', 'tap');
     await k.until((s) => s.screen === 'steps' && s.page === 1);
     await k.gesture('tap');
     expect(k.c.followed?.guide).toBeDefined();
@@ -576,7 +578,8 @@ describe('§ 1 : le toucher de l’écran du trajet fait ce que dit sa ligne d�
   const plan = (now: number) => [door('j1', now + 4 * MIN, now + 70 * MIN), door('j2', now + 9 * MIN, now + 80 * MIN)];
   const open = async (k: Awaited<ReturnType<typeof kit>>) => {
     await k.until((s) => s.screen === 'home' && s.lines.some((l) => nb(l).startsWith('Bureau')));
-    await k.gesture('tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi », « Favoris », puis le favori
+    await k.gesture('down', 'down', 'tap');
     return k.until((s) => s.screen === 'steps' && s.page === 1);
   };
 

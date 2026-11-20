@@ -17,6 +17,7 @@
  */
 import type { AreaSummary, LatLon, LineMatch, LinePick, Mode, Names, Op, SearchItem, StationPick } from '../../core/api';
 import { lineKey } from '../../core/linepicks';
+import { apos } from '../../core/typo';
 import { displayName, distanceM, kindLabel, mainMode } from '../../core/util';
 import { LIMITS } from '../../settings';
 import { normalizeForSearch } from '../../../../shared/names';
@@ -29,6 +30,9 @@ import { isFollowed, type LineFollow } from '../../core/linerun';
 import { OP_NAME } from '../../core/util';
 import { messageHub } from '../ui';
 import { linesAtStop, trainIcon, withLine, withStation, type Pickable, type PickKind } from './picks';
+
+/** 1.3.1 (PRD-1.3.1 § 7) : un nom des données tel qu'il s'affiche, avec l'apostrophe typographique (les choix gardent le nom). */
+const shownName = (n: Parameters<typeof displayName>[0], lang: Parameters<typeof displayName>[1]): string => apos(displayName(n, lang));
 
 /** Gares proposées sans texte : à moins de 2 km de la position (3 × 3 tuiles autour d'elle, recherche légère). */
 export const NEAR_STATIONS_M = 2000;
@@ -188,7 +192,7 @@ function stationPanel(ctx: PhoneCtx, opts: AddPanelOpts): HTMLElement {
     return toggleRow({
       ctx,
       icon: trainIcon(),
-      t1: displayName(c.name, ctx.settings.get().lang),
+      t1: shownName(c.name, ctx.settings.get().lang),
       t2: c.distanceM !== undefined ? typo(distanceText(c.distanceM)) : undefined,
       done: 'Ajoutée',
       on: taken,
@@ -212,7 +216,7 @@ function stationPanel(ctx: PhoneCtx, opts: AddPanelOpts): HTMLElement {
       ...shown.map((c) => {
         const taken = s.stations.some((x) => x.areaId === c.areaId);
         const meta = taken ? T.stationTaken : c.distanceM !== undefined ? typo(distanceText(c.distanceM)) : undefined;
-        return option({ icon: icon('train'), label: displayName(c.name, s.lang), meta, verb: 'Ajouter', onPick: () => void pick(c) });
+        return option({ icon: icon('train'), label: shownName(c.name, s.lang), meta, verb: 'Ajouter', onPick: () => void pick(c) });
       }),
     );
     list.hidden = !shown.length;
@@ -266,7 +270,7 @@ function stationPanel(ctx: PhoneCtx, opts: AddPanelOpts): HTMLElement {
   };
 
   async function pick(c: StationChoice): Promise<void> {
-    const name = displayName(c.name, ctx.settings.get().lang);
+    const name = shownName(c.name, ctx.settings.get().lang);
     const r = withStation(ctx.settings.get(), c, ctx.clock.now());
     if (r === 'exists') return hub.say(msg, T.stationExists);
     if (r === 'full') return hub.say(msg, typo(stationLimitText(LIMITS.stations)), true);
@@ -430,7 +434,7 @@ function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
     else if ((ctx.settings.get().follows ?? []).length >= LIMITS.lines) hub.say(msg2, typo(lineLimitText(LIMITS.lines)), true);
     else {
       await ctx.settings.update((x) => ({ ...x, follows: [...(x.follows ?? []), followOf(m, ctx.clock.now())] }));
-      hub.say(msg2, typo(lineAddedText(name, m.ends.map((e) => displayName(e, lang())).join(' ↔ '))));
+      hub.say(msg2, typo(lineAddedText(name, m.ends.map((e) => shownName(e, lang())).join(' ↔ '))));
     }
     after.hidden = false;
     again.focus();
@@ -465,7 +469,7 @@ function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
     void presetP.then((p) => {
       preset = p;
       if (!p.lines.length) return;
-      const where = p.area ? displayName(p.area.n, lang()) : '';
+      const where = p.area ? shownName(p.area.n, lang()) : '';
       quick.replaceChildren(
         h('p', { class: 'small' }, typo(stopLinesText(where))),
         h(
@@ -493,7 +497,7 @@ function linePanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
   const followed = (m: LineMatch): boolean => followsOf(ctx.settings.get()).some((f) => isFollowed(f, m));
   const nearRow = (m: LineMatch): HTMLLIElement => {
     const s = ctx.settings.get();
-    const ends = m.ends.map((e) => displayName(e, s.lang)).join(' ↔ ');
+    const ends = m.ends.map((e) => shownName(e, s.lang)).join(' ↔ ');
     const dist = m.nearest ? ` · ${distanceText(m.nearest.distanceM)}` : '';
     return toggleRow({
       ctx,
@@ -573,7 +577,7 @@ function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
     return toggleRow({
       ctx,
       icon: modeIcon(mainMode(c.modes)),
-      t1: displayName(c.name, ctx.settings.get().lang),
+      t1: shownName(c.name, ctx.settings.get().lang),
       t2: typo(c.distanceM !== undefined ? `${c.kind} · ${distanceText(c.distanceM)}` : c.kind),
       extra,
       done: 'Ajouté',
@@ -603,7 +607,7 @@ function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
         void linesAtStop(ctx, c.areaId).then((ls) => {
           if (ls.length) extra.replaceWith(badgeRow(ctx, c.op, ls));
         });
-        return option({ icon: modeIcon(mainMode(c.modes)), label: displayName(c.name, s.lang), sub: c.kind, meta, verb: 'Ajouter', extra, onPick: () => void pick(c) });
+        return option({ icon: modeIcon(mainMode(c.modes)), label: shownName(c.name, s.lang), sub: c.kind, meta, verb: 'Ajouter', extra, onPick: () => void pick(c) });
       }),
     );
     list.hidden = !shown.length;
@@ -662,7 +666,7 @@ function stopPanel(ctx: PhoneCtx, arret: string | null, presetP: Promise<Preset>
   };
 
   async function pick(c: StopChoice): Promise<void> {
-    const name = displayName(c.name, ctx.settings.get().lang);
+    const name = shownName(c.name, ctx.settings.get().lang);
     const stop = { areaId: c.areaId, op: c.op, name: c.name, lat: c.lat, lon: c.lon };
     const r = withLine(ctx.settings.get(), stop, ctx.clock.now());
     if (r === 'exists') return hub.say(msg, T.stopExists);

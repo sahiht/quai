@@ -3,6 +3,8 @@
  *
  * - walkProgress : où l'on en est sur un chemin à pied (projection de la position sur la polyligne, prochain virage) ;
  * - projectOn : projection d'un point sur une polyligne quelconque (chemin à pied, arrêts d'un véhicule) ;
+ * - projectAlong (1.3.1) : la même, prolongée avant le début du chemin (marche partie du mauvais côté) ;
+ * - pointAlong (1.3.1) : point à une distance donnée le long d'une polyligne ;
  * - turnsOf : virages annoncés d'un chemin (vrai chemin seulement, jamais « tout droit », aucun dans les 20 derniers m) ;
  * - bearingDeg, relativeDeg : cap d'un point à un autre, et direction par rapport au cap de la marche.
  */
@@ -64,6 +66,42 @@ export function projectOn(pts: readonly LatLon[], p: LatLon, cum: readonly numbe
   }
   const alongM = cum[best.seg] + best.t * (cum[best.seg + 1] - cum[best.seg]);
   return { alongM, offM: best.d, seg: best.seg, t: best.t, totalM };
+}
+
+/**
+ * 1.3.1 (A6, P3) : projection sur une polyligne prolongée avant son début : derrière le départ (dans le sens contraire
+ * du premier segment), `alongM` est négatif et `offM` se mesure au prolongement du premier segment ; ailleurs, comme
+ * projectOn. Sert à voir une marche partie du mauvais côté du chemin.
+ */
+export function projectAlong(pts: readonly LatLon[], p: LatLon, cum: readonly number[] = cumulative(pts)): { alongM: number; offM: number } {
+  const pr = projectOn(pts, p, cum);
+  if (pts.length < 2 || pr.seg !== 0 || pr.t > 0) return { alongM: pr.alongM, offM: pr.offM };
+  const kx = Math.cos(p.lat * RAD) * RAD * EARTH_M;
+  const ky = RAD * EARTH_M;
+  const ax = (pts[0].lon - p.lon) * kx;
+  const ay = (pts[0].lat - p.lat) * ky;
+  const dx = (pts[1].lon - p.lon) * kx - ax;
+  const dy = (pts[1].lat - p.lat) * ky - ay;
+  const len = Math.hypot(dx, dy);
+  if (!(len > 0)) return { alongM: pr.alongM, offM: pr.offM };
+  const s = -(ax * dx + ay * dy) / len;
+  if (s >= 0) return { alongM: pr.alongM, offM: pr.offM };
+  return { alongM: s, offM: Math.abs(ax * dy - ay * dx) / len };
+}
+
+/** 1.3.1 (A6) : point à `d` mètres du début d'une polyligne (distances cumulées `cum`), borné à ses deux bouts. */
+export function pointAlong(pts: readonly LatLon[], cum: readonly number[], d: number): LatLon {
+  const n = pts.length;
+  if (n === 0) return { lat: 0, lon: 0 };
+  if (n === 1 || d <= 0) return { lat: pts[0].lat, lon: pts[0].lon };
+  for (let i = 1; i < n; i++) {
+    if (cum[i] >= d) {
+      const span = cum[i] - cum[i - 1];
+      const f = span > 0 ? (d - cum[i - 1]) / span : 0;
+      return { lat: pts[i - 1].lat + f * (pts[i].lat - pts[i - 1].lat), lon: pts[i - 1].lon + f * (pts[i].lon - pts[i - 1].lon) };
+    }
+  }
+  return { lat: pts[n - 1].lat, lon: pts[n - 1].lon };
 }
 
 /** Points d'un chemin à pied (au moins le départ et l'arrivée). */

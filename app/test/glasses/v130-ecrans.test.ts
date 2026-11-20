@@ -147,6 +147,8 @@ const homeReady = (s: Screen) => s.screen === 'home' && !s.lines.some((l) => / �
 async function open(guide = true) {
   const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0', display: { ...settingsWith([]).display, guide } }), core: (now) => stubCore(now, { answers }) });
   await h.until(homeReady);
+  // 1.3.1 (PRD-1.3.1 § 8) : le curseur s'ouvre sur « Autour de moi » ; posé sur le favori (« Favoris », puis Bureau)
+  await h.gesture('down', 'down');
   return h;
 }
 
@@ -269,7 +271,8 @@ function shown(m: Moment | null, show: GuideShow = 'moment', s: Partial<GuideSta
   return { v, p, lines: p.lines.map(nb) };
 }
 const levels = (p: PageSpec) => ({ hi: rowsOf(container(p, 'colA')), norm: rowsOf(container(p, 'colB')), pale: rowsOf(container(p, 'colC')) });
-const GUIDE_HINT = 'toucher : effacer   appui long : arrêter';
+// 1.3.1 (PRD-1.3.1 § 2) : « masquer »
+const GUIDE_HINT = 'toucher : masquer   appui long : arrêter';
 
 describe('PRD-1.3.0 § 4 : hors de Belgique', () => {
   it('moment `offMap`, cap connu : « Hors de Belgique », « pas de chemin à pied : suis la flèche », pâle « 6 min jusqu’à l’arrêt … » ; la flèche', () => {
@@ -311,13 +314,14 @@ describe('PRD-1.3.0 § 4 : hors de Belgique', () => {
   it('« Où tu en es » à pied hors de Belgique : « À pied vers l’arrêt … », « 450 m à vol d’oiseau, 6 min », pâle « hors de Belgique, pas de chemin à pied »', () => {
     const w: WhereAmI = { ...WHERE, walk: { ...WHERE.walk!, offMap: true, crowM: 452, remainingM: undefined, bearingDeg: 30 } };
     const { p, lines } = shown(null, 'where', { where: w });
-    expect(lines).toEqual(['◎ à pied ─ ○ bus 45', 'À pied vers l’arrêt du bus 45', '450 m à vol d’oiseau, 6 min', 'hors de Belgique, pas de chemin à pied', 'bus 45 à 07:45, marge 8 min', 'arrivée 08:09', GUIDE_HINT]);
+    // 1.3.1 (PRD-1.3.1 § 4, § 12) : le nom de l'arrêt, « Ensuite : bus 45 à 07:45 », plus de marge
+    expect(lines).toEqual(['Jusqu’au bureau', 'Ensuite : bus 45 à 07:45', 'À pied vers l’arrêt Maastricht Station', '450 m à vol d’oiseau, 6 min', 'hors de Belgique, pas de chemin à pied', '◎ à pied ─ ○ bus 45', 'arrivée 08:09', GUIDE_HINT]);
     expect(levels(p).pale).toContain('hors de Belgique, pas de chemin à pied');
     // sans la distance à vol d'oiseau : celle du chemin droit, ou les minutes seules
-    expect(shown(null, 'where', { where: { ...w, walk: { ...w.walk!, crowM: undefined, remainingM: 455 } } }).lines[2]).toBe('460 m à vol d’oiseau, 6 min');
-    expect(shown(null, 'where', { where: { ...w, walk: { ...w.walk!, crowM: undefined } } }).lines[2]).toBe('6 min');
+    expect(shown(null, 'where', { where: { ...w, walk: { ...w.walk!, crowM: undefined, remainingM: 455 } } }).lines[3]).toBe('460 m à vol d’oiseau, 6 min');
+    expect(shown(null, 'where', { where: { ...w, walk: { ...w.walk!, crowM: undefined } } }).lines[3]).toBe('6 min');
     // en Belgique (pas `offMap`) : comme en 1.2.10
-    expect(shown(null, 'where').lines.slice(1, 3)).toEqual(['À pied vers l’arrêt du bus 45', '460 m, 6 min']);
+    expect(shown(null, 'where').lines.slice(2, 4)).toEqual(['À pied vers l’arrêt Maastricht Station', '460 m, 6 min']);
   });
 });
 
@@ -332,21 +336,21 @@ describe('PRD-1.3.0 § 6.3 : moment `check`', () => {
     expect(bat.v.images).toBeUndefined();
     expect(container(bat.p, 'colA').x).toBe(28);
     const pos = shown(check([{ kind: 'noPosition' }]));
-    expect(pos.lines).toEqual(['Pas de position : guidage à l’heure', 'Position « Toujours » pour l’appli Even, sur le téléphone', GUIDE_HINT]);
-    expect(levels(pos.p).hi[0]).toBe('Pas de position : guidage à l’heure');
+    expect(pos.lines).toEqual(['Pas de position : Quai suit l’horaire', 'Position « Toujours » pour l’appli Even, sur le téléphone', GUIDE_HINT]);
+    expect(levels(pos.p).hi[0]).toBe('Pas de position : Quai suit l’horaire');
     expect(levels(pos.p).pale[1]).toBe('Position « Toujours » pour l’appli Even, sur le téléphone');
     const lost = shown(check([{ kind: 'positionLost', minutes: 3 }]));
-    expect(lost.lines).toEqual(['Position perdue depuis 3 min', 'guidage à l’heure en attendant', GUIDE_HINT]);
-    expect(levels(lost.p).pale[1]).toBe('guidage à l’heure en attendant');
+    expect(lost.lines).toEqual(['Position perdue depuis 3 min', 'Quai suit l’horaire en attendant', GUIDE_HINT]);
+    expect(levels(lost.p).pale[1]).toBe('Quai suit l’horaire en attendant');
     const both = shown(check([{ kind: 'battery', level: 12 }, { kind: 'noPosition' }]));
-    expect(both.lines).toEqual(['Lunettes : 12 % de batterie', 'Pas de position : guidage à l’heure', 'Position « Toujours » pour l’appli Even, sur le téléphone', GUIDE_HINT]);
+    expect(both.lines).toEqual(['Lunettes : 12 % de batterie', 'Pas de position : Quai suit l’horaire', 'Position « Toujours » pour l’appli Even, sur le téléphone', GUIDE_HINT]);
     expect(both.v.log).toMatchObject({ moment: { kind: 'check', id: 'check:jx:start' } });
   });
 
   it('deux problèmes au plus (quatre rangées) ; checkLines garde sa forme (carte « En cours » du téléphone) ; au pixel', () => {
     const three: CheckIssue[] = [{ kind: 'battery', level: 9.6 }, { kind: 'positionLost', minutes: 3.2 }, { kind: 'noPosition' }];
     const v = shown(check(three));
-    expect(v.lines).toEqual(['Lunettes : 10 % de batterie', 'Position perdue depuis 3 min', 'guidage à l’heure en attendant', GUIDE_HINT]);
+    expect(v.lines).toEqual(['Lunettes : 10 % de batterie', 'Position perdue depuis 3 min', 'Quai suit l’horaire en attendant', GUIDE_HINT]);
     expect(v.v.items.length).toBeLessThanOrEqual(GUIDE.MAX_LINES);
     expect(checkLines(three).map(nb)).toEqual(['Lunettes : 10 % de batterie', 'Position perdue depuis 3 min']);
     expect(checkLines([{ kind: 'battery', level: 140 }]).map(nb)).toEqual(['Lunettes : 100 % de batterie']);

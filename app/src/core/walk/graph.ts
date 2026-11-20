@@ -108,6 +108,13 @@ export interface RoutingGraph {
     closed: Uint32Array;
     sid: number;
   };
+  /**
+   * 1.3.1 (R4) : attributs des tronçons écartés de ce graphe, ni accroche ni passage (seul le graphe sans marches de
+   * withoutSteps en a : F_STEPS) ; absent : aucun.
+   */
+  skip?: number;
+  /** 1.3.1 (R4) : le même graphe sans marches, gardé dès qu'il a servi (withoutSteps) */
+  noSteps?: RoutingGraph;
 }
 
 /** Fusionne des tuiles (au moins une). */
@@ -203,6 +210,29 @@ export function mergeTiles(tiles: TileGraph[]): RoutingGraph {
     y[v] = (latN[v] - refLat) * M_PER_U;
   }
   return { tiles, edgeBase, n, lat: latN, lon: lonN, x, y, refLat, refLon, kx, adjStart, adj, m, eFrom, eTo, eLen, eCost, eFlags, eComp, eTile, eLocal };
+}
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 14, R4, « Éviter les escaliers ») : le même graphe, marches interdites. Un tronçon marqué F_STEPS
+ * (escalier, et escalier mécanique : highway=steps dans OpenStreetMap, avec ou sans conveying, pipeline/src/walk/filter.ts)
+ * n'est ni une accroche (`skip`) ni un passage (coût infini : A* ne le prend jamais). Un ascenseur dessiné et relié dans
+ * OpenStreetMap est un nœud qui joint ses voies : un passage comme un autre. Tout le reste est partagé avec le graphe :
+ * seul le coût change, calculé une fois ; les tableaux de travail de A* sont communs (un calcul à la fois).
+ */
+export function withoutSteps(g: RoutingGraph): RoutingGraph {
+  if (g.noSteps) return g.noSteps;
+  const eCost = new Float64Array(g.m);
+  for (let e = 0; e < g.m; e++) eCost[e] = g.eFlags[e] & F_STEPS ? Infinity : g.eCost[e];
+  const v: RoutingGraph = { ...g, eCost, skip: F_STEPS };
+  Object.defineProperty(v, 'scratch', {
+    enumerable: true,
+    get: () => g.scratch,
+    set: (s: RoutingGraph['scratch']) => {
+      g.scratch = s;
+    },
+  });
+  g.noSteps = v;
+  return v;
 }
 
 /** Points d'un tronçon fusionné, du nœud from au nœud to compris (unités). */

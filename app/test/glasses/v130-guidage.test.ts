@@ -765,7 +765,8 @@ describe('PRD-1.3.0 § 6.3 : batterie des lunettes et vérification', () => {
     expect(h.last()).toMatchObject({ show: 'moment', moment: 'check:j-bureau' });
     // deux au plus
     await says(h, { issues: [{ kind: 'noPosition' }, { kind: 'battery', level: 12 }, { kind: 'positionLost', minutes: 3 }] });
-    expect(h.c.guideStatus()?.check).toEqual(['Pas de position : guidage à l’heure', 'Lunettes : 12 % de batterie']);
+    // 1.3.1 (L3) : « Quai suit l’horaire »
+    expect(h.c.guideStatus()?.check).toEqual(['Pas de position : Quai suit l’horaire', 'Lunettes : 12 % de batterie']);
     expect(seen.at(-1)?.check).toHaveLength(2);
     const before = seen.length;
     await says(h, {});

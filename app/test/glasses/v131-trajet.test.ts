@@ -6,11 +6,14 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Favorite, FavoriteAnswer, Journey, Leg } from '../../src/core/api';
+import { shortName } from '../../src/core/typo';
 import { textWidth } from '../../src/glasses/font';
 import { EXPAND_PX, favoriteDetail } from '../../src/glasses/format';
 import { layoutPage, WIDTHS } from '../../src/glasses/layout';
+import type { GlassesView, PageSpec } from '../../src/glasses/types';
 import { favoritesView, stepsPage, type FavoriteEntry, type ViewCtx } from '../../src/glasses/views';
-import { MIN, PLACES, at, container, journey, lines, nb, page, settingsWith } from './helpers';
+import { newTally, pageCuts, tally } from '../scan/cuts';
+import { MIN, PLACES, at, container, journey, lines, nb, overflowing, page, settingsWith } from './helpers';
 
 const DAY = '2026-11-20';
 const NOW = at(DAY, 16, 33);
@@ -215,5 +218,151 @@ describe('PRD-1.3.1 § 4 et § 7 : contrôle qualité de l’écran du trajet et
     }
     // le balayage passe bien par des noms coupés
     expect(cut).toBeGreaterThan(20);
+  });
+});
+
+/* ------------------------------ § 15 : le diminutif d'un nom trop long ------------------------------ */
+
+describe('PRD-1.3.1 § 15 : nom de l’arrêt où l’on marche : entier s’il tient, sinon son diminutif, sinon coupé au mot', () => {
+  /** Place du texte d'une marche de l'écran du trajet (WALK_ROW_PX de views.ts : 542 − 70 − 10 − 2). */
+  const WALK_PX = 460;
+  const bus = (stop: string) => ({ ride: '71', mode: 'bus' as const, dep: T(17, 5), arr: T(17, 20), from: stop, to: 'Gare Centrale' });
+  const walkTo = (stop: string, min = 7) => journey('s', [{ walk: min, to: stop }, bus(stop), { walk: 2 }]);
+  const CARREFOUR = 'Bruxelles-Central Carrefour de l’Europe';
+  const GRAINS = 'Sainte-Catherine Place du Vieux Marché aux Grains';
+  const EINSTEIN = 'Louvain-la-Neuve Université Parc Scientifique Einstein';
+  const SCHUMAN = 'Bruxelles-Schuman Rond-Point Robert Schuman';
+  const MONTGOMERY = 'Boulevard Saint-Michel Avenue de Tervueren Square Montgomery';
+
+  it('écran du trajet : le nom entier qui tient reste entier (jamais « Bxl-Central » quand « Bruxelles-Central » tient)', () => {
+    expect(textWidth('à pied 7 min → Bruxelles-Central')).toBeLessThanOrEqual(WALK_PX);
+    expect(rows(walkTo('Bruxelles-Central'))[0]).toBe('16:58 à pied 7 min → Bruxelles-Central');
+    expect(rows(rain(walkTo('Bruxelles-Central'), 0))[0]).toBe('16:58 à pied 7 min → Bruxelles-Central, pluie');
+    expect(rows(J)[2]).toBe('17:00 à pied 2 min → Bruxelles-Central');
+  });
+
+  it('écran du trajet : trop long de 13 px, le diminutif tient : « à pied 7 min → Bxl-Central Carrefour de l’Europe », sans « … »', () => {
+    expect(textWidth(`à pied 7 min → ${CARREFOUR}`)).toBe(473);
+    expect(textWidth('à pied 7 min → Bxl-Central Carrefour de l’Europe')).toBe(419);
+    const j = walkTo(CARREFOUR);
+    expect(rows(j)[0]).toBe('16:58 à pied 7 min → Bxl-Central Carrefour de l’Europe');
+    // au pixel : rien ne dépasse, et la mise en page montre exactement ce que la vue a écrit
+    const v = stepsPage(route, { journeys: [j], index: 0, fresh: true }, ctx());
+    expect(overflowing(layoutPage(v, { sel: 0, top: 0 }))).toEqual([]);
+    expect(nb(v.items[0].segs![1].t)).toBe('à pied 7 min → Bxl-Central Carrefour de l’Europe');
+    // le véhicule qui suit garde ses règles (son arrêt de descente n'est pas un arrêt où l'on marche)
+    expect(rows(j)[1]).toMatch(/^17:05 Bus 71 → Gare Centrale/);
+  });
+
+  it('écran du trajet : le diminutif ne tient pas non plus (« , pluie » compris) : la coupe au mot du nom entier, comme avant', () => {
+    // avec « , pluie », même le diminutif dépasse : nom entier coupé au mot, « , pluie » entier
+    expect(textWidth('à pied 7 min → Bxl-Central Carrefour de l’Europe, pluie')).toBeGreaterThan(WALK_PX);
+    expect(rows(rain(walkTo(CARREFOUR), 0))[0]).toBe('16:58 à pied 7 min → Bruxelles-Central Carrefour…, pluie');
+    // un diminutif lui-même trop long : jamais « Ste-… » coupé, le nom entier coupé au mot
+    expect(textWidth('à pied 7 min → Ste-Catherine Pl. du Vieux Marché aux Grains')).toBeGreaterThan(WALK_PX);
+    expect(rows(walkTo(GRAINS))[0]).toBe('16:58 à pied 7 min → Sainte-Catherine Place du Vieux…');
+  });
+
+  it('écran du trajet : un nom sans diminutif : coupé au mot, comme avant', () => {
+    const r = rows(walkTo(EINSTEIN))[0];
+    expect(r).toBe('16:58 à pied 7 min → Louvain-la-Neuve Université Parc…');
+    expect(textWidth(r.slice(6))).toBeLessThanOrEqual(WALK_PX);
+  });
+
+  it('accordéon d’un favori, 1re ligne : « à pied 7 min → … » et « depuis … » suivent la même règle', () => {
+    // le nom entier tient : inchangé
+    expect(texts(ok(PLACES.bureau, walkTo('Bruxelles-Central')))[0]).toBe('à pied 7 min → Bruxelles-Central');
+    expect(texts(ok(PLACES.bureau, walkTo(CARREFOUR)))[0]).toBe(`à pied 7 min → ${CARREFOUR}`);
+    // trop long, le diminutif tient
+    expect(textWidth(`à pied 7 min → ${SCHUMAN}`)).toBeGreaterThan(EXPAND_PX);
+    expect(texts(ok(PLACES.bureau, walkTo(SCHUMAN)))[0]).toBe('à pied 7 min → Bxl-Schuman Rond-Point Robert Schuman');
+    const there = journey('d', [bus(MONTGOMERY)]);
+    expect(textWidth(`depuis ${MONTGOMERY}`)).toBeGreaterThan(EXPAND_PX);
+    const from = texts(ok(PLACES.bureau, there))[0];
+    expect(from).toBe('depuis Bd St-Michel Av. de Tervueren Square Montgomery');
+    expect(textWidth(from)).toBeLessThanOrEqual(EXPAND_PX);
+    // sans diminutif, ou diminutif trop long : le nom entier coupé au mot
+    expect(texts(ok(PLACES.bureau, walkTo(EINSTEIN)))[0]).toBe('à pied 7 min → Louvain-la-Neuve Université Parc…');
+    const longer = `${GRAINS} Quai aux Briques`;
+    expect(textWidth(`à pied 7 min → ${shortName(longer)}`)).toBeGreaterThan(EXPAND_PX);
+    expect(texts(ok(PLACES.bureau, walkTo(longer)))[0]).toBe('à pied 7 min → Sainte-Catherine Place du Vieux Marché…');
+    // une gare hors de portée à pied (règle de la 1.3.0) n'est pas un arrêt où l'on marche : inchangée
+    const ic = journey('g', [{ ride: 'IC', mode: 'train', dep: T(17, 42), arr: T(18, 12), from: `${SCHUMAN} Quartier Européen Berlaymont`, to: 'Namur', platform: '4' }]);
+    expect(texts(ok(PLACES.bureau, ic, { fromStation: true }))[0]).toMatch(/^IC voie 4 à 17:42, à Bruxelles-Schuman .*…$/);
+  });
+
+  it('« Favoris » : la rangée ouverte avec un diminutif tient au pixel, telle que la vue l’a écrite', () => {
+    const entries: FavoriteEntry[] = [{ fav: PLACES.bureau, answer: ok(PLACES.bureau, walkTo(SCHUMAN)) }];
+    const v = favoritesView({ entries }, ctx());
+    const p = layoutPage(v, { sel: 0, top: 0 });
+    expect(overflowing(p)).toEqual([]);
+    expect(p.lines.map(nb)[1]).toBe('à pied 7 min → Bxl-Schuman Rond-Point Robert Schuman');
+  });
+
+  it('balayage au pixel des deux lignes : entier dès qu’il tient, diminutif seulement sinon, coupe au mot en dernier ; jamais recoupé', () => {
+    const seen = { full: 0, short: 0, cut: 0 };
+    /** Ce qui est attendu pour `head`, `name`, `tail` dans `max` px, sans passer par la fonction de l'appli. */
+    const kind = (head: string, name: string, tail: string, max: number): 'full' | 'short' | 'cut' =>
+      textWidth(`${head}${name}${tail}`) <= max ? 'full' : shortName(name) !== name && textWidth(`${head}${shortName(name)}${tail}`) <= max ? 'short' : 'cut';
+    const check = (said: string, head: string, name: string, tail: string, max: number, what: string): void => {
+      const k = kind(head, name, tail, max);
+      seen[k]++;
+      expect(textWidth(said), what).toBeLessThanOrEqual(max);
+      if (k === 'full') expect(said, what).toBe(`${head}${name}${tail}`);
+      else if (k === 'short') expect(said, what).toBe(`${head}${shortName(name)}${tail}`);
+      else {
+        // la coupe au mot du nom entier : ce qui précède « … » est un début du nom entier, fini à la fin d'un mot (ou
+        // après le trait d'union ou l'apostrophe d'un nom composé, règle des coupes de la 1.3.0)
+        expect(said.startsWith(head) && said.endsWith(`…${tail}`), `${what} : ${said}`).toBe(true);
+        const shown = said.slice(head.length, said.length - tail.length - 1);
+        expect(name.startsWith(shown), `${what} : ${said}`).toBe(true);
+        expect(name.charAt(shown.length) === ' ' || /[-’/]$/.test(shown), `${what} : ${said}`).toBe(true);
+      }
+    };
+    for (const base of [`${CARREFOUR} Gare Centrale Cantersteen`, `${SCHUMAN} Quartier Européen`, `${GRAINS} Quai aux Briques`, MONTGOMERY, `${EINSTEIN} Lauzelle`]) {
+      const words = base.split(' ');
+      for (let n = 1; n <= words.length; n++) {
+        const stop = words.slice(0, n).join(' ');
+        for (const min of [5, 7, 12, 29]) {
+          for (const wet of [false, true]) {
+            const j = wet ? rain(walkTo(stop, min), 0) : walkTo(stop, min);
+            const said = nb(stepsPage(route, { journeys: [j], index: 0, fresh: true }, ctx()).items[0].segs![1].t);
+            check(said, `à pied ${min} min → `, stop, wet ? ', pluie' : '', WALK_PX, `trajet, ${min} min, « ${stop} »`);
+            // la mise en page ne recoupe jamais ce que la vue a écrit
+            const row = rows(j)[0];
+            expect(row, stop).toBe(`${row.slice(0, 5)} ${said}`);
+          }
+          check(texts(ok(PLACES.bureau, walkTo(stop, min)))[0], `à pied ${min} min → `, stop, '', EXPAND_PX, `accordéon, ${min} min, « ${stop} »`);
+        }
+        check(texts(ok(PLACES.bureau, journey('d', [bus(stop)])))[0], 'depuis ', stop, '', EXPAND_PX, `accordéon, depuis « ${stop} »`);
+      }
+    }
+    // le balayage passe bien par les trois cas
+    expect(seen.full).toBeGreaterThan(50);
+    expect(seen.short).toBeGreaterThan(20);
+    expect(seen.cut).toBeGreaterThan(20);
+  });
+});
+
+describe('PRD-1.3.1 § 15 : l’outil des balayages (test/scan/cuts.ts) reconnaît le diminutif comme le nom', () => {
+  const FULL = 'Boulevard Saint-Michel Avenue de Tervueren Square Montgomery';
+  /** Une page dont la rangée montre `line`, pour une vue dont le texte entier est le nom des données. */
+  const cutsOf = (line: string) => {
+    const v = { layout: 'message', items: [{ a: '', b: FULL }] } as unknown as GlassesView;
+    const t = newTally();
+    tally(t, pageCuts(v, { lines: [line] } as unknown as PageSpec));
+    return t;
+  };
+
+  it('un diminutif coupé au mot est retrouvé (ni « introuvable », ni « au milieu d’un mot »)', () => {
+    expect(cutsOf('à pied 7 min → Bd St-Michel Av. de Tervueren…')).toMatchObject({ cut: 1, mid: 0, first: 0, unknown: 0 });
+    expect(cutsOf('à pied 7 min → Boulevard Saint-Michel Avenue…')).toMatchObject({ cut: 1, mid: 0, first: 0, unknown: 0 });
+  });
+
+  it('un diminutif coupé au milieu d’un mot est compté, comme le nom entier', () => {
+    expect(cutsOf('à pied 7 min → Bd St-Michel Av. de Terv…')).toMatchObject({ cut: 1, mid: 1, unknown: 0 });
+    expect(cutsOf('à pied 7 min → Boulevard Saint-Michel Aven…')).toMatchObject({ cut: 1, mid: 1, unknown: 0 });
+    // un texte qui n'est ni le nom ni son diminutif reste introuvable
+    expect(cutsOf('à pied 7 min → Blvd St-Michel…')).toMatchObject({ cut: 1, unknown: 1 });
   });
 });

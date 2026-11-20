@@ -7,7 +7,7 @@ import type { Departure, FavoriteAnswer, Journey, Leg, LineDeparture, NameLang, 
 import { meansText, rideName } from '../core/means';
 import { NB as CORE_NB, dayWord as coreDayWord, placeNoun, timeText, vers } from '../core/text';
 import { OP_NAME, displayName, hhmm, lineLabel, mainMode, minutesUntil } from '../core/util';
-import { apos } from '../core/typo';
+import { apos, shortName } from '../core/typo';
 import type { AreaSummary, Mode, Names, Op } from '../../../shared/types';
 import { frenchSpaces, textWidth, truncate } from './font';
 import { truncateWords, WIDTHS } from './layout';
@@ -43,8 +43,11 @@ export const HINTS = {
    * l'aide, la ligne d'action le dit au-dessus (« ▶ Me guider jusqu'à … », GUIDE_TO).
    */
   stopsGuide: `△▽ arrêts   double${NB}: retour`,
-  /** 1.2.10 (§ 3.2, § 3.3) : un moment du guidage ou « Où tu en es ». */
-  guide: `toucher${NB}: effacer   appui long${NB}: arrêter`,
+  /**
+   * 1.2.10 (§ 3.2, § 3.3) : un moment du guidage ou « Où tu en es ». 1.3.1 (PRD-1.3.1 § 2) : « masquer » : rien n'est
+   * effacé, l'écran est caché et le guidage continue.
+   */
+  guide: `toucher${NB}: masquer   appui long${NB}: arrêter`,
   /** 1.2.10 : « Tu y es ». */
   guideEnd: `toucher${NB}: terminer`,
   /** 1.2.10 (§ 3.4) : menu de l'appui long rendu par Quai (Quai Web). */
@@ -163,12 +166,15 @@ export const SECTION = {
   noPassage: 'aucun passage',
   /** Une ligne sans aucun passage (« Bus, tram, métro », détail d'une ligne). */
   noPassageAll: 'aucun passage dans les prochaines heures',
-  /** Arrêt d'une ligne choisie introuvable dans les données (§ 3, lineBoard `missing`) ; Quai Web : dans l'onglet Réglages. */
+  /**
+   * Arrêt d'une ligne choisie introuvable dans les données (§ 3, lineBoard `missing`) ; Quai Web : dans l'onglet
+   * Réglages (1.3.1, PRD-1.3.1 § 12, L8 : « Réglages » seul désigne aussi le bouton de cet onglet).
+   */
   missing: `introuvable${NB}: modifie-la sur le téléphone`,
-  missingWeb: `introuvable${NB}: modifie-la dans Réglages`,
+  missingWeb: `introuvable${NB}: modifie-la dans l’onglet Réglages`,
   /** 1.2.4 : sous « ARRÊTS », un arrêt (toutes ses lignes) introuvable. */
   missingStop: `introuvable${NB}: modifie-le sur le téléphone`,
-  missingStopWeb: `introuvable${NB}: modifie-le dans Réglages`,
+  missingStopWeb: `introuvable${NB}: modifie-le dans l’onglet Réglages`,
   /** Accueil, « Gares » : gare ou arrêt introuvable dans les données du jour (zone ni retrouvée ni déplacée). */
   missingStation: 'introuvable',
   /** Arrêt sans filtre (arrêt favori de la 1.2.1 migré) : « Gare du Nord · toutes les lignes ». */
@@ -779,7 +785,8 @@ export function favoriteDetail(a: FavoriteAnswer | undefined, now: number, setti
   // 1.3.1 (PRD-1.3.1 § 4) : la 1re ligne nomme l'arrêt où monter (« à pied 7 min → Flagey » ; trajet qui part de
   // l'arrêt : « depuis Flagey ») ; la 2e garde le premier véhicule et son heure (rideLine)
   const walk = walkBeforeRide(j);
-  const first = station ? fitName(walk > 0 ? `à pied ${minText(walk)} → ` : 'depuis ', station, '', maxPx) : walk > 0 ? fit(`à pied ${minText(walk)}`) : '';
+  // 1.3.1 (§ 15) : nom entier, sinon diminutif, sinon coupe au mot (fitStopName)
+  const first = station ? fitStopName(walk > 0 ? `à pied ${minText(walk)} → ` : 'depuis ', station, '', maxPx) : walk > 0 ? fit(`à pied ${minText(walk)}`) : '';
   // le texte tel que l'écran le dit (espace insécable devant « : » d'une alerte) : jamais recoupé par la mise en page
   const second = frenchSpaces(rideLine(j, r, time, plat, maxPx));
   return first ? [{ text: first }, mark(second)] : [mark(second)];
@@ -1120,6 +1127,24 @@ export function fitName(head: string, name: string, tail: string, maxPx: number)
     room = Math.min(room - 1, textWidth(n) - 1);
   }
   return truncateWords(full, maxPx);
+}
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 15, décision du propriétaire du 20/11 à 21:15) : le nom de l'arrêt ou de la gare où l'on marche,
+ * sur sa ligne (écran du trajet « 16:40  à pied 7 min → … », première ligne d'un favori ouvert « à pied 7 min → … » ou
+ * « depuis … »). Dans cet ordre : le nom entier s'il tient ; sinon son diminutif (shortName : « Bruxelles-Central » →
+ * « Bxl-Central ») s'il tient ; sinon la coupe au mot du nom entier (fitName, comme avant). Jamais de diminutif quand
+ * le nom entier tient. La seule place de cette règle pour les écrans.
+ */
+export function fitStopName(head: string, name: string, tail: string, maxPx: number): string {
+  const full = `${head}${name}${tail}`;
+  if (textWidth(full) <= maxPx) return full;
+  const short = shortName(name);
+  if (short !== name) {
+    const t = `${head}${short}${tail}`;
+    if (textWidth(t) <= maxPx) return t;
+  }
+  return fitName(head, name, tail, maxPx);
 }
 
 /**
