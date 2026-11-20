@@ -4,7 +4,8 @@
  * gares et des arrêts (comme le « Dernier passage » de la STIB), écran du trajet (« 23:12  IC voie 4 → Namur, dernier
  * 00:05 »). Pièges prouvés ici : variantes d'une ligne, voyages après minuit (jour de service), les deux jours publiés,
  * ligne sans départ le lendemain (fin de semaine), « Dernier passage » de la STIB (une seule marque), train en retard
- * qui passe après le dernier. « Si tu le rates » se tait quand rien ne repart. Rien de nouveau sur le réseau. Lieux
+ * qui passe après le dernier. « Si tu le rates » se tait quand rien ne repart. Écran du trajet : pas de marque quand un
+ * autre trajet déjà calculé part plus tard avant demain. Rien de nouveau sur le réseau. Lieux
  * publics seulement.
  */
 import { describe, expect, it } from 'vitest';
@@ -15,7 +16,7 @@ import { lastCover, lastLineKey, legLast, scheduleLast, tomorrowAt, trainLegLast
 import { markLast, type RefreshEnv } from '../../src/core/journeys';
 import { indexDay } from '../../src/core/trains';
 import { brusselsParts, gtfsTime, hhmm } from '../../src/core/util';
-import { boardView, missLine, stepsPage, type ViewCtx } from '../../src/glasses/views';
+import { boardView, laterJourney, missLine, stepsPage, type ViewCtx } from '../../src/glasses/views';
 import { journey, lines, PLACES, settingsWith } from '../glasses/helpers';
 import { FakeServer, makeEnv } from './support/env';
 
@@ -732,12 +733,81 @@ describe('R3 : écran du trajet et « Si tu le rates »', () => {
     ]);
     expect(missLine(j, [j, other], j.leaveAt, NOW)).toBeNull();
     expect(rows(j, [j, other])[0]).not.toMatch(/Si tu le rates/);
-    // un bus de nuit repart de la même gare plus tard : « Si tu le rates » donne son arrivée, l'IC reste le dernier train
+    // seul calculé : la marque du cœur reste ; avec cet autre trajet qui part plus tard, la personne peut encore partir
+    expect(rows(j)).toContain('23:12 IC voie 4 → Namur, dernier   00:05');
+    expect(rows(j, [j, other])).toContain('23:12 IC voie 4 → Namur   00:05');
+    // un bus de nuit repart de la même gare plus tard : « Si tu le rates » donne son arrivée, et l'IC n'est plus « dernier »
     const bus = journey('jb', [
       { walk: 6, to: 'Bruxelles-Central' },
       { ride: 'N', mode: 'bus', dep: T(FRI, '23:50'), arr: T(FRI, '25:20'), from: 'Bruxelles-Central', to: 'Namur' },
       { walk: 9 },
     ]);
     expect(missLine(j, [j, bus], j.leaveAt, NOW)?.replace(/\u00a0/g, ' ')).toBe('Si tu le rates : arrivée 01:29, 1 h 15 plus tard');
+    expect(rows(j, [j, bus])).toContain('23:12 IC voie 4 → Namur   00:05');
+  });
+
+  it('autres trajets déjà calculés : pas de « , dernier » quand un autre part plus tard avant demain (autre ligne, autre réseau, changement)', () => {
+    type Steps = Parameters<typeof journey>[1];
+    // tram de la STIB marqué « dernier » par le cœur
+    const tram = (id = 'jt'): Journey => {
+      const j = journey(id, [
+        { walk: 4, to: 'Bourse' },
+        { ride: '3', mode: 'tram', dep: T(FRI, '23:10'), arr: T(FRI, '23:31'), from: 'Bourse', to: 'Churchill', head: 'Churchill' },
+        { walk: 5 },
+      ]);
+      j.legs[1].last = true;
+      return j;
+    };
+    const other = (id: string, steps: Steps): Journey => journey(id, steps);
+    const j = tram();
+    const WITH = '23:10 Tram 3 → Churchill, dernier   23:31';
+    const WITHOUT = '23:10 Tram 3 → Churchill   23:31';
+    const shown = (journeys: Journey[]) => rows(j, journeys).find((l) => l.startsWith('23:10'));
+    // aucun autre trajet calculé : la règle du cœur, la marque
+    expect(shown([j])).toBe(WITH);
+    expect(laterJourney(j.legs[1], j, [j])).toBe(false);
+    // un bus d'un autre réseau, d'un autre arrêt, plus tard dans les autres trajets : pas de marque
+    const bus = other('jb', [{ walk: 7, to: 'De Brouckère' }, { ride: '48', mode: 'bus', dep: T(FRI, '23:40'), arr: T(FRI, '24:02'), from: 'De Brouckère', to: 'Churchill' }, { walk: 5 }]);
+    expect(bus.legs[1].op).not.toBe(j.legs[1].op);
+    expect(shown([j, bus])).toBe(WITHOUT);
+    expect(shown([bus, j])).toBe(WITHOUT);
+    // avec un changement, après minuit (même nuit) : pas de marque
+    const change = other('jc', [
+      { walk: 4, to: 'Bourse' },
+      { ride: 'N10', mode: 'bus', dep: T(FRI, '24:20'), arr: T(FRI, '24:35'), from: 'Bourse', to: 'Albert' },
+      { ride: 'N11', mode: 'bus', dep: T(FRI, '24:45'), arr: T(FRI, '24:55'), from: 'Albert', to: 'Churchill' },
+      { walk: 5 },
+    ]);
+    expect(shown([j, change])).toBe(WITHOUT);
+    // autre trajet seulement demain (04:00 passé) : la marque reste
+    const tomorrow = other('jd', [{ walk: 4, to: 'Bourse' }, { ride: '3', mode: 'tram', dep: T(SAT, '05:12'), arr: T(SAT, '05:33'), from: 'Bourse', to: 'Churchill' }, { walk: 5 }]);
+    expect(shown([j, tomorrow])).toBe(WITH);
+    // un trajet plus tôt, le même trajet rafraîchi (même identifiant), un trajet à pied, un trajet dont un véhicule est
+    // supprimé : la marque reste
+    const earlier = other('je', [{ walk: 4, to: 'Bourse' }, { ride: '4', mode: 'tram', dep: T(FRI, '22:50'), arr: T(FRI, '23:12'), from: 'Bourse', to: 'Churchill' }, { walk: 5 }]);
+    const sameTime = other('js', [{ walk: 7, to: 'De Brouckère' }, { ride: '48', mode: 'bus', dep: T(FRI, '23:10'), arr: T(FRI, '23:35'), from: 'De Brouckère', to: 'Churchill' }, { walk: 5 }]);
+    const onFoot = other('jw', [{ walk: 48 }]);
+    const cancelled = other('jx', [{ walk: 7, to: 'De Brouckère' }, { ride: '48', mode: 'bus', dep: T(FRI, '23:40'), arr: T(FRI, '24:02'), from: 'De Brouckère', to: 'Churchill' }, { walk: 5 }]);
+    cancelled.legs[1].cancelled = true;
+    // le même trajet relu avec 2 min de retard (même identifiant) n'est pas « un autre trajet »
+    const again = tram('jt');
+    again.legs[1].dep += 120_000;
+    expect(shown([j, earlier, sameTime, again, onFoot, cancelled])).toBe(WITH);
+    // une correspondance marquée « dernier » : seul un trajet qui part après elle retire la marque
+    const two = journey('j2', [
+      { walk: 4, to: 'Bourse' },
+      { ride: '4', mode: 'tram', dep: T(FRI, '23:20'), arr: T(FRI, '23:30'), from: 'Bourse', to: 'Albert' },
+      { ride: '51', mode: 'tram', dep: T(FRI, '23:50'), arr: T(FRI, '23:58'), from: 'Albert', to: 'Churchill' },
+      { walk: 5 },
+    ]);
+    two.legs[2].last = true;
+    const second = (journeys: Journey[]) => lines(stepsPage(route, { journeys, index: journeys.indexOf(two), fresh: true }, ctx)).find((l) => l.includes('Tram 51'));
+    expect(second([two])).toMatch(/Tram 51 → Churchill, dernier/);
+    expect(second([two, bus])).toMatch(/Tram 51 → Churchill, dernier/);
+    expect(second([two, change])).not.toMatch(/dernier/);
+    // le trajet qui part plus tard garde sa propre marque
+    const last = other('jl', [{ walk: 7, to: 'De Brouckère' }, { ride: '48', mode: 'bus', dep: T(FRI, '23:40'), arr: T(FRI, '24:02'), from: 'De Brouckère', to: 'Churchill' }, { walk: 5 }]);
+    last.legs[1].last = true;
+    expect(lines(stepsPage(route, { journeys: [j, last], index: 1, fresh: true }, ctx)).find((l) => l.startsWith('23:40'))).toBe('23:40 Bus 48 → Churchill, dernier   00:02');
   });
 });
