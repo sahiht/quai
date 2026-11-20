@@ -1171,16 +1171,34 @@ async function s131sousterre(ctx: Ctx131): Promise<void> {
     let title = FONTAINAS;
     await wstep(r, 'position-perdue-avant-de-partir', async () => {
       await openWeb(r, ctx.pageUrl({ ...START, ...ctx.preset('p/1210.json') }, true));
-      ({ title } = await webLaunch(r));
-      // avant de partir, plus aucune position depuis 3 min : « Position perdue depuis 3 min » et, pâle, L3
-      await goTo(r, tr, T('07:20:20'));
+      let j!: O.OJourney;
+      ({ title, j } = await webLaunch(r));
+      // avant de partir, plus aucune position depuis 3 min : « Position perdue depuis 3 min » et, pâle, L3. La position
+      // n'est demandée (et écoutée) que 10 min avant de partir (PRD-1.2.10 ; § 6.3 de la 1.3.0 : « alors que la phase en
+      // demande et qu'il y en avait ») : des positions de 10 à 9 min avant l'heure de partir, puis plus aucune
+      const need = j.leaveAt - 10 * 60_000;
+      await walkThrough(r, tr, T('07:20:20'), need - 20_000, 20_000);
+      // Mode test : un saut de l'horloge recalcule le moteur sans toucher au flux de position (controller.ts, listenClock) ;
+      // dans la vraie vie le même pas ouvre le flux. Ici un geste le fait : « Où tu en es », masqué après 1,5 s.
+      await goTo(r, null, need + 2_000);
+      await gesture(r, 'tap');
+      await waitGuide(r, '« Où tu en es » (position demandée)', isWhere);
+      await sleep(1_600);
+      await webMask(r, '« Où tu en es »');
+      await walkThrough(r, tr, need + 20_000, need + 60_000, 20_000);
       r.mark = r.page.screens().length;
+      const none = r.page.screens().find((x) => isGuide(x) && x.lines.some((l) => /^Pas de position/.test(N(l))));
+      check(!none, `« Pas de position » alors que des positions arrivent depuis que le guidage en demande : ${show(none)}`);
       let s: GlassesScreen | undefined;
-      for (let t = T('07:21'); t <= T('07:26') && !s; t += 20_000) {
+      let lostAt = 0;
+      for (let t = need + 80_000; t <= j.leaveAt - 60_000 && !s; t += 20_000) {
+        lostAt = t;
         await goTo(r, null, t);
         s = r.page.screens().slice(r.mark).find((x) => isGuide(x) && x.lines.some((l) => /^Position perdue depuis \d+ min$/.test(N(l))));
       }
-      check(s, `« Position perdue depuis 3 min » jamais affiché avant de partir, sans position depuis 3 min (PRD-1.3.0 § 6.3, gardé avant de partir par A8) : ${show(r.page.lastScreen())}`);
+      check(s, `« Position perdue depuis 3 min » jamais affiché avant de partir (jusqu’à ${O.hm(j.leaveAt - 60_000)}), sans position depuis ${O.hm(need + 60_000)} (PRD-1.3.0 § 6.3, gardé avant de partir par A8) : ${show(r.page.lastScreen())} ; écrans vus : ${r.page.screens().slice(r.mark).filter(isGuide).slice(-8).map(show).join(' | ')}`);
+      check(lostAt >= need + 60_000 + 3 * 60_000 - 20_000 && lostAt <= need + 60_000 + 4 * 60_000, `« Position perdue » à ${O.hm(lostAt)} : attendu 3 min après la dernière position (${O.hm(need + 60_000)})`);
+      check(s.lines.some((l) => /^Position perdue depuis 3 min$/.test(N(l))), `« Position perdue depuis 3 min » attendu : ${show(s)}`);
       check(s.lines.some((l) => O.matches(l, TXT.lostPale)), `ligne pâle « ${TXT.lostPale} » attendue sous « Position perdue » (L3) : ${show(s)}`);
       check(!s.lines.some((l) => /guidage à l’heure/.test(N(l))), `« guidage à l’heure » remplacé par « Quai suit l’horaire » (L3) : ${show(s)}`);
       momentCommon(s, title);
@@ -1199,21 +1217,23 @@ async function s131sousterre(ctx: Ctx131): Promise<void> {
   await ctx.withChrome(async (page) => {
     const r: Run = { ctx, page, mark: 0 };
     await wstep(r, 'pas-de-position', async () => {
-      // L3 : sans aucune position (le navigateur la refuse), un trajet d'une gare à une gare : « Pas de position : Quai suit
-      // l'horaire » (Quai Web : sans le conseil de l'appli Even)
-      await openWeb(r, ctx.pageUrl({ mockNow: '2026-11-10T07:20:00+01:00', ...ctx.preset('p/1210.json') }, true));
-      const steps = await webOpenFavorite(r, 'Vers Bruxelles-Central');
-      await gesture(r, 'tap');
-      await waitGuide(r, 'guidage', (s) => isGuide(s) && !!s.title, 15_000);
+      // L3 : aucune position depuis le lancement (jamais poussée), un trajet qui commence à pied : 30 s après que le
+      // guidage en demande (10 min avant de partir), « Pas de position : Quai suit l'horaire » (Quai Web : sans le
+      // conseil de l'appli Even). D'une gare à une gare, rien : on y attend à l'arrêt, puis à bord (A8).
+      // Aucun geste d'ici là : en mode test, le flux de position ne s'ouvre pas sur un saut de l'horloge (listenClock),
+      // donc la position simulée du lancement n'est jamais donnée au guidage : c'est le cas « aucune position ».
+      await openWeb(r, ctx.pageUrl({ ...START, ...ctx.preset('p/1210.json') }, true));
+      const { j, title } = await webLaunch(r);
       r.mark = r.page.screens().length;
       let s: GlassesScreen | undefined;
-      for (let t = T('07:20:10'); t <= T('07:21:30') && !s; t += 10_000) {
+      for (let t = T('07:20:30'); t <= j.leaveAt - 2 * 60_000 && !s; t += 20_000) {
         await goTo(r, null, t);
         s = r.page.screens().slice(r.mark).find((x) => isGuide(x) && x.lines.some((l) => /^Pas de position/.test(N(l))));
       }
-      check(s, `« ${TXT.noPosition} » jamais affiché sans position (vérification au lancement) : ${show(r.page.lastScreen())}`);
+      check(s, `« ${TXT.noPosition} » jamais affiché sans position, jusqu’à ${O.hm(j.leaveAt - 2 * 60_000)} (départ à ${O.hm(j.leaveAt)}, position demandée 10 min avant, vérification 30 s après) : ${show(r.page.lastScreen())}`);
       check(s.lines.some((l) => O.matches(l, TXT.noPosition)), `« ${TXT.noPosition} » attendu (L3) : ${show(s)}`);
-      momentCommon(s, steps.title);
+      check(!s.lines.some((l) => /guidage à l’heure/.test(N(l))), `« guidage à l’heure » remplacé par « Quai suit l’horaire » (L3) : ${show(s)}`);
+      momentCommon(s, title);
       return { screen: s, shot: 'guide' };
     });
   }, VIEWPORT);
@@ -1233,12 +1253,14 @@ async function s131pluie(ctx: Ctx131): Promise<void> {
     const r: Run = { ctx, page, mark: 0 };
     await wstep(r, 'partir-sous-la-pluie', async () => {
       await openWeb(r, ctx.pageUrl({ ...RAIN_START, ...ctx.preset('p/1210.json') }, true));
+      const n0 = r.page.screens().length;
       const { j, title } = await webLaunch(r);
       check(j.legs[0]?.kind === 'walk', `essai impossible : le trajet ne commence pas à pied (${j.legs.map((l) => l.kind).join(', ')})`);
       check(j.legs[0].rain, `essai impossible : la première marche du trajet ne porte pas la pluie (faux Open-Meteo : 08:45 à 09:00 sur Bruxelles), trajet ${JSON.stringify(j.legs.map((l) => [l.kind, O.hm(l.dep), O.hm(l.arr), l.rain ?? false]))}`);
       const stay0 = { id: 's131-central', label: 'Gare de Bruxelles-Central', places: ['Bruxelles-Central'], points: stay(CENTRAL, T('08:46'), T('09:10'), { phase: 'stay', accuracy: 6 }) } as Trace;
-      r.mark = r.page.screens().length;
+      // l'heure de partir est déjà là au lancement : « Partir maintenant » peut venir avant la première position poussée
       await goTo(r, stay0, Math.max(j.leaveAt, T('08:46')) + 5_000);
+      r.mark = n0;
       const s = await momentWeb(r, 'Partir maintenant', 'Partir maintenant', 12_000);
       // B19 (I5) : « pluie prévue », 4e ligne pâle, quand la première marche porte la pluie
       check(s.lines.some((l) => O.matches(l, TXT.rain)), `« ${TXT.rain} » absent de « Partir maintenant » alors que la première marche est sous la pluie (B19) : ${show(s)}`);
@@ -1309,7 +1331,8 @@ async function s131tel(ctx: Ctx131): Promise<void> {
       // L7 : les mêmes noms que les lunettes (« Bureau », pas « Vers le bureau »)
       await page.waitFor(`(() => { const a = [...document.querySelectorAll('.fav-card .fav-row .answer')]; return a.length >= 2 && a.every((x) => x.textContent && !x.textContent.endsWith('…')); })()`, 25_000, 'réponses des favoris');
       const names = await page.eval<string[]>(`(() => { ${NORM_JS} return [...document.querySelectorAll('.fav-card .fav-row .t1')].map((r) => n(r.textContent)); })()`);
-      check(names.some((x) => /^Bureau( !)?$/.test(x)) && !names.some((x) => /^Vers /.test(x)), `noms des favoris du téléphone ${JSON.stringify(names)} : « Bureau » comme sur les lunettes (L7)`);
+      // (un trajet fixe entre deux gares s'appelle « Vers Gand-Saint-Pierre » sur les lunettes aussi : seul le lieu change)
+      check(names.some((x) => /^Bureau( !)?$/.test(x)) && names.some((x) => /^Maison( !)?$/.test(x)) && !names.some((x) => /^Vers (le bureau|la maison)/i.test(x)), `noms des favoris du téléphone ${JSON.stringify(names)} : « Bureau » et « Maison » comme sur les lunettes (L7)`);
       // B15 (U2) : le « ! » d'un favori dont le trajet a un souci (voie modifiée de l'IC), aussi sur l'accueil du téléphone
       const rows = await page.eval<string[]>(`(() => { ${NORM_JS} return [...document.querySelectorAll('.fav-card .fav-row')].map((r) => n(r.innerText)); })()`);
       check(rows.some((x) => /Bureau\s*!/.test(x)), `« Bureau ! » attendu sur l’accueil du téléphone (B15 : voie modifiée de l’IC) : ${JSON.stringify(rows)}`);
