@@ -27,7 +27,7 @@ import { createKV, memoryBackend } from '../../src/platform/kv';
 import type { Fix, GlassesPort, LocationPort } from '../../src/platform/types';
 import { SettingsStore } from '../../src/settings';
 import { APP_VERSION } from '../../src/version';
-import { createEssai, ESSAI_LEAD_MS, ESSAI_TEXT, gatedPort, plannedJourney, RIDE_SPEED_MIN, simulatedFix, type Essai } from '../../src/web/essai';
+import { createEssai, ESSAI_LEAD_MS, ESSAI_TEXT, gatedPort, plannedJourney, RIDE_SPEED_MIN, RIDE_WAIT_FROM_END_M, simulatedFix, type Essai } from '../../src/web/essai';
 import { createWebGlassesPort } from '../../src/web/port';
 import { BUS6, MIN, P, S, at, firstWalkRoute, journeyOf, offset, route, walkLeg } from '../core/guide-fixtures';
 import { stubCore } from '../glasses/helpers';
@@ -203,29 +203,47 @@ describe('trajet aux heures prévues et positions simulées (fonctions pures)', 
     near(simulatedFix(j, at('07:30'), walk), P.guillemins, 1);
   });
 
-  it('à bord, l’allure d’un véhicule, jamais celle d’une marche : il roule (6 m/s au moins), puis attend son heure à l’arrêt', () => {
+  it('à bord, l’allure d’un véhicule, jamais celle d’une marche : il roule (5 m/s au moins) ou il attend ; chaque arrêt à son heure', () => {
     const j = plannedJourney(trip(), 2);
     const bus = j.legs[1];
     // l'horaire seul donnerait 2,4 m/s de Monument Gramme à Place Général Leman (566 m en 4 min) : pour le moteur, ni un
     // véhicule (4 m/s : montée constatée) ni franchement une marche (2,5 m/s)
     expect(distanceM(P.gramme, P.leman) / 240).toBeLessThan(GUIDE.walkMaxMs);
     expect(RIDE_SPEED_MIN).toBeGreaterThan(GUIDE.vehicleMs);
+    expect(RIDE_WAIT_FROM_END_M).toBeGreaterThan(GUIDE.alightNearM);
     let rolling = 0;
     for (let t = bus.dep; t <= bus.arr; t += 1_000) {
       const f = simulatedFix(j, t)!;
       expect(f.speed === 0 || f.speed! >= RIDE_SPEED_MIN, `${hhmm(t)} : ${f.speed} m/s`).toBe(true);
       expect(f.heading === undefined).toBe(f.speed === 0);
       if (f.speed) rolling++;
+      // avant l'arrivée, jamais à l'arrêt près de l'arrêt de descente (le moteur y constaterait la descente trop tôt)
+      if (f.speed === 0 && t < bus.arr) expect(distanceM(f, P.guilleminsBus), hhmm(t)).toBeGreaterThanOrEqual(RIDE_WAIT_FROM_END_M);
     }
-    expect(rolling).toBeGreaterThan(120);
-    // chaque arrêt à son heure prévue (parti à l'heure, arrivé avant l'heure du suivant et à l'arrêt)
-    const near = (t: number, p: LatLon) => expect(distanceM(simulatedFix(j, t)!, p)).toBeLessThan(1);
+    expect(rolling).toBeGreaterThan(150);
+    const near = (t: number, p: LatLon, m = 1) => expect(distanceM(simulatedFix(j, t)!, p)).toBeLessThan(m);
+    // parti à l'heure de Monument Gramme, en avance à Place Général Leman, où il attend son heure
     near(at('07:12'), P.gramme);
+    expect(simulatedFix(j, at('07:12') + 5_000)).toMatchObject({ speed: RIDE_SPEED_MIN });
     near(at('07:14'), P.leman);
     expect(simulatedFix(j, at('07:14'))).toMatchObject({ speed: 0 });
     near(at('07:16'), P.leman);
+    // dernier tronçon : reparti à l'heure, l'attente au milieu, arrivé à l'heure à Gare des Guillemins (pas avant)
+    expect(simulatedFix(j, at('07:16') + 5_000)).toMatchObject({ speed: RIDE_SPEED_MIN });
+    near(at('07:18'), { lat: (P.leman.lat + P.guilleminsBus.lat) / 2, lon: (P.leman.lon + P.guilleminsBus.lon) / 2 }, 2);
+    expect(simulatedFix(j, at('07:18'))).toMatchObject({ speed: 0 });
+    expect(simulatedFix(j, at('07:20') - 5_000)).toMatchObject({ speed: RIDE_SPEED_MIN });
+    expect(distanceM(simulatedFix(j, at('07:20') - 5_000)!, P.guilleminsBus)).toBeGreaterThan(20);
     near(at('07:20'), P.guilleminsBus);
-    // un horaire déjà rapide est suivi tel quel (train : 10 km en 7 min)
+    // un seul tronçon, court (300 m en 3 min) : parti à l'heure, l'attente à 200 m de l'arrivée, arrivé à l'heure
+    const hop = plannedJourney(journeyOf([{ ...bus, to: { ...bus.to, ...offset(bus.from, 0, -300) }, stops: [] }], 'jcourt', bus.dep), 0);
+    const h = hop.legs[0];
+    expect(simulatedFix(hop, h.dep + 5_000)).toMatchObject({ speed: RIDE_SPEED_MIN });
+    const paused = simulatedFix(hop, (h.dep + h.arr) / 2)!;
+    expect(paused.speed).toBe(0);
+    expect(Math.round(distanceM(paused, h.to))).toBe(RIDE_WAIT_FROM_END_M);
+    expect(distanceM(simulatedFix(hop, h.arr)!, h.to)).toBeLessThan(1);
+    // un horaire déjà rapide est suivi tel quel (train : 10 km en 8 min)
     const fast = plannedJourney(journeyOf([{ ...bus, to: { ...bus.to, lat: bus.from.lat + 0.09, lon: bus.from.lon }, stops: [] }], 'jrapide', bus.dep), 0);
     const mid = simulatedFix(fast, (fast.legs[0].dep + fast.legs[0].arr) / 2)!;
     expect(mid.speed).toBeGreaterThan(15);

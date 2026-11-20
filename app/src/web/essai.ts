@@ -59,10 +59,15 @@ const WALK_SPEED_MAX = 2.2;
 /**
  * Vitesse d'un véhicule simulé, au moins (contrôle qualité) : le moteur constate la montée à partir de 4 m/s
  * (GUIDE.vehicleMs) et prend pour une marche ce qui va moins vite que 2,5 m/s. Un horaire à la minute donne souvent une
- * moyenne plus lente entre deux arrêts (566 m en 4 min : 2,4 m/s) : le véhicule simulé roule alors à cette vitesse, puis
- * attend son heure à l'arrêt, comme un vrai.
+ * moyenne plus lente entre deux arrêts (566 m en 4 min : 2,4 m/s) : le véhicule simulé roule alors à cette vitesse et
+ * attend le reste du temps, à l'arrêt, comme un vrai.
  */
-export const RIDE_SPEED_MIN = 6;
+export const RIDE_SPEED_MIN = 5;
+/**
+ * Sur le dernier tronçon, l'attente se fait en route, à 200 m au moins de l'arrêt de descente : le moteur constate la
+ * descente dès qu'on est au pas près de cet arrêt (150 m), et « Descends au prochain arrêt » n'aurait pas le temps d'être lu.
+ */
+export const RIDE_WAIT_FROM_END_M = 200;
 /** Une position au moins toutes les 20 s simulées, même immobile (comme le flux des vraies positions). */
 const FIX_EVERY_MAX_MS = 20_000;
 const CORE_TIMEOUT_MS = 20_000;
@@ -164,9 +169,10 @@ function walkFix(l: Leg, i: number, t: number, walk: SimWalk | null | undefined,
 }
 
 /**
- * À bord de l'étape `l` à l'instant `t` : d'arrêt en arrêt (ceux dont la position est connue). Le véhicule quitte chaque
- * arrêt à son heure, roule à l'allure d'un véhicule (RIDE_SPEED_MIN au moins) et attend à l'arrêt suivant jusqu'à l'heure
- * de celui-ci : jamais à l'allure d'une marche.
+ * À bord de l'étape `l` à l'instant `t` : d'arrêt en arrêt (ceux dont la position est connue), parti de chacun et arrivé
+ * au dernier à l'heure prévue. Jamais à l'allure d'une marche : le véhicule roule (RIDE_SPEED_MIN au moins) ou attend.
+ * Il attend à l'arrêt suivant, où il arrive en avance ; sur le dernier tronçon, en route (au milieu, et à
+ * RIDE_WAIT_FROM_END_M au moins de l'arrêt de descente), pour arriver à l'heure.
  */
 function rideFix(l: Leg, t: number, at: number): Fix {
   const pts: { p: LatLon; t: number }[] = [{ p: { lat: l.from.lat, lon: l.from.lon }, t: l.dep }];
@@ -177,11 +183,20 @@ function rideFix(l: Leg, t: number, at: number): Fix {
   const a = pts[k];
   const b = pts[k + 1];
   const dist = distanceM(a.p, b.p);
-  // durée du roulage : celle de l'horaire si sa moyenne est déjà celle d'un véhicule, sinon plus courte (attente à l'arrêt)
+  // durée du roulage : celle de l'horaire si sa moyenne est déjà celle d'un véhicule, sinon plus courte, le reste en attente
   const roll = Math.min(b.t - a.t, (dist / RIDE_SPEED_MIN) * 1000);
-  const f = roll > 0 ? Math.min(1, Math.max(0, (t - a.t) / roll)) : 1;
+  const wait = b.t - a.t - roll;
+  // part du tronçon roulée avant l'attente
+  const first = k < pts.length - 2 || dist <= 0 ? 1 : Math.max(0, Math.min(dist / 2, dist - RIDE_WAIT_FROM_END_M)) / dist;
+  const e = t - a.t;
+  let f = 1;
+  if (roll > 0 && e < roll * first) f = e / roll;
+  else if (roll > 0 && e < roll * first + wait) f = first;
+  else if (roll > 0) f = Math.min(1, (e - wait) / roll);
+  f = Math.max(0, f);
+  const moving = roll > 0 && f < 1 && !(e >= roll * first && e < roll * first + wait);
   const p = lerp(a.p, b.p, f);
-  const speed = roll > 0 && f < 1 ? dist / (roll / 1000) : 0;
+  const speed = moving ? dist / (roll / 1000) : 0;
   const out: Fix = { lat: p.lat, lon: p.lon, accuracy: 10, speed: tenth(speed), at, source: 'mock' };
   if (speed > 0) out.heading = bearingDeg(a.p, b.p);
   return out;
