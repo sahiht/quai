@@ -22,7 +22,7 @@ import { buildFeeds, feedZip, loadNetwork } from '../../../fixtures/pipeline/mak
 import type { Screen, Sim } from '../lib/sim';
 import { buildFixtureData, buildWalkTiles, GTFS } from '../lib/stack';
 import { joinTrace, pointAt, stay, walk, type LatLon, type Trace, type TracePoint } from '../traces/geo';
-import { NAMUR_FONTAINAS, PLACES, toFix } from '../traces/traces';
+import { NAMUR_FONTAINAS, PLACES, WALK_NAMUR, toFix } from '../traces/traces';
 import type { GlassesScreen, Page } from './cdp';
 import * as O from './guide-oracle';
 import { canvasToShot, checkCalmPixels, checkGuidePixels, litCount, type GuideShot } from './guide-pixels';
@@ -726,20 +726,18 @@ async function s131apos(ctx: Ctx131): Promise<void> {
 
 /* ------------------------------ Traces des s131 (lieux publics : Namur, place de l'Ange, gare) ------------------------------ */
 
-/** Rues entre la place de l'Ange et la gare de Namur (les mêmes que la trace NAMUR_FONTAINAS). */
-const WALK_NAMUR: LatLon[] = [PLACES.placeAnge, { lat: 50.4655, lon: 4.8642 }, { lat: 50.4672, lon: 4.8631 }, { lat: 50.4683, lon: 4.8627 }, PLACES.namurVoie6];
 
 /**
  * A2 (P1) : parti trop tard : sur la place jusqu'à 07:41:30, puis à pied (1,2 m/s) vers la gare ; l'IC part à 07:44
  * (temps réel) quand on est encore à plus de 300 m ; on continue à marcher jusqu'à la gare. À 07:45:40 on est encore à
- * 250 m de la gare : le moteur compte « à la gare » à 200 m (GUIDE.atStationM, règle de la 1.2.10 gardée) ; partie à
+ * 280 m de la gare : le moteur compte « à la gare » à 200 m (GUIDE.atStationM, règle de la 1.2.10 gardée) ; partie à
  * 07:39:40, la première trace y était déjà à 105 m et l'écran disait, à raison, « À la gare de Namur ».
  */
 const LATE_WALK: Trace = {
   id: 's131-late-walk',
   label: 'Place de l’Ange (Namur) : départ à pied à 07:41:40, l’IC de 07:44 part pendant la marche',
   places: ['Place de l’Ange, Namur', 'Gare de Namur'],
-  points: joinTrace(stay(PLACES.placeAnge, T('07:20'), T('07:41:30'), { phase: 'stay', accuracy: 6 }), walk(WALK_NAMUR, T('07:41:40'), { speed: 1.2 }), stay(PLACES.namurVoie6, T('07:50:30'), T('07:57'))),
+  points: joinTrace(stay(PLACES.placeAnge, T('07:20'), T('07:41:30'), { phase: 'stay', accuracy: 6 }), walk(WALK_NAMUR, T('07:41:40'), { speed: 1.2 }), stay(PLACES.namurVoie6, T('07:51:40'), T('07:58'))),
 };
 
 /**
@@ -747,22 +745,25 @@ const LATE_WALK: Trace = {
  * du chemin (`turnAt` : l'instant du demi-tour), avant de repartir dans le bon sens.
  */
 function uturnTrace(leaveAt: number): { trace: Trace; turnAt: number } {
-  const go = walk(WALK_NAMUR.slice(0, 2), leaveAt + 10_000, { speed: 1.3 });
+  // rue de Fer : 120 m dans le bon sens (50 m après la rue Saint-Jacques), 40 m en arrière, puis la suite du chemin
+  const far: LatLon = { lat: 50.46495, lon: 4.86508 };
+  const near: LatLon = { lat: 50.46459, lon: 4.86516 };
+  const go = walk([...WALK_NAMUR.slice(0, 3), far], leaveAt + 10_000, { speed: 1.3 });
   const turnAt = go[go.length - 1].at + 2_000;
-  const back = walk([WALK_NAMUR[1], { lat: 50.4651, lon: 4.8646 }], turnAt, { speed: 1.3 });
-  const again = walk([{ lat: 50.4651, lon: 4.8646 }, ...WALK_NAMUR.slice(1)], back[back.length - 1].at + 3_000, { speed: 1.3 });
+  const back = walk([far, near], turnAt, { speed: 1.3 });
+  const again = walk([near, ...WALK_NAMUR.slice(3)], back[back.length - 1].at + 3_000, { speed: 1.3 });
   return {
     trace: { id: 's131-uturn', label: 'Place de l’Ange → vers la gare, demi-tour, puis la gare', places: ['Place de l’Ange, Namur', 'Gare de Namur'], points: joinTrace(stay(PLACES.placeAnge, T('07:20'), leaveAt, { phase: 'stay', accuracy: 6 }), go, back, again) },
     turnAt,
   };
 }
 
-/** A3 (I1) : sans temps réel, sur le quai à 07:40 et encore à 08:30 (l'IC de 07:42 en retard, ou raté). */
+/** A3 (I1) : sans temps réel, sur le quai à 07:41 et encore à 08:30 (l'IC de 07:42 en retard, ou raté). */
 const PLATFORM_LONG: Trace = {
   id: 's131-platform',
   label: 'Place de l’Ange → gare de Namur, puis sur le quai jusqu’à 08:30',
   places: ['Place de l’Ange, Namur', 'Gare de Namur'],
-  points: joinTrace(stay(PLACES.placeAnge, T('07:20'), T('07:31:50'), { phase: 'stay', accuracy: 6 }), walk(WALK_NAMUR, T('07:32')), stay(PLACES.namurVoie6, T('07:39:30'), T('08:30'))),
+  points: joinTrace(stay(PLACES.placeAnge, T('07:20'), T('07:31:50'), { phase: 'stay', accuracy: 6 }), walk(WALK_NAMUR, T('07:32')), stay(PLACES.namurVoie6, T('07:41:10'), T('08:30'))),
 };
 
 /** Moment dont la 1re ligne vérifie `first`, journalisé depuis le dernier geste ou instant. */

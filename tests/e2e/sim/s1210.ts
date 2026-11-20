@@ -443,13 +443,20 @@ async function s1210go(ctx: Ctx): Promise<void> {
       const back = r.page.screens().slice(r.mark).find((x) => isGuide(x) && O.matches(x.lines[0], 'Partir maintenant'));
       check(!back, `« Partir maintenant » revenu après « effacer » : ${show(back)}`);
     });
+    let turnSeenAt = 0;
     await gstep(r, 'guide-virage', async () => {
       // § 3.8 : virages seulement avec un vrai chemin (tuiles piétonnes data/walk/ des données de test)
       const t0 = T('07:31');
       let seen: GlassesScreen | undefined;
       for (let t = t0; t <= T('07:40:30') && !seen; t += 10_000) {
+        turnSeenAt = t;
         await goTo(r, tr, t);
         seen = r.page.screens().slice(r.mark).find((x) => isGuide(x) && O.turnRe().test(O.norm(x.lines[0])));
+      }
+      // 1.3.1 (A6) : la trace suit les rues du chemin : jamais « Fais demi-tour » à qui marche vers la gare
+      if (ctx.v131) {
+        const uturn = r.page.screens().slice(r.mark).find((x) => isGuide(x) && O.matches(x.lines[0], O.T131.uturn));
+        check(!uturn, `« Fais demi-tour » sur une marche qui suit le chemin, vers la gare (A6 : seulement à contresens) : ${show(uturn)}`);
       }
       check(seen, 'aucun virage annoncé sur la marche de la place de l’Ange à la gare de Namur : il faut un vrai chemin à pied (tuiles piétonnes data/walk/ dans les données de test, équipe D) ; sans elles, chemin droit sans virage (§ 3.8)');
       const m = /dans (\d+) m$/.exec(O.norm(seen.lines[0]));
@@ -459,7 +466,9 @@ async function s1210go(ctx: Ctx): Promise<void> {
       return { screen: seen, shot: { kind: 'guide', image: true } };
     });
     await gstep(r, 'guide-ou-tu-en-es-a-pied', async () => {
-      await goTo(r, tr, T('07:36:05'));
+      // après le virage (jamais en arrière dans le temps : en 1.3.1 un message ne se masque qu'affiché depuis 1,5 s, A7),
+      // encore à plus de 200 m de la gare (plus près, le moteur dit « À la gare de Namur »)
+      await goTo(r, tr, Math.max(T('07:36:05'), turnSeenAt + 5_000));
       // un virage peut être affiché : l'effacer d'abord
       const cur = r.page.lastScreen();
       if (cur && isGuide(cur) && !isEmpty(cur)) await dismiss(r, 'moment en cours');
@@ -822,6 +831,8 @@ async function s1210ride(ctx: Ctx): Promise<void> {
       const ft = await followed(r);
       check(ft?.guide?.kind === 'ride' || ft?.journey?.legs?.length === 1, `genre « ride » attendu pour « j’y descends » (quai.trip : ${JSON.stringify(ft?.guide ?? null)})`);
       title = ft?.title ?? title;
+      // 1.3.1 (§ 12) : « Jusqu'à … » est aussi le titre de « j'y descends » (écran du guidage, carte « En cours », journal)
+      if (ctx.v131) title = title.replace(/^Vers /, 'Jusqu’à ');
       if (ctx.v131 && O.matches(w.title, O.T131.whereTitle)) {
         // 1.3.1 (§ 12) : « Où tu en es » d'un « j'y descends » : « Jusqu’à Bruxelles-Central », « Quai te dit quand descendre », pas de chaîne
         const j = ft!.journey;
@@ -899,11 +910,12 @@ async function s1210fg(ctx: Ctx): Promise<void> {
       // premier plan quitté (FOREGROUND_EXIT ; Quai Web : page cachée) : le guidage calcule, l'affichage attend (§ 3.7)
       const vis = (hidden: boolean) => page.eval(`(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => '${hidden ? 'hidden' : 'visible'}' }); document.dispatchEvent(new Event('visibilitychange')); return true; })()`);
       await vis(true);
-      for (const t of [T('07:39'), T('07:40'), T('07:41:05')]) await goTo(r, NAMUR_FONTAINAS, t);
+      // (la trace suit les rues, 700 m : à 60 m de la gare vers 07:41:50, une minute plus tard que l'ancienne trace en biais)
+      for (const t of [T('07:40'), T('07:41'), T('07:42:05')]) await goTo(r, NAMUR_FONTAINAS, t);
       r.mark = r.page.screens().length;
       await vis(false);
       const ic = rideLeg(j);
-      const s = await waitGuide(r, 'page du moment présent reconstruite au retour (§ 3.7)', (x) => isGuide(x) && O.matches(x.lines[0], O.boardLines(j, ic, T('07:41:05'))[0]), 10_000);
+      const s = await waitGuide(r, 'page du moment présent reconstruite au retour (§ 3.7)', (x) => isGuide(x) && O.matches(x.lines[0], O.boardLines(j, ic, T('07:42:05'))[0]), 10_000);
       momentCommon(s, title);
       return { screen: s, shot: { kind: 'guide', image: true } };
     });

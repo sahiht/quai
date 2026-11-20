@@ -231,7 +231,9 @@ export function replanMissedLines(lost: OLeg, next: OJourney | null, oldArr: num
   const p = r?.newPlatform ?? r?.platform;
   if (SPEC.v131) {
     // 1.3.1 (B12, L4) : « Nouveau trajet : IC à 08:42, voie 5 » ; B13 : un train en retard « IC 08:42 +3, voie 5 »
-    const first = r ? new RegExp(`^Nouveau trajet : ${esc(vehicleWhen(r))}${isTrain(r) && p ? `, voie ${esc(p)}` : ''}$`) : /^Nouveau trajet : /;
+    // (« ~ » devant une heure sans temps réel : le PRD écrit « IC à 08:42 » et ne tranche pas, les deux formes admises)
+    const when = !r ? '' : trainLate(r) ? esc(vehicleWhen(r)) : `${esc(vehicle(r))} à ~?${esc(hm(r.dep))}`;
+    const first = r ? new RegExp(`^Nouveau trajet : ${when}${isTrain(r) && p ? `, voie ${esc(p)}` : ''}$`) : /^Nouveau trajet : /;
     return [lostRe, first, `arrivée ${hm(next.arr)}, ${Math.round((next.arr - oldArr) / 60_000)} min plus tard`];
   }
   const first = r ? new RegExp(`^Nouveau trajet : ${esc(vehicle(r))} ~?${esc(hm(r.dep))}${isTrain(r) && p ? `, voie ${esc(p)}` : ''}$`) : /^Nouveau trajet : /;
@@ -427,8 +429,29 @@ export function boardLines131(j: OJourney, leg: number, now: number): Want[] {
   if (prev && prev.kind === 'walk' && leg > 1) {
     const where = `(→ ${esc(l.from.name.fr)}|jusqu’${isTrain(l) ? 'au quai' : 'à l’arrêt'})`;
     out.push(new RegExp(`^\\d+ min à pied ${where}, (marge \\d+ min|très juste)$`));
-  } else out.push(stopsPhrase(stopsToAlight(l)));
+  } else out.push(alightPhrase131(l));
   return out;
+}
+
+/**
+ * § 15 : diminutif d'un nom trop long (« Bruxelles-Central » → « Bxl-Central », l'exemple du propriétaire) ; pour les
+ * autres mots de la liste (Brussel, Saint, Sainte, Sint, Boulevard, Avenue, Chaussée, Place), le PRD ne donne pas
+ * l'abréviation : un mot plus court est admis à leur place.
+ */
+export function shortNameRe(name: string): string {
+  return esc(name)
+    .replace(/Bruxelles/g, 'Bxl')
+    .replace(/(?<![\p{L}])(Brussel|Sainte|Saint|Sint|Boulevard|Avenue|Chaussée|Place)(?![\p{L}])/gu, '[\\p{L}.]{1,4}');
+}
+
+/**
+ * 1.3.1 (B12, E5) : au moment de monter, « descente dans 5 arrêts, à Bruxelles-Nord » : le nom entier s'il tient à côté de
+ * l'image, sinon son diminutif (§ 15), sinon la ligne sans le nom.
+ */
+export function alightPhrase131(l: OLeg): RegExp {
+  const base = stopsPhrase(stopsToAlight(l));
+  const name = l.to.name.fr;
+  return new RegExp(`^${esc(base)}(, à (${esc(name)}|${shortNameRe(name)}))?$`, 'u');
 }
 
 /** 1.3.1 (B16, U4) : 4e ligne pâle du « monter » d'une correspondance très juste : « Si tu le rates : tram 3 à 08:51 ». */
