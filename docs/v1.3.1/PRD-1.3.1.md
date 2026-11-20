@@ -157,3 +157,11 @@ qualité par sujet, et une équipe de recherche et développement qui propose de
 Méthodes (celles des plugins Engineering, Design et Product Management de l'annuaire d'Anthropic, non installés) :
 revue de code et stratégie de tests, critique de design, accessibilité et textes d'interface, cadrage des
 fonctions et synthèse de recherche.
+
+## 14. Recherche et développement retenue (le propriétaire, 20/11 à 19:03)
+
+« Si on est sûr de la faisabilité, on peut tout lancer, avec un contrôle qualité que ça fonctionne. » Notes :
+`docs/v1.3.1/experts/06-rd.md`. R2, R3, R4, R5, R6 et R7 : faisables avec ce que Quai a déjà, construits avec un
+contrôle de chaque sujet. R1 (sortie du métro) : d'abord mesuré sur les vraies données belges (branche de
+vérification) ; construit seulement si au moins 80 % des arrêts STIB sous terre ont une sortie nommée et que les
+chemins à pied ne régressent pas ; sinon, reporté et expliqué au propriétaire.
