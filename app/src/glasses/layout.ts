@@ -518,6 +518,28 @@ export function withOptionalTail(text: string, tail: string | undefined, maxPx: 
 export interface LayoutOptions {
   /** Message temporaire affiché dans la ligne d'aides (ex. « ★ Ajouté aux favoris »). */
   toast?: string;
+  /** 1.3.1 (PRD-1.3.1 § 14, R5) : réglage « Plein soleil » (Settings.display.sun) : niveaux de SUN_LEVEL. */
+  sun?: boolean;
+}
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 14, R5) : « Plein soleil », le seul point de réglage de la luminosité : chaque niveau pâle monte
+ * d'un cran, jusqu'au niveau 3 au plus ; le niveau 4 reste seul au plus clair. Le curseur et la ligne d'action (au
+ * niveau 4, dans la colonne a ou dans le conteneur du curseur) restent donc distincts de tout le reste, d'un cran au
+ * moins (3 contre 4, au lieu de 2 contre 4 pour le texte pâle). Les plateformes rendent ces niveaux tels quels
+ * (textColor du SDK, opacité de Quai Web).
+ */
+export const SUN_LEVEL: Readonly<Record<Brightness, Brightness>> = { 0: 1, 1: 2, 2: 3, 3: 3, 4: 4 };
+
+/** Niveau d'un conteneur, « Plein soleil » allumé ou non. */
+export function sunLevel(level: Brightness, sun: boolean): Brightness {
+  return sun ? SUN_LEVEL[level] : level;
+}
+
+/** Page en « Plein soleil » : niveaux des conteneurs et de leurs bordures (filet) ; images et menu inchangés. */
+export function inSun(p: PageSpec): PageSpec {
+  p.containers = p.containers.map((c) => ({ ...c, level: sunLevel(c.level, true), ...(c.border ? { border: { ...c.border, level: sunLevel(c.border.level, true) } } : {}) }));
+  return p;
 }
 
 /**
@@ -600,6 +622,7 @@ function segRowBright(segs: Seg[], indentPx: number, right: string | undefined, 
 
 /** Construit la page complète. `frame` = sélection et défilement courants. */
 export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {}): PageSpec {
+  if (opts.sun) return inSun(layoutPage(v, frame, { ...opts, sun: false }));
   if (v.layout === 'guide') return layoutGuide(v, opts);
   const def = LAYOUTS[v.layout];
   const message = v.layout === 'message';

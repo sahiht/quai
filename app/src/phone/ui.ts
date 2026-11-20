@@ -376,12 +376,13 @@ export function previewItemText(i: Item): string {
  * Aperçu fidèle des lunettes : même mise en page que l'appareil, réduite. `title` : écrit au-dessus, et début de son nom
  * pour les lecteurs d'écran ; 1.2.10 : `hiddenTitle` : dans le nom seulement (Affichage sur un seul écran).
  */
-export function glassesPreview(title: string, view: GlassesView, opts: { hiddenTitle?: boolean } = {}): HTMLElement {
+export function glassesPreview(title: string, view: GlassesView, opts: { hiddenTitle?: boolean; sun?: boolean } = {}): HTMLElement {
   const box = h('div', { class: 'preview', role: 'img', 'aria-label': `${title} : ${[view.title, ...view.items.map(previewItemText)].join(', ')}` });
   const nav = initNav({ screen: 'home' });
   const g = geometry(view);
   const frame = effectiveFrame(nav.stack[0], view, g.capacity);
-  const containers = layoutPage(view, frame).containers;
+  // 1.3.1 (R5) : `sun`, réglage « Plein soleil » (niveaux de glasses/layout.ts)
+  const containers = layoutPage(view, frame, { sun: opts.sun === true }).containers;
   if (previewPainter) previewPainter(box, containers);
   else {
     const screen = h('div', { class: 'g-screen' });

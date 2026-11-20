@@ -4181,7 +4181,8 @@ export class GlassesController implements GlassesApi {
     const shown = inTitle ? { ...view, title: message } : view;
     const g = geometry(shown, !!toast);
     const frame = effectiveFrame(current(this.nav), view, g.capacity);
-    const page = layoutPage(shown, frame, { toast });
+    // 1.3.1 (PRD-1.3.1 § 14, R5) : « Plein soleil » (layout.ts, SUN_LEVEL) ; un changement de réglage redessine la page
+    const page = layoutPage(shown, frame, { toast, sun: this.settings().display.sun === true });
     // 1.2.10 : images et choix du menu système de la page (guidage), s'ils n'y sont pas déjà
     if (view.images?.length && !page.images) page.images = view.images;
     if (view.menu?.length && !page.menu) page.menu = view.menu;

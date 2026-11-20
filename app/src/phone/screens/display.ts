@@ -9,6 +9,8 @@
  * deux choix côte à côte, « À l’ouverture de Quai » sur son écran (#/affichage/ouverture), sa valeur sur la ligne qui
  * l'ouvre ; l'aperçu se lit par son nom (« Aperçu dans les lunettes : … »). Ouvert depuis l'accueil (?retour=accueil),
  * Affichage y revient, et l'écran de l'ouverture revient à cet Affichage-là.
+ * 1.3.1 (PRD-1.3.1 § 14, R5) : « Plein soleil » dans « Sur tous les écrans », après la pluie ; l'aperçu le suit. Avec ce
+ * quatrième interrupteur, Affichage dépasse 390 × 844 d'environ 55 px (arbitrage signalé, test de display.test.ts).
  */
 import type { Settings } from '../../core/api';
 import { header, type PhoneCtx } from '../app';
@@ -24,7 +26,9 @@ const PREVIEW_TITLE = 'Aperçu dans les lunettes';
 function livePreview(ctx: PhoneCtx): { el: HTMLElement; refresh(): void } {
   const el = h('div', { class: 'preview-top' });
   const refresh = (): void => {
-    el.replaceChildren(glassesPreview(PREVIEW_TITLE, homePreview(ctx.settings.get()), { hiddenTitle: true }));
+    // 1.3.1 (R5) : l'aperçu suit « Plein soleil »
+    const s = ctx.settings.get();
+    el.replaceChildren(glassesPreview(PREVIEW_TITLE, homePreview(s), { hiddenTitle: true, sun: s.display.sun === true }));
   };
   refresh();
   return { el, refresh };
@@ -96,6 +100,8 @@ export function displayScreen(ctx: PhoneCtx): HTMLElement {
         h('div', { class: 'bordered' }, switchRow({ label: 'Signaler les horaires prévus', sub: 'un ~ devant l’heure sans temps réel', checked: s.display.markPlanned, onChange: (v) => set((d) => ({ ...d, markPlanned: v })) })),
         // 1.2.5 : pluie prévue sur les marches de 5 min ou plus (grille fixe de la Belgique : la position n'est pas envoyée)
         h('div', { class: 'bordered' }, switchRow({ label: 'Pluie pendant la marche', sub: 'sur les marches de 5 min ou plus, d’après Open-Meteo', checked: s.display.rain, onChange: (v) => set((d) => ({ ...d, rain: v })) })),
+        // 1.3.1 (PRD-1.3.1 § 14, R5) : « Plein soleil », éteint par défaut (seul `true` est enregistré) ; l'aperçu le suit
+        h('div', { class: 'bordered' }, switchRow({ label: 'Plein soleil', sub: 'Le texte pâle devient plus clair.', checked: s.display.sun === true, onChange: (v) => set((d) => ({ ...d, sun: v })) })),
       ),
     ),
   );
