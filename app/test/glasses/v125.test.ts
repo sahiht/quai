@@ -199,19 +199,21 @@ describe('PRD-1.2.5 § 3 : pluie prévue sur les marches de 5 min ou plus', () =
   it('« à pied 5 min, pluie » ; la marche de 4 min et celle de 2 min n’en disent jamais rien (1.2.10 § 5)', () => {
     const wet = withRain(j1, 0, 2, 4);
     const l = stepLines(wet, [wet], T(7, 20));
-    expect(l).toContain('07:38 à pied 5 min, pluie');
+    // 1.3.1 (PRD-1.3.1 § 4) : la marche nomme l'arrêt où monter, « , pluie » après lui
+    expect(l).toContain('07:38 à pied 5 min → Maison Arrêt, pluie');
     // la marche de 4 min et celle de 2 min : trop courtes pour la pluie, même marquées
-    expect(l).toContain('07:55 à pied 4 min');
+    expect(l).toContain('07:55 à pied 4 min → Braine-l’Alleud');
     for (const x of l) expect(textWidth(x)).toBeLessThanOrEqual(WIDTHS.full);
   });
 
   it('arrivée à pied, trajet tout à pied ; jamais sans marque du cœur', () => {
     const end = journey('e', [{ ride: '3', mode: 'tram', dep: T(7, 40), arr: T(7, 50), from: 'Gare du Nord', to: 'Bourse', head: 'Churchill' }, { walk: 6 }]);
     const wetEnd = withRain(end, 1);
-    expect(stepLines(wetEnd)).toContain('07:50 à pied 6 min, pluie');
-    expect(stepLines(end)).toContain('07:50 à pied 6 min');
+    // 1.3.1 (B14) : la dernière marche porte l'heure d'arrivée à droite
+    expect(stepLines(wetEnd)).toContain('07:50 à pied 6 min, pluie   07:56');
+    expect(stepLines(end)).toContain('07:50 à pied 6 min   07:56');
     const walk: Journey = { id: 'w', legs: [{ kind: 'walk', from: { name: { fr: 'Ici', nl: 'Ici' }, lat: 50.8, lon: 4.3 }, to: { name: { fr: 'Bureau', nl: 'Bureau' }, lat: 50.8, lon: 4.3 }, dep: T(7, 40), arr: T(7, 52), schedDep: T(7, 40), schedArr: T(7, 52), walkMin: 12, rain: true }], dep: T(7, 40), arr: T(7, 52), leaveAt: T(7, 40), transfers: 0, rt: true, alerts: [] };
-    expect(stepLines(walk)).toContain('07:40 à pied 12 min, pluie');
+    expect(stepLines(walk)).toContain('07:40 à pied 12 min, pluie   07:52');
     // « Autres trajets » : à pied tout du long, sous la pluie
     expect(nb(otherDetail(walk, [j1, walk]))).toBe('à pied, 12 min sous la pluie');
     expect(nb(otherDetail({ ...walk, legs: [{ ...walk.legs[0], rain: undefined }] }, [j1, walk]))).toBe('à pied, 12 min');

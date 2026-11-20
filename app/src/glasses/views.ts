@@ -19,6 +19,7 @@ import { areaLabel, displayName, distanceM, hhmm, lineLabel, minutesUntil } from
 import type { Mode, Names } from '../../../shared/types';
 import { normalizeForSearch } from '../../../shared/names';
 import { compareVersions } from '../version';
+import { apos } from '../core/typo';
 import { padLeftTo, textWidth } from './font';
 import { COL_SEP, ensureVisible, geometry, maxTop, visibleRange, WIDTHS, type DetailItem } from './layout';
 import type { AreaRef, GlassesView, Intent, Item, KeepLineRoute, LineRoute, LineRunRoute, OthersRoute, Route, Seg, StepsRoute, StopsRoute, SubRow, TopLine } from './types';
@@ -1318,6 +1319,12 @@ const stepTime = (t: string): string => padLeftTo(t, STEP_TIME_PX);
 const STEP_ROW_PX = WIDTHS.full - STEP_TIME_PX - 10 - 10 - 10 - 12;
 
 /**
+ * 1.3.1 (PRD-1.3.1 § 4) : place du texte pâle d'une marche (« à pied 7 min → Flagey ») : de x = 108 (colonne b, après la
+ * case de l'heure et deux espaces) au bord sûr, 2 px de marge pour le crénage ; la colonne de droite éventuelle en moins.
+ */
+const WALK_ROW_PX = WIDTHS.full - STEP_TIME_PX - 10 - 2;
+
+/**
  * 1.2.10 (PRD-1.2.10 § 5) : une rangée par étape. L'heure au début ; un véhicule au plus clair (« Bus 6 », « IC voie 3 »,
  * « Tram 3 », « IC voie 6 ! » si elle change), puis « → Gare des Guillemins » pâle (« , dernier » au dernier passage) ;
  * à droite l'heure d'arrivée pâle, ou la marge d'une correspondance de 5 min ou moins (« marge 2 min », « très juste »,
@@ -1328,21 +1335,37 @@ const STEP_ROW_PX = WIDTHS.full - STEP_TIME_PX - 10 - 10 - 10 - 12;
 function stepRows(j: Journey, leave: number, ctx: ViewCtx): StepRow[] {
   const l = lang(ctx);
   const rows: StepRow[] = [];
-  const walkRow = (time: number, min: number, rain: boolean, start: number, end: number): StepRow => ({
-    item: { a: '', segs: [{ t: stepTime(hhmm(time)), hi: true }, { t: `à pied ${minText(min)}${rain ? RAIN_TAIL : ''}` }] },
-    start,
-    end,
-  });
+  /**
+   * 1.3.1 (PRD-1.3.1 § 4) : une marche vers un véhicule nomme l'arrêt ou la gare où monter, comme les véhicules
+   * (« à pied 7 min → Flagey », correspondance « à pied 2 min → Gare du Midi ») : le nom coupé au mot, jamais la fin
+   * (« , pluie ») ; la dernière marche vers la destination ne change pas. 1.3.1 (§ 12, B14) : la dernière marche (et un
+   * trajet à pied seul) porte à droite l'heure d'arrivée, pâle (« à pied 9 min, pluie   08:58 »).
+   */
+  const walkRow = (time: number, min: number, rain: boolean, start: number, end: number, to?: string, arrival?: number): StepRow => {
+    const tail = rain ? RAIN_TAIL : '';
+    const walk = `à pied ${minText(min)}`;
+    const right = arrival !== undefined ? hhmm(arrival) : '';
+    const text = to ? fitName(`${walk} → `, apos(to), tail, WALK_ROW_PX - (right ? textWidth(right) + 12 : 0)) : `${walk}${tail}`;
+    const item: Item = { a: '', segs: [{ t: stepTime(hhmm(time)), hi: true }, { t: text }] };
+    if (right) {
+      item.bRight = right;
+      item.rightPale = true;
+    }
+    return { item, start, end };
+  };
   if (!j.legs.some((x) => x.kind === 'ride')) {
     const min = Math.max(1, Math.round((j.arr - j.dep) / 60_000));
-    rows.push(walkRow(j.dep, min, rainyJourney(j) && min >= 5, j.dep, j.arr));
+    rows.push(walkRow(j.dep, min, rainyJourney(j) && min >= 5, j.dep, j.arr, undefined, j.arr));
     return rows;
   }
   let prevRide: Leg | undefined;
   j.legs.forEach((leg, i) => {
     if (leg.kind === 'walk') {
       const time = i === 0 ? leave : leg.dep;
-      rows.push(walkRow(time, walkMinOf(leg), rainyWalk(leg), time, Math.max(leg.arr, time + 60_000)));
+      // le véhicule où mène cette marche (le premier qui suit) ; aucun : la dernière marche, vers la destination
+      const next = j.legs.slice(i + 1).find((x) => x.kind === 'ride');
+      const to = next ? displayName(next.from.name, l) : undefined;
+      rows.push(walkRow(time, walkMinOf(leg), rainyWalk(leg), time, Math.max(leg.arr, time + 60_000), to || undefined, next ? undefined : leg.arr));
       return;
     }
     const p = leg.newPlatform || leg.platform;
