@@ -367,6 +367,13 @@ describe('1.3.1 : sorties du métro (mesure de vérification R1)', () => {
     writeFileSync(join(cache, EXITS_FILE), JSON.stringify({ ...pub, version: '2020-01-01' }));
     expect(await publishExits(cache, data, w.index!.version)).toContain('non publiées');
     expect(existsSync(join(data, EXITS_FILE))).toBe(false);
+    // d'une autre forme (4 sorties pour un arrêt, autre format) : jamais publiées
+    const four = { ...pub, stops: { '8001': { s: 'Bourse', x: [['Rue A', 50.85, 4.35, 1], ['Rue B', 50.85, 4.35, 2], ['Rue C', 50.85, 4.35, 3], ['Rue D', 50.85, 4.35, 4]] } } };
+    for (const bad of [four, { ...pub, v: 2 }]) {
+      writeFileSync(join(cache, EXITS_FILE), JSON.stringify(bad));
+      expect(await publishExits(cache, data, w.index!.version)).toBe('sorties du métro illisibles : non publiées');
+      expect(existsSync(join(data, EXITS_FILE))).toBe(false);
+    }
     writeFileSync(join(cache, EXITS_FILE), '{ illisible');
     expect((await publishWalk({ cacheDir: cache, dataDir: data, now: () => new Date('2026-11-16T02:00:00Z'), log: () => undefined })).published).toBe(true);
     expect(existsSync(join(data, EXITS_FILE))).toBe(false);
