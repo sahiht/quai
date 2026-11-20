@@ -33,8 +33,11 @@ export const HINTS = {
   stops: `△▽ arrêts   toucher${NB}: j’y descends   double${NB}: retour`,
   /** 1.2.8 : tout le trajet d'un train ; 1.2.10 : même liste, mêmes aides que les arrêts d'un départ (§ 3.1). */
   trainRun: `△▽ arrêts   toucher${NB}: j’y descends   double${NB}: retour`,
-  /** 1.2.10 (§ 3.2, § 3.3) : un moment du guidage ou « Où tu en es ». */
-  guide: `toucher${NB}: effacer   appui long${NB}: arrêter`,
+  /**
+   * 1.2.10 (§ 3.2, § 3.3) : un moment du guidage ou « Où tu en es ». 1.3.1 (PRD-1.3.1 § 2) : « masquer » : rien n'est
+   * effacé, l'écran est caché et le guidage continue.
+   */
+  guide: `toucher${NB}: masquer   appui long${NB}: arrêter`,
   /** 1.2.10 : « Tu y es ». */
   guideEnd: `toucher${NB}: terminer`,
   /** 1.2.10 (§ 3.4) : menu de l'appui long rendu par Quai (Quai Web). */

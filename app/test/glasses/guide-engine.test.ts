@@ -14,14 +14,18 @@ import { nb, overflowing, page, settingsWith } from './helpers';
 
 const MAIN_FIRST: Record<string, RegExp> = {
   leave: /^Partir maintenant$/,
-  turn: /^(à |légèrement|franchement|tout droit|Fais demi-tour)/,
-  board: /^(dans |à |imminent|IC |S\d|L |P )/,
+  // 1.3.1 (B12, L4) : « À gauche dans 30 m », « Tram 3 dans ~1 min »
+  turn: /^(À |Légèrement|Franchement|Tout droit|Fais demi-tour)/,
+  board: /^(Bus |Tram |Métro |IC |S\d|L |P )/,
   platform: /^Voie modifiée$/,
   nextStop: /^Prochain arrêt : /,
   alight: /^Descends au prochain arrêt$/,
-  replan: /^(Ton |Correspondance ratée : )/,
+  // 1.3.1 (A3, I1) : véhicule raté sans temps réel, resté à l'arrêt : le nouveau trajet d'abord
+  replan: /^(Ton |Correspondance ratée : |Nouveau trajet : |Prochain : )/,
   passed: /^Tu as passé /,
   arrived: /^Tu y es$/,
+  // 1.3.1 (B17, P7) : la marche après une descente
+  walk: /^\d+ min à pied jusqu/,
 };
 
 /** Page d'un état : contrôlée, ses lignes (espaces insécables remises). */
@@ -46,7 +50,7 @@ describe('écrans du guidage sur les états du moteur', () => {
     for (let t = atHm('06:58'); t <= atHm('09:05'); t += MIN) {
       const s = step(r, t);
       const where = render(s, 'where', j, t);
-      expect(where.at(-1)).toBe('toucher : effacer   appui long : arrêter');
+      expect(where.at(-1)).toBe('toucher : masquer   appui long : arrêter');
       if (!s.moment) continue;
       const lines = render(s, 'moment', j, t);
       expect(lines[0], s.moment.kind).toMatch(MAIN_FIRST[s.moment.kind]);
@@ -71,7 +75,7 @@ describe('écrans du guidage sur les états du moteur', () => {
       t += 15_000;
     }
     expect(turns.length).toBeGreaterThan(0);
-    expect(turns[0][0]).toMatch(/^à droite (dans \d+ m|maintenant)$/);
+    expect(turns[0][0]).toMatch(/^À droite (dans \d+ m|maintenant)$/);
     expect(turns[0][1]).toBe('Boulevard d’Avroy');
   });
 
