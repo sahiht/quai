@@ -293,7 +293,10 @@ describe('§ 4, téléphone : la ligne « moyens » d’une carte nomme l’arr�
     const kept = hz.settings.get().favorites[0];
     expect(kept.kind === 'trip' && kept.to.type === 'area' ? kept.to.name.fr : '').toBe("Braine-l'Alleud-Ouest");
     expect(shownLabel({ kind: 'area', area: { areaId: 'x', op: 'sncb', name: N("Braine-l'Alleud"), lat: 0, lon: 0, modes: ['train'] }, label: "Braine-l'Alleud" })).toBe('Braine-l’Alleud');
-    expect(shownLabel({ kind: 'address', label: "Rue de l'Église 5", lat: 0, lon: 0 })).toBe("Rue de l'Église 5");
+    // décision du 20/11 (« ’ » partout à l'affichage) : une adresse aussi ; le libellé gardé ne change pas
+    const address = { kind: 'address' as const, label: "Rue de l'Église 5", lat: 0, lon: 0 };
+    expect(shownLabel(address)).toBe('Rue de l’Église 5');
+    expect(address.label).toBe("Rue de l'Église 5");
   });
 });
 

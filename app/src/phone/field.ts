@@ -146,9 +146,9 @@ export function placeField(ctx: FieldCtx, o: FieldOptions): PlaceField {
   }
 
   function pick(c: FieldChoice): void {
-    // 1.3.1 (§ 7) : une gare ou un arrêt s'écrit avec l'apostrophe typographique (le choix rendu garde le nom des données)
-    // (un lieu gardé aussi : son nom vient souvent d'une gare ; le lieu rendu ne change pas)
-    input.value = c.kind === 'stop' || c.kind === 'place' ? apos(c.label) : c.label;
+    // 1.3.1 (§ 7) : une gare, un arrêt, un lieu gardé ou une adresse s'écrit avec l'apostrophe typographique ; le choix
+    // rendu (nom des données, adresse gardée) ne change pas
+    input.value = apos(c.label);
     picked = true;
     close();
     o.onPick(c);
@@ -171,7 +171,8 @@ export function placeField(ctx: FieldCtx, o: FieldOptions): PlaceField {
       for (const r of s.recent) {
         if (q && !matchesQuery(q, r.label)) continue;
         recentLabels.add(r.label.toLowerCase());
-        items.push({ label: r.label, type: 'récent', pick: () => pick({ kind: 'address', label: r.label, lat: r.lat, lon: r.lon, approx: r.approx, recent: true }) });
+        // 1.3.1 (§ 7) : affichée avec l'apostrophe typographique ; l'adresse gardée et le choix rendu ne changent pas
+        items.push({ label: apos(r.label), type: 'récent', pick: () => pick({ kind: 'address', label: r.label, lat: r.lat, lon: r.lon, approx: r.approx, recent: true }) });
       }
     }
     const stops: Option[] = (st.stops ?? []).slice(0, MAX_STOPS).map((it) => {
@@ -181,12 +182,16 @@ export function placeField(ctx: FieldCtx, o: FieldOptions): PlaceField {
     });
     const geo = st.geo && st.geo !== 'skip' ? st.geo : null;
     const addresses: Option[] = [];
+    /** Adresses déjà proposées, telles que le service les rend (les doublons se comparent sur elles). */
+    const offered: string[] = [];
     for (const r of geo?.results ?? []) {
       const text = addressLabel(r, s.lang);
-      if (recentLabels.has(text.toLowerCase()) || addresses.some((a) => a.label.startsWith(text))) continue;
+      if (recentLabels.has(text.toLowerCase()) || offered.some((a) => a.startsWith(text))) continue;
       const approx = r.approx || streetOnly(r);
+      offered.push(streetOnly(r) ? `${text} (sans numéro)` : text);
       addresses.push({
-        label: streetOnly(r) ? `${text} (sans numéro)` : text,
+        // 1.3.1 (§ 7) : affichée avec l'apostrophe typographique ; le choix rendu garde l'adresse du service
+        label: apos(offered[offered.length - 1]),
         type: 'adresse',
         pick: () => pick({ kind: 'address', label: text, lat: r.lat, lon: r.lon, approx: approx || undefined, recent: false }),
       });
@@ -250,7 +255,9 @@ export function placeField(ctx: FieldCtx, o: FieldOptions): PlaceField {
         void (async () => {
           let ans: GeocodeAnswer;
           try {
-            ans = await (await ctx.core()).geocode(q, geoLang(settings().lang), near() ?? null);
+            // 1.3.1 (§ 7) : l'apostrophe typographique n'est que de l'affichage : le texte envoyé au service d'adresses
+            // (par le relais) garde l'apostrophe droite, même repris d'un champ que Quai a rempli
+            ans = await (await ctx.core()).geocode(q.replace(/’/g, "'"), geoLang(settings().lang), near() ?? null);
           } catch {
             ans = { results: [], error: 'down' };
           }

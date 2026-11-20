@@ -7,19 +7,24 @@
  * aucune apostrophe droite dans le texte des pages ni dans ce que lit un lecteur d'écran. Lieux publics seulement.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Journey, LinePick, StationPick } from '../../src/core/api';
+import type { Core, Departure, FavoriteAnswer, Journey, Leg, LinePick, StationPick } from '../../src/core/api';
+import type { GeocodeResult } from '../../../shared/types';
 import type { GuideStatus } from '../../src/core/guide-types';
 import type { JournalTrip, TripJournal } from '../../src/core/journal-types';
 import type { LineFollow } from '../../src/core/linerun';
+import { troubleText } from '../../src/glasses/format';
+import { favoriteTrouble } from '../../src/glasses/views';
+import { placeField, type FieldChoice } from '../../src/phone/field';
 import { dataScreen } from '../../src/phone/screens/data';
 import { favoritesScreen } from '../../src/phone/screens/favorites';
-import { homeScreen, resetAnswers } from '../../src/phone/screens/home';
+import { homeFavoriteTrouble, homeScreen, resetAnswers } from '../../src/phone/screens/home';
 import { picksScreen, resetKnownLines } from '../../src/phone/screens/picks';
-import { searchScreen } from '../../src/phone/screens/search';
+import { searchScreen, shownLabel } from '../../src/phone/screens/search';
+import { endpointText } from '../../src/phone/text';
 import { createWebLocation, locationText, MANUAL_KEY } from '../../src/web/location';
 import { positionCard } from '../../src/web/position';
-import { at, button, defaults, harness, mount, textOf, until, withGuide } from './helpers';
-import { rideLeg, walkLeg } from './trips';
+import { at, button, defaults, harness, mount, preset11, SCENARIO, textOf, type, until, withGuide } from './helpers';
+import { rideLeg, trip, walkLeg } from './trips';
 
 beforeEach(() => {
   resetAnswers();
@@ -187,5 +192,127 @@ describe('§ 7, preuve côté DOM : aucune apostrophe droite dans une page pour 
     journalBox(page).querySelector<HTMLButtonElement>('.journal-row')!.click();
     expect(page.textContent).toContain('Descendre à Braine-l’Alleud affiché');
     expect(straight(), 'Données').toEqual([]);
+  });
+});
+
+/* ------------------------------ Adresses (décision du directeur, 20/11) ------------------------------ */
+
+describe('§ 7, adresses : « ’ » à l’affichage aussi, jamais dans une valeur gardée ni dans ce qui part vers le service d’adresses', () => {
+  const EGLISE = "Rue de l'Église 5, 1000 Bruxelles";
+  const result: GeocodeResult = { label: EGLISE, lat: 50.8503, lon: 4.3517, kind: 'adresse', source: 'bru', score: 1 };
+  const withGeo = (asked: string[], searched: string[] = []) => (c: Core): Core => ({
+    ...c,
+    search: async (q, near) => (searched.push(q), c.search(q, near)),
+    geocode: async (q) => (asked.push(q), { results: /glise/i.test(q) ? [result] : [] }),
+  });
+
+  it('champ unique : la proposition et le texte choisi avec « ’ » ; le choix rendu et l’adresse récente gardent « \' »', async () => {
+    const asked: string[] = [];
+    const hz = harness({ settings: defaults(), core: withGeo(asked) });
+    const picks: FieldChoice[] = [];
+    const f = placeField(hz.ctx, { id: 'f', label: 'Arrivée', recent: true, onPick: (c) => picks.push(c) });
+    mount(f.el);
+    type(f.input, "rue de l'eglise 5");
+    await until(() => [...f.list.querySelectorAll('.s1')].some((x) => textOf(x) === 'Rue de l’Église 5, 1000 Bruxelles'), 3000);
+    // la recherche tapée avec « ' » part telle quelle
+    expect(asked).toEqual(["rue de l'eglise 5"]);
+    expect(straight(f.list)).toEqual([]);
+    [...f.list.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((b) => textOf(b.querySelector('.s1')).startsWith('Rue de l’Église'))!.click();
+    expect(f.input.value).toBe('Rue de l’Église 5, 1000 Bruxelles');
+    expect(picks[0]).toMatchObject({ kind: 'address', label: EGLISE, lat: 50.8503, lon: 4.3517 });
+  });
+
+  it('un texte repris d’un champ que Quai a rempli (« ’ ») : le service d’adresses reçoit « \' », et l’adresse est retrouvée', async () => {
+    const asked: string[] = [];
+    const searched: string[] = [];
+    const hz = harness({ settings: defaults(), core: withGeo(asked, searched) });
+    const f = placeField(hz.ctx, { id: 'f', label: 'Arrivée', onPick: () => undefined });
+    mount(f.el);
+    type(f.input, 'Rue de l’Église 5');
+    await until(() => [...f.list.querySelectorAll('.s1')].some((x) => textOf(x) === 'Rue de l’Église 5, 1000 Bruxelles'), 3000);
+    expect(asked).toEqual(["Rue de l'Église 5"]);
+    for (const q of asked) expect(q).not.toContain('’');
+  });
+
+  it('« Mes favoris » (adresses récentes, trajet fixe vers une adresse), titre et champs de la recherche : aucune « \' » ; réglages inchangés', async () => {
+    const to = { type: 'address' as const, label: EGLISE, lat: 50.8503, lon: 4.3517 };
+    const s = defaults({
+      favorites: [{ kind: 'trip', id: 'fav-e', from: { type: 'area', areaId: NAMUR.areaId, op: 'sncb', name: NAMUR.name, lat: NAMUR.lat, lon: NAMUR.lon }, to, propose: 'never' }],
+      recent: [{ label: EGLISE, lat: 50.8503, lon: 4.3517, at: 1 }],
+    });
+    expect(endpointText(to, s)).toBe('Rue de l’Église 5, 1000 Bruxelles');
+    const hz = harness({ settings: s });
+    const before = JSON.stringify(hz.settings.get());
+    const fav = mount(favoritesScreen(hz.ctx));
+    expect(textOf(fav.querySelector('.list .t1'))).toBe('Namur → Rue de l’Église 5, 1000 Bruxelles');
+    expect([...fav.querySelectorAll('#recents ~ ul li, section[aria-labelledby="recents"] li')].map((x) => textOf(x))).toContain('Rue de l’Église 5, 1000 Bruxelles');
+    expect(straight(), 'Mes favoris').toEqual([]);
+    mount(homeScreen(hz.ctx));
+    expect(straight(), 'accueil').toEqual([]);
+    expect(shownLabel({ kind: 'address', label: EGLISE, lat: 50.8503, lon: 4.3517 })).toBe('Rue de l’Église 5, 1000 Bruxelles');
+    // rien n'a changé dans les réglages : l'adresse gardée a toujours son apostrophe droite
+    expect(JSON.stringify(hz.settings.get())).toBe(before);
+    expect(hz.settings.get().recent[0].label).toBe(EGLISE);
+  });
+});
+
+/* ------------------------------ B15 : le souci d'un favori dit en mots ------------------------------ */
+
+describe('§ 12, B15 (contrôle du téléphone) : le souci d’un favori se lit, avec les mots des lunettes', () => {
+  const now = at(7, 31);
+  const base = (): Journey => trip('short', at(7, 35), [5, [at(7, 42), at(8, 20), 'IC'], 8]);
+  const answer = (j: Journey): FavoriteAnswer => ({ favoriteId: 'fav-bureau', kind: 'trip', state: 'ok', plan: { journeys: [j] }, updatedAt: now });
+  const withRide = (patch: Partial<Leg>): Journey => {
+    const j = base();
+    j.legs[1] = { ...j.legs[1], ...patch };
+    return j;
+  };
+  const works = (): Journey => ({ ...base(), alerts: [{ kind: 'works', text: "! Travaux : arrêt Porte d'Anderlecht déplacé", at: now }] });
+
+  it('exactement les mots de troubleText (lunettes), aucun mot nouveau ; un retard seul, à l’heure, en calcul : rien', () => {
+    const cases: [Journey, string][] = [
+      [withRide({ cancelled: true }), 'IC supprimé'],
+      [withRide({ platform: '4', newPlatform: '6' }), 'voie 6 au lieu de 4'],
+      [withRide({ newPlatform: '6' }), 'voie modifiée'],
+      [works(), 'Travaux : arrêt Porte d’Anderlecht déplacé'],
+    ];
+    for (const [j, words] of cases) {
+      expect(homeFavoriteTrouble(answer(j), now)).toBe(words);
+      // les mots des lunettes, à l'apostrophe typographique près
+      expect(homeFavoriteTrouble(answer(j), now)).toBe(troubleText(j).replace(/'/g, '’'));
+      expect(favoriteTrouble(answer(j), now)).toBe(true);
+    }
+    expect(homeFavoriteTrouble(answer(withRide({ delayMin: 7, rt: true })), now)).toBe('');
+    expect(homeFavoriteTrouble(answer(base()), now)).toBe('');
+    expect(homeFavoriteTrouble(undefined, now)).toBe('');
+    // un arrêt favori : son prochain départ, les mêmes mots
+    const d = (patch: Partial<Departure>): Departure => ({ op: 'stib', mode: 'tram', line: '81', head: N('Montgomery'), sched: now + 4 * 60_000, est: now + 4 * 60_000, rt: true, delayMin: 0, cancelled: false, ...patch });
+    const stop = (dep: Departure): FavoriteAnswer => ({ favoriteId: 'fav-stop', kind: 'stop', state: 'ok', board: { area: { id: PDA.areaId, op: 'stib', n: PDA.name, lat: PDA.lat, lon: PDA.lon, modes: ['tram'], lines: ['81'] }, departures: [dep] } as FavoriteAnswer['board'], updatedAt: now });
+    expect(homeFavoriteTrouble(stop(d({ cancelled: true })), now)).toBe('tram 81 supprimé');
+    expect(homeFavoriteTrouble(stop(d({ platform: '2', newPlatform: '3' })), now)).toBe('voie 3 au lieu de 2');
+    expect(homeFavoriteTrouble(stop(d({})), now)).toBe('');
+  });
+
+  it('à l’écran : un texte caché juste après le nom, qui part avec le souci ; le nom, le « ! » et le nom des boutons ne changent pas', async () => {
+    let current = answer(withRide({ cancelled: true }));
+    const hz = harness({ settings: preset11(), now, here: SCENARIO.s1, flags: { noRt: true }, core: (c) => ({ ...c, answer: async (f, here, st) => (f.id === 'fav-bureau' ? { ...current, updatedAt: now } : c.answer(f, here, st)) }) });
+    withGuide(hz.glasses);
+    mount(homeScreen(hz.ctx));
+    const row = () => [...document.querySelectorAll<HTMLElement>('.fav-card .fav-row')].find((r) => textOf(r.querySelector('.t1')).startsWith('Bureau'))!;
+    const said = () => row().querySelector<HTMLElement>('.fav-trouble')!;
+    await until(() => row().querySelector('.t1')!.textContent === 'Bureau\u00a0!');
+    expect(said().textContent).toBe('IC supprimé');
+    expect([said().hidden, said().classList.contains('sr-only')]).toEqual([false, true]);
+    // juste après le nom, avant la réponse : lu dans cet ordre
+    expect([...row().querySelector('.txt')!.children].map((c) => c.className)).toEqual(['t1', 'sr-only fav-trouble', 't2 answer']);
+    const labels = [...row().querySelectorAll('button')].map((b) => b.getAttribute('aria-label'));
+    expect(labels).toEqual(['Afficher Bureau dans les lunettes', 'Y aller\u00a0: Bureau']);
+    // les autres favoris, sans souci : rien à lire en plus
+    for (const r of document.querySelectorAll<HTMLElement>('.fav-card .fav-row')) if (r !== row()) expect(r.querySelector<HTMLElement>('.fav-trouble')!.hidden).toBe(true);
+    // plus de souci au calcul suivant (ici, l'accueil rouvert) : le texte part avec le « ! »
+    current = answer(base());
+    mount(homeScreen(hz.ctx));
+    await until(() => row().querySelector('.t1')!.textContent === 'Bureau' && said().hidden);
+    expect(said().textContent).toBe('');
   });
 });

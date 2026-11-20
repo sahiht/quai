@@ -15,7 +15,7 @@
  * porte le nom de l'accueil des lunettes (L7 : « Bureau », pas « Vers le bureau ») et le même « ! » quand il a un souci
  * (B15) ; noms des données avec l'apostrophe typographique (§ 7).
  */
-import type { Core, FavoriteAnswer, GlassesApi, Settings } from '../../core/api';
+import type { Core, FavoriteAnswer, GlassesApi, Journey, Settings } from '../../core/api';
 import type { GuideStatus } from '../../core/guide-types';
 import { asTrip, favoriteTitle } from '../../core/favorites';
 import type { LineFollow } from '../../core/linerun';
@@ -24,7 +24,7 @@ import { NEWS_SINCE, type PhoneCtx } from '../app';
 import { lineBadge } from '../badges';
 import { h, icon, ICON, svgNode, type Child } from '../dom';
 import { canGo, glassesButton, goButton, goFavorite, showTrip } from '../glasses-link';
-import { catchable, SECTION } from '../../glasses/format';
+import { catchable, SECTION, troubleText, upcoming } from '../../glasses/format';
 import { favoriteTrouble, HOME_FAVORITES, homeFavoriteName, TROUBLE_MARK } from '../../glasses/views';
 import { arrivalCopyText, checkLinesOf, copiedText, counted, guideNowLine, guideTitleLine, lineName, newsTitle, shortAnswer, T, typo, withinText } from '../text';
 import { copyText, messageHub, MIRROR_ICON, navRow, nextId } from '../ui';
@@ -111,6 +111,24 @@ export function homeFavoriteText(f: ShownFavorite, a: FavoriteAnswer | undefined
   return favoriteTrouble(a, now) ? `${name}${TROUBLE_MARK}` : name;
 }
 
+/**
+ * 1.3.1 (PRD-1.3.1 § 12, B15, contrôle du téléphone) : le souci d'un favori, en mots, pour qui ne voit pas le « ! » (un
+ * lecteur d'écran ne dit pas un signe seul) : exactement les mots des lunettes (troubleText : « IC supprimé », « voie 6
+ * au lieu de 4 », « voie modifiée », le texte de l'alerte de travaux), aucun mot nouveau ; un arrêt favori : son
+ * prochain départ, avec les mêmes mots. Pas de souci (ou pas de réponse) : ''.
+ */
+export function homeFavoriteTrouble(a: FavoriteAnswer | undefined, now: number): string {
+  if (!a || !favoriteTrouble(a, now)) return '';
+  if (a.kind === 'stop') {
+    const d = upcoming(a.board?.departures ?? [], now)[0];
+    if (!d) return '';
+    const ride = { kind: 'ride', op: d.op, mode: d.mode, line: d.line, cancelled: d.cancelled, platform: d.platform, newPlatform: d.newPlatform };
+    return apos(troubleText({ legs: [ride], alerts: [] } as unknown as Journey));
+  }
+  const j = a.plan?.journeys[0];
+  return j ? apos(troubleText(j)) : '';
+}
+
 /* ------------------------------ Carte « Favoris » ------------------------------ */
 
 /**
@@ -145,15 +163,25 @@ function favoritesCard(ctx: PhoneCtx): HTMLElement {
   const ordered = orderedFavorites(ctx.coreNow(), s, here);
   const shown = ordered.slice(0, HOME_FAVORITES);
   const rest = ordered.slice(HOME_FAVORITES);
-  const rows = new Map<string, { name: HTMLElement; answer: HTMLElement }>();
+  const rows = new Map<string, { name: HTMLElement; trouble: HTMLElement; answer: HTMLElement }>();
+  /** 1.3.1 (B15) : le souci dit en mots, caché à l'écran (le « ! » le montre), juste après le nom. */
+  const sayTrouble = (el: HTMLElement, a: FavoriteAnswer | undefined): void => {
+    const words = homeFavoriteTrouble(a, ctx.clock.now());
+    el.textContent = words;
+    el.hidden = !words;
+  };
   const go = canGo(ctx);
   const favRow = (f: ShownFavorite): HTMLLIElement => {
     // 1.3.1 (L7) : le nom de l'accueil des lunettes, sans le « ! » dans le nom des boutons
     const title = apos(homeFavoriteName({ fav: f }, { now: ctx.clock.now(), settings: s }));
     const known = lastAnswers.get(f.id);
-    const name = h('span', { class: 't1' }, homeFavoriteText(f, known, ctx.clock.now(), s));
+    const nameEl = h('span', { class: 't1' }, homeFavoriteText(f, known, ctx.clock.now(), s));
+    const trouble = h('span', { class: 'sr-only fav-trouble' });
+    sayTrouble(trouble, known);
+    // le nom, puis son souci en mots (caché) : ensemble dans la rangée, dont la ligne ne change pas (R2 la complète)
+    const name: Child = [nameEl, trouble];
     const answer = h('span', { class: 't2 answer' }, typo(shortAnswer(known, ctx.clock.now(), s)));
-    rows.set(f.id, { name, answer });
+    rows.set(f.id, { name: nameEl, trouble, answer });
     const { button, message } = glassesButton(hub, `Afficher ${title} dans les lunettes`, async () => {
       const st = ctx.settings.get();
       const fav = shownFavorites(st.favorites).find((x) => x.id === f.id) ?? f;
@@ -217,6 +245,7 @@ function favoritesCard(ctx: PhoneCtx): HTMLElement {
           const row = rows.get(fav.id);
           if (!row) return;
           row.name.textContent = homeFavoriteText(fav, a, ctx.clock.now(), st);
+          sayTrouble(row.trouble, a);
           row.answer.textContent = typo(shortAnswer(a, ctx.clock.now(), st));
         }),
       );

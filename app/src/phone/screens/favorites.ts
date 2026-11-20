@@ -128,7 +128,7 @@ export function favoritesScreen(ctx: PhoneCtx): HTMLElement {
         'section',
         { class: 'box pad', 'aria-labelledby': 'recents' },
         h('h2', { id: 'recents' }, T.recentTitle),
-        h('ul', { class: 'plain' }, s.recent.map((r) => h('li', { class: 'small' }, r.label))),
+        h('ul', { class: 'plain' }, s.recent.map((r) => h('li', { class: 'small' }, apos(r.label)))),
         h('button', {
           type: 'button',
           class: 'btn btn-secondary btn-block',

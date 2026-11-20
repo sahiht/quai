@@ -174,7 +174,7 @@ export function placeForm(ctx: PhoneCtx, o: PlaceFormOptions): HTMLElement {
     field = placeField(ctx, {
       id: 'pl-lieu',
       label: T.favField,
-      value: legacy ? undefined : existing.src === 'stop' ? apos(legacyQuery(existing)) : existing.src === 'address' ? existing.address : undefined,
+      value: legacy ? undefined : existing.src === 'stop' ? apos(legacyQuery(existing)) : existing.src === 'address' ? (existing.address === undefined ? undefined : apos(existing.address)) : undefined,
       here: { label: T.hereOption, type: T.hereSub },
       recent: true,
       // Texte changé après un choix (« 25 » corrigé en « 52 ») : le choix ne vaut plus, il faut en refaire un.
@@ -226,7 +226,7 @@ export function placeForm(ctx: PhoneCtx, o: PlaceFormOptions): HTMLElement {
         'div',
         { class: 'box pad verify' },
         h('strong', null, T.toVerify),
-        h('span', null, typo(`Texte enregistré avec la version précédente : « ${existing.address} ».`)),
+        h('span', null, typo(`Texte enregistré avec la version précédente : « ${apos(existing.address ?? '')} ».`)),
         h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => field?.search(legacyQuery(existing)) }, T.verify),
       )
     : null;

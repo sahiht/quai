@@ -42,11 +42,11 @@ const areaOf = (a: Pick<AreaSummary, 'id' | 'op' | 'n' | 'lat' | 'lon' | 'modes'
 /**
  * 1.3.1 (PRD-1.3.1 § 7) : texte affiché d'une extrémité : une gare, un arrêt, « Ma position, … » ou un lieu gardé en
  * favori (son nom vient souvent d'une gare) avec l'apostrophe typographique ; le libellé gardé (End.label) ne change
- * pas ; une adresse tapée reste telle quelle. Rien : ''.
+ * pas ; une adresse aussi (décision du 20/11 : « ’ » partout à l'affichage). Rien : ''.
  */
 export function shownLabel(e: End | null): string {
   if (!e) return '';
-  return e.kind === 'address' ? e.label : apos(e.label);
+  return apos(e.label);
 }
 
 /** Choix du champ unique → extrémité de la recherche. */
