@@ -717,12 +717,15 @@ function chooseView(kind: 'stations' | 'lines' | 'follows', ctx: ViewCtx): Glass
  * Toucher : le tableau des départs de la gare. 1.3.1 (PRD-1.3.1 § 12, B21) : en accordéon (comme « Favoris ») : sous la
  * gare du curseur, pâles et en retrait, la direction de son prochain train (« vers Bruxelles-Midi »), puis le train
  * d'après (« puis IC vers Liège-Guillemins, 07:54 voie 4 », stationDetail) ; les autres gares restent fermées.
+ * Contrôle 1.3.1 : la ligne de note reste réservée comme en 1.3.0 (une vue en accordéon ne la garde que par
+ * `notePlanned`, geometry) : un train sans temps réel qui arrive au rafraîchissement ne reconstruit pas la page ; et
+ * « ~ horaire prévu » ne se dit que sous un « ~ » à l'écran (règle de la 1.2.8) : celui d'une rangée visible ou du
+ * train d'après de la gare ouverte, jamais celui d'une gare fermée.
  */
 export function stationsView(rows: StationRow[], ctx: ViewCtx): GlassesView {
   if (!rows.length) return chooseView('stations', ctx);
   const v = base('stations', 'stations', SECTION.stationsTitle, ctx);
   v.accordion = true;
-  let planned = false;
   for (const r of rows) {
     const item: DetailItem = { a: displayName(r.pick.name, lang(ctx)), c: '…', action: { kind: 'open', route: { screen: 'board', areaId: r.pick.areaId, name: r.pick.name } } };
     const next = r.next && r.next.est >= ctx.now - 30_000 ? r.next : undefined;
@@ -732,15 +735,15 @@ export function stationsView(rows: StationRow[], ctx: ViewCtx): GlassesView {
       const t = departureRightText(next, ctx.now, mp(ctx));
       item.c = t.text;
       if (t.tail) item.cTail = t.tail;
-      if (!next.rt && !next.cancelled) planned = true;
+      if (!next.rt && !next.cancelled && mp(ctx)) item.planned = true;
       const after = r.after && r.after.est >= ctx.now - 30_000 && r.after !== next ? r.after : undefined;
       const expand = stationDetail(next, after, ctx.now, ctx.settings);
       if (expand.length) item.expand = expand;
-      if (expand.some((e) => e.planned)) planned = true;
     }
     v.items.push(item);
   }
-  v.note = ctx.stale ?? (planned && mp(ctx) ? NOTE_PLANNED : undefined);
+  v.note = ctx.stale;
+  v.notePlanned = NOTE_PLANNED;
   v.reserveNote = true;
   v.hints = hints(ctx, HINTS.stations);
   return v;
