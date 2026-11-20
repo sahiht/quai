@@ -29,6 +29,8 @@ export const engine = {
   /** « J'y descends », arrêt dépassé : le même véhicule prolongé jusqu'à l'arrêt suivant (rideOnJourney). */
   kept: [] as { old: string; to?: string; now: number }[],
   script: null as Script | null,
+  /** 1.3.1 (B16) : correspondances très juste que tightLegs rend (rangs d'étape). */
+  tight: [] as number[],
   /** Lève une erreur au prochain calcul (moteur en panne). */
   throwNext: false,
   reset(): void {
@@ -39,6 +41,7 @@ export const engine = {
     this.nones = [];
     this.kept = [];
     this.script = null;
+    this.tight = [];
     this.throwNext = false;
   },
   last(): { input: GuideInputLike; mem: GuideMemory } {
@@ -118,6 +121,10 @@ export const guideModule = {
   guideStatusOf(state: GuideState, journey: Journey, title: string, guided: boolean, lang: NameLang): GuideStatus {
     return { kind: state.kind, title, arr: journey.arr, now: guideModule.guideNowText(state, journey, lang), guided };
   },
+  /** 1.3.1 (B16) : correspondances très juste (engine.tight). */
+  tightLegs(_j: Journey): number[] {
+    return [...engine.tight];
+  },
   /** Le moteur double note la recherche sans résultat dans sa mémoire (`noneAt`), comme le vrai la garde. */
   replanNone(mem: GuideMemory, now: number): GuideMemory {
     engine.nones.push(now);
@@ -156,9 +163,11 @@ export const views = {
 
 /** Double de glasses/guide-views.ts : ni toucher, ni menu (le contrôleur les ajoute), images des moments. */
 export const viewsModule = {
+  // 1.3.1 (B10) : « Voir tout le trajet », « Voir les arrêts », « Arrêter le guidage » en dernier
   GUIDE_MENU: [
-    { id: 1, label: 'Arrêter le guidage' },
     { id: 2, label: 'Voir tout le trajet' },
+    { id: 3, label: 'Voir les arrêts' },
+    { id: 1, label: 'Arrêter le guidage' },
   ] as MenuItem[],
   guideView(state: GuideState, show: 'empty' | 'moment' | 'where', journey: Journey, ctx: ViewCtx): GlassesView {
     const m = state.moment;

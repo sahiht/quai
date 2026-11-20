@@ -66,6 +66,8 @@ describe('vrai moteur : de l’heure de partir au premier virage', () => {
     await h.settle(5 * MIN + 1_000);
     expect(shown(h)).toBe('leave');
     const id = h.last().moment;
+    // 1.3.1 (A7) : masqué d'un toucher, affiché depuis au moins 1,5 s
+    await h.settle(1_000);
     await h.gesture('tap');
     expect(h.last().show).not.toBe('moment');
     expect(h.c.followed!.guide!.mem.dismissed).toContain(id);
@@ -91,7 +93,8 @@ describe('vrai moteur : de l’heure de partir au premier virage', () => {
     const built = h.since(n);
     expect(built.find((x) => x.op === 'rebuild')?.extra?.images?.[0].image).toEqual({ kind: 'turn', turn: 'right' });
     expect((built.find((x) => x.op === 'paint')?.arg as ImageSpec).image).toEqual({ kind: 'turn', turn: 'right' });
-    expect(built.find((x) => x.op === 'rebuild')?.extra?.menu?.map((m) => m.id)).toEqual([1, 2]);
+    // 1.3.1 (B10) : « Voir tout le trajet », « Voir les arrêts », « Arrêter le guidage »
+    expect(built.find((x) => x.op === 'rebuild')?.extra?.menu?.map((m) => m.id)).toEqual([2, 3, 1]);
   });
 });
 

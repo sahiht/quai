@@ -180,7 +180,8 @@ export type Route =
 export interface MenuItem { id: number; label: string }
 
 /** 1.2.10 : identifiants des choix du menu pendant un guidage. */
-export const MENU_IDS = { stopGuide: 1, allSteps: 2 } as const;
+/** 1.3.1 (B10, E4) : `stops`, « Voir les arrêts » (« Dans le train » du véhicule en cours). */
+export const MENU_IDS = { stopGuide: 1, allSteps: 2, stops: 3 } as const;
 
 /** news : message « Quai 1.2.4 » (une fois, après la mise à jour depuis une version antérieure ; lignes dans la route). */
 export type MessageKind = 'loading' | 'error' | 'empty' | 'firstRun' | 'notConfigured' | 'info' | 'news';
