@@ -1,6 +1,9 @@
 /**
- * 1.3.1 (PRD-1.3.1 § 14, R1) : mesure de la sortie du métro, lancée seulement par une branche de vérification (flux
- * « Données de nuit », verification=true) : rien n'est publié, le bilan va dans le journal.
+ * 1.3.1 (PRD-1.3.1 § 14, R1) : sorties du métro et du prémétro.
+ * - Fichier publié data/exits.json (format : app/src/core/walk/exits-format.ts) : fait par writeExits avec l'extrait
+ *   et les tuiles de la semaine (weekly.ts), copié par publishWalk ; jamais bloquant, ignoré par la 1.3.0.
+ * - Mesure (commande « exits » de cli.ts), lancée seulement par une branche de vérification (flux « Données de nuit »,
+ *   verification=true) : rien n'est publié, le bilan va dans le journal, avec les sorties retenues de chaque station.
  *
  * - Arrêts : éléments OSM (nœuds et voies) qui portent ref:STIB_MIVB (plusieurs numéros séparés par « ; »), arrêts ou
  *   quais (public_transport=stop_position|platform, railway=stop|tram_stop|platform), sous terre : location=underground,
@@ -9,18 +12,21 @@
  * - Chemins : les tuiles piétonnes de la nuit (celles du téléphone), raccordées par leurs nœuds partagés.
  * - Pour chaque élément : le quai est la voie sous terre (F_UNDER) la plus proche, à 30 m au plus ; on suit seulement
  *   les voies sous terre (sens uniques respectés) jusqu'à 600 m ; un nœud qui touche une voie de surface est une
- *   sortie ; son nom : la première voie nommée à 60 m au plus le long des voies de surface, sinon la voie de surface
- *   nommée la plus proche, à 40 m au plus.
+ *   sortie ; son nom : la première voie de surface au nom de rue ou de place (isStreetName : jamais le nom de la
+ *   station) à 60 m au plus le long des voies de surface, sinon la plus proche à 40 m au plus. Une sortie par nom,
+ *   3 au plus par numéro STIB, de la plus proche du quai à la plus lointaine.
  * - Classes : A aucune voie piétonne à 30 m ; B voies de surface seulement (quai non marqué sous terre) ; C couloirs
- *   sans sortie à 600 m ; D sorties sans nom ; E sortie nommée.
+ *   sans sortie à 600 m ; D sorties sans rue ni place nommée (isStreetName) ; E sortie nommée.
  * - Contrôle avec les données officielles : stations STIB de métro publiées (data/tiles, mode metro) avec un arrêt OSM
  *   sous terre à 150 m, et avec une sortie nommée.
  */
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { decodeTile, F_BWD, F_FWD, F_UNDER, isWalkIndex, isWalkTile, leafKeysForBox, WALK_UNIT, type DecodedTile } from '../../../app/src/core/walk/format.ts';
+import { isExitsFile, MAX_EXITS, type ExitsFile, type ExitTuple } from '../../../app/src/core/walk/exits-format.ts';
 import { tagsOf, underground, wayName } from './filter.ts';
 import { firstBlockWithoutNodes, PbfFile, readKeyedNodes, readWays, type Tags } from './pbf.ts';
+import { ATTRIBUTION, LICENCE, SOURCE } from './tiles.ts';
 
 export const STIB_KEY = 'ref:STIB_MIVB';
 /** Quai : voie sous terre à cette distance au plus de l'arrêt. */
@@ -437,8 +443,47 @@ export function exitsFrom(g: ExitGraph, s: Snap): Map<number, number> {
   return exits;
 }
 
-/** Nom d'une sortie : première voie de surface nommée à NAME_ALONG_M le long des voies de surface, sinon la plus proche à NAME_NEAR_M ; '' sinon. */
-export function exitName(g: ExitGraph, node: number): string {
+/* ------------------------------ Noms des sorties ------------------------------ */
+
+/** Mots qui ouvrent un nom de rue ou de place (minuscules, sans accents). */
+const STREET_HEADS = new Set([
+  'rue', 'avenue', 'boulevard', 'place', 'chaussee', 'square', 'quai', 'parvis', 'allee', 'cours', 'passage', 'impasse',
+  'esplanade', 'rond-point', 'carrefour', 'chemin', 'clos', 'dreve', 'venelle', 'ruelle', 'pont', 'promenade', 'montagne',
+  'marche', 'mont', 'grand-place',
+]);
+/** Débuts en deux mots (« Petite rue des Bouchers », « Vieux Marché aux Grains »). */
+const STREET_HEADS_2 = new Set(['petite rue', 'vieux marche', 'grand place']);
+
+/** Nom replié pour comparer : minuscules, sans accents, apostrophes droites, espaces simples. */
+export function fold(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[’‘`]/g, "'")
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * 1.3.1 (R1, consigne du 20/11) : nom montré pour une sortie : une rue ou une place (le premier mot le dit : « Rue »,
+ * « Avenue », « Place », « Chaussée »…), jamais le nom de la station elle-même (« Parc », « Louise », « Gare de
+ * l'Ouest », « Heysel »), ni un sentier, un quai de gare ou un parc.
+ */
+export function isStreetName(name: string, station = ''): boolean {
+  const n = fold(name);
+  if (!n) return false;
+  const st = fold(station);
+  if (st && n === st) return false;
+  const words = n.split(' ');
+  return STREET_HEADS.has(words[0]) || (words.length > 1 && STREET_HEADS_2.has(`${words[0]} ${words[1]}`));
+}
+
+/**
+ * Nom d'une sortie : la première voie de surface dont le nom convient (`ok`), à NAME_ALONG_M au plus le long des voies
+ * de surface, sinon la voie de surface au nom qui convient la plus proche, à NAME_NEAR_M au plus ; '' sinon.
+ */
+export function exitName(g: ExitGraph, node: number, ok: (name: string) => boolean = () => true): string {
   const dist = new Map<number, number>();
   const heap = new Heap();
   heap.push(0, node);
@@ -449,13 +494,21 @@ export function exitName(g: ExitGraph, node: number): string {
     for (let k = g.adjStart[u]; k < g.adjStart[u + 1]; k++) {
       const e = g.adj[k];
       if (under(g, e)) continue;
-      if (g.eName[e]) return g.eName[e];
+      if (g.eName[e] && ok(g.eName[e])) return g.eName[e];
       const v = g.eFrom[e] === u ? g.eTo[e] : g.eFrom[e];
       if (!dist.has(v)) heap.push(d + g.eLen[e], v);
     }
   }
-  const s = nearest(g, g.lat[node], g.lon[node], NAME_NEAR_M, (e) => !under(g, e) && g.eName[e] !== '');
+  const s = nearest(g, g.lat[node], g.lon[node], NAME_NEAR_M, (e) => !under(g, e) && g.eName[e] !== '' && ok(g.eName[e]));
   return s ? g.eName[s.e] : '';
+}
+
+/** Une sortie retenue : nom, point en surface (degrés), mètres de couloir depuis le quai. */
+export interface FoundExit {
+  name: string;
+  lat: number;
+  lon: number;
+  m: number;
 }
 
 export interface FeatureResult {
@@ -465,28 +518,32 @@ export interface FeatureResult {
   underM?: number;
   /** rues des sorties nommées, de la plus proche à la plus lointaine (4 au plus) */
   names: string[];
+  /** sorties nommées, une par nom, de la plus proche à la plus lointaine */
+  exits: FoundExit[];
 }
 
-/** Classe d'un arrêt ou quai sous terre (voir l'en-tête). */
+/** Classe d'un arrêt ou quai sous terre (voir l'en-tête) ; noms : rues et places seulement (isStreetName). */
 export function measureFeature(g: ExitGraph, f: StibFeature): FeatureResult {
   const latU = f.lat / WALK_UNIT;
   const lonU = f.lon / WALK_UNIT;
   const any = nearest(g, latU, lonU, SNAP_UNDER_M, () => true);
-  if (!any) return { f, cls: 'A', names: [] };
+  if (!any) return { f, cls: 'A', names: [], exits: [] };
   const s = nearest(g, latU, lonU, SNAP_UNDER_M, (e) => under(g, e));
-  if (!s) return { f, cls: 'B', names: [] };
-  const exits = [...exitsFrom(g, s).entries()].sort((a, b) => a[1] - b[1] || a[0] - b[0]);
-  if (!exits.length) return { f, cls: 'C', names: [] };
-  const names: string[] = [];
-  let underM: number | undefined;
-  for (const [node, d] of exits) {
-    const n = exitName(g, node);
-    if (!n) continue;
-    underM ??= d;
-    if (!names.includes(n) && names.length < 4) names.push(n);
+  if (!s) return { f, cls: 'B', names: [], exits: [] };
+  const found = [...exitsFrom(g, s).entries()].sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+  if (!found.length) return { f, cls: 'C', names: [], exits: [] };
+  const exits: FoundExit[] = [];
+  const ok = (n: string) => isStreetName(n, f.name);
+  for (const [node, d] of found) {
+    const name = exitName(g, node, ok);
+    if (!name || exits.some((x) => x.name === name)) continue;
+    exits.push({ name, lat: round5(g.lat[node] * WALK_UNIT), lon: round5(g.lon[node] * WALK_UNIT), m: Math.round(d) });
   }
-  return names.length ? { f, cls: 'E', underM, names } : { f, cls: 'D', names: [] };
+  if (!exits.length) return { f, cls: 'D', names: [], exits: [] };
+  return { f, cls: 'E', underM: exits[0].m, names: exits.slice(0, 4).map((x) => x.name), exits };
 }
+
+const round5 = (x: number) => Math.round(x * 1e5) / 1e5;
 
 export interface CodeResult {
   code: string;
@@ -495,20 +552,72 @@ export interface CodeResult {
   cls: ExitClass;
   underM?: number;
   names: string[];
+  /** sorties de tous ses éléments, une par nom (la plus courte), de la plus proche à la plus lointaine */
+  exits: FoundExit[];
 }
 
-/** Un résultat par numéro STIB : le meilleur de ses arrêts et quais sous terre. */
+/** Un résultat par numéro STIB : le meilleur de ses arrêts et quais sous terre ; leurs sorties réunies. */
 export function byCode(results: readonly FeatureResult[]): CodeResult[] {
   const out = new Map<string, CodeResult>();
   for (const r of results) {
     for (const code of r.f.codes) {
       const cur = out.get(code);
+      const merged = mergeExits(cur?.exits ?? [], r.exits);
       if (!cur || RANK[r.cls] > RANK[cur.cls] || (r.cls === cur.cls && (r.underM ?? Infinity) < (cur.underM ?? Infinity))) {
-        out.set(code, { code, name: r.f.name || cur?.name || '', mode: r.f.mode !== 'other' ? r.f.mode : (cur?.mode ?? 'other'), cls: r.cls, ...(r.underM !== undefined ? { underM: r.underM } : {}), names: r.names });
-      } else if (!cur.name && r.f.name) cur.name = r.f.name;
+        out.set(code, { code, name: r.f.name || cur?.name || '', mode: r.f.mode !== 'other' ? r.f.mode : (cur?.mode ?? 'other'), cls: r.cls, ...(r.underM !== undefined ? { underM: r.underM } : {}), names: r.names, exits: merged });
+      } else {
+        if (!cur.name && r.f.name) cur.name = r.f.name;
+        cur.exits = merged;
+      }
     }
   }
+  for (const c of out.values()) if (c.exits.length) c.names = c.exits.slice(0, 4).map((x) => x.name);
   return [...out.values()].sort((a, b) => a.code.localeCompare(b.code, 'en', { numeric: true }));
+}
+
+/** Sorties réunies : une par nom (la plus courte en couloir), de la plus proche à la plus lointaine. */
+function mergeExits(a: readonly FoundExit[], b: readonly FoundExit[]): FoundExit[] {
+  const best = new Map<string, FoundExit>();
+  for (const x of [...a, ...b]) {
+    const cur = best.get(x.name);
+    if (!cur || x.m < cur.m) best.set(x.name, x);
+  }
+  return [...best.values()].sort((x, y) => x.m - y.m || x.name.localeCompare(y.name, 'fr'));
+}
+
+/* ------------------------------ Fichier publié (data/exits.json) ------------------------------ */
+
+/** Fichier des sorties : les numéros STIB sous terre avec au moins une sortie (rue ou place), 3 au plus. */
+export function exitsFile(codes: readonly CodeResult[], meta: { version: string; builtAt: string }): ExitsFile {
+  const stops: ExitsFile['stops'] = {};
+  for (const c of codes) {
+    if (c.cls !== 'E' || !c.exits.length) continue;
+    stops[c.code] = { s: c.name, x: c.exits.slice(0, MAX_EXITS).map((e): ExitTuple => [e.name, e.lat, e.lon, e.m]) };
+  }
+  return { v: 1, version: meta.version, builtAt: meta.builtAt, source: SOURCE, licence: LICENCE, attribution: ATTRIBUTION, stops };
+}
+
+/**
+ * 1.3.1 (R1) : construit data/exits.json (écrit dans `out`, par un fichier temporaire renommé) avec l'extrait et les
+ * tuiles de la semaine. Ne lève jamais : renvoie une phrase pour le journal (« … arrêts sous terre avec une sortie »).
+ */
+export async function writeExits(o: { pbf: string; tilesDir: string; out: string; version: string; builtAt: string; key?: string }): Promise<{ ok: boolean; message: string; stops?: number }> {
+  try {
+    const { features } = readStibFeatures(o.pbf, o.key ?? STIB_KEY);
+    const targets = features.filter(isUnderStop);
+    const g = await loadExitGraph(o.tilesDir, targets);
+    if (!g) return { ok: false, message: 'sorties du métro non faites (tuiles illisibles)' };
+    const codes = byCode(targets.map((f) => measureFeature(g, f)));
+    const file = exitsFile(codes, { version: o.version, builtAt: o.builtAt });
+    if (!isExitsFile(file)) return { ok: false, message: 'sorties du métro non faites (fichier incohérent)' };
+    const n = Object.keys(file.stops).length;
+    const tmp = `${o.out}.tmp`;
+    await writeFile(tmp, JSON.stringify(file), 'utf8');
+    await rename(tmp, o.out);
+    return { ok: true, message: `sorties du métro : ${n} arrêts STIB sous terre sur ${codes.length} avec une sortie`, stops: n };
+  } catch (e) {
+    return { ok: false, message: `sorties du métro non faites (${e instanceof Error ? e.message : String(e)})` };
+  }
 }
 
 /* ------------------------------ Données officielles ------------------------------ */
@@ -583,26 +692,25 @@ export function exitReport(g: ExitGraph, features: readonly StibFeature[], stati
   lines.push(`${P} : ${features.length} éléments OSM avec ${key} (${[...roles.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ')})`);
   lines.push(`${P} : ${codes.length} numéros STIB sous terre (arrêts et quais : métro ${modes('metro')}, tram ${modes('tram')}, bus ${modes('bus')}, autre ${modes('other')}), ${stationNames.size} noms de station`);
   lines.push(`${P} : sortie nommée par les couloirs pour ${named} sur ${codes.length} (${pct(named, codes.length)}) ; seuil de 80 % ${rate >= THRESHOLD ? 'atteint' : 'NON atteint'}`);
-  lines.push(`${P} : A pas de voie piétonne à ${SNAP_UNDER_M} m ${count('A')} ; B quai seulement en surface ${count('B')} ; C couloirs sans sortie à ${MAX_UNDER_M} m ${count('C')} ; D sortie sans nom ${count('D')} ; E sortie nommée ${named}`);
+  lines.push(`${P} : A pas de voie piétonne à ${SNAP_UNDER_M} m ${count('A')} ; B quai seulement en surface ${count('B')} ; C couloirs sans sortie à ${MAX_UNDER_M} m ${count('C')} ; D sortie sans rue ni place ${count('D')} ; E sortie nommée ${named}`);
   const dists = codes.filter((c) => c.cls === 'E' && c.underM !== undefined).map((c) => c.underM as number);
   if (dists.length) lines.push(`${P} : marche sous terre jusqu'à la première sortie nommée : médiane ${Math.round(quantile(dists, 0.5))} m, 90e centile ${Math.round(quantile(dists, 0.9))} m, au plus ${Math.round(Math.max(...dists))} m`);
-  // exemples publics : une ligne par station (noms de station et de rue seulement)
-  const byStation = new Map<string, Set<string>>();
+  // sorties retenues, une ligne par station (noms de station et de rue seulement) : ce que publie data/exits.json
+  const byStation = new Map<string, FoundExit[]>();
   for (const c of codes) {
     if (c.cls !== 'E' || !c.name) continue;
-    const set = byStation.get(c.name) ?? new Set<string>();
-    for (const n of c.names) set.add(n);
-    byStation.set(c.name, set);
+    byStation.set(c.name, mergeExits(byStation.get(c.name) ?? [], c.exits.slice(0, MAX_EXITS)));
   }
   const ex = [...byStation.entries()].sort((a, b) => a[0].localeCompare(b[0], 'fr'));
-  for (let i = 0; i < ex.length; i += 6) lines.push(`${P} : exemples : ${ex.slice(i, i + 6).map(([s, n]) => `${s} → ${[...n].slice(0, 3).join(', ')}`).join(' ; ')}`);
+  lines.push(`${P} : sorties retenues pour ${ex.length} stations (rue ou place, 3 au plus par arrêt, la plus proche du quai d'abord) :`);
+  for (const [st, xs] of ex) lines.push(`${P} : ${st} → ${xs.map((x) => `${x.name} (${x.m} m)`).join(', ')}`);
   const fails = codes.filter((c) => c.cls !== 'E');
   const failLine = (cls: ExitClass[], label: string) => {
     const xs = fails.filter((c) => cls.includes(c.cls)).map((c) => `${c.name || '?'} (${c.code}, ${c.cls})`);
     for (let i = 0; i < xs.length; i += 12) lines.push(`${P} : ${label} : ${xs.slice(i, i + 12).join(', ')}`);
   };
   failLine(['A', 'B', 'C'], 'sans couloir jusqu’à la rue');
-  failLine(['D'], 'sortie sans nom');
+  failLine(['D'], 'sortie sans rue ni place');
   let official: ExitReport['official'];
   if (stations) {
     let covered = 0;

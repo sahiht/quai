@@ -5,6 +5,7 @@
  *   tiles/          tuiles prêtes à publier (index.json écrit en dernier)
  *   extract.json    fiche du dernier téléchargement de l'extrait (semaine ISO, octets, MD5)
  *   extract.osm.pbf extrait Geofabrik, gardé seulement tant que les tuiles de sa semaine n'ont pas été construites
+ *   exits.json      1.3.1 (R1) : sorties du métro faites avec le même extrait (exits.ts), publiées en data/exits.json
  *
  * Chaque nuit : tuiles de la semaine déjà là → rien ; sinon extrait de la semaine (téléchargé une seule fois par
  * semaine, contrôle MD5) → construction dans next/ → échange (tiles devient tiles.old, next devient tiles). Un échec
@@ -18,7 +19,9 @@ import { once } from 'node:events';
 import { basename, join } from 'node:path';
 import { isWalkIndex, type WalkIndex } from '../../../app/src/core/walk/format.ts';
 import { addDays, brusselsDate } from '../dates.ts';
+import { EXITS_FILE, isExitsFile } from '../../../app/src/core/walk/exits-format.ts';
 import { buildWalk, sizeLine } from './build.ts';
+import { writeExits } from './exits.ts';
 import { PbfFile } from './pbf.ts';
 import { ATTRIBUTION, BUDGET_BYTES, MAX_TILE_BYTES } from './tiles.ts';
 
@@ -306,6 +309,10 @@ export async function weeklyWalk(o: WeeklyOptions): Promise<WeeklyResult> {
     }
     await rename(next, tilesDir);
     await rm(old, { recursive: true, force: true });
+    // 1.3.1 (R1) : sorties du métro avec le même extrait et les mêmes tuiles (exits.json, à côté des tuiles) ; un échec
+    // ne touche ni aux tuiles ni à la nuit : la publication garde alors les sorties de la même version, sinon aucune
+    const ex = await writeExits({ pbf, tilesDir, out: join(o.cacheDir, EXITS_FILE), version: r.built.index.version, builtAt: r.built.index.builtAt });
+    log(`Chemins à pied : ${ex.message}`);
     await rm(pbf, { force: true });
     return { state: 'built', message: `tuiles construites en ${Math.round(r.ms / 1000)} s : ${sizeLine(r.built)}`, index: r.built.index };
   } catch (e) {
@@ -363,6 +370,26 @@ export async function localWalk(o: { input: string; dataDir: string; log?: (m: s
   }
 }
 
+/**
+ * 1.3.1 (R1) : sorties du métro du cache (exits.json) copiées en data/exits.json, seulement si elles sont de la même
+ * version que les tuiles publiées ; sinon aucun fichier (l'appli ne montre alors aucune sortie). Ne lève jamais.
+ */
+export async function publishExits(cacheDir: string, dataDir: string, version: string): Promise<string> {
+  const dest = join(dataDir, EXITS_FILE);
+  try {
+    await rm(dest, { force: true });
+    const raw = (await readJson(join(cacheDir, EXITS_FILE))) as unknown;
+    if (!raw) return 'sorties du métro absentes du cache (faites avec les tuiles de la semaine)';
+    if (!isExitsFile(raw)) return 'sorties du métro illisibles : non publiées';
+    if (raw.version !== version) return `sorties du métro du ${raw.version}, tuiles du ${version} : non publiées`;
+    await writeFile(dest, JSON.stringify(raw), 'utf8');
+    return `sorties du métro publiées : ${Object.keys(raw.stops).length} arrêts STIB sous terre (${EXITS_FILE})`;
+  } catch (e) {
+    await rm(dest, { force: true }).catch(() => undefined);
+    return `sorties du métro non publiées (${e instanceof Error ? e.message : String(e)})`;
+  }
+}
+
 /** Copie les tuiles du cache dans les données de la nuit (dataDir/walk) et complète LICENSE-DATA.txt. Ne lève jamais. */
 export async function publishWalk(o: { cacheDir: string; dataDir: string; now?: () => Date; log?: (m: string) => void }): Promise<PublishResult> {
   const log = o.log ?? ((m: string) => console.log(m));
@@ -389,6 +416,7 @@ export async function publishWalk(o: { cacheDir: string; dataDir: string; now?: 
     const licence = join(o.dataDir, 'LICENSE-DATA.txt');
     const had = await readFile(licence, 'utf8').catch(() => '');
     if (!had.includes(LICENSE_MARK)) await appendFile(licence, licenseSection(idx), 'utf8');
+    log(`Chemins à pied : ${await publishExits(o.cacheDir, o.dataDir, idx.version)}`);
     const bytes = await dirBytes(out);
     const total = await dirBytes(o.dataDir);
     const mo = (b: number) => `${(b / 1e6).toFixed(1).replace('.', ',')} Mo`;
