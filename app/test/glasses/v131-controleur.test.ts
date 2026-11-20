@@ -12,7 +12,8 @@ vi.mock('../../src/glasses/guide-views', async () => (await import('./controller
 
 import type { Favorite, FavoriteAnswer, Journey } from '../../src/core/api';
 import type { GuideState, Moment } from '../../src/core/guide-types';
-import { TAP_MASK_AFTER_MS, nextOfFirst } from '../../src/glasses/controller';
+import { GlassesController, TAP_MASK_AFTER_MS, nextOfFirst } from '../../src/glasses/controller';
+import { createKV, memoryBackend } from '../../src/platform/kv';
 import { engine, moment, views } from './controller-guide-doubles';
 import { NOW, cleanupKit, door, guideSetup, type Kit, type KitOptions } from './controller-guide-kit';
 import { MIN, PLACES, boardOf, dep, journey, settingsWith } from './helpers';
@@ -129,12 +130,46 @@ describe('1.3.1, A1 (E2) : les six messages importants ramènent l’écran du g
     expect(screensOf(h)).toEqual(['home', 'guide']);
     cleanupKit();
     views.reset();
+    // contrôle qualité : le message de la première moitié ne doit pas déjà être là au lancement (il serait compté avant
+    // la mesure de `before`, et le test passerait sans la condition du réglage)
+    current = null;
     const off = await guided({ settings: settings(false) });
     const before = screensOf(off);
-    expect(before).not.toContain('guide');
+    expect(before).toEqual(['home']);
     await show(off, board());
     expect(screensOf(off)).toEqual(before);
     expect(views.calls.filter((c) => c.show === 'moment')).toEqual([]);
+  });
+
+  it('contrôle qualité : instantané repris (téléphone verrouillé, nouvelle WebView), après ou avant le démarrage : le message arrivé pendant la reprise ramène le guidage sur l’écran repris', async () => {
+    const a = await guided();
+    await a.gesture('double');
+    expect(screensOf(a)).toEqual(['home']);
+    const snap = JSON.parse(JSON.stringify(a.c.snapshot()));
+    cleanupKit();
+    // reprise après le démarrage de la nouvelle WebView (__restoreState appelé une fois le contrôleur prêt)
+    const b = await guideSetup({ settings: settings(), stub: { answers }, kv: createKV(memoryBackend()) });
+    current = board();
+    b.c.restore(snap);
+    await b.settle(100);
+    expect(screensOf(b)).toEqual(['home', 'guide']);
+    expect(b.last()).toMatchObject({ screen: 'guide', show: 'moment', moment: 'board:j-bureau:1' });
+    cleanupKit();
+    // reprise avant le démarrage (main.ts : restore, puis start)
+    current = null;
+    const start = GlassesController.prototype.start;
+    const spy = vi.spyOn(GlassesController.prototype, 'start').mockImplementationOnce(async function (this: GlassesController) {
+      current = alight();
+      this.restore(snap);
+      return start.call(this);
+    });
+    const c = await guideSetup({ settings: settings(), stub: { answers }, kv: createKV(memoryBackend()) });
+    spy.mockRestore();
+    await c.settle(100);
+    expect(screensOf(c)).toEqual(['home', 'guide']);
+    expect(c.last()).toMatchObject({ screen: 'guide', show: 'moment', moment: 'alight:j-bureau:1' });
+    expect(c.logs).toContain('QUAI_GUIDE retour à l’écran du guidage depuis home : alight');
+    expect(c.logs.filter((l) => l.startsWith('QUAI_GUIDE retour'))).toHaveLength(1);
   });
 });
 

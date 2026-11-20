@@ -852,6 +852,9 @@ export class GlassesController implements GlassesApi {
       resumed = o.resumed;
     }
     this.ready = true;
+    // 1.3.1 (A1, contrôle qualité) : un message important du guidage repris ramène l'écran du guidage sur l'écran
+    // d'ouverture ou l'écran repris (instantané de la WebView précédente), maintenant qu'il est posé
+    if (this.guideState) this.bringBack(this.guideState);
     // 1.2.10 : repris sur l'écran du guidage, « Où tu en es » le dit (pas de message en plus sur l'écran calme)
     if (resumed && this.trip && !this.guideShown()) this.showToast(`Trajet en cours${NB}: ${lowerFirst(this.trip.title)}`, RESUME_MS);
     await this.render(true);
@@ -3019,10 +3022,13 @@ export class GlassesController implements GlassesApi {
    * IMPORTANT) ramènent l'écran du guidage quel que soit l'écran affiché (accueil, tableau, trajet, « Dans le train »,
    * menu de Quai Web), une fois chacun, à son apparition ; l'accueil dessous (double toucher), comme au lancement. Virage,
    * prochain arrêt, « Tu y es », vérification : non. Réglage « Me guider » éteint : rien. Vrai si l'écran a changé.
+   * Contrôle qualité : rien avant que l'écran d'ouverture ou l'écran repris soit posé (démarrage, instantané de la
+   * WebView quand le téléphone se verrouille) : le message serait compté sur un écran aussitôt remplacé ; start et
+   * restore le rappellent ensuite.
    */
   private bringBack(st: GuideState): boolean {
     const m = st.moment;
-    if (!m || !IMPORTANT.has(m.kind) || this.backSeen.has(m.id)) return false;
+    if (!m || !IMPORTANT.has(m.kind) || this.backSeen.has(m.id) || !this.ready) return false;
     this.backSeen.add(m.id);
     if (this.stopped || !this.guideShown()) return false;
     const top = current(this.nav).route.screen;
@@ -4347,16 +4353,21 @@ export class GlassesController implements GlassesApi {
         this.tripLoaded = true;
         this.reminder.resume(this.trip?.guide?.remind);
         this.saveFollowed();
-        // 1.2.10 : guidage repris, recalculé depuis l'heure et la position (avant d'être prêt : au démarrage)
-        if (this.ready) this.syncGuide();
       }
-      if (!nav) return;
+      // 1.2.10 : guidage repris, recalculé depuis l'heure et la position (avant d'être prêt : au démarrage) ; 1.3.1 (A1,
+      // contrôle qualité) : après la pose de l'écran repris, qu'un message important nouveau remplace alors
+      const resync = s.tripRead === true && this.ready;
+      if (!nav) {
+        if (resync) this.syncGuide();
+        return;
+      }
       if (!this.ready) {
         this.pendingRestore = nav;
         return;
       }
       this.nav = nav;
       this.forceNext = true;
+      if (resync) this.syncGuide();
       void this.refreshCurrent(true);
     } catch (e) {
       console.warn('[Quai] état non restauré', errText(e));
