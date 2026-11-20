@@ -493,7 +493,8 @@ export function untilLine(title: string): Want {
   const rest = m ? m[1] : t;
   // nom propre (« Bruxelles-Central ») ou nom commun du lieu (« la place Fontainas », « au bureau ») : les deux formes
   const lower = rest.charAt(0).toLowerCase() + rest.slice(1);
-  return new RegExp(`^Jusqu’(à ${esc(rest)}|à la ${esc(lower)}|au ${esc(lower)}|à l’${esc(lower)}|aux ${esc(lower)}|à ${esc(lower)}|e chez .+)$`);
+  // un nom propre (« Bruxelles-Central ») ou commun (« la place Fontainas », « au bureau », « à l’école »)
+  return new RegExp(`^Jusqu’(à ${esc(rest)}|à (la |l’)?${esc(lower)}|au ${esc(lower)}|e chez .+)$`);
 }
 
 /** Écarts d'un écran « Où tu en es » de la 1.3.1 (vide : conforme). */
@@ -503,9 +504,11 @@ export function whereIssues131(s: { screen: string; title: string; clock?: strin
   if (!matches(s.title, T131.whereTitle)) bad.push(`titre « ${s.title} » au lieu de « ${T131.whereTitle} » (PRD-1.3.1 § 3)`);
   if (!/^\d\d:\d\d$/.test(s.clock ?? '')) bad.push(`heure à droite du titre absente (« ${s.clock ?? ''} »)`);
   const hint = s.lines[s.lines.length - 1];
-  const body = s.lines.slice(0, matches(hint, HINTS.moment) ? -1 : s.lines.length).filter((l) => l.trim());
+  // l'aide est la dernière ligne, même fausse (« toucher : effacer … ») : jamais comptée comme une ligne en trop
+  const isHint = matches(hint, HINTS.moment) || /^toucher /.test(norm(hint));
+  const body = s.lines.slice(0, isHint ? -1 : s.lines.length).filter((l) => l.trim());
   if (!matches(hint, HINTS.moment)) bad.push(`aide « ${norm(hint)} » au lieu de « ${HINTS.moment} » (PRD-1.3.1 § 2)`);
-  if (!matches(body[0], w.until)) bad.push(`1re ligne « ${norm(body[0])} » au lieu de ${showWant(w.until)} (§ 12 : « Jusqu’à … »)`);
+  if (!matches(body[0], w.until)) bad.push(`1re ligne « ${norm(body[0])} » au lieu de « Jusqu’à … » (la destination, comme le titre du trajet : ${showWant(w.until)} ; § 12)`);
   if (!matches(body[1], w.then)) bad.push(`2e ligne « ${norm(body[1])} » au lieu de ${showWant(w.then)} (§ 12 : « Ensuite : … », juste après)`);
   const rest = body.slice(2);
   for (const m of w.must) {

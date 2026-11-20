@@ -57,6 +57,9 @@ const WAT = { mockLat: '50.7175', mockLon: '4.399', mockNow: '2026-11-10T07:31:0
 /** Namur, place de l'Ange, 23:30 : plus aucun trajet dans les 3 h (B20, U8). */
 const LATE = { ...START, mockNow: '2026-11-10T23:30:00+01:00' };
 const FONTAINAS = 'Place Fontainas';
+/** Gare du Nord (Bruxelles, scénario 2 des fixtures), 12:10. */
+const GDN = { lat: 50.86, lon: 4.359 };
+const S2_GDN = { mockLat: String(GDN.lat), mockLon: String(GDN.lon), mockNow: '2026-11-10T12:10:00+01:00' };
 
 /** Préréglages des s131 (écrits par run-sim.ts dans p/), d'après celui de la 1.2.10. */
 export function presets131(base: { p1210: Record<string, unknown> }): Record<string, unknown> {
@@ -64,6 +67,13 @@ export function presets131(base: { p1210: Record<string, unknown> }): Record<str
   return {
     // § 9 : qui vient de la 1.3.0 ne voit aucun message des nouveautés (NEWS_SINCE reste 1.3.0)
     '131from130.json': { ...base.p1210, seenVersion: '1.3.0' },
+    // U3 (c) : un trajet qui commence à pied vers un arrêt de métro (Rogier), vers le boulevard du Centenaire (Heysel)
+    '131centenaire.json': {
+      ...base.p1210,
+      places: [{ id: 'centenaire', label: 'Boulevard du Centenaire', lat: 50.8915, lon: 4.334, address: 'Boulevard du Centenaire 1, 1020 Bruxelles', src: 'address' }],
+      favorites: [{ kind: 'trip', id: 'fav-centenaire', from: { type: 'here' }, to: { type: 'place', placeId: 'centenaire' }, label: 'Boulevard du Centenaire', propose: 'never' }],
+      recent: [],
+    },
     // § 7 : la gare de Braine-l'Alleud (nom des données avec une apostrophe droite) gardée dans « Gares de train »
     '131apos.json': {
       ...base.p1210,
@@ -787,15 +797,20 @@ async function s131calme(ctx: Ctx131): Promise<void> {
     let j!: O.OJourney;
     let title = FONTAINAS;
     let ic = -1;
-    await wstep(r, 'ou-tu-en-es-au-lancement', async () => {
+    let launched: GlassesScreen[] = [];
+    await wstep(r, 'lancement', async () => {
       await openWeb(r, ctx.pageUrl({ ...START, ...ctx.preset('p/1210.json') }, true));
       const x = await webLaunch(r);
       j = x.j;
       title = x.title;
       ic = j.legs.findIndex((l) => l.kind === 'ride');
+      launched = r.page.screens().slice(r.mark).filter(isGuide);
+      return { screen: x.first };
+    }, { critical: true });
+    await wstep(r, 'ou-tu-en-es-au-lancement', async () => {
       // § 3 : « Où tu en es » au lancement ; un moment déjà dû (la voie modifiée de l'IC) peut passer d'abord : masqué,
       // puis un toucher sur l'écran calme rouvre « Où tu en es »
-      let w = r.page.screens().slice(r.mark).filter(isGuide).find(isWhere);
+      let w = launched.find(isWhere);
       if (!w) {
         const first = r.page.lastScreen()!;
         check(isGuide(first) && first.show === 'moment', `au lancement, ni « Où tu en es » ni un moment déjà dû : ${show(first)}`);
@@ -807,11 +822,12 @@ async function s131calme(ctx: Ctx131): Promise<void> {
       }
       whereOk(w, O.where131(j, title, 'before'), '« Où tu en es » avant de partir (PRD-1.3.1 § 3, § 12)');
       return { screen: w, shot: 'guide' };
-    }, { critical: true });
+    });
     await wstep(r, 'calme-trois-points', async () => {
       // § 2 : « toucher : masquer » ; § 1 : l'écran calme d'un guidage montre « · · · », au plus pâle, en bas au centre
       await sleep(1_600);
-      const s = await webMask(r, '« Où tu en es »');
+      const cur = r.page.lastScreen();
+      const s = cur && isCalm(cur) ? cur : await webMask(r, '« Où tu en es »');
       check(isDots(s), `écran calme : « ${TXT.dots} » seul attendu (PRD-1.3.1 § 1) : ${show(s)}`);
       return { screen: s, shot: 'dots' };
     });
@@ -1303,9 +1319,9 @@ async function s131tel(ctx: Ctx131): Promise<void> {
       await openWeb(r, ctx.pageUrl({ ...START, ...ctx.preset('p/1210.json') }, true));
       await webSelectHome(r, /^Favoris {3}\d+$/);
       await gesture(r, 'tap');
-      const f = await waitGuide(r, '« Favoris »', (s) => s.screen === 'favorites' && loaded(s), 20_000);
-      const last = f.lines.length;
-      for (let i = 0; i < 16 && (r.page.lastScreen()?.sel ?? 0) < last - 2; i++) await gesture(r, 'down');
+      await waitGuide(r, '« Favoris »', (s) => s.screen === 'favorites' && loaded(s), 20_000);
+      // ▼ jusqu'à « Autre adresse », la dernière rangée (la liste défile)
+      for (let i = 0; i < 20 && !r.page.lastScreen()!.lines.some((l) => /^Autre adresse {3}/.test(N(l))); i++) await gesture(r, 'down');
       const s = r.page.lastScreen()!;
       const row = s.lines.find((l) => /^Autre adresse {3}/.test(N(l)));
       // L8 : « dans l'onglet Réglages » (« dans Réglages » désignait deux endroits)
@@ -1323,15 +1339,39 @@ async function s131tel(ctx: Ctx131): Promise<void> {
       check(!/Maintenant : partir à/.test(t), `« Maintenant : partir à … » remplacé par « Ensuite : … » (L5) : « ${t.slice(0, 500)} »`);
       return {};
     }, { critical: true });
+    await wstep(r, 'arreter', async () => {
+      await page.eval(`(document.querySelector('#w-tab-lunettes')?.click(), true)`);
+      await gesture(r, 'long');
+      const m = await waitGuide(r, 'menu', (x) => x.screen === 'menu');
+      const k = m.lines.findIndex((l) => N(l).endsWith('Arrêter le guidage'));
+      check(k >= 0, `« Arrêter le guidage » absent du menu : ${show(m)}`);
+      for (let i = 0; i < 6 && r.page.lastScreen()?.sel !== k; i++) await gesture(r, (r.page.lastScreen()?.sel ?? 0) < k ? 'down' : 'up');
+      await gesture(r, 'tap');
+      return { screen: await waitGuide(r, 'accueil', (x) => x.screen === 'home') };
+    });
+  }, VIEWPORT);
+  // U3 (c), L2 : à pied vers un arrêt de bus, tram ou métro, la carte « En cours » le nomme. Gare du Nord (12:10, scénario
+  // 2 des fixtures) vers le boulevard du Centenaire (Heysel) : 6 min à pied jusqu'à Rogier, métro 6 (CA-M5.2)
+  await ctx.withChrome(async (page) => {
+    const r: Run = { ctx, page, mark: 0 };
     await wstep(r, 'carte-en-cours-a-pied-vers-l-arret', async () => {
-      await page.eval(`(document.querySelector('#w-tab-lunettes')?.click(), true)`);
-      await walkThrough(r, NAMUR_FONTAINAS, T('07:21'), T('08:42:05'), 120_000);
-      await goTo(r, NAMUR_FONTAINAS, T('08:42:40'));
-      // U3 (c) : la marche vers l'arrêt du tram, l'arrêt nommé : « Maintenant : à pied vers l'arrêt Gare du Nord »
+      await openWeb(r, ctx.pageUrl({ ...S2_GDN, ...ctx.preset('p/131centenaire.json') }, true));
+      await webSelectHome(r, /^Favoris {3}\d+$/);
+      await gesture(r, 'tap');
+      await waitGuide(r, '« Favoris »', (x) => x.screen === 'favorites' && loaded(x), 20_000);
+      await gesture(r, 'tap');
+      const steps = await waitGuide(r, 'écran du trajet vers le boulevard du Centenaire', (x) => x.screen === 'steps' && loaded(x), 20_000);
+      check(steps.lines.some((l) => /à pied \d+ min → Rogier/.test(N(l))), `trajet par Rogier attendu (« à pied 6 min → Rogier », § 4) : ${show(steps)}`);
+      await gesture(r, 'tap');
+      await waitGuide(r, 'guidage', (x) => isGuide(x) && !!x.title, 15_000);
+      const ft = await webFollowed(r);
+      check(ft?.journey?.legs?.[0]?.kind === 'walk', `le trajet guidé commence à pied : ${JSON.stringify(ft?.journey?.legs?.map((l) => l.kind))}`);
+      const j = ft!.journey;
+      const tr: Trace = { id: 's131-rogier', label: 'Gare du Nord → Rogier (à pied)', places: ['Gare du Nord', 'Rogier'], points: joinTrace(stay(GDN, T('12:10'), j.leaveAt, { phase: 'stay', accuracy: 6 }), walk([GDN, { lat: 50.8585, lon: 4.3592 }, PLACES.rogier], j.leaveAt + 10_000, { speed: 1.3 })) };
+      for (let t = T('12:10:30'); t <= j.leaveAt + 70_000; t += 30_000) await goTo(r, tr, t);
       await page.eval(`(document.querySelector('#w-tab-reglages')?.click(), location.hash = '#/', true)`);
-      const t = await pageWait(page, /En cours/, 10_000, 'carte « En cours »');
-      check(/Maintenant : à pied vers l’arrêt Gare du Nord/.test(t), `carte « En cours » : « Maintenant : à pied vers l’arrêt Gare du Nord » attendu (U3, L2 : le nom, plus « l’arrêt du tram 3 ») ; texte vu : « ${t.slice(0, 500)} »`);
-      await page.eval(`(document.querySelector('#w-tab-lunettes')?.click(), true)`);
+      const txt = await pageWait(page, /En cours/, 10_000, 'carte « En cours »');
+      check(/Maintenant : à pied vers l’arrêt Rogier/.test(txt), `carte « En cours » : « Maintenant : à pied vers l’arrêt Rogier » attendu (U3, L2 : le nom de l’arrêt, plus « l’arrêt du métro 6 ») ; texte vu : « ${txt.slice(0, 500)} »`);
       return {};
     });
   }, VIEWPORT);

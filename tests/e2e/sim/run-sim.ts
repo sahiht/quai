@@ -3222,7 +3222,11 @@ async function phone(): Promise<void> {
       // l'aperçu est dessiné (role=img) ; son texte est lu dans aria-label : « Aperçu dans les lunettes : Quai, Favoris 3, … »
       const label = nbn(await page.waitFor<string>(`document.querySelector('.preview[role=img]')?.getAttribute('aria-label')`, 8_000, 'aperçu de l’accueil'));
       // favoris d'exemple du téléphone (samples.ts), puis « Autour de moi » et les trois rubriques (PRD-1.2.6 § 1)
-      check(/^Aperçu dans les lunettes : Quai, Favoris 3, Bureau \S.*, Autour de moi \d+ arrêts?, Gares de train 1 gare, Arrêts de bus, tram, métro 1 arrêt, Lignes de bus, tram, métro 1 ligne$/.test(label), `aperçu : « Favoris », les favoris, « Autour de moi », les trois rubriques : ${label}`);
+      // 1.3.1 (PRD-1.3.1 § 8) : l'aperçu suit l'accueil des lunettes (« Autour de moi » d'abord, « Arrêts » en dernier)
+      const preview = V131
+        ? /^Aperçu dans les lunettes : Quai, Autour de moi \d+ arrêts?, Favoris 3, Bureau \S.*, Gares de train 1 gare, Lignes de bus, tram, métro 1 ligne, Arrêts de bus, tram, métro 1 arrêt$/
+        : /^Aperçu dans les lunettes : Quai, Favoris 3, Bureau \S.*, Autour de moi \d+ arrêts?, Gares de train 1 gare, Arrêts de bus, tram, métro 1 arrêt, Lignes de bus, tram, métro 1 ligne$/;
+      check(preview.test(label), `aperçu : l’accueil des lunettes dans son ordre : ${label}`);
       check(!label.includes('Autres favoris') && !label.includes('Aller à'), `plus de « Autres favoris » ni de « Aller à… » : ${label}`);
       // 1.2.9 (PRD-1.2.9 § 2.4) : retour à Réglages
       const hd = await screenHead(page);
