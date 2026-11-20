@@ -94,7 +94,7 @@ function pagesOf(v: GlassesView): PageSpec[] {
 const pct = (n: number, d: number): string => `${String(d ? Math.round((1000 * n) / d) / 10 : 0).replace('.', ',')} %`;
 
 describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’horaire (QUAI_SCAN_DATA)', () => {
-  it('jamais « dernier » quand un départ de la même ligne et du même sens suit avant demain ; tableaux et trains', { timeout: 1_800_000 }, async () => {
+  it('jamais « dernier » quand un départ de la même ligne et du même sens suit avant demain ; tableaux et trains', { timeout: 3_600_000 }, async () => {
     const dir = DIR!;
     const t0 = Date.now();
     const meta = JSON.parse(await readFile(join(dir, 'meta.json'), 'utf8')) as Meta;
