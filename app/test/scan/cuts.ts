@@ -28,8 +28,13 @@ export interface Cut {
 }
 
 const NBSP = /[  ]/g;
+/**
+ * 1.3.1 (PRD-1.3.1 § 7) : l'affichage met l'apostrophe typographique dans les noms des données (apos) : « ’ » à l'écran
+ * et « ' » dans les données sont la même apostrophe pour retrouver un texte coupé.
+ */
+const APOS = /’/g;
 /** Comme l'affichage (caractères sûrs, espaces insécables de la typographie française), espaces insécables en espaces. */
-const norm = (s: string): string => truncate(s, Number.MAX_SAFE_INTEGER).replace(NBSP, ' ');
+const norm = (s: string): string => truncate(s, Number.MAX_SAFE_INTEGER).replace(NBSP, ' ').replace(APOS, "'");
 export const isWordChar = (ch: string | undefined): boolean => !!ch && /[\p{L}\p{N}]/u.test(ch);
 const COMPOUND = /[-/’']/;
 
@@ -59,7 +64,7 @@ function lineCuts(lines: readonly string[], texts: readonly (string | undefined)
   const cands = [...new Set(texts.filter((x): x is string => !!x && !!x.trim()).map(norm))];
   const out: Cut[] = [];
   lines.forEach((raw, i) => {
-    const line = raw.replace(NBSP, ' ');
+    const line = raw.replace(NBSP, ' ').replace(APOS, "'");
     for (let k = line.indexOf('…'); k >= 0; k = line.indexOf('…', k + 1)) {
       const before = line.slice(0, k);
       if (!before.trim() || /\s$/.test(before)) continue;
@@ -96,12 +101,17 @@ export function pageCuts(v: GlassesView, p: PageSpec): Cut[] {
   }
   for (let i = p.top; i < p.top + p.visible; i++) {
     const it = v.items[i];
-    const alone: GlassesView = { ...v, items: [it], top: undefined, note: undefined, notePlanned: undefined, reserveNote: false, hints: '', action: undefined, compactFoot: true, scroll: false, mark: undefined, paged: false, initialSel: undefined, initialTop: undefined, accordion: !!v.accordion && i === p.sel, log: undefined };
+    // 1.3.1 (PRD-1.3.1 § 6) : remise en page seule, une rangée n'a pas de ligne d'action (cursorAction) : sinon elle
+    // compterait une ligne de trop et les rangées suivantes seraient comparées à la mauvaise
+    const alone: GlassesView = { ...v, items: [it], top: undefined, note: undefined, notePlanned: undefined, reserveNote: false, hints: '', action: undefined, cursorAction: undefined, compactFoot: true, scroll: false, mark: undefined, paged: false, initialSel: undefined, initialTop: undefined, accordion: !!v.accordion && i === p.sel, log: undefined };
     const n = layoutPage(alone, { sel: 0, top: 0 }).lines.length;
     out.push(...lineCuts(p.lines.slice(k, k + n), itemTexts(it), k));
     k += n;
   }
-  out.push(...lineCuts(p.lines.slice(k), viewTexts, k));
+  // 1.3.1 (PRD-1.3.1 § 6) : la ligne d'action qui suit le curseur dit le nom de la rangée du curseur (« ▶ Me guider
+  // jusqu'à … ») : le pied se compare aussi aux textes entiers de cette rangée
+  const sel = v.cursorAction ? v.items[p.sel] : undefined;
+  out.push(...lineCuts(p.lines.slice(k), sel ? [...viewTexts, ...itemTexts(sel)] : viewTexts, k));
   return out;
 }
 

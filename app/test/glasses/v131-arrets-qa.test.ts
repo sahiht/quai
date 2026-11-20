@@ -13,7 +13,8 @@ import { GEO, layoutPage, WIDTHS } from '../../src/glasses/layout';
 import { stopsView, type ViewCtx } from '../../src/glasses/views';
 import { createKV, memoryBackend } from '../../src/platform/kv';
 import { describeContainers } from '../../src/web/display';
-import { MIN, at, boardOf, container, dep, nb, overflowing, settingsWith, setup, stopsOf, stubCore, trainRunOf } from './helpers';
+import { newTally, pageCuts, tally } from '../scan/cuts';
+import { MIN, at, boardOf, container, dep, nb, overflowing, page, settingsWith, setup, stopsOf, stubCore, trainRunOf } from './helpers';
 
 const NOW = at('2026-11-20', 8, 0);
 const N = (fr: string) => ({ fr, nl: fr });
@@ -76,6 +77,34 @@ describe('contrôle qualité : Quai Web, lecteur d’écran', () => {
     const said = nb(describeContainers(layoutPage(v, { sel: 2, top: 0 }).containers));
     expect(said.split('Me guider')).toHaveLength(2);
     expect(said.endsWith('. ▶ Me guider jusqu’à Bruxelles-Central. △▽ arrêts double : retour'), said).toBe(true);
+  });
+});
+
+describe('contrôle qualité : balayage des vrais noms (test/scan/cuts.ts) et ligne d’action', () => {
+  // vrais arrêts publics que le balayage des données du 13/11 met dans « tout le trajet d'un train »
+  const GENVAL = "Genval Route d'Ohain (Rue des Volontaires)";
+  const LLN = "Louvain-la-Neuve Parc d'Affaires (Rue Rodeuhaie)";
+  const SINT_JOB = "Sint-Job-in-'t-Goor Kristus Koning Ringven";
+  const ic = { ...b71, op: 'sncb' as const, mode: 'train' as const, line: 'IC', head: N('Namur') };
+  const cutsOf = (calls: [string, number, Partial<import('../../src/core/api').StopCall>?][]) => {
+    const v = stopsView({ screen: 'stops', areaId: 'sncb:Namur', dep: ic as Departure }, trainRunOf(ic, NOW, calls, 0), ctx());
+    const p = page(v);
+    const t = newTally();
+    tally(t, pageCuts(v, p));
+    return { t, lines: p.lines.map(nb) };
+  };
+
+  it('un nom à apostrophe coupé dans la ligne d’action : une coupe au mot, retrouvée (« ’ » à l’écran, « \' » dans les données)', () => {
+    const { t, lines } = cutsOf([['Namur', 2], [SINT_JOB, 30, { platform: '12a', newPlatform: '12b' }], [SINT_JOB, 60, { cancelled: true }]]);
+    expect(lines.at(-2)).toMatch(/^▶ Me guider jusqu’à Sint-Job-in-’t-Goor .*…$/);
+    expect(t).toMatchObject({ mid: 0, first: 0, unknown: 0 });
+    expect(t.cut).toBe(2);
+  });
+
+  it('des gares différentes : chaque rangée comparée à sa gare, la ligne d’action à celle du curseur', () => {
+    const { t, lines } = cutsOf([['Namur', 2], [GENVAL, 30, { platform: '12a', newPlatform: '12b' }], [LLN, 45, { platform: '12a', newPlatform: '12b' }], [SINT_JOB, 60, { cancelled: true }]]);
+    expect(lines.filter((l) => /\S…/.test(l))).toHaveLength(3);
+    expect(t).toMatchObject({ cut: 3, mid: 0, first: 0, unknown: 0 });
   });
 });
 
