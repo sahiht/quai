@@ -62,6 +62,7 @@ import {
   dayWord,
   departureRightText,
   fitName,
+  fitStopName,
   guideToText,
   stationDetail,
   distanceText,
@@ -1431,7 +1432,8 @@ function stepRows(j: Journey, leave: number, ctx: ViewCtx): StepRow[] {
     const walk = `à pied ${minText(min)}`;
     const right = arrival !== undefined ? hhmm(arrival) : '';
     // le nom n'est que sur une marche vers un véhicule, qui n'a jamais d'heure à droite (seule la dernière marche en a une)
-    const text = to ? fitName(`${walk} → `, apos(to), tail, WALK_ROW_PX) : `${walk}${tail}`;
+    // 1.3.1 (§ 15) : nom entier, sinon diminutif (« Bxl-Central »), sinon coupe au mot (fitStopName)
+    const text = to ? fitStopName(`${walk} → `, apos(to), tail, WALK_ROW_PX) : `${walk}${tail}`;
     const item: Item = { a: '', segs: [{ t: stepTime(hhmm(time)), hi: true }, { t: text }] };
     if (right) {
       item.bRight = right;

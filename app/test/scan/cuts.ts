@@ -8,6 +8,7 @@
  * d'autre issue, est compté à part (`first`). Un « … » qui fait partie du texte (« bus 36 + IC + … », « … » d'un calcul)
  * n'est pas une coupe.
  */
+import { shortName } from '../../src/core/typo';
 import { truncate } from '../../src/glasses/font';
 import { expandLines, layoutPage } from '../../src/glasses/layout';
 import type { GlassesView, Item, PageSpec, Seg } from '../../src/glasses/types';
@@ -61,7 +62,10 @@ const glued = (line: string): boolean => /\S…/.test(line.replace(NBSP, ' '));
 
 /** Coupes de rangées dont les textes entiers sont `texts` ; `row0` : rang de la première dans le journal de la page. */
 function lineCuts(lines: readonly string[], texts: readonly (string | undefined)[], row0: number): Cut[] {
-  const cands = [...new Set(texts.filter((x): x is string => !!x && !!x.trim()).map(norm))];
+  // 1.3.1 (PRD-1.3.1 § 15) : le diminutif d'un nom (« Bxl-Central » pour « Bruxelles-Central », shortName) est ce nom :
+  // une rangée qui le montre coupé se compare aussi au diminutif du texte entier, après le texte entier lui-même
+  const whole = texts.filter((x): x is string => !!x && !!x.trim());
+  const cands = [...new Set([...whole.map(norm), ...whole.map((t) => norm(shortName(t)))])];
   const out: Cut[] = [];
   lines.forEach((raw, i) => {
     const line = raw.replace(NBSP, ' ').replace(APOS, "'");

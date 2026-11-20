@@ -20,11 +20,13 @@ import type { LineFile, LineIndex, Meta, Names, TrainsDay } from '../../../share
 import type { LineFollow, LineRun } from '../../src/core/linerun';
 import { linePath } from '../../src/core/linepicks';
 import { gtfsTime } from '../../src/core/util';
-import { textWidth } from '../../src/glasses/font';
+import { apos, shortName } from '../../src/core/typo';
+import { textWidth, truncate } from '../../src/glasses/font';
+import { EXPAND_PX } from '../../src/glasses/format';
 import type { GlassesView } from '../../src/glasses/types';
 import { boardView, favoritesView, followsView, lineRunView, lineView, stationsView, stepsPage, stopsView, trainRunView, type ViewCtx } from '../../src/glasses/views';
 import { PLACES, boardOf, dep, journey, lineBoardOf, overflowing, page, settingsWith, stopsOf, trainAt, trainRunOf } from '../glasses/helpers';
-import { newTally, pageCuts, tally } from './cuts';
+import { cutKind, newTally, pageCuts, tally } from './cuts';
 
 const DIR = process.env.QUAI_SCAN_DATA;
 const MIN = 60_000;
@@ -161,11 +163,61 @@ describe.skipIf(!DIR)('1.3.0 : balayage des vrais noms dans les rangées des lun
       }
     }
 
+    // 1.3.1 (PRD-1.3.1 § 15) : le nom de l'arrêt où l'on marche, pour chaque long nom d'arrêt ou de gare : écran du
+    // trajet (« à pied 6 min → … ») et première ligne de l'accordéon d'un favori (« à pied 6 min → … », « depuis … »).
+    // Lu sur la page elle-même : le nom entier (toujours, s'il tient), sinon son diminutif entier, sinon le nom entier
+    // coupé au mot ; jamais au milieu d'un mot, jamais un diminutif coupé.
+    const walked = { full: 0, short: 0, cut: 0, mid: 0, wrong: 0 };
+    const WALK_PX = 460;
+    const walkName = (label: string, line: string | undefined, head: string, name: string, maxPx: number): void => {
+      // comme l'affichage : apostrophe typographique, caractères sûrs des lunettes
+      const shown = nb(truncate(apos(name), Number.MAX_SAFE_INTEGER));
+      if (!line || !line.startsWith(head)) {
+        walked.wrong++;
+        err(`${label} : ligne attendue « ${head}… », lue « ${line ?? ''} »`);
+        return;
+      }
+      const said = line.slice(head.length);
+      const fits = textWidth(`${head}${shown}`) <= maxPx;
+      if (said === shown) walked.full++;
+      else if (!fits && said === shortName(shown) && said !== shown) walked.short++;
+      else if (!fits && said.endsWith('…') && shown.startsWith(said.slice(0, -1))) {
+        walked.cut++;
+        if (cutKind(said.slice(0, -1), shown) === 'mid') {
+          walked.mid++;
+          err(`${label} : coupé au milieu d'un mot : ${line}`);
+        }
+      } else {
+        walked.wrong++;
+        err(`${label} : ni le nom entier, ni son diminutif, ni sa coupe au mot : ${line}`);
+      }
+    };
+    for (const name of longStops) {
+      try {
+        const bus = { ride: '163b', mode: 'bus' as const, dep: now + 10 * MIN, arr: now + 30 * MIN, from: name, to: 'Wavre', head: 'Wavre' };
+        const j = journey('scan3', [{ walk: 6, to: name }, bus, { walk: 3 }]);
+        const steps = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0, fresh: true }, ctx);
+        check(`Écran du trajet, à pied vers ${name}`, steps, []);
+        const row = page(steps).lines.map(nb).find((l) => l.includes('à pied 6 min → '));
+        walkName(`Écran du trajet, ${name}`, row?.slice(row.indexOf('à pied')), 'à pied 6 min → ', name, WALK_PX);
+        const favCtx = { ...ctx, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.9' }) };
+        for (const [head, legs] of [['à pied 6 min → ', j], ['depuis ', journey('scan4', [bus])]] as const) {
+          const fav = { fav: PLACES.bureau, answer: { favoriteId: PLACES.bureau.id, kind: 'trip' as const, state: 'ok' as const, plan: { journeys: [legs] }, updatedAt: now } };
+          const v = favoritesView({ entries: [fav] }, favCtx);
+          check(`Accordéon d'un favori, ${head}${name}`, v, []);
+          walkName(`Accordéon d'un favori, ${name}`, page(v).lines.map(nb).find((l) => l.startsWith(head)), head, name, EXPAND_PX);
+        }
+      } catch (e) {
+        err(`${name} : ${(e as Error).message}`);
+      }
+    }
+
     const top = [...longStops, ...longHeads].sort((a, b) => textWidth(b) - textWidth(a)).slice(0, 5);
     const report = [
       `Balayage des vrais noms (${meta.serviceDates[0]}) : ${stops.size} noms d'arrêts et de gares, ${heads.size} destinations ; ${longStops.length} + ${longHeads.length} de ${MIN_PX} px et plus, dans ${views} vues (${rows} rangées), ${Math.round((Date.now() - t0) / 1000)} s.`,
       `Rangées coupées : ${words.cut} ; au milieu d'un mot (0 exigé) : ${words.mid} ; premier mot seul trop long (coupé au caractère) : ${words.first} ; coupes introuvables : ${words.unknown}.${words.samples.length ? ` Ex. : ${words.samples.join(' | ')}` : ''}`,
       `Noms à apostrophe droite : ${withApos.length} ; rangées affichées avec une apostrophe droite (1.3.1, 0 exigé) : ${words.straight}.${words.straightSamples.length ? ` Ex. : ${words.straightSamples.join(' | ')}` : ''}`,
+      `Arrêt où l'on marche (1.3.1 § 15), ${longStops.length} noms sur 3 lignes : nom entier ${walked.full}, diminutif ${walked.short}, coupé au mot ${walked.cut} ; au milieu d'un mot (0 exigé) : ${walked.mid} ; autre (0 exigé) : ${walked.wrong}.`,
       `Noms les plus longs : ${top.map((s) => `${s} (${textWidth(s)} px)`).join(', ')}.`,
       errors.length ? `Erreurs :\n  ${errors.join('\n  ')}` : 'Aucune erreur.',
     ];
@@ -175,6 +227,9 @@ describe.skipIf(!DIR)('1.3.0 : balayage des vrais noms dans les rangées des lun
     expect(errors).toEqual([]);
     expect(words.mid).toBe(0);
     expect(words.unknown).toBe(0);
+    // 1.3.1 (PRD-1.3.1 § 15) : l'arrêt où l'on marche : jamais au milieu d'un mot, et le diminutif sert vraiment
+    expect([walked.mid, walked.wrong]).toEqual([0, 0]);
+    expect(walked.short).toBeGreaterThan(0);
     // 1.3.1 (PRD-1.3.1 § 7) : aucune apostrophe droite affichée, et il y en avait dans les données
     expect(withApos.length).toBeGreaterThan(0);
     expect(words.straight).toBe(0);
