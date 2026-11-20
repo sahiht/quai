@@ -585,7 +585,11 @@ describe('PRD-1.3.0 § 6.2 : « vu » par le capteur de mouvement', () => {
 
   const closers: [string, (h: Kit) => Promise<void>][] = [
     ['vu', (h) => lift(h)],
-    ['effacé d’un toucher', (h) => h.gesture('tap')],
+    // 1.3.1 (A7) : masqué d'un toucher, affiché depuis au moins 1,5 s
+    ['masqué d’un toucher', async (h) => {
+      await h.settle(1_500);
+      await h.gesture('tap');
+    }],
     ['un nouveau moment', (h) => says(h, { moment: moment('turn', 'turn:j-bureau:0:1', NOW, NOW + 60 * MIN, { turn: 'left', distM: 40 }) })],
     ['la fin du moment', (h) => says(h, { moment: null })],
     ['premier plan quitté', (h) => h.emit({ kind: 'background' })],
@@ -808,8 +812,9 @@ describe('PRD-1.3.0 § 6.4 : journal du trajet', () => {
     expect(jr.of('moment')).toEqual([{ t: expect.any(Number), k: 'moment', d: { m: 'board', id: 'board:j-bureau:1' } }]);
     expect(jr.of('remind').map((e) => e.d)).toEqual([{ m: 'board', n: 1 }]);
     expect(jr.of('seen').map((e) => e.d)).toEqual([{ m: 'board' }]);
-    // un autre, effacé d'un toucher
+    // un autre, masqué d'un toucher (1.3.1, A7 : affiché depuis au moins 1,5 s)
     await says(h, { moment: moment('platform', 'platform:j-bureau:1', NOW, NOW + 60 * MIN, { platform: '6' }), location: 'high' });
+    await h.settle(1_500);
     await h.gesture('tap');
     expect(jr.of('clear').map((e) => e.d)).toEqual([{ m: 'platform' }]);
     // montée et descente constatées par la position (mémoire du moteur), arrêt dépassé
@@ -849,6 +854,8 @@ describe('PRD-1.3.0 § 6.4 : journal du trajet', () => {
     const arrived = moment('arrived', 'arrived:j-bureau', NOW, NOW + 60 * MIN, { title: 'Bureau', at: NOW, diffMin: 0 });
     await says(h, { phase: { kind: 'arrived' }, moment: arrived });
     expect(jr.of('arrived')).toHaveLength(1);
+    // 1.3.1 (A7) : « Tu y es » affiché depuis au moins 1,5 s
+    await h.settle(1_500);
     await h.gesture('tap');
     expect(h.c.followed).toBeNull();
     expect(jr.trips[0]).toMatchObject({ end: 'done', endedAt: expect.any(Number) });

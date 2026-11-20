@@ -95,9 +95,11 @@ describe('PRD § 3.2 : écran calme, l’écran vide', () => {
       for (const c of p.containers) expect(c.content.trim(), c.name).toBe('');
       // pied d'un pixel : aucune ligne d'aide réservée
       expect(container(p, 'foot').h).toBe(1);
+      // 1.3.1 (B10, E4) : « Arrêter le guidage » en dernier
       expect(p.menu).toEqual([
-        { id: MENU_IDS.stopGuide, label: 'Arrêter le guidage' },
         { id: MENU_IDS.allSteps, label: 'Voir tout le trajet' },
+        { id: MENU_IDS.stops, label: 'Voir les arrêts' },
+        { id: MENU_IDS.stopGuide, label: 'Arrêter le guidage' },
       ]);
       // journal QUAI_SCREEN : rien de montré, le menu
       expect(v.log).toEqual({ show: 'empty', moment: null, images: [], menu: GUIDE_MENU, journey: 'j1' });
@@ -423,12 +425,14 @@ describe('PRD § 3.4 : menu de l’appui long rendu par Quai (Quai Web)', () => 
   it('un choix par rangée ; toucher = le choisir ; double = retour', () => {
     const v = menuView(GUIDE_MENU, ctx);
     expect(v).toMatchObject({ screen: 'menu', layout: 'menu', title: 'Menu' });
+    // 1.3.1 (B10, E4) : « Arrêter le guidage » en dernier
     expect(v.items).toEqual([
-      { a: 'Arrêter le guidage', action: { kind: 'menu', id: 1 } },
       { a: 'Voir tout le trajet', action: { kind: 'menu', id: 2 } },
+      { a: 'Voir les arrêts', action: { kind: 'menu', id: 3 } },
+      { a: 'Arrêter le guidage', action: { kind: 'menu', id: 1 } },
     ]);
     const p = page(v);
-    expect(p.lines.map(nb)).toEqual(['Arrêter le guidage', 'Voir tout le trajet', '△▽ choisir   toucher : valider   double : retour']);
+    expect(p.lines.map(nb)).toEqual(['Voir tout le trajet', 'Voir les arrêts', 'Arrêter le guidage', '△▽ choisir   toucher : valider   double : retour']);
     expect(overflowing(p)).toEqual([]);
     expect(rowsOf(container(p, 'cursor'))[0]).toBe('▶');
   });
