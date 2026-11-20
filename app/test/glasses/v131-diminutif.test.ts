@@ -111,6 +111,27 @@ describe('1.3.1, § 15 : « monter » d’une correspondance, « 3 min à pied �
   });
 });
 
+describe('1.3.1, B12 (E5) et § 15 : au moment de monter, « descente dans 5 arrêts, à Bruxelles-Nord »', () => {
+  const ride = (alight: string, stopsToAlight: number): Moment => ({
+    ...base, leg: 3, id: 'board:jdim:3', kind: 'board', vehicle: IC, head: N('Ostende'), depAt: T(7, 35), rt: true, alight: N(alight), stopsToAlight,
+  });
+
+  it('le nom entier s’il tient ; sinon son diminutif (« à Bxl-Central ») ; sinon la ligne sans le nom, comme avant', () => {
+    expect(moment(ride('Bruxelles-Nord', 5))).toEqual(['IC à 07:35', 'vers Ostende', 'descente dans 5 arrêts, à Bruxelles-Nord', 'toucher : masquer   appui long : arrêter']);
+    // « descente dans 5 arrêts, à Bruxelles-Central » : 378 px pour 374
+    expect(textWidth(`descente dans 5${'\u00a0'}arrêts, à Bruxelles-Central`)).toBeGreaterThan(GUIDE.TEXT_W);
+    expect(moment(ride('Bruxelles-Central', 5))[2]).toBe('descente dans 5 arrêts, à Bxl-Central');
+    // ni le nom ni un diminutif ne tient : la ligne d'avant, jamais un nom coupé
+    expect(moment(ride('Ottignies-Louvain-la-Neuve', 5))[2]).toBe('descente dans 5 arrêts');
+    expect(moment(ride('Bruxelles-National-Aéroport', 12))[2]).toBe('descente dans 12 arrêts');
+    // un seul arrêt : « descente au prochain arrêt, à … » ; nom inconnu : rien de plus
+    expect(moment(ride('Namur', 1))[2]).toBe('descente au prochain arrêt, à Namur');
+    expect(moment(ride('', 5))[2]).toBe('descente dans 5 arrêts');
+    // nombre d'arrêts inconnu (0) : « descente à … », comme avant
+    expect(moment(ride('Bruxelles-Nord', 0))[2]).toBe('descente à Bruxelles-Nord');
+  });
+});
+
 describe('1.3.1, § 15 : « Partir maintenant », la marche après la descente, « ensuite », le virage, « Où tu en es »', () => {
   it('« jusqu’à … » : « 12 min à pied jusqu’à Bxl-Luxembourg » ; le nom entier sans « la gare de » passe avant le diminutif', () => {
     expect(moment(leave('Bruxelles-Luxembourg', 12))[1]).toBe('12 min à pied jusqu’à Bxl-Luxembourg');

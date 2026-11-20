@@ -186,11 +186,12 @@ describe('PRD § 3.2 : les moments', () => {
     expect(nb(turnText('straight', 60))).toBe('tout droit dans 60 m');
   });
 
-  it('board : « Bus 6 dans 1 min » (1.3.1, B12), « vers … » pâle, « descente dans 4 arrêts » pâle ; panneau « bus / 6 »', () => {
+  it('board : « Bus 6 dans 1 min » (1.3.1, B12), « vers … » pâle, « descente dans 4 arrêts, à … » pâle (E5) ; panneau « bus / 6 »', () => {
     const { v, p, lines } = shown(board());
-    expect(lines).toEqual(['Bus 6 dans 1 min', 'vers Gare des Guillemins', 'descente dans 4 arrêts', HINT]);
+    // 1.3.1 (B12, E5) : l'arrêt de la descente après le nombre d'arrêts, s'il tient
+    expect(lines).toEqual(['Bus 6 dans 1 min', 'vers Gare des Guillemins', 'descente dans 4 arrêts, à Liège-Guillemins', HINT]);
     expect(levels(p).hi[0]).toBe('Bus 6 dans 1 min');
-    expect(levels(p).pale.slice(1)).toEqual(['vers Gare des Guillemins', 'descente dans 4 arrêts']);
+    expect(levels(p).pale.slice(1)).toEqual(['vers Gare des Guillemins', 'descente dans 4 arrêts, à Liège-Guillemins']);
     expect(v.images?.[0].image).toEqual({ kind: 'sign', label: 'bus', value: '6' });
     // au-delà de 10 min : l'heure ; « imminent » seulement avec le temps réel ; sans lui : « ~ »
     expect(shown(board({ depAt: T(7, 12) })).lines[0]).toBe('Bus 6 à 07:12');
@@ -206,7 +207,7 @@ describe('PRD § 3.2 : les moments', () => {
     expect(vehicleSign({ op: 'sncb', mode: 'bus', line: 'BUS' })).toEqual({ kind: 'sign', label: 'bus', value: 'SNCB' });
     const train = shown(board({ vehicle: IC, depAt: T(7, 30), platform: '3', head: N('Ostende'), stopsToAlight: 6 }));
     // contrôle usager du 15/11 : la voie aussi dans le texte (le texte suffit sans l'image, § 3.9)
-    expect(train.lines).toEqual(['IC à 07:30, voie 3', 'vers Ostende', 'descente dans 6 arrêts', HINT]);
+    expect(train.lines).toEqual(['IC à 07:30, voie 3', 'vers Ostende', 'descente dans 6 arrêts, à Liège-Guillemins', HINT]);
     expect(train.v.images?.[0].image).toEqual({ kind: 'sign', label: 'voie', value: '3' });
     expect(shown(board({ vehicle: IC, depAt: T(7, 30), head: N('Ostende') })).v.images?.[0].image).toEqual({ kind: 'sign', label: 'train', value: 'IC' });
     const changed = shown(board({ vehicle: IC, depAt: T(7, 30), platform: '6', platformChanged: true, head: N('Ostende') }));

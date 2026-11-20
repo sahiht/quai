@@ -186,7 +186,8 @@ function cutAtWord(cut: string, name: string): boolean {
  * entre `head` et `tail`, sur une rangée de `maxPx` : le nom entier s'il tient ; sinon son diminutif (shortName :
  * « Bruxelles-Central » → « Bxl-Central »), entier lui aussi ; rien (undefined) si aucun des deux ne tient. Jamais de
  * diminutif quand le nom entier tient. La seule place de cette règle dans les écrans du guidage : « 3 min à pied → … »,
- * « ensuite : 7 min à pied → … », « vers l’arrêt … », « jusqu’à … », « Où tu en es ».
+ * « ensuite : 7 min à pied → … », « vers l’arrêt … », « jusqu’à … », « Où tu en es » ; et, au moment de monter, l'arrêt
+ * de la descente (« descente dans 5 arrêts, à Bxl-Central », sinon la ligne sans le nom).
  */
 export function wholeWalkName(head: string, name: string, tail: string, maxPx: number): string | undefined {
   const full = `${head}${name}${tail}`;
@@ -323,7 +324,8 @@ function turnMoment(m: Extract<Moment, { kind: 'turn' }>, j: Journey, title: str
  * « Monter ». Bus, tram, métro : le véhicule et son attente (1.3.1, B12, L4 : « Tram 3 dans ~1 min », « Tram 3 à
  * ~07:12 », « Tram 3 imminent » : deux lignes peuvent partager le quai) ; train : « IC à 07:30, voie 3 » (B13 : « IC 07:42
  * +2, voie 3 »). Pâles : la direction ; la marche d'une correspondance (« 2 min à pied → Gare du Nord, très juste ») ou
- * la descente ; 1.3.1 (B16, U4) : correspondance très juste, le suivant (« Si tu le rates : tram 3 à 08:51 »).
+ * la descente (1.3.1, B12, E5 : « descente dans 5 arrêts, à Bruxelles-Nord », le nom s'il tient) ; 1.3.1 (B16, U4) :
+ * correspondance très juste, le suivant (« Si tu le rates : tram 3 à 08:51 »).
  */
 function boardMoment(m: Extract<Moment, { kind: 'board' }>, ctx: ViewCtx): MomentView {
   const train = isTrainRef(m.vehicle);
@@ -342,8 +344,11 @@ function boardMoment(m: Extract<Moment, { kind: 'board' }>, ctx: ViewCtx): Momen
     const tail = m.marginMin !== undefined ? `, ${marginText(m.marginMin)}` : '';
     lines.push(F('pale', (w) => walkToStopText(walkMin, nameOf(m.stop, ctx), train, tail, w)));
   } else {
+    // 1.3.1 (B12, E5 ; contrôle du sujet, remarque 2) : « descente dans 5 arrêts, à Bruxelles-Nord » : le nom entier s'il
+    // tient, sinon son diminutif (§ 15 : « à Bxl-Central »), sinon la ligne sans le nom
     const d = alightPhrase(m.stopsToAlight, m.alight, ctx);
-    if (d) lines.push(m.stopsToAlight > 0 ? L('pale', d) : F('pale', (w) => fitName('descente à ', nameOf(m.alight, ctx), '', w)));
+    const at = nameOf(m.alight, ctx);
+    if (d) lines.push(m.stopsToAlight > 0 ? F('pale', (w) => (at ? (wholeWalkName(`${d}, à `, at, '', w) ?? d) : d)) : F('pale', (w) => fitName('descente à ', at, '', w)));
   }
   if (m.ifMissed) {
     const miss = `Si tu le rates${NB}: ${vehicleAtText(m.ifMissed.vehicle, m.ifMissed.depAt, m.ifMissed.rt, ctx)}`;
