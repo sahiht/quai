@@ -132,13 +132,30 @@ describe('PRD-1.3.1 § 4 : accordéon des favoris', () => {
     expect(texts(ok(PLACES.bureau, firstRide(ic, { newPlatform: '6', delayMin: 2 })))[1]).toBe('IC 16:49 +2 voie 6 au lieu de 4, direct');
     expect(texts(ok(PLACES.bureau, firstRide(ic, { platform: undefined, newPlatform: '6' })))[1]).toBe('IC 16:49 voie 6 !, direct');
     const works = { ...ic, alerts: [{ kind: 'works' as const, text: 'Travaux : ligne 161', at: NOW }] };
-    expect(texts(ok(PLACES.bureau, works))[1]).toBe('IC 16:49 voie 4, Travaux : ligne 161, direct');
+    // après le véhicule, un mot de Quai prend la minuscule (contrôle du sujet, remarque 3)
+    expect(texts(ok(PLACES.bureau, works))[1]).toBe('IC 16:49 voie 4, travaux : ligne 161, direct');
     // le véhicule et son heure ne sont jamais coupés : l'alerte l'est, au mot, après eux
     const long = { ...ic, alerts: [{ kind: 'works' as const, text: 'Travaux entre Bruxelles-Central et Namur : bus de remplacement entre les gares', at: NOW }] };
     const second = texts(ok(PLACES.bureau, long))[1];
-    expect(second.startsWith('IC 16:49 voie 4, Travaux entre')).toBe(true);
+    expect(second.startsWith('IC 16:49 voie 4, travaux entre')).toBe(true);
     expect(second.endsWith('…')).toBe(true);
     expect(textWidth(second)).toBeLessThanOrEqual(EXPAND_PX);
+  });
+
+  it('un souci après le véhicule : un mot de Quai en minuscule, un texte qui commence par un nom des données tel quel', () => {
+    const ic = journey('ic', [{ walk: 5, to: 'Bruxelles-Central' }, { ride: 'IC', mode: 'train', dep: T(16, 49), arr: T(17, 30), from: 'Bruxelles-Central', to: 'Namur', platform: '4' }, { walk: 3 }]);
+    const second = (kind: 'works' | 'platform' | 'cancel', text: string) => texts(ok(PLACES.bureau, { ...ic, alerts: [{ kind, text, at: NOW }] }))[1];
+    expect(second('platform', '! Voie modifiée : le métro 2 part de la voie 2')).toBe('IC 16:49 voie 4, voie modifiée : le métro 2 part de la voie 2');
+    expect(second('cancel', '! Bus SNCB 17:40 supprimé')).toBe('IC 16:49 voie 4, bus SNCB 17:40 supprimé, direct');
+    expect(second('works', 'Grève : service réduit')).toBe('IC 16:49 voie 4, grève : service réduit, direct');
+    expect(second('works', 'Événement à Namur')).toBe('IC 16:49 voie 4, événement à Namur, direct');
+    // un texte de l'opérateur ou un code de ligne en tête : jamais touché
+    expect(second('works', 'Ligne 51 déviée rue de Fer')).toBe('IC 16:49 voie 4, Ligne 51 déviée rue de Fer, direct');
+    expect(second('cancel', '! IC 17:40 supprimé')).toBe('IC 16:49 voie 4, IC 17:40 supprimé, direct');
+    expect(second('works', 'Travaillons ensemble')).toBe('IC 16:49 voie 4, Travaillons ensemble, direct');
+    // en tête de la 2e ligne (gare hors de portée à pied, règle de la 1.3.0) : la majuscule reste
+    const station = journey('g', [{ ride: 'IC', mode: 'train', dep: T(17, 42), arr: T(18, 12), from: 'Bruxelles-Central', to: 'Gand-Saint-Pierre', platform: '4' }]);
+    expect(texts(ok(PLACES.bureau, { ...station, alerts: [{ kind: 'works', text: 'Travaux : ligne 50', at: NOW }] }, { fromStation: true }))[1]).toBe('Travaux : ligne 50, direct');
   });
 
   it('un trajet qui part de l’arrêt : « depuis Flagey » ; à pied seulement et gare hors de portée : comme en 1.3.0', () => {

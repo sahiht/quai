@@ -769,12 +769,43 @@ function rideLine(j: Journey, r: Leg, time: string, plat: string, maxPx: number)
   let trouble = '';
   if (r.cancelled) base = `${rideWords(r)} ${time} supprimé`;
   else if (r.newPlatform && r.platform && r.platform !== r.newPlatform) base = `${rideWords(r)} ${time} voie ${r.newPlatform} au lieu de ${r.platform}`;
-  else if (!r.newPlatform) trouble = troubleText(j);
+  else if (!r.newPlatform) trouble = lowerQuaiWord(troubleText(j));
   if (textWidth(base) > maxPx) return truncateWords(base, maxPx);
   const head = trouble ? `${base}, ${trouble}` : base;
   const changes = [changesText(j), transfersText(j.transfers)];
   for (const c of changes) if (textWidth(`${head}, ${c}`) <= maxPx) return `${head}, ${c}`;
   return trouble ? fitName(`${base}, `, trouble, '', maxPx) : base;
+}
+
+/**
+ * 1.3.1 (contrôle du sujet « écran du trajet », remarque 3) : mots de Quai qui ouvrent le texte d'un souci (alertes du
+ * trajet : core/text.ts, causes et effets de core/alerts.ts). Après le véhicule, au milieu de la ligne, ils prennent une
+ * minuscule (« IC 16:49 voie 4, travaux : ligne 161 ») ; un texte de l'opérateur qui commence par un nom venu des
+ * données (« Ligne 51 déviée rue de Fer », un lieu) garde sa majuscule.
+ */
+const QUAI_TROUBLE_WORDS = [
+  'Travaux',
+  'Accident',
+  'Grève',
+  'Manifestation',
+  'Événement',
+  'Intempéries',
+  'Incident',
+  'Déviation',
+  'Perturbation',
+  'Problème technique',
+  'Intervention de police',
+  'Urgence médicale',
+  'Jour férié',
+  'Voie modifiée',
+  'Bus SNCB',
+  'Supprimé',
+];
+
+/** Le texte d'un souci, son premier mot en minuscule s'il est un mot de Quai (QUAI_TROUBLE_WORDS), sinon tel quel. */
+export function lowerQuaiWord(text: string): string {
+  const w = QUAI_TROUBLE_WORDS.find((x) => text.startsWith(x) && !/[\p{L}\p{N}]/u.test(text.charAt(x.length)));
+  return w ? `${w.charAt(0).toLowerCase()}${text.slice(1)}` : text;
 }
 
 /* ------------------------------ 1.2.2 : Bus, tram, métro ------------------------------ */

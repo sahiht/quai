@@ -129,7 +129,7 @@ describe('PRD-1.2.10 § 2 et PRD-1.3.0 § 7 : « Favoris », une ligne par favor
       }
       expect(textWidth(v.items[0].a)).toBeLessThanOrEqual(WIDTHS.wideLeft);
       // le souci (travaux) sur la 2e ligne, juste après le véhicule et son heure (1.3.1)
-      expect(nb((v.items[0] as DetailItem).expand![1].text)).toBe('bus 163b4 07:39, Travaux, direct');
+      expect(nb((v.items[0] as DetailItem).expand![1].text)).toBe('bus 163b4 07:39, travaux, direct');
     }
   });
 });
