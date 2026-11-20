@@ -730,14 +730,16 @@ async function s131apos(ctx: Ctx131): Promise<void> {
 const WALK_NAMUR: LatLon[] = [PLACES.placeAnge, { lat: 50.4655, lon: 4.8642 }, { lat: 50.4672, lon: 4.8631 }, { lat: 50.4683, lon: 4.8627 }, PLACES.namurVoie6];
 
 /**
- * A2 (P1) : parti trop tard : sur la place jusqu'à 07:39:30, puis à pied (1,3 m/s) vers la gare ; l'IC part à 07:44
- * (temps réel) quand on est encore à mi-chemin ; on continue à marcher jusqu'à la gare.
+ * A2 (P1) : parti trop tard : sur la place jusqu'à 07:41:30, puis à pied (1,2 m/s) vers la gare ; l'IC part à 07:44
+ * (temps réel) quand on est encore à plus de 300 m ; on continue à marcher jusqu'à la gare. À 07:45:40 on est encore à
+ * 250 m de la gare : le moteur compte « à la gare » à 200 m (GUIDE.atStationM, règle de la 1.2.10 gardée) ; partie à
+ * 07:39:40, la première trace y était déjà à 105 m et l'écran disait, à raison, « À la gare de Namur ».
  */
 const LATE_WALK: Trace = {
   id: 's131-late-walk',
-  label: 'Place de l’Ange (Namur) : départ à pied à 07:39:40, l’IC de 07:44 part pendant la marche',
+  label: 'Place de l’Ange (Namur) : départ à pied à 07:41:40, l’IC de 07:44 part pendant la marche',
   places: ['Place de l’Ange, Namur', 'Gare de Namur'],
-  points: joinTrace(stay(PLACES.placeAnge, T('07:20'), T('07:39:30'), { phase: 'stay', accuracy: 6 }), walk(WALK_NAMUR, T('07:39:40'), { speed: 1.2 }), stay(PLACES.namurVoie6, T('07:48:30'), T('07:55'))),
+  points: joinTrace(stay(PLACES.placeAnge, T('07:20'), T('07:41:30'), { phase: 'stay', accuracy: 6 }), walk(WALK_NAMUR, T('07:41:40'), { speed: 1.2 }), stay(PLACES.namurVoie6, T('07:50:30'), T('07:57'))),
 };
 
 /**
@@ -1038,10 +1040,10 @@ async function s131rate(ctx: Ctx131): Promise<void> {
       await openWeb(r, ctx.pageUrl({ ...START, ...ctx.preset('p/1210.json') }, true));
       ({ j, title } = await webLaunch(r));
       const icDep = j.legs[j.legs.findIndex((l) => l.kind === 'ride')].dep;
-      await walkThrough(r, LATE_WALK, T('07:31'), T('07:39:30'), 60_000);
+      await walkThrough(r, LATE_WALK, T('07:31'), T('07:41:30'), 60_000);
       r.mark = r.page.screens().length;
       // l'IC part (07:44) pendant la marche : on reste « à pied » tant qu'on marche vers la gare (A2, P1)
-      const seen = await walkThrough(r, LATE_WALK, T('07:40'), icDep + 100_000, 20_000, false);
+      const seen = await walkThrough(r, LATE_WALK, T('07:42'), icDep + 100_000, 20_000, false);
       const ride = seen.find((s) => s.lines.some((l) => /^(Prochain arrêt|Descends|Ensuite : descente)/.test(N(l))) || O.PROGRESS_RE.test(N(s.lines.find((l) => l.trim()) ?? '')));
       check(!ride, `A2 : passé « à bord » alors qu’on marche encore vers la gare : ${show(ride)}`);
       const stopped = r.page.screens().slice(r.mark).find((s) => s.screen === 'home');
@@ -1060,12 +1062,17 @@ async function s131rate(ctx: Ctx131): Promise<void> {
       // quand le véhicule est parti (2 min après, temps réel) : « Ton IC de 07:44 est parti », le nouveau trajet depuis là où on est
       const icDep = j.legs[j.legs.findIndex((l) => l.kind === 'ride')].dep;
       r.mark = r.page.screens().length;
+      // le message vient d'abord seul (le nouveau trajet se calcule), puis avec « Nouveau trajet : … » : on attend le second
+      const gone = (x: GlassesScreen) => isGuide(x) && /^Ton IC de \d\d:\d\d est parti$/.test(N(x.lines[0]));
+      const withNew = (x: GlassesScreen) => gone(x) && x.lines.some((l) => /^Nouveau trajet : /.test(N(l)));
       let s: GlassesScreen | undefined;
       for (let t = icDep + 110_000; t <= icDep + 240_000 && !s; t += 15_000) {
         await goTo(r, LATE_WALK, t);
-        s = r.page.screens().slice(r.mark).find((x) => isGuide(x) && /^Ton IC de \d\d:\d\d est parti$/.test(N(x.lines[0])));
+        s = r.page.screens().slice(r.mark).find(withNew);
       }
-      check(s, `A2 : « Ton IC … est parti » jamais affiché après le départ de l’IC : ${show(r.page.lastScreen())}`);
+      const alone = r.page.screens().slice(r.mark).find(gone);
+      check(alone, `A2 : « Ton IC … est parti » jamais affiché après le départ de l’IC : ${show(r.page.lastScreen())}`);
+      check(s, `« Nouveau trajet : IC à 08:42, voie 5 » jamais venu sous « Ton IC … est parti » (A2, B12) : ${show(alone)}`);
       check(s.lines.some((l) => /^Nouveau trajet : IC à ~?08:42(, voie 5)?$/.test(N(l))), `« Nouveau trajet : IC à 08:42, voie 5 » attendu (A2, B12) : ${show(s)}`);
       momentCommon(s, title);
       return { screen: s, shot: 'guide' };

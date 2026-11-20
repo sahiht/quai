@@ -535,7 +535,7 @@ const WHERE_NEVER = [/marge \d+ min/, /^Prochain : /, /^descente : /];
  *  - `wait` (à l'arrêt du véhicule `leg`) : « Ensuite : tram 3 à 08:44 » ; « À l'arrêt Gare du Nord » ;
  *  - `ride` (dans le véhicule `leg`, `nextIdx` : l'arrêt suivant) : « Ensuite : descente à Bruxelles-Nord, 08:42 » ; la
  *    progression (jamais effacée) ; « Prochain arrêt : Ottignies, 08:11 » (seulement pour l'arrêt suivant à bord) ;
- *  - `last` (dernière marche) : « Ensuite : arrivée ~08:58 » ; « À pied vers la place Fontainas ».
+ *  - `last` (dernière marche) : « Ensuite : arrivée ~08:58 » ; « À pied, 390 m, 5 min » (la destination est déjà dite).
  * La chaîne et l'arrivée restent s'il y a la place (permises) ; jamais deux fois l'arrivée.
  */
 export function where131(j: OJourney, title: string, phase: 'before' | 'walk' | 'wait' | 'ride' | 'last', leg = 0, nextIdx = 0): Where131 {
@@ -583,7 +583,9 @@ export function where131(j: OJourney, title: string, phase: 'before' | 'walk' | 
       };
     }
     case 'last':
-      return { until, then: new RegExp(`^Ensuite : arrivée ~?${esc(hm(j.arr))}$`), must: [/^À pied vers /], may: [chain, dist], never: [...WHERE_NEVER, /^arrivée /] };
+      // § 12 : « chaque chose une seule fois » : la destination est dite par « Jusqu'à … », la ligne de la marche ne la
+      // redit pas (« À pied, 390 m, 5 min », et non « À pied vers la place Fontainas » comme en 1.2.10)
+      return { until, then: new RegExp(`^Ensuite : arrivée ~?${esc(hm(j.arr))}$`), must: [/^À pied, ((\d+ m|\d+,\d km), )?\d+ min$/], may: [chain], never: [...WHERE_NEVER, /^arrivée /, /^À pied vers /] };
   }
 }
 
