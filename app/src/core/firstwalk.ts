@@ -22,8 +22,8 @@
  * 6. le chemin est celui du réglage « Éviter les escaliers » ;
  * 7. seulement la première marche d'un trajet qui continue en véhicule ;
  * 8. la position ne quitte pas le téléphone : seules des tuiles publiques sont demandées, par zone, comme pendant un
- *    guidage ; un calcul à la fois, les chemins gardés en mémoire (FIRST_WALK.keep), un chemin impossible redemandé au
- *    plus tôt FIRST_WALK.retryMs après.
+ *    guidage ; un calcul à la fois, les chemins gardés en mémoire (FIRST_WALK.keep, le moins récemment demandé oublié
+ *    d'abord), un chemin impossible redemandé au plus tôt FIRST_WALK.retryMs après.
  */
 import type { Journey, LatLon, Leg, Settings } from './api';
 import type { WalkRoute } from './guide-types';
@@ -40,8 +40,13 @@ export const FIRST_WALK = {
   endM: 30,
   /** chemin impossible à calculer (tuiles absentes, réseau) : pas de nouvelle demande avant */
   retryMs: 120_000,
-  /** chemins gardés en mémoire */
-  keep: 32,
+  /**
+   * chemins gardés en mémoire, le moins récemment demandé oublié d'abord. Contrôle technique final : assez pour les
+   * premières marches de tous les favoris permis et des adresses récentes, trois propositions chacun ((32 + 5) × 3 =
+   * 111). Avec 32 chemins oubliés dans l'ordre d'arrivée, plus de 32 premières marches différentes faisaient recalculer
+   * à chaque rafraîchissement un chemin oublié, qui « venait d'être connu » : tous les favoris refaits, sans fin
+   */
+  keep: 128,
   /** attente au plus, depuis le début de son calcul, d'un chemin avant de rendre un trajet (tuiles déjà là : quelques ms) */
   graceMs: 100,
 } as const;
@@ -211,7 +216,17 @@ export class FirstWalks {
     const now = this.o.now();
     for (const j of js) {
       const w = firstWalkLeg(j.legs);
-      if (!w || this.entryOf(w, avoid)) continue;
+      if (!w) continue;
+      const known = this.entryOf(w, avoid);
+      if (known) {
+        // encore demandé : le dernier à être oublié (un chemin qui sert à chaque rafraîchissement reste en mémoire)
+        const k = this.entries.indexOf(known);
+        if (k >= 0 && k < this.entries.length - 1) {
+          this.entries.splice(k, 1);
+          this.entries.push(known);
+        }
+        continue;
+      }
       if (this.queue.some((q) => this.same(q, w.from, w.to, avoid))) continue;
       const k = this.failed.findIndex((f) => this.same(f, w.from, w.to, avoid));
       if (k >= 0) {
