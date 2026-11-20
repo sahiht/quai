@@ -417,7 +417,7 @@ describe('PRD-1.2.2 § 7 : cas réels du PRD-1.2.1 § 1.5 (marche maximale 5 min
     ]);
   });
 
-  it('B, Braine-l’Alleud → Madou, 12/11 07:31 : bus 36, IC 08:01, métro 2 ; l’IC après 22 min à pied jamais « Moins de changements »', () => {
+  it('B, Braine-l’Alleud → Louise, 12/11 07:31 : bus 36, IC 08:01, métro 2 ; l’IC après 22 min à pied jamais « Moins de changements »', () => {
     const P1 = J('36+IC+2', { walks: [0, 4, 3, 0], rides: 3, board: '07:49', arr: '08:31' });
     const F = J('IC+2', { walks: [22, 3, 0], rides: 2, board: '08:01', arr: '08:31' });
     const L22 = J('S1+2', { walks: [22, 3, 0], rides: 2, board: '08:06', arr: '08:48' });
@@ -428,7 +428,7 @@ describe('PRD-1.2.2 § 7 : cas réels du PRD-1.2.1 § 1.5 (marche maximale 5 min
     ]);
   });
 
-  it('C, Braine-l’Alleud → Madou, 11/11 13:30 : bus W, métro 2 ; « Plus tôt » : 22 min à pied et l’IC ; jamais le bus 36 vers Rixensart', () => {
+  it('C, Braine-l’Alleud → Louise, 11/11 13:30 : bus W, métro 2 ; « Plus tôt » : 22 min à pied et l’IC ; jamais le bus 36 vers Rixensart', () => {
     const W2 = J('W+2', { walks: [8, 1, 0], rides: 2, board: '13:49', arr: '14:45' });
     const IC2 = J('IC+2', { walks: [22, 3, 0], rides: 2, board: '14:08', arr: '14:37' });
     const R = J('36', { walks: [0, 1, 4, 5], rides: 3, board: '13:40', arr: '15:18' });

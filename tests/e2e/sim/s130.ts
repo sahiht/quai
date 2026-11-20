@@ -26,7 +26,7 @@ import { distM, joinTrace, pointAt, stay, walk, type LatLon, type Trace, type Tr
 import { NAMUR_FONTAINAS, PLACES, toFix } from '../traces/traces';
 import type { GlassesScreen, Page } from './cdp';
 import * as O from './guide-oracle';
-import { canvasToShot, checkGuidePixels, litCount, type GuideShot } from './guide-pixels';
+import { canvasToShot, checkCalmPixels, checkGuidePixels, litCount, type GuideShot } from './guide-pixels';
 import { accordionLines, checkPixels, levels, truncatedLines } from './pixels';
 import type { Ctx } from './s1210';
 
@@ -69,10 +69,18 @@ export const TXT = {
   /** § 3 */
   board: '△▽ départs   toucher : où descendre   double : retour',
   line: '△▽ passages   toucher : où descendre   double : retour',
-  /** 1.2.10, inchangé : le toucher ouvre toujours les arrêts du départ, où l'on choisit « j'y descends ». */
-  stops: '△▽ arrêts   toucher : j’y descends   double : retour',
+  /**
+   * 1.2.10 : le toucher ouvre toujours les arrêts du départ, où l'on choisit « j'y descends ». 1.3.1 (PRD-1.3.1 § 6) : le
+   * geste est dit par la ligne d'action « ▶ Me guider jusqu’à … », l'aide devient « △▽ arrêts   double : retour ».
+   */
+  get stops(): string {
+    return O.SPEC.v131 ? O.T131.stopsHints : '△▽ arrêts   toucher : j’y descends   double : retour';
+  },
   favorites: '△▽ choisir   toucher : ouvrir   double : retour',
-  moment: 'toucher : effacer   appui long : arrêter',
+  /** 1.3.1 (PRD-1.3.1 § 2) : « masquer » (TXT.moment suit la spécification jouée, guide-oracle.ts useSpec) */
+  get moment(): string {
+    return O.HINTS.moment;
+  },
   /** § 4 */
   offMap: 'Hors de Belgique',
   offMapArrow: 'pas de chemin à pied : suis la flèche',
@@ -87,7 +95,10 @@ export const TXT = {
   testAsk: 'Lève la tête. Que vois-tu dans les lunettes ?',
   answers: { quai: 'Le test de Quai', dashboard: 'Le Dashboard', nothing: 'Rien' },
   testVisible: 'Les messages de Quai se voient sans rien faire. S’il le faut, Quai les rappelle.',
-  testHeadUp: 'Lève un peu la tête pour voir les messages. Pour le moindre mouvement : dans l’appli Even, règle l’angle d’affichage au plus bas.',
+  /** 1.3.1 (PRD-1.3.1 § 5) : le conseil précis (T131.headUp) ; avant : celui de la 1.3.0 */
+  get testHeadUp(): string {
+    return O.SPEC.v131 ? O.T131.headUp : 'Lève un peu la tête pour voir les messages. Pour le moindre mouvement : dans l’appli Even, règle l’angle d’affichage au plus bas.';
+  },
   testDashboard: 'En levant la tête, tu vois le Dashboard. Pendant un trajet, touche une fois les lunettes pour voir Quai.',
   testCancel: 'Arrêter le test',
   testClosed: 'Ouvre Quai sur les lunettes, puis recommence.',
@@ -219,9 +230,15 @@ async function simHome(sim: Sim): Promise<Screen> {
   return lastOrWait(sim, (s) => s.screen === 'home' && loaded(s) && s.lines.some((l) => /^Autour de moi {3}/.test(l)), 25_000, 'accueil chargé');
 }
 
+/** Rang (sel) de « Favoris » sur l'accueil : 0 jusqu'à la 1.3.0, sous « Autour de moi » en 1.3.1 (PRD-1.3.1 § 8). */
+function favIndex(s: { lines: string[] }): number {
+  const items = s.lines.filter((l, i) => l !== '' && !/^△▽ |^Jour férié/.test(l) && !(i === 0 && /^(Temps réel indisponible|Pas de réseau|Horaires |Près de |! )/.test(l)));
+  return Math.max(0, items.findIndex((l) => /^(Favoris {3}\d+|Ajouter un favori)/.test(l)));
+}
+
 async function simFavorites(sim: Sim): Promise<Screen> {
-  await simHome(sim);
-  await sim.select(0);
+  const h = await simHome(sim);
+  await sim.select(favIndex(h));
   await sim.input('click');
   return sim.waitScreen((s) => s.screen === 'favorites' && loaded(s), 25_000, '« Favoris » calculés');
 }
@@ -388,7 +405,27 @@ interface Run {
   blocked?: string;
 }
 const isGuide = (s: GlassesScreen) => s.screen === 'guide';
-const isEmpty = (s: GlassesScreen) => s.screen === 'guide' && !s.title && s.lines.every((l) => !l.trim());
+/**
+ * Écran calme du guidage : rien jusqu'à la 1.3.0 ; 1.3.1 (PRD-1.3.1 § 1, B9) : « · · · » seul, ou à bord la ligne de
+ * progression. Aussi pour les écrans du simulateur (`calm`).
+ */
+const calm = (s: { screen: string; title: string; lines: string[] }) =>
+  s.screen === 'guide' && !s.title && s.lines.every((l) => !l.trim() || (O.SPEC.v131 && (O.matches(l, O.T131.dots) || O.PROGRESS_RE.test(O.norm(l)))));
+const isEmpty = (s: GlassesScreen) => calm(s);
+/** 1.3.1 (A7, E3) : un toucher ne masque qu'un message affiché depuis au moins 1,5 s. */
+const maskWait = () => (O.SPEC.v131 ? sleep(1_600) : Promise.resolve());
+
+/**
+ * Menu de Quai Web : le curseur sur le choix `label` (1.3.0 : « Arrêter le guidage », « Voir tout le trajet » ; 1.3.1, B10 :
+ * « Voir tout le trajet », « Voir les arrêts », « Arrêter le guidage », curseur sur le premier).
+ */
+async function menuChoose(r: Run, label: string): Promise<void> {
+  const m = r.page.lastScreen()!;
+  const k = m.lines.findIndex((l) => O.norm(l).endsWith(label));
+  check(m.screen === 'menu' && k >= 0, `choix « ${label} » absent du menu : ${show(m)}`);
+  for (let i = 0; i < 6 && r.page.lastScreen()?.sel !== k; i++) await gesture(r, (r.page.lastScreen()?.sel ?? 0) < k ? 'down' : 'up');
+  check(r.page.lastScreen()?.sel === k, `curseur du menu pas arrivé sur « ${label} » (sel ${r.page.lastScreen()?.sel})`);
+}
 const momentKind = (s: GlassesScreen) => (s.moment && typeof s.moment === 'object' ? String((s.moment as { kind?: unknown }).kind ?? '') : '');
 
 async function openWeb(r: Run, url: string): Promise<GlassesScreen> {
@@ -432,7 +469,8 @@ async function webFollowed(r: Run): Promise<{ journey: O.OJourney; title: string
 }
 /** Depuis l'accueil de Quai Web : « Favoris », le favori `name`, son écran du trajet. */
 async function webOpenFavorite(r: Run, name: string): Promise<GlassesScreen> {
-  for (let i = 0; i < 4 && r.page.lastScreen()?.sel !== 0; i++) await gesture(r, 'up');
+  const fi = favIndex(r.page.lastScreen()!);
+  for (let i = 0; i < 6 && r.page.lastScreen()?.sel !== fi; i++) await gesture(r, (r.page.lastScreen()?.sel ?? 0) < fi ? 'down' : 'up');
   await gesture(r, 'tap');
   const f = await waitGuide(r, '« Favoris »', (s) => s.screen === 'favorites' && loaded(s), 20_000);
   const k = favRows(f as unknown as Screen).findIndex((l) => l.startsWith(`${name}   `) || l.startsWith(`${name} !   `));
@@ -571,7 +609,7 @@ async function s130actionWeb(ctx: Ctx130): Promise<void> {
       // menu de l'appui long, « Voir tout le trajet » : l'écran du trajet guidé
       await gesture(r, 'long');
       await waitGuide(r, 'menu de l’appui long', (s) => s.screen === 'menu');
-      await gesture(r, 'down');
+      await menuChoose(r, 'Voir tout le trajet');
       await gesture(r, 'tap');
       const s = await waitGuide(r, 'écran du trajet guidé', (x) => x.screen === 'steps' && loaded(x));
       stepsCommon(s, TXT.guided);
@@ -586,6 +624,7 @@ async function s130actionWeb(ctx: Ctx130): Promise<void> {
       // arrêter le guidage, puis « Me guider pendant un trajet » éteint (PRD-1.2.10 § 3.5)
       await gesture(r, 'long');
       await waitGuide(r, 'menu', (s) => s.screen === 'menu');
+      await menuChoose(r, 'Arrêter le guidage');
       await gesture(r, 'tap');
       await waitGuide(r, 'accueil après « Arrêter le guidage »', (s) => s.screen === 'home');
       await page.eval(`(() => { const s = JSON.parse(localStorage.getItem('quai.settings')); s.display = { ...s.display, guide: false }; localStorage.setItem('quai.settings', JSON.stringify(s)); return true; })()`);
@@ -650,7 +689,14 @@ async function s130up(ctx: Ctx130): Promise<void> {
 /* ------------------------------ s130fav : favoris en accordéon (§ 7) ------------------------------ */
 
 /** 2e ligne de l'accordéon (PRD-1.3.0 § 7) : un souci du trajet en tête, puis « direct » ou les changements (au-delà : « … »). */
-const SECOND = /^((voie \S+ au lieu de \S+|.+ supprimé), )?(direct|\d+ changements? : .+)$/;
+const SECOND_130 = /^((voie \S+ au lieu de \S+|.+ supprimé), )?(direct|\d+ changements? : .+)$/;
+/**
+ * 1.3.1 (PRD-1.3.1 § 4) : la 2e ligne garde le premier véhicule et son heure (le souci avec lui), puis les changements
+ * s'ils tiennent ; une gare hors de portée à pied garde la règle de la 1.3.0.
+ */
+const SECOND_131 = /^(IC|S\d+|L|P|EXP|IR|ICE|TGV|train|bus|tram|métro|bus SNCB)\b[^,]*~?\d\d:\d\d( \+\d+)?( voie \S+( !| au lieu de \S+)?| supprimé)?(, .+)?$/;
+const SECOND = { test: (t: string) => SECOND_130.test(t) || SPEC131() && SECOND_131.test(t) };
+const SPEC131 = () => O.SPEC.v131;
 /** Contenu attendu de l'accordéon d'une rangée de « Favoris » (PRD-1.3.0 § 7), d'après la rangée elle-même. */
 function accordionWant(row: string): { n: [number, number]; first?: RegExp; label: string } {
   const answer = row.split('   ').pop() ?? '';
@@ -658,7 +704,9 @@ function accordionWant(row: string): { n: [number, number]; first?: RegExp; labe
   return {
     n: [1, 2],
     // marche puis véhicule ; départ d'une gare hors de portée à pied ; à pied seulement ; adresse récente (l'adresse complète)
-    first: /^(à pied \d+ min, puis .+|(IC|S\d+|L|P|EXP|bus|tram|métro|Bus|Tram|Métro)\b.* à ~?\d\d:\d\d, à .+|à pied \d+ min|.+, \d{4} .+)$/,
+    first: O.SPEC.v131
+      ? /^(à pied \d+ min → .+|depuis .+|(IC|S\d+|L|P|EXP|bus|tram|métro|Bus|Tram|Métro)\b.* à ~?\d\d:\d\d, à .+|à pied \d+ min|.+, \d{4} .+)$/
+      : /^(à pied \d+ min, puis .+|(IC|S\d+|L|P|EXP|bus|tram|métro|Bus|Tram|Métro)\b.* à ~?\d\d:\d\d, à .+|à pied \d+ min|.+, \d{4} .+)$/,
     label: 'marche puis véhicule, gare hors de portée, à pied seulement ou adresse',
   };
 }
@@ -698,8 +746,14 @@ async function s130fav(ctx: Ctx130): Promise<void> {
     // le favori du curseur (Place Fontainas) s'ouvre sur deux lignes : la marche puis l'IC, puis le souci et le changement
     const open = checkScreen(f, 'Favoris');
     check(f.sel === 0 && open.length === 2 && f.lines[1] === open[0], `accordéon sous « ${FONTAINAS} » (curseur) : ${JSON.stringify(f.lines)}`);
-    check(/^à pied \d+ min, puis IC ~?07:4[24]( \+2)? voie 6 !$/.test(O.norm(open[0])), `1re ligne « ${open[0]} » au lieu de « à pied 9 min, puis IC ~07:42 voie 6 ! »`);
-    check(/^voie 6 au lieu de 4\b.*\b1 changement : tram 3$/.test(O.norm(open[1])), `2e ligne « ${open[1]} » : « voie 6 au lieu de 4 » en tête, puis « 1 changement : tram 3 »`);
+    if (O.SPEC.v131) {
+      // 1.3.1 (PRD-1.3.1 § 4) : la 1re ligne nomme la gare où monter, la 2e le premier véhicule, puis les changements
+      check(/^à pied \d+ min → Namur$/.test(O.norm(open[0])), `1re ligne « ${open[0]} » au lieu de « à pied 9 min → Namur » (PRD-1.3.1 § 4)`);
+      check(/^IC (~?07:4[24]|07:42 \+2)( voie 6 !| voie 6 au lieu de 4)?(, 1 changement( : tram 3)?)?$/.test(O.norm(open[1])), `2e ligne « ${open[1]} » au lieu de « IC 07:42 +2 voie 6 au lieu de 4, 1 changement : tram 3 » (PRD-1.3.1 § 4)`);
+    } else {
+      check(/^à pied \d+ min, puis IC ~?07:4[24]( \+2)? voie 6 !$/.test(O.norm(open[0])), `1re ligne « ${open[0]} » au lieu de « à pied 9 min, puis IC ~07:42 voie 6 ! »`);
+      check(/^voie 6 au lieu de 4\b.*\b1 changement : tram 3$/.test(O.norm(open[1])), `2e ligne « ${open[1]} » : « voie 6 au lieu de 4 » en tête, puis « 1 changement : tram 3 »`);
+    }
     // relief : les lignes ouvertes pâles (plus pâles que la rangée), en retrait (contrôle au pixel de l'étape)
     await sleep(300);
     const lv = levels(await sim.rawShot(), f);
@@ -841,6 +895,7 @@ async function s130offmap(ctx: Ctx130): Promise<void> {
       // § 4 : une fois, au début de la marche (après « Partir maintenant », PRIO) ; aucun virage
       const cur = r.page.lastScreen();
       if (cur && isGuide(cur) && !isEmpty(cur)) {
+        await maskWait();
         await gesture(r, 'tap');
         await waitGuide(r, 'écran vide', isEmpty);
       }
@@ -867,27 +922,22 @@ async function s130offmap(ctx: Ctx130): Promise<void> {
       momentCommon(s, title);
       return { screen: s, shot: 'guideImage' };
     });
-    await wstep(r, 'aucun-virage', async () => {
-      // toute la marche jusqu'à la gare : ni virage, ni second « Hors de Belgique »
-      await gesture(r, 'tap');
-      const tr = luxWalk(j.leaveAt);
-      const from = r.page.screens().length;
-      const walkEnd = tr.points[tr.points.length - 1].at;
-      for (let t = tOff + 15_000; t <= walkEnd - 30_000; t += 15_000) await goTo(r, tr, t);
-      const after = r.page.screens().slice(from).filter(isGuide);
-      const turns = after.filter((x) => /^(légèrement |franchement )?(à gauche|à droite)( dans \d+ m| maintenant)$|^Fais demi-tour$/.test(O.norm(x.lines[0])) || momentKind(x) === 'turn');
-      check(!turns.length, `virage annoncé sans chemin à pied (hors de Belgique) : ${turns.map(show).join(' | ')}`);
-      const again = after.filter((x) => O.matches(x.lines[0], TXT.offMap));
-      check(!again.length, `« ${TXT.offMap} » montré plus d’une fois : ${again.map(show).join(' | ')}`);
-      return { screen: r.page.lastScreen() };
-    });
+    let walkFrom = 0;
     await wstep(r, 'ou-tu-en-es-hors-de-belgique', async () => {
       // « Où tu en es » à pied, hors de Belgique : la gare, la distance à vol d'oiseau et le temps, puis la raison, pâle
+      // (1.3.1, A7 : un message ne se masque qu'affiché depuis 1,5 s ; l'horloge ne recule donc jamais : cette étape vient
+      // avant la fin de la marche, où « monter » s'affiche)
+      await maskWait();
+      await gesture(r, 'tap');
+      await waitGuide(r, 'écran calme après « Hors de Belgique » masqué', isEmpty);
       const tr = luxWalk(j.leaveAt);
       const mid = j.leaveAt + 20_000 + 120_000;
+      walkFrom = r.page.screens().length;
+      for (let t = tOff + 15_000; t < mid; t += 15_000) await goTo(r, tr, t);
       await goTo(r, tr, mid);
       const cur = r.page.lastScreen();
       if (cur && isGuide(cur) && !isEmpty(cur)) {
+        await maskWait();
         await gesture(r, 'tap');
         await waitGuide(r, 'écran vide', isEmpty);
       }
@@ -899,8 +949,29 @@ async function s130offmap(ctx: Ctx130): Promise<void> {
       const m = /^(\d[\d ]*) m à vol d’oiseau, (\d+) min$/.exec(O.norm(w.lines[k + 1]));
       check(m && Math.abs(Number(m[1].replace(/ /g, '')) - crow) <= Math.max(30, crow * 0.15), `« ${w.lines[k + 1]} » au lieu de « ${crow} m à vol d’oiseau, N min » (PRD-1.3.0 § 4)`);
       check(O.matches(w.lines[k + 2], TXT.offMapWhere), `« ${w.lines[k + 2]} » au lieu de « ${TXT.offMapWhere} » (pâle)`);
-      momentCommon(w, title);
+      // 1.3.1 (§ 3, § 12) : le titre de « Où tu en es » est « Guidage en cours », la destination sur la ligne « Jusqu’à … »
+      if (O.SPEC.v131) check(O.matches(w.lines[0], O.untilLine(title)), `« ${w.lines[0]} » au lieu de « Jusqu’à … » (${title} ; PRD-1.3.1 § 12)`);
+      momentCommon(w, O.SPEC.v131 ? O.T131.whereTitle : title);
       return { screen: w, shot: (w.images as unknown[] | undefined)?.length ? 'guideImage' : 'guide' };
+    });
+    await wstep(r, 'aucun-virage', async () => {
+      // toute la marche jusqu'à la gare : ni virage, ni second « Hors de Belgique »
+      // (depuis « Hors de Belgique » masqué, étape d'avant comprise ; « Où tu en es » est masqué d'abord)
+      const cur = r.page.lastScreen();
+      if (cur && isGuide(cur) && !isEmpty(cur)) {
+        await maskWait();
+        await gesture(r, 'tap');
+        await waitGuide(r, 'écran calme après « Où tu en es »', isEmpty);
+      }
+      const tr = luxWalk(j.leaveAt);
+      const walkEnd = tr.points[tr.points.length - 1].at;
+      for (let t = j.leaveAt + 20_000 + 120_000 + 15_000; t <= walkEnd - 30_000; t += 15_000) await goTo(r, tr, t);
+      const after = r.page.screens().slice(walkFrom).filter(isGuide);
+      const turns = after.filter((x) => /^(légèrement |franchement )?(à gauche|à droite)( dans \d+ m| maintenant)$|^Fais demi-tour$/.test(O.norm(x.lines[0])) || momentKind(x) === 'turn');
+      check(!turns.length, `virage annoncé sans chemin à pied (hors de Belgique) : ${turns.map(show).join(' | ')}`);
+      const again = after.filter((x) => O.matches(x.lines[0], TXT.offMap));
+      check(!again.length, `« ${TXT.offMap} » montré plus d’une fois : ${again.map(show).join(' | ')}`);
+      return { screen: r.page.lastScreen() };
     });
   }, VIEWPORT);
 }
@@ -1073,9 +1144,10 @@ async function simGuideToLeave(ctx: Ctx130, preset: string): Promise<{ s: Screen
   await host.eval(`window.__quaiPushFix(${JSON.stringify({ ...fix, at: j.leaveAt - 20_000 })})`);
   await sleep(600);
   await sim.drain();
-  if (sim.last?.screen === 'guide' && sim.last.lines.some((l) => l.trim())) {
+  if (sim.last?.screen === 'guide' && !calm(sim.last)) {
+    await maskWait();
     await sim.input('click');
-    await sim.waitScreen((x) => x.screen === 'guide' && !x.title && x.lines.every((l) => !l.trim()), 8_000, 'écran calme avant l’heure de partir');
+    await sim.waitScreen(calm, 8_000, 'écran calme avant l’heure de partir');
   }
   await sim.drain();
   const from = sim.entries.length;
@@ -1180,8 +1252,9 @@ async function s130remind(ctx: Ctx130): Promise<void> {
       check(rebuilds(sim, from) >= 2, `pages entières : ${rebuilds(sim, from)} pour 2 rappels`);
       const j = (await host.storage('quai.journal')) ?? '';
       check(/"remind"/.test(j), 'journal : les rappels ne sont pas notés (PRD-1.3.0 § 6.2, § 6.4)');
+      await maskWait();
       await sim.input('click');
-      const e = await sim.waitScreen((x) => x.screen === 'guide' && !x.title && x.lines.every((l) => !l.trim()), 8_000, 'écran vide après le toucher');
+      const e = await sim.waitScreen(calm, 8_000, 'écran vide après le toucher');
       return { screen: e, shot: false };
     });
     await ctx.step('vu-tete-levee', async () => {
@@ -1264,8 +1337,19 @@ async function s130check(ctx: Ctx130): Promise<void> {
     return {};
   });
   await ctx.step('toucher-efface', async () => {
+    // 1.3.1 (A7) : le toucher masque un message affiché depuis 1,5 s au moins
+    await maskWait();
     await sim.input('click');
-    const e = await sim.waitScreen((x) => x.screen === 'guide' && !x.title && x.lines.every((l) => !l.trim()), 8_000, 'écran vide après le toucher');
+    const e = await sim.waitScreen(calm, 8_000, 'écran calme après le toucher');
+    if (O.SPEC.v131) {
+      // 1.3.1 (PRD-1.3.1 § 1) : sur le vrai simulateur, « · · · » au niveau le plus pâle (alpha 197 au plus), en bas au centre
+      let res = checkCalmPixels(await sim.rawShot(), 'dots');
+      for (let k = 0; res.bad.length && k < 4; k++) {
+        await sleep(400);
+        res = checkCalmPixels(await sim.rawShot(), 'dots');
+      }
+      check(!res.bad.length, `écran calme du simulateur :\n        ${res.bad.join('\n        ')}`);
+    }
     const j = (await host.storage('quai.journal')) ?? '';
     check(/"battery"|batterie/i.test(j), 'journal : batterie au départ pas notée (PRD-1.3.0 § 6.4)');
     return { screen: e, shot: false };
@@ -1347,11 +1431,15 @@ async function s130journal(ctx: Ctx130): Promise<void> {
           await goTo(r, tr, t);
           pushed.push(pointAt(tr.points, t));
           const cur = r.page.lastScreen();
-          if (cur && isGuide(cur) && !isEmpty(cur)) await gesture(r, 'tap');
+          if (cur && isGuide(cur) && !isEmpty(cur)) {
+            await maskWait();
+            await gesture(r, 'tap');
+          }
         }
         // arrêter le guidage (menu de l'appui long)
         await gesture(r, 'long');
         await waitGuide(r, 'menu', (x) => x.screen === 'menu');
+        await menuChoose(r, 'Arrêter le guidage');
         await gesture(r, 'tap');
         await waitGuide(r, 'accueil', (x) => x.screen === 'home');
         return { screen: s };
@@ -1382,9 +1470,13 @@ async function s130journal(ctx: Ctx130): Promise<void> {
       check(rows.length >= 1 && rows.some((r) => r.includes(FONTAINAS)), `rangée du trajet « ${FONTAINAS} » dans « ${TXT.journalCard} » (.journal-row) : ${JSON.stringify(rows)}`);
       const clicked = await page.eval<boolean>(`(() => { const r = [...document.querySelectorAll('.journal-row')].find((x) => x.textContent.includes(${JSON.stringify(FONTAINAS)})); if (!r) return false; (r.querySelector('button, a, summary') || r).click(); return true; })()`);
       if (!clicked) await page.clickText(FONTAINAS, 'body', 'button,a,[role=button],li,summary');
-      const text = await page.waitFor<string>(`(() => { const e = document.querySelector('.journal-text'); const t = (e ? (e.value || e.innerText || e.textContent) : (document.querySelector('main') || document.body).innerText).replace(/[\\u00a0\\u202f]/g, ' '); return /Journal Quai 1\\.3\\.0, trajet/.test(t) ? t : ''; })()`, 10_000, 'texte du journal (.journal-text)');
-      check(/Journal Quai 1\.3\.0, trajet « Place Fontainas », 10\/11\/2026/.test(text), `en-tête « Journal Quai 1.3.0, trajet « ${FONTAINAS} », 10/11/2026 » absent : « ${text.slice(0, 300)} »`);
+      const text = await page.waitFor<string>(`(() => { const e = document.querySelector('.journal-text'); const t = (e ? (e.value || e.innerText || e.textContent) : (document.querySelector('main') || document.body).innerText).replace(/[\\u00a0\\u202f]/g, ' '); return /Journal Quai \\d+\\.\\d+\\.\\d+, trajet/.test(t) ? t : ''; })()`, 10_000, 'texte du journal (.journal-text)');
+      // version de app.json (1.3.0 à la publication de la 1.3.0, 1.3.1 ensuite : seul le numéro change)
+      const head = `Journal Quai ${ctx.appVersion}, trajet « ${FONTAINAS} », 10/11/2026`;
+      check(text.includes(head), `en-tête « ${head} » absent : « ${text.slice(0, 300)} »`);
       check(/(^|\n)\s*07:3\d:\d\d Partir maintenant affiché\s*($|\n)/.test(text), `ligne « 07:3x:xx Partir maintenant affiché » absente (une ligne par événement, heures de Bruxelles) : « ${text.slice(0, 800)} »`);
+      // 1.3.1 (PRD-1.3.1 § 2, L2) : « masqué d’un toucher », plus jamais « effacé »
+      if (O.SPEC.v131) check(/ masqué d’un toucher/.test(text) && !/ effacé d’un toucher/.test(text), `journal : « … masqué d’un toucher » attendu, jamais « effacé » (PRD-1.3.1 § 2, L2) : « ${text.slice(0, 800)} »`);
       const bad = journalPrivacyIssues(text, pushed, ['Place Fontainas, 1000 Bruxelles']);
       check(!bad.length, `texte du journal : ${bad.join(' ; ')}`);
       for (const b of [TXT.journalCopy, TXT.journalClear]) check(await page.eval<boolean>(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === ${JSON.stringify(b)})`), `bouton « ${b} » absent`);

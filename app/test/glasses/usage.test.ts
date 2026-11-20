@@ -57,19 +57,19 @@ describe('REVUE-USAGE n° 8 : un véhicule s’écrit partout de la même façon
     expect(lineCode(ride({ op: 'sncb', mode: 'bus', line: 'BUS' }))).toBe('Bus SNCB');
   });
 
-  it('étapes (1.2.10 § 5) : « 07:36 Bus W → Bruxelles Midi », « Métro 2 → Madou », le véhicule en toutes lettres', () => {
+  it('étapes (1.2.10 § 5) : « 07:36 Bus W → Bruxelles Midi », « Métro 2 → Louise », le véhicule en toutes lettres', () => {
     const j = journey('j', [
       { walk: 4, to: 'Merbraine' },
       { ride: 'W', mode: 'bus', dep: NOW + 5 * MIN, arr: NOW + 50 * MIN, from: 'Merbraine', to: 'Bruxelles Midi', head: 'Bruxelles Midi' },
       { walk: 2, to: 'Gare du Midi' },
-      { ride: '2', mode: 'metro', dep: NOW + 55 * MIN, arr: NOW + 62 * MIN, from: 'Gare du Midi', to: 'Madou', head: 'Simonis (Elisabeth)' },
+      { ride: '2', mode: 'metro', dep: NOW + 55 * MIN, arr: NOW + 62 * MIN, from: 'Gare du Midi', to: 'Louise', head: 'Simonis (Elisabeth)' },
       { walk: 3 },
     ]);
     const v = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0, fresh: true }, ctx());
     const l = lines(v);
     expect(l).toContain('07:36 Bus W → Bruxelles Midi   08:21');
     // 1.2.5 : correspondance de 3 min (le W arrive à 08:21, 2 min à pied) : sa marge à droite
-    expect(l).toContain('08:26 Métro 2 → Madou   marge 3 min');
+    expect(l).toContain('08:26 Métro 2 → Louise   marge 3 min');
   });
 
   it('« En cours » et la ligne d’une gare donnent la même heure pour un même train : « IC 07:42 +2 voie 6 ! »', () => {

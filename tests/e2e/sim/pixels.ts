@@ -60,6 +60,13 @@ type Seg = { from: number; to: number; text: string; float?: { min: number; max:
 /** Écrans en liste à une colonne de droite (gabarit de chacun, layout.ts). */
 const MENU: Record<string, keyof typeof LAYOUTS> = { favorites: 'favorites', stations: 'stations', keepLine: 'menu', followed: 'menu', menu: 'menu' };
 const CHECKED = new Set(['home', 'steps', 'others', 'lines', 'follows', 'lineRun', 'trainRun', 'line', 'board', 'stops', 'train', ...Object.keys(MENU)]);
+/** Écrans avec une ligne d'action « ▶ … » juste au-dessus des aides : trajet (1.3.0), arrêts d'un départ (1.3.1, § 6). */
+const ACTION_SCREENS = new Set(['steps', 'stops', 'trainRun']);
+/** 1.3.1 (§ 6) : écrans dont la ligne d'action suit le curseur (rangée réservée même vide), et leur aide sans « toucher ». */
+const CURSOR_ACTION_SCREENS = new Set(['stops', 'trainRun']);
+const CURSOR_ACTION_HINT = /^△▽ arrêts {3}double : retour$/;
+/** Écrans en accordéon : « Favoris » (1.3.0, § 7) et « Gares de train » (1.3.1, B21). */
+const ACCORDION_SCREENS = new Set(['favorites', 'stations']);
 /** 1.2.3 : ligne du haut d'un tableau (message de l'opérateur, « Départs de demain ») ; sa note, jamais une ligne de liste. */
 const TOP_BOARD = /^(! |Départs de demain$)/;
 const NOTE_BOARD = /^(~ horaire prévu|Temps réel indisponible|Pas de réseau)/;
@@ -72,8 +79,12 @@ const NOTE = /^(~ horaire prévu|\* s’arrête avant le terminus|Temps réel in
 const TOP_TRAIN = /^[●◎○─…]+ {3}descente (au prochain arrêt|dans \d+ arrêts)$/;
 /** 1.2.5 (PRD-1.2.5 § 4) : rangée en mots clairs et pâles de « Bus, tram, métro » (« Bus W vers Bruxelles Midi   20 min »). */
 export const SEG_ROW = /^(Bus SNCB|Bus|Tram|Métro|Ligne) \S+ vers /;
-/** Accueil : les lignes qui suivent les favoris (jamais en retrait, même sans ligne vide). */
-const HOME_TOOLS = /^(Autour de moi|Gares|Bus, tram, métro)( {3}|$)/;
+/**
+ * Accueil : les lignes qui suivent les favoris (jamais en retrait, même sans ligne vide). 1.3.1 (§ 8) : les favoris sont
+ * suivis de « Gares de train », « Lignes de bus, tram, métro », « Arrêts de bus, tram, métro » ; avec « En cours » en tête,
+ * la ligne vide saute : ces rubriques restent à la marge.
+ */
+const HOME_TOOLS = /^(Autour de moi|Gares|Bus, tram, métro|Gares de train|Lignes de bus, tram, métro|Arrêts de bus, tram, métro)( {3}|$)/;
 /** « Bus, tram, métro » : titre d'une ligne choisie (à la marge) ; le reste, ses sens, en retrait. */
 const LINE_TITLE = /^((Bus SNCB|Bus|Tram|Métro|Ligne) \S+ · |.+ · toutes les lignes$)/;
 /** Ligne d'aide (ou message temporaire de l'accueil) : jamais une ligne de la liste. */
@@ -415,7 +426,7 @@ export function accordionLines(s: LoggedScreen): string[] {
   const x = s as LoggedScreen & { expand?: unknown; detail?: unknown };
   if (Array.isArray(x.expand)) return x.expand.map((e) => String(typeof e === 'object' && e && 'text' in e ? (e as { text: unknown }).text : e).replace(/[\u00a0\u202f]/g, ' '));
   if (typeof x.detail === 'string') return [];
-  return s.lines.slice(0, -1).filter((l) => !!l && !l.includes('   ') && l !== 'ADRESSES RÉCENTES');
+  return s.lines.slice(0, -1).filter((l) => !!l && !l.includes('   ') && l !== 'ADRESSES RÉCENTES' && !NOTE.test(l) && !NOTE_BOARD.test(l));
 }
 
 interface Band {
@@ -453,6 +464,8 @@ function bands(s: LoggedScreen): Band[] | null {
   let hint: string | undefined;
   let note: string | undefined;
   let action: string | undefined;
+  /** la rangée de la ligne d'action est réservée (texte journalisé, ou vide sur une rangée sans action, 1.3.1) */
+  let actionRow = false;
   let footLines: number;
   if (home) {
     // pied compact (1.2.1) : l'aide seulement les 7 premiers jours ; sous le jour férié, pas de ligne d'aide vide
@@ -461,8 +474,9 @@ function bands(s: LoggedScreen): Band[] | null {
     footLines = (note !== undefined ? 1 : 0) + (note !== undefined && hint === undefined ? 0 : 1);
   } else {
     hint = lines.pop();
-    // 1.3.0 (PRD-1.3.0 § 1) : écran du trajet, la ligne d'action (« ▶ Y aller ») juste au-dessus des aides
-    if (s.screen === 'steps' && lines.length && /^▶ /.test(lines[lines.length - 1])) action = lines.pop();
+    // 1.3.0 (PRD-1.3.0 § 1) : écran du trajet, la ligne d'action (« ▶ Y aller ») juste au-dessus des aides ; 1.3.1
+    // (PRD-1.3.1 § 6) : aussi les arrêts d'un départ et tout le trajet d'un train (« ▶ Me guider jusqu'à cet arrêt »)
+    if (ACTION_SCREENS.has(s.screen) && lines.length && /^▶ /.test(lines[lines.length - 1])) action = lines.pop();
     // 1.2.10 (PRD-1.2.10 § 2) : « Favoris », la ligne du détail du favori choisi, fixe en bas au-dessus des aides
     // (journalisée dans `detail`, espaces insécables comprises, alors que les lignes du journal en sont nettoyées),
     // à la place de la note
@@ -471,13 +485,17 @@ function bands(s: LoggedScreen): Band[] | null {
     else note = lines.length && (board ? NOTE_BOARD : NOTE).test(lines[lines.length - 1]) ? lines.pop() : undefined;
     // ligne de note réservée (layout.ts, reserveNote) : partout sauf « Autres trajets », les menus et « Dans le train »
     const reserve = !['others', 'keepLine', 'followed', 'train', 'follows'].includes(s.screen);
-    footLines = (reserve || note ? 1 : 0) + (action !== undefined ? 1 : 0) + 1;
+    // 1.3.1 (PRD-1.3.1 § 6) : arrêts d'un départ et trajet d'un train, la ligne d'action suit le curseur et garde sa rangée,
+    // même vide (sur l'arrêt de la montée, une gare quittée) : l'aide sans « toucher » (« △▽ arrêts   double : retour ») le dit
+    if (action === undefined && CURSOR_ACTION_SCREENS.has(s.screen) && CURSOR_ACTION_HINT.test((hint ?? '').replace(/[\u00a0\u202f]/g, ' '))) actionRow = true;
+    if (action !== undefined) actionRow = true;
+    footLines = (reserve || note ? 1 : 0) + (actionRow ? 1 : 0) + 1;
   }
   const footY = SCREEN_H - GEO.BOTTOM_MARGIN - footLines * LINE_H;
   const listY = GEO.TITLE_Y + LINE_H + (hasTop ? LINE_H : 0) + 3;
   // 1.3.0 (PRD-1.3.0 § 1, layout.ts geometry) : avec la ligne d'action, la liste finit là où commence le pied (elle
   // descend du reste de la division, 9 px), la ligne d'action prolongeant la colonne a sur la grille du pied
-  const rowsY = action !== undefined ? Math.max(listY, footY - Math.max(1, Math.floor((footY - listY) / LINE_H)) * LINE_H) : listY;
+  const rowsY = actionRow ? Math.max(listY, footY - Math.max(1, Math.floor((footY - listY) / LINE_H)) * LINE_H) : listY;
 
   const out: Band[] = [];
   // l'heure du titre, calée à droite de son conteneur par les mêmes espaces que layout.ts
@@ -511,8 +529,9 @@ function bands(s: LoggedScreen): Band[] | null {
   }
   // accueil : les favoris en retrait sont les lignes entre « Favoris » et la ligne vide
   let underFavorites = false;
-  // 1.3.0 : lignes de l'accordéon de « Favoris » (champ `expand` du journal, sinon les lignes sans colonne de réponse)
-  const open = new Set(s.screen === 'favorites' ? accordionLines(s) : []);
+  // 1.3.0 : lignes de l'accordéon de « Favoris » (champ `expand` du journal, sinon les lignes sans colonne de réponse) ;
+  // 1.3.1 (B21, U7) : aussi « Gares de train », la direction et le train suivant sous la gare du curseur
+  const open = new Set(ACCORDION_SCREENS.has(s.screen) ? accordionLines(s) : []);
   // 1.2.6 : « Lignes » : à la marge, sauf « introuvable » sous la ligne
   const indented = s.screen === 'lines' ? linesIndented(lines) : s.screen === 'follows' ? lines.map((l) => /^introuvable/.test(l)) : [];
   lines.forEach((l, i) => {
@@ -525,7 +544,7 @@ function bands(s: LoggedScreen): Band[] | null {
         segs = homeSegments(l, false);
         underFavorites = false;
       } else segs = homeSegments(l, underFavorites);
-    } else if (s.screen === 'favorites' && open.has(l)) {
+    } else if (ACCORDION_SCREENS.has(s.screen) && open.has(l)) {
       // 1.3.0 (PRD-1.3.0 § 7) : ligne de l'accordéon, pâle et en retrait sous la rangée du curseur (retrait mesuré)
       const x0 = LAYOUTS.favorites.a.x;
       segs = [{ from: x0 + 6, to: x0 + 6 + width(l), text: l, float: { min: x0 + 6, max: x0 + 64 } }];
@@ -629,3 +648,18 @@ export function truncatedLines(s: LoggedScreen): string[] {
 }
 
 export { HOME_INDENT };
+
+/**
+ * Texte de la rangée du curseur d'une liste journalisée (`sel`, `top` des listes par page) : sans la ligne du haut (l'arrêt
+ * de la montée des arrêts d'un départ, « ● : … » de tout le trajet d'un train), la note, la ligne d'action (« ▶ … ») ni
+ * l'aide. Liste par page (1.3.1, PRD-1.3.1 § 6 : la ligne d'action prend une rangée), un arrêt peut être sur la page
+ * suivante : le chercher par ▼ avec cette rangée.
+ */
+export function cursorRowText(s: LoggedScreen & { top?: number }): string | undefined {
+  const rows = s.lines.slice(0, -1);
+  if (rows.length && /^▶ /.test(rows[rows.length - 1])) rows.pop();
+  if (rows.length && (NOTE.test(rows[rows.length - 1]) || NOTE_BOARD.test(rows[rows.length - 1]))) rows.pop();
+  if (s.screen === 'stops' || (s.screen === 'trainRun' && /^[●◇]\s: /.test(rows[0] ?? ''))) rows.shift();
+  const k = (s.sel ?? 0) - (s.top ?? 0);
+  return k >= 0 ? rows[k] : undefined;
+}
