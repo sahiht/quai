@@ -8,6 +8,7 @@
  */
 import { LINE_H, SCREEN_H, SPACE_W, frenchSpaces, glyphSafe, padLeftTo, padRightTo, textWidth, truncate, utf8Bytes } from './font';
 import type { Brightness, ContainerSpec, GlassesView, Item, Layout, PageSpec, Seg } from './types';
+import { apos } from '../core/typo';
 
 export const GEO = {
   X_CURSOR: 4,
@@ -779,7 +780,7 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
     y,
     w,
     h,
-    content: fitBytes(nonEmpty(content)),
+    content: fitBytes(nonEmpty(apos(content))),
     level,
     capture: id === IDS.title,
   });
@@ -823,6 +824,9 @@ export function layoutPage(v: GlassesView, frame: Frame, opts: LayoutOptions = {
 
 /** 1.2.10 : images et choix du menu de la vue, copiés dans la page (absents : aucun). */
 function withExtras(p: PageSpec, v: GlassesView): PageSpec {
+  // 1.3.1 (PRD-1.3.1 § 7) : le journal de la page dit ce que montrent les conteneurs (apostrophe typographique)
+  p.lines = p.lines.map(apos);
+  p.title = apos(p.title);
   if (v.images?.length) p.images = v.images.map((i) => ({ ...i, image: { ...i.image } }));
   if (v.menu?.length) p.menu = v.menu.map((m) => ({ ...m }));
   return p;
@@ -914,7 +918,7 @@ function layoutGuide(v: GlassesView, opts: LayoutOptions): PageSpec {
     y,
     w: cw,
     h,
-    content: fitBytes(nonEmpty(content)),
+    content: fitBytes(nonEmpty(apos(content))),
     level,
     capture: id === IDS.title,
   });
