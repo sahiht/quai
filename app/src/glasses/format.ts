@@ -7,8 +7,9 @@ import type { Departure, FavoriteAnswer, Journey, Leg, LineDeparture, NameLang, 
 import { meansText, rideName } from '../core/means';
 import { NB as CORE_NB, dayWord as coreDayWord, placeNoun, timeText, vers } from '../core/text';
 import { OP_NAME, displayName, hhmm, lineLabel, mainMode, minutesUntil } from '../core/util';
+import { apos } from '../core/typo';
 import type { AreaSummary, Mode, Names, Op } from '../../../shared/types';
-import { textWidth, truncate } from './font';
+import { frenchSpaces, textWidth, truncate } from './font';
 import { truncateWords, WIDTHS } from './layout';
 
 /** Espace insécable : devant « : ; ! ? » et entre un nombre et son unité. */
@@ -33,6 +34,11 @@ export const HINTS = {
   stops: `△▽ arrêts   toucher${NB}: j’y descends   double${NB}: retour`,
   /** 1.2.8 : tout le trajet d'un train ; 1.2.10 : même liste, mêmes aides que les arrêts d'un départ (§ 3.1). */
   trainRun: `△▽ arrêts   toucher${NB}: j’y descends   double${NB}: retour`,
+  /**
+   * 1.3.1 (PRD-1.3.1 § 6) : arrêts d'un départ et trajet d'un train, réglage « Me guider » allumé : le toucher quitte
+   * l'aide, la ligne d'action le dit au-dessus (« ▶ Me guider jusqu'à … », GUIDE_TO).
+   */
+  stopsGuide: `△▽ arrêts   double${NB}: retour`,
   /** 1.2.10 (§ 3.2, § 3.3) : un moment du guidage ou « Où tu en es ». */
   guide: `toucher${NB}: effacer   appui long${NB}: arrêter`,
   /** 1.2.10 : « Tu y es ». */
@@ -93,6 +99,22 @@ export const ACTION = {
   follow: '▶ Suivre ce trajet',
   followed: '▶ Trajet suivi',
 } as const;
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 6, § 12 B11) : ligne d'action des arrêts d'un départ et du trajet d'un train, sur un arrêt où le
+ * toucher lance « j'y descends » (réglage « Me guider » allumé) : « ▶ Me guider jusqu'à Bruxelles-Central », le nom de
+ * l'arrêt du curseur, coupé au mot s'il ne tient pas (guideToText) ; sans nom : « ▶ Me guider jusqu'à cet arrêt ».
+ */
+export const GUIDE_TO = {
+  prefix: '▶ Me guider jusqu’à ',
+  stop: '▶ Me guider jusqu’à cet arrêt',
+} as const;
+
+/** « ▶ Me guider jusqu'à Bruxelles-Central » dans `maxPx`, le nom coupé au mot (sans nom : « … cet arrêt »). */
+export function guideToText(name: string, maxPx: number): string {
+  const n = name.trim();
+  return n ? fitName(GUIDE_TO.prefix, n, '', maxPx) : GUIDE_TO.stop;
+}
 
 /**
  * 1.2.2 : textes des rubriques « Gares » et « Bus, tram, métro » (PRD-1.2.2 § 1.1 à § 3, REVUE-USAGE n° 6), en un seul
@@ -719,12 +741,13 @@ export function troubleText(j: Journey): string {
 
 /**
  * 1.3.0 (PRD-1.3.0 § 7) : l'accordéon d'un lieu ou d'un trajet dans « Favoris », ouvert sous la rangée du curseur
- * (1.2.2 à 1.2.10 : la 2e ligne, puis la ligne du détail en bas). Marche puis véhicule : 1re ligne « à pied 7 min, puis
- * bus W ~11:49 » (un train « IC ~07:42 voie 6 », voie modifiée « voie 6 ! » ; trajet qui commence à bord : le véhicule
- * seul) ; gare de départ hors de portée à pied : « IC voie 4 à 11:42, à Bruxelles-Central » (le nom coupé au mot) ;
- * 2e ligne : le souci du trajet en tête (troubleText), puis les changements (changesText). À pied seulement : une ligne,
- * « à pied 23 min ». Rien (« tu y es », aucun trajet, sans position, en calcul ou plus attrapable) : aucune ligne.
- * Chaque ligne tient dans `maxPx`, coupée au mot ; `planned` : la ligne montre un « ~ » (heure prévue).
+ * (1.2.2 à 1.2.10 : la 2e ligne, puis la ligne du détail en bas). 1.3.1 (PRD-1.3.1 § 4) : marche puis véhicule : 1re
+ * ligne, l'arrêt où monter, « à pied 7 min → Flagey » (trajet qui part de l'arrêt : « depuis Flagey ») ; 2e ligne, le
+ * premier véhicule et son heure, puis les changements s'ils tiennent (rideLine : « bus W ~11:49, 1 changement : métro
+ * 2 » ; un train « IC ~07:42 voie 6 »). Gare de départ hors de portée à pied, règle de la 1.3.0 : « IC voie 4 à 11:42,
+ * à Bruxelles-Central » (le nom coupé au mot), puis le souci du trajet (troubleText) et les changements (changesText).
+ * À pied seulement : une ligne, « à pied 23 min ». Rien (« tu y es », aucun trajet, sans position, en calcul ou plus
+ * attrapable) : aucune ligne. Chaque ligne tient dans `maxPx`, coupée au mot ; `planned` : la ligne montre un « ~ ».
  */
 export function favoriteDetail(a: FavoriteAnswer | undefined, now: number, settings: Settings, maxPx = EXPAND_PX): ExpandLine[] {
   const j = a?.state === 'ok' ? a.plan?.journeys[0] : undefined;
@@ -737,18 +760,42 @@ export function favoriteDetail(a: FavoriteAnswer | undefined, now: number, setti
   const time = `${planned ? '~' : ''}${hhmm(r.schedDep)}${r.cancelled ? '' : delaySuffix(r.delayMin)}`;
   const plat = isTrainRef(r) && !r.cancelled ? platformText(r.platform, r.newPlatform) : '';
   const vehicle = `${rideWords(r)}${plat ? ` ${plat}` : ''}`;
-  let first: string;
-  const station = displayName(r.from.name, settings.lang);
-  if (a?.fromStation) first = station ? fitName(`${vehicle} à ${time}, à `, station, '', maxPx) : fit(`${vehicle} à ${time}`);
-  else {
-    const walk = walkBeforeRide(j);
-    const ride = `${rideWords(r)} ${time}${plat ? ` ${plat}` : ''}`;
-    first = fit(walk > 0 ? `à pied ${minText(walk)}, puis ${ride}` : ride);
+  const station = apos(displayName(r.from.name, settings.lang));
+  const mark = (t: string): ExpandLine => ({ text: t, ...(planned && t.includes('~') ? { planned: true } : {}) });
+  if (a?.fromStation) {
+    // gare de départ hors de portée à pied : la règle de la 1.3.0 (PRD-1.3.1 § 4)
+    const first = station ? fitName(`${vehicle} à ${time}, à `, station, '', maxPx) : fit(`${vehicle} à ${time}`);
+    const trouble = troubleText(j);
+    const changes = changesText(j);
+    return [mark(first), { text: fit(trouble ? `${trouble}, ${changes}` : changes) }];
   }
-  const trouble = troubleText(j);
-  const changes = changesText(j);
-  const second = fit(trouble ? `${trouble}, ${changes}` : changes);
-  return [{ text: first, ...(planned && first.includes('~') ? { planned: true } : {}) }, { text: second }];
+  // 1.3.1 (PRD-1.3.1 § 4) : la 1re ligne nomme l'arrêt où monter (« à pied 7 min → Flagey » ; trajet qui part de
+  // l'arrêt : « depuis Flagey ») ; la 2e garde le premier véhicule et son heure (rideLine)
+  const walk = walkBeforeRide(j);
+  const first = station ? fitName(walk > 0 ? `à pied ${minText(walk)} → ` : 'depuis ', station, '', maxPx) : walk > 0 ? fit(`à pied ${minText(walk)}`) : '';
+  // le texte tel que l'écran le dit (espace insécable devant « : » d'une alerte) : jamais recoupé par la mise en page
+  const second = frenchSpaces(rideLine(j, r, time, plat, maxPx));
+  return first ? [{ text: first }, mark(second)] : [mark(second)];
+}
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 4) : 2e ligne de l'accordéon d'un favori : le premier véhicule et son heure, jamais coupés (« bus W
+ * ~11:49 », « IC ~07:42 voie 6 »), puis les changements s'ils tiennent (« , 1 changement : métro 2 », sinon « , 1
+ * changement », sinon rien). Le souci du trajet (le « ! » du favori, PRD-1.3.0 § 7) reste sur cette ligne : avec le
+ * véhicule quand il le touche (« IC 07:42 supprimé », « IC 07:42 voie 6 au lieu de 4 »), sinon juste après lui (alerte
+ * de travaux), coupé au mot ; les changements tombent avant lui.
+ */
+function rideLine(j: Journey, r: Leg, time: string, plat: string, maxPx: number): string {
+  let base = `${rideWords(r)} ${time}${plat ? ` ${plat}` : ''}`;
+  let trouble = '';
+  if (r.cancelled) base = `${rideWords(r)} ${time} supprimé`;
+  else if (r.newPlatform && r.platform && r.platform !== r.newPlatform) base = `${rideWords(r)} ${time} voie ${r.newPlatform} au lieu de ${r.platform}`;
+  else if (!r.newPlatform) trouble = troubleText(j);
+  if (textWidth(base) > maxPx) return truncateWords(base, maxPx);
+  const head = trouble ? `${base}, ${trouble}` : base;
+  const changes = [changesText(j), transfersText(j.transfers)];
+  for (const c of changes) if (textWidth(`${head}, ${c}`) <= maxPx) return `${head}, ${c}`;
+  return trouble ? fitName(`${base}, `, trouble, '', maxPx) : base;
 }
 
 /* ------------------------------ 1.2.2 : Bus, tram, métro ------------------------------ */

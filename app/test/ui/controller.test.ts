@@ -235,7 +235,10 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     // favori choisi s'ouvre sous lui (accordéon, rendu par la mise en page), plus de ligne du détail en bas
     expect(list.lines[0]).toBe('Bureau   maintenant → 12:26');
     expect(list.lines).toContain('Vers Gand-Saint-Pierre   14:10 → 14:39');
-    expect(list.lines).not.toContain('tram 3 12:12, direct');
+    // 1.3.1 (PRD-1.3.1 § 4) : le tram et son heure sont dans l'accordéon du curseur, sous « à pied 2 min → Gare du Nord » ;
+    // plus jamais en bas (ligne du détail de la 1.2.10)
+    expect(list.lines.slice(1, 3)).toEqual(['à pied 2 min → Gare du Nord', 'tram 3 12:12, direct']);
+    expect(list.lines.filter((l) => l === 'tram 3 12:12, direct')).toHaveLength(1);
     expect(last().lines.at(-1)).toBe('△▽ choisir   toucher : ouvrir   double : retour');
     c.stop();
   });
@@ -418,12 +421,12 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     // 1.2.10 (PRD-1.2.10 § 5) : l'alerte du trajet en haut ; une rangée par étape, l'heure au début
     expect(s.lines).toEqual([
       '! Voie modifiée : l’IC part de la voie 6',
-      '07:35 à pied 7 min',
+      '07:35 à pied 7 min → Namur',
       '07:44 IC voie 6 ! → Bruxelles-Nord   08:42',
-      '08:42 à pied 2 min',
+      '08:42 à pied 2 min → Gare du Nord',
       // 1.2.5 (PRD-1.2.5 § 2) : l'IC a 2 min de retard, 2 min à pied, le tram à 08:44 : aucune marge
       '~08:44 Tram 3 → Bourse   très juste',
-      '08:49 à pied 9 min',
+      '08:49 à pied 9 min   08:58',
       'Fin du trajet. ▽ 2 autres trajets',
       // 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action, entre la note et les aides
       '▶ Y aller',
@@ -528,7 +531,7 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     await gesture('tap');
     const st = await until(stepsReady);
     expect(st).toMatchObject({ page: 1, followed: false, label: 'short', title: 'Korenmarkt' });
-    expect(st.lines).toContain('14:39 à pied 1 min');
+    expect(st.lines).toContain('14:39 à pied 1 min → Gand-Saint-Pierre');
     await gesture('double');
     await settings.update((x) => ({ ...x, recent: [] }));
     const after = await until((x) => x.screen === 'favorites' && !x.lines.includes('ADRESSES RÉCENTES'));
@@ -1043,11 +1046,11 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
     // en haut : « Si tu le rates » (fenêtre de la 1.2.5, gardée en 1.2.10)
     expect(p2.lines.map(nb)).toEqual([
       'Si tu le rates : arrivée 09:57, 1 h 04 plus tard',
-      '07:33 à pied 7 min',
+      '07:33 à pied 7 min → Namur',
       '~07:42 IC voie 4 → Bruxelles-Nord   08:40',
-      '08:40 à pied 2 min',
+      '08:40 à pied 2 min → Gare du Nord',
       '~08:44 Tram 3 → Bourse   marge 2 min',
-      '08:49 à pied 4 min',
+      '08:49 à pied 4 min   08:53',
       'Fin du trajet. ▽ autres trajets',
       // 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action, entre la note et les aides
       '▶ Y aller',

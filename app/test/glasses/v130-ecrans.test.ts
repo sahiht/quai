@@ -408,31 +408,33 @@ function chain(rides: { ride: string; mode: 'bus' | 'tram' | 'metro' | 'train'; 
 const withRide = (j: Journey, p: Partial<Leg>): Journey => ({ ...j, legs: j.legs.map((l) => (l === j.legs.find((x) => x.kind === 'ride') ? { ...l, ...p } : l)) });
 
 describe('PRD-1.3.0 § 7 : contenu de l’accordéon des favoris', () => {
-  it('marche puis véhicule : « à pied 7 min, puis bus W ~07:42 » ; un train et sa voie, voie modifiée « voie 6 ! » ; « direct »', () => {
+  // 1.3.1 (PRD-1.3.1 § 4) : la 1re ligne nomme l'arrêt où monter, la 2e garde le véhicule et son heure (règles de la 1.3.0
+  // pour l'heure prévue, la voie, le souci et les changements)
+  it('marche puis véhicule : « à pied 7 min → Arrêt 0 », « bus W ~07:42, direct » ; un train et sa voie, voie modifiée', () => {
     const bus = withRide(chain([{ ride: 'W', mode: 'bus' }]), { rt: false });
-    expect(texts(ok(PLACES.bureau, bus))).toEqual(['à pied 7 min, puis bus W ~07:42', 'direct']);
-    expect(favoriteDetail(ok(PLACES.bureau, bus), NOW, S)[0]).toEqual({ text: 'à pied 7 min, puis bus W ~07:42', planned: true });
+    expect(texts(ok(PLACES.bureau, bus))).toEqual(['à pied 7 min → Arrêt 0', 'bus W ~07:42, direct']);
+    expect(favoriteDetail(ok(PLACES.bureau, bus), NOW, S)[1]).toEqual({ text: 'bus W ~07:42, direct', planned: true });
     // sans le « ~ » du réglage : pas de `planned`
-    expect(favoriteDetail(ok(PLACES.bureau, bus), NOW, settingsWith([], { display: { ...S.display, markPlanned: false } }))[0]).toEqual({ text: 'à pied 7 min, puis bus W 07:42' });
+    expect(favoriteDetail(ok(PLACES.bureau, bus), NOW, settingsWith([], { display: { ...S.display, markPlanned: false } }))[1]).toEqual({ text: 'bus W 07:42, direct' });
     const ic = withRide(chain([{ ride: 'IC', mode: 'train', platform: '4' }]), { rt: false });
-    expect(texts(ok(PLACES.bureau, ic))).toEqual(['à pied 7 min, puis IC ~07:42 voie 4', 'direct']);
+    expect(texts(ok(PLACES.bureau, ic))).toEqual(['à pied 7 min → Arrêt 0', 'IC ~07:42 voie 4, direct']);
     const moved = withRide(chain([{ ride: 'IC', mode: 'train', platform: '4' }]), { newPlatform: '6', delayMin: 2 });
-    expect(texts(ok(PLACES.bureau, moved))).toEqual(['à pied 7 min, puis IC 07:42 +2 voie 6 !', 'voie 6 au lieu de 4, direct']);
-    // un trajet qui commence à bord : le véhicule seul
+    expect(texts(ok(PLACES.bureau, moved))).toEqual(['à pied 7 min → Arrêt 0', 'IC 07:42 +2 voie 6 au lieu de 4, direct']);
+    // un trajet qui part de la gare : « depuis Namur »
     const aboard = journey('a', [{ ride: 'IC', mode: 'train', dep: NOW + 11 * MIN, arr: NOW + 40 * MIN, from: 'Namur', to: 'Bruxelles-Central', platform: '2' }]);
-    expect(texts(ok(PLACES.bureau, aboard))).toEqual(['IC 07:42 voie 2', 'direct']);
+    expect(texts(ok(PLACES.bureau, aboard))).toEqual(['depuis Namur', 'IC 07:42 voie 2, direct']);
   });
 
-  it('2e ligne : « 1 changement : métro 2 », « 2 changements : métro 2, tram 3 », au-delà « … » ; le souci en tête', () => {
+  it('2e ligne : « 1 changement : métro 2 », « 2 changements : métro 2, tram 3 », au-delà « … » ; le souci', () => {
     const one = chain([{ ride: 'IC', mode: 'train', platform: '3' }, { ride: '2', mode: 'metro' }]);
-    expect(texts(ok(PLACES.bureau, one))[1]).toBe('1 changement : métro 2');
+    expect(texts(ok(PLACES.bureau, one))[1]).toBe('IC 07:42 voie 3, 1 changement : métro 2');
     const two = chain([{ ride: 'IC', mode: 'train', platform: '3' }, { ride: '2', mode: 'metro' }, { ride: '3', mode: 'tram' }]);
-    expect(texts(ok(PLACES.bureau, two))[1]).toBe('2 changements : métro 2, tram 3');
+    expect(texts(ok(PLACES.bureau, two))[1]).toBe('IC 07:42 voie 3, 2 changements : métro 2, tram 3');
     const three = chain([{ ride: '36', mode: 'bus' }, { ride: 'IC', mode: 'train' }, { ride: '2', mode: 'metro' }, { ride: '3', mode: 'tram' }]);
     expect(nb(changesText(three))).toBe('3 changements : IC, métro 2, …');
-    // premier véhicule supprimé : « IC supprimé » en tête ; la 1re ligne garde l'heure prévue, sans voie
+    // premier véhicule supprimé : « IC 07:42 supprimé », l'heure prévue, sans voie (1.3.1)
     const cancelled = withRide(one, { cancelled: true });
-    expect(texts(ok(PLACES.bureau, cancelled))).toEqual(['à pied 7 min, puis IC 07:42', 'IC supprimé, 1 changement : métro 2']);
+    expect(texts(ok(PLACES.bureau, cancelled))).toEqual(['à pied 7 min → Arrêt 0', 'IC 07:42 supprimé, 1 changement : métro 2']);
     // voie modifiée sans l'ancienne voie : « voie modifiée »
     expect(troubleText(withRide(chain([{ ride: 'IC', mode: 'train' }]), { newPlatform: '6' }))).toBe('voie modifiée');
     // alerte du trajet (travaux, voie, suppression), sans son « ! » ; un retard seul, jamais
@@ -468,7 +470,7 @@ describe('PRD-1.3.0 § 7 : contenu de l’accordéon des favoris', () => {
     expect(v.accordion).toBe(true);
     expect(v.reserveNote).toBeUndefined();
     const items = v.items as DetailItem[];
-    expect(items.map((i) => i.expand?.map((l) => nb(l.text)))).toEqual([['à pied 7 min, puis bus W 07:42', 'direct'], undefined, ['Place Saint-Lambert 1, 4000 Liège'], undefined]);
+    expect(items.map((i) => i.expand?.map((l) => nb(l.text)))).toEqual([['à pied 7 min → Arrêt 0', 'bus W 07:42, direct'], undefined, ['Place Saint-Lambert 1, 4000 Liège'], undefined]);
     expect(items.every((i) => i.detail === undefined)).toBe(true);
     expect(page(v).lines.map(nb)).not.toContain('Place Saint-Lambert 1, 4000 Liège');
     // sans favori : « Ajouter un favori » n'a rien à ouvrir

@@ -212,8 +212,9 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
       '○ Andenne voie 1   dans 29 min',
       '○ Huy   SUPPRIMÉ',
       '○ Liège-Guillemins voie 5   à 08:34',
-      '○ Liège-Carré voie 1   à 08:40',
-      '△▽ arrêts   toucher : j’y descends   double : retour',
+      // 1.3.1 (PRD-1.3.1 § 6) : la ligne d'action de la gare du curseur prend une rangée à la liste ; l'aide sans « toucher »
+      '▶ Me guider jusqu’à Andenne',
+      '△▽ arrêts   double : retour',
     ]);
     // les gares quittées tout en pâle (colonne b), leur heure comprise ; 1.2.10 : la gare de la montée aussi (§ 3.1)
     const p = page(v);
@@ -273,7 +274,8 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
     expect(bus.top?.strong).toBeFalsy();
     expect(container(page(bus), 'top').level).toBe(2);
     expect(bus.items.map((it) => it.action)).toEqual([{ kind: 'alight', index: 1 }, { kind: 'alight', index: 2 }]);
-    expect(lines(bus)).toEqual(['07:48 +3   Braine-l’Alleud Merbraine', '07:56 +3   Waterloo Eglise', '08:41 +3   Bruxelles Midi', '△▽ arrêts   toucher : j’y descends   double : retour']);
+    // 1.3.1 (PRD-1.3.1 § 6) : « ▶ Me guider jusqu'à … » sur l'arrêt du curseur, l'aide sans « toucher »
+    expect(lines(bus)).toEqual(['07:48 +3   Braine-l’Alleud Merbraine', '07:56 +3   Waterloo Eglise', '08:41 +3   Bruxelles Midi', '▶ Me guider jusqu’à Waterloo Eglise', '△▽ arrêts   double : retour']);
     const t3 = dep(NOW, 40, { op: 'stib', mode: 'tram', line: '3', head: N('Churchill'), rt: false });
     const tram = stopsView(
       { screen: 'stops', areaId: 'stib:6357F', dep: t3 },
@@ -285,7 +287,7 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
       ctx(),
     );
     expect(tram.title).toBe('Tram 3 vers Churchill');
-    expect(lines(tram)).toEqual(['~08:11   Gare du Nord', '~08:13   Rogier', '~08:36   Churchill', '~ horaire prévu, sans temps réel', '△▽ arrêts   toucher : j’y descends   double : retour']);
+    expect(lines(tram)).toEqual(['~08:11   Gare du Nord', '~08:13   Rogier', '~08:36   Churchill', '~ horaire prévu, sans temps réel', '▶ Me guider jusqu’à Rogier', '△▽ arrêts   double : retour']);
     // départ du lendemain (le prochain, même plus tard) : le titre le dit
     const late = at('2026-11-10', 23, 40);
     const ic = trainAt(late, 400, { line: 'IC', head: N('Herstal'), platform: '4' });
@@ -337,7 +339,7 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
       ctx(),
     );
     expect(bus.title).toBe('Bus 36 vers Wavre');
-    expect(lines(bus)).toEqual(['~07:37   Braine-l’Alleud Côté du Collège', '~07:42   Braine-l’Alleud Gare', '~07:53   Waterloo Gare', '~08:29   Wavre Gare', '~ horaire prévu, sans temps réel', '△▽ arrêts   toucher : j’y descends   double : retour']);
+    expect(lines(bus)).toEqual(['~07:37   Braine-l’Alleud Côté du Collège', '~07:42   Braine-l’Alleud Gare', '~07:53   Waterloo Gare', '~08:29   Wavre Gare', '~ horaire prévu, sans temps réel', '▶ Me guider jusqu’à Braine-l’Alleud Gare', '△▽ arrêts   double : retour']);
   });
 
   it('du tableau à tout le trajet de l’IC et retour : le curseur sur la première gare où descendre ; double toucher revient, curseur gardé', async () => {
@@ -352,7 +354,8 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
     const s = await h.until(stopsReady);
     expect(s).toMatchObject({ screen: 'trainRun', title: 'IC vers Herstal', sel: 1 });
     expect(s.lines.slice(0, 3)).toEqual(['○ Namur voie 6 !   dans 13 min', '○ Andenne voie 1   dans 29 min', '○ Huy   SUPPRIMÉ']);
-    expect(s.lines.at(-1)).toBe('△▽ arrêts   toucher : j’y descends   double : retour');
+    // 1.3.1 (PRD-1.3.1 § 6) : la ligne d'action dit la gare du curseur ; l'aide n'a plus le toucher
+    expect(s.lines.slice(-2)).toEqual(['▶ Me guider jusqu’à Andenne', '△▽ arrêts   double : retour']);
     // retour : le tableau de Namur, le curseur sur l'IC
     await h.gesture('double');
     expect(h.last()).toMatchObject({ screen: 'board', title: 'Namur, train (SNCB) ★', sel: 2 });
@@ -426,7 +429,8 @@ describe('revue 1.2.3 : un départ reste le même (clé des arrêts, curseur, ra
     expect(b.lines.slice(1, 3)).toEqual(['M1   Stockel   6 min', 'M1   Gare de l’Ouest   6 min']);
     await h.gesture('tap');
     expect((await h.until((x) => x.screen === 'stops' && x.lines.length > 2)).title).toBe('Métro 1 vers Stockel');
-    expect(h.last().lines.at(-2)).toBe('23:36   Stockel');
+    // 1.3.1 (PRD-1.3.1 § 6) : sous la liste, la ligne d'action de l'arrêt du curseur, puis les aides
+    expect(h.last().lines.slice(-3)).toEqual(['23:36   Stockel', '▶ Me guider jusqu’à Mérode', '△▽ arrêts   double : retour']);
     await h.gesture('double', 'down', 'tap');
     const s = await h.until((x) => x.screen === 'stops' && x.title === 'Métro 1 vers Gare de l’Ouest' && x.lines.length > 2);
     expect(s.lines.slice(1, 3)).toEqual(['23:23   De Brouckère', '23:30   Gare de l’Ouest']);
