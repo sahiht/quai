@@ -610,14 +610,22 @@ export class GlassesController implements GlassesApi {
   private trip: FollowedTrip | null = null;
   private tripLoaded = false;
   /**
-   * 1.3.1 (PRD-1.3.1 § 12, B11) : arrêts où l'on descend d'habitude, par ligne (clé quai.descentes), lus une fois avant la
-   * première liste des arrêts d'un départ (alightsRead) ; ceux retenus avant la lecture passent devant ceux relus.
-   * `alightsGen` : « Effacer le journal » pendant une lecture l'emporte sur elle.
+   * 1.3.1 (PRD-1.3.1 § 12, B11) : arrêts où l'on descend d'habitude, par ligne (clé quai.descentes), lus une fois
+   * (alightsRead), en arrière-plan : au démarrage, puis, après une lecture sans réponse, à l'ouverture suivante d'une
+   * liste des arrêts ou au prochain « j'y descends » (warmAlights), jamais à chaque rafraîchissement. Aucun écran
+   * n'attend cette lecture (règle de la 1.3.0) : la liste s'affiche avec ce qui est déjà lu. Ceux retenus avant la
+   * lecture passent devant ceux relus. `alightsGen` : « Effacer le journal » pendant une lecture l'emporte sur elle.
    */
   private alights: AlightMemory = emptyAlights();
   private alightsRead = false;
   private alightsLoading: Promise<void> | null = null;
   private alightsGen = 0;
+  /**
+   * 1.3.1 (B11) : la liste des arrêts ouverte (clé de sa route) et les arrêts retenus à sa première image, gardés tant
+   * qu'elle reste dans la pile : une lecture qui finit après ne déplace jamais le curseur ; elle sert à l'ouverture
+   * suivante.
+   */
+  private stopsShown: { key: string; kept?: KeptStop[] } | null = null;
   private tripSaved = '';
   /**
    * 1.2.2 : gare ou ligne retirée par ★ (départs, « garder une ligne »), rétablissable à l'identique pendant 5 s (M6.1).
@@ -844,6 +852,8 @@ export class GlassesController implements GlassesApi {
       resumed = o.resumed;
     }
     this.ready = true;
+    // 1.3.1 (B11) : les arrêts retenus se lisent dès maintenant, en arrière-plan (aucun écran ne les attend)
+    this.warmAlights();
     // 1.2.10 : repris sur l'écran du guidage, « Où tu en es » le dit (pas de message en plus sur l'écran calme)
     if (resumed && this.trip && !this.guideShown()) this.showToast(`Trajet en cours${NB}: ${lowerFirst(this.trip.title)}`, RESUME_MS);
     await this.render(true);
@@ -2699,6 +2709,11 @@ export class GlassesController implements GlassesApi {
     return this.alightsLoading;
   }
 
+  /** 1.3.1 (B11) : lance la lecture des arrêts retenus en arrière-plan, si elle n'est ni faite ni en cours ; jamais attendue. */
+  private warmAlights(): void {
+    if (!this.alightsRead && !this.alightsLoading) void this.loadAlights();
+  }
+
   /** 1.3.1 (B11) : arrêts retenus de la ligne d'un départ, du plus récent au plus ancien (pas encore lus : ceux de la session). */
   private keptFor(ds: Pick<DepartureStops, 'op' | 'mode' | 'line'>): KeptStop[] {
     return keptStops(this.alights, alightLineKey(ds));
@@ -3685,9 +3700,9 @@ export class GlassesController implements GlassesApi {
       }
       case 'stops': {
         // 1.2.3 (§ 2) : les arrêts du départ touché, de l'arrêt du tableau au terminus (voyage disparu : missing) ;
-        // 1.2.10 : avec le départ à jour, celui que « j'y descends » fait suivre ; 1.3.1 (B11) : les arrêts retenus, lus
-        // en même temps (la liste s'ouvre sur le plus récent)
-        const [dep] = await Promise.all([this.freshDeparture(r), this.loadAlights()]);
+        // 1.2.10 : avec le départ à jour, celui que « j'y descends » fait suivre. 1.3.1 (B11) : la lecture des arrêts
+        // retenus n'est jamais attendue ici (un écran n'attend pas le stockage) : voir warmAlights et stopsShown
+        const dep = await this.freshDeparture(r);
         return { stops: await core.departureStops(r.areaId, dep), dep };
       }
       case 'steps':
@@ -4007,6 +4022,9 @@ export class GlassesController implements GlassesApi {
     this.syncEntry();
     const f = current(this.nav);
     const r = f.route;
+    // 1.3.1 (B11) : liste des arrêts quittée (plus dans la pile) : sa première image est oubliée
+    const shownKey = this.stopsShown?.key;
+    if (shownKey && !this.nav.stack.some((x) => x.route.screen === 'stops' && routeKey(x.route) === shownKey)) this.stopsShown = null;
     const ctx = this.ctx();
     if (r.screen === 'guide') return this.guideViewOf(ctx);
     if (r.screen === 'menu') return this.menuViewOf(r.items, ctx);
@@ -4096,9 +4114,18 @@ export class GlassesController implements GlassesApi {
         return lineView(r, board, ctx, works?.[0]);
       }
       case 'stops': {
+        // 1.3.1 (B11) : à l'ouverture (pas à chaque rafraîchissement), un nouvel essai de lecture si la précédente n'a
+        // pas répondu, en arrière-plan ; les arrêts retenus de la première image restent ceux de cette liste
+        let shown = this.stopsShown;
+        if (shown?.key !== key) {
+          shown = this.stopsShown = { key };
+          this.warmAlights();
+        }
         if (!value) return loadingView(stopsTitle(r.dep, ctx.settings.lang), 'Chargement des arrêts…', ctx, 'stops');
         const ds = (value as { stops: DepartureStops }).stops;
-        return stopsView(r, ds, ctx, ds.state === 'ok' ? this.keptFor(ds) : []);
+        if (ds.state !== 'ok') return stopsView(r, ds, ctx, []);
+        shown.kept ??= this.keptFor(ds);
+        return stopsView(r, ds, ctx, shown.kept);
       }
       case 'keepLine': {
         if (!value) return loadingView(keepLineTitle(displayName(r.name, ctx.settings.lang)), 'Chargement des lignes…', ctx, 'keepLine');

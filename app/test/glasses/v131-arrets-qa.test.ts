@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Departure, KV } from '../../src/core/api';
-import { ALIGHTS_KEY, emptyAlights, keptStops, noteAlight, parseAlights } from '../../src/glasses/alights';
+import { ALIGHTS_KEY, ALIGHTS_LINES_MAX, ALIGHTS_PER_LINE, emptyAlights, keptIndex, keptStops, noteAlight, parseAlights, sameKept } from '../../src/glasses/alights';
 import { textWidth } from '../../src/glasses/font';
 import { GEO, layoutPage, WIDTHS } from '../../src/glasses/layout';
 import { stopsView, type ViewCtx } from '../../src/glasses/views';
@@ -126,8 +126,8 @@ describe('contrôle qualité : B11, lecture ratée puis réussie', () => {
     const stored = JSON.stringify(noteAlight(emptyAlights(), 'stib|bus|71', { areaId: 'stib:FernandCocq', name: N('Fernand Cocq') }));
     const mem = createKV(memoryBackend());
     await mem.set(ALIGHTS_KEY, stored);
-    // la première lecture stricte reste sans réponse, la suivante répond
-    let fails = 1;
+    // les deux premières lectures strictes (démarrage, ouverture de la liste) restent sans réponse, la suivante répond
+    let fails = 2;
     const kv: KV = {
       get: (k) => mem.get(k),
       set: (k, v) => mem.set(k, v),
@@ -151,5 +151,156 @@ describe('contrôle qualité : B11, lecture ratée puis réussie', () => {
     await h.settle(50);
     expect(keptStops(parseAlights(await mem.get(ALIGHTS_KEY)), 'stib|bus|71').map((x) => x.fr)).toEqual(['Gare Centrale', 'Fernand Cocq']);
     h.c.stop();
+  });
+});
+
+describe('contrôle qualité, remarque 3 : la liste des arrêts n’attend jamais le stockage (B11)', () => {
+  const STOPS: [string, number][] = [
+    ['Flagey', 6],
+    ['Germoir', 8],
+    ['Fernand Cocq', 10],
+    ['Gare Centrale', 17],
+    ['De Brouckère', 20],
+  ];
+  const HINT = '△▽ arrêts   double : retour';
+  const core = (now: () => number) =>
+    stubCore(now, {
+      board: (id) => (id === 'stib:Flagey' ? boardOf('stib:Flagey', 'Flagey', [b71]) : undefined),
+      departureStops: (_id, d, n) => stopsOf(d, n, STOPS.map(([s, m]) => [s, m - Math.round((n - NOW) / MIN)])),
+    });
+  const stored = JSON.stringify(noteAlight(emptyAlights(), 'stib|bus|71', { areaId: 'stib:FernandCocq', name: N('Fernand Cocq') }));
+  const stopsReady = (x: { screen: string; lines: string[] }) => x.screen === 'stops' && x.lines.length > 3;
+  type H = Awaited<ReturnType<typeof setup>>;
+  const openBoard = async (h: H) => {
+    await h.c.show({ screen: 'board', areaId: 'stib:Flagey', name: N('Flagey') });
+    await h.until((x) => x.screen === 'board' && x.lines.length > 2);
+    await h.gesture('down');
+  };
+  const reopen = async (h: H) => {
+    await h.gesture('double');
+    await h.until((x) => x.screen === 'board');
+    await h.gesture('tap');
+    return h.until(stopsReady);
+  };
+
+  it('lecture stricte de 5 s : la liste est là tout de suite sur le premier arrêt, immobile ; l’ouverture suivante sur l’arrêt retenu', async () => {
+    const mem = createKV(memoryBackend());
+    await mem.set(ALIGHTS_KEY, stored);
+    // le pont Even : la lecture stricte ne répond qu'au bout de 5 s (ici : quand le test la libère)
+    let reads = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((ok) => (release = ok));
+    const kv: KV = {
+      get: (k) => mem.get(k),
+      set: (k, v) => mem.set(k, v),
+      getStrict: async (k) => {
+        if (k !== ALIGHTS_KEY) return mem.get(k);
+        reads++;
+        await gate;
+        return mem.get(k);
+      },
+    };
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0' }), core, kv: kv as ReturnType<typeof createKV> });
+    await h.until((x) => x.screen === 'home');
+    // lue tôt, en arrière-plan : dès le démarrage, sans rien retarder
+    expect(reads).toBe(1);
+    await openBoard(h);
+    await h.gesture('tap');
+    // la lecture n'a toujours pas répondu : la liste est déjà là, comme en 1.3.0, sur le premier arrêt
+    let s = await h.until(stopsReady);
+    expect(s.sel).toBe(0);
+    expect(s.lines.slice(-2)).toEqual(['▶ Me guider jusqu’à Germoir', HINT]);
+    // trois rafraîchissements pendant l'attente : aucune lecture de plus
+    for (let i = 0; i < 3; i++) await h.c.refreshCurrent(true);
+    expect(reads).toBe(1);
+    // la lecture répond enfin : le curseur, que personne n'a bougé, ne saute pas sur l'arrêt retenu
+    release();
+    await h.settle(50);
+    await h.c.refreshCurrent(true);
+    s = h.last();
+    expect(s.screen).toBe('stops');
+    expect(s.sel).toBe(0);
+    expect(s.lines.slice(-2)).toEqual(['▶ Me guider jusqu’à Germoir', HINT]);
+    // la liste rouverte : sur l'arrêt retenu, sans nouvelle lecture
+    s = await reopen(h);
+    expect(s.sel).toBe(1);
+    expect(s.lines.slice(-2)).toEqual(['▶ Me guider jusqu’à Fernand Cocq', HINT]);
+    expect(reads).toBe(1);
+    expect(await mem.get(ALIGHTS_KEY)).toBe(stored);
+    h.c.stop();
+  });
+
+  it('stockage sans réponse : un essai au démarrage, un par ouverture de la liste, un à « j’y descends » ; jamais aux rafraîchissements', async () => {
+    const mem = createKV(memoryBackend());
+    await mem.set(ALIGHTS_KEY, stored);
+    let reads = 0;
+    const kv: KV = {
+      get: (k) => mem.get(k),
+      set: (k, v) => mem.set(k, v),
+      getStrict: async (k) => {
+        if (k !== ALIGHTS_KEY) return mem.get(k);
+        reads++;
+        throw new Error('pas de réponse');
+      },
+    };
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0' }), core, kv: kv as ReturnType<typeof createKV> });
+    await h.until((x) => x.screen === 'home');
+    expect(reads).toBe(1);
+    await openBoard(h);
+    await h.gesture('tap');
+    let s = await h.until(stopsReady);
+    expect(s.sel).toBe(0);
+    expect(reads).toBe(2);
+    for (let i = 0; i < 3; i++) await h.c.refreshCurrent(true);
+    await h.settle(50);
+    expect(reads).toBe(2);
+    expect(h.last().sel).toBe(0);
+    // l'ouverture suivante réessaie, une fois
+    s = await reopen(h);
+    expect(s.sel).toBe(0);
+    expect(reads).toBe(3);
+    // « j'y descends » réessaie aussi ; rien n'est écrit par-dessus la mémoire du téléphone
+    await h.gesture('down', 'tap');
+    await h.until((x) => x.screen === 'guide');
+    await h.settle(50);
+    expect(reads).toBe(4);
+    expect(await mem.get(ALIGHTS_KEY)).toBe(stored);
+    h.c.stop();
+  });
+});
+
+describe('contrôle qualité, remarque 7 : plafond de la mémoire et comparaison par zone (B11)', () => {
+  it('40 lignes au plus : la moins récemment servie est oubliée d’abord, à l’écriture comme à la lecture', () => {
+    let m = emptyAlights();
+    for (let i = 1; i <= ALIGHTS_LINES_MAX + 2; i++) m = noteAlight(m, `stib|bus|${i}`, { areaId: `stib:A${i}`, name: N(`Arrêt ${i}`) });
+    expect(m.lines).toHaveLength(ALIGHTS_LINES_MAX);
+    expect(m.lines[0].key).toBe(`stib|bus|${ALIGHTS_LINES_MAX + 2}`);
+    expect(m.lines.at(-1)!.key).toBe('stib|bus|3');
+    expect(keptStops(m, 'stib|bus|1')).toEqual([]);
+    // un contenu plus long (autre version, abîmé) : les 40 premières lignes, 3 arrêts par ligne, sans doublon de ligne
+    const stops = [1, 2, 3, 4, 5].map((k) => ({ id: `stib:S${k}`, fr: `Arrêt ${k}` }));
+    const big = { v: 1, lines: [{ key: 'stib|bus|0', stops }, { key: 'stib|bus|0', stops }, ...Array.from({ length: ALIGHTS_LINES_MAX + 5 }, (_, i) => ({ key: `stib|tram|${i}`, stops })) ] };
+    const read = parseAlights(JSON.stringify(big));
+    expect(read.lines).toHaveLength(ALIGHTS_LINES_MAX);
+    expect(read.lines.map((l) => l.key).slice(0, 3)).toEqual(['stib|bus|0', 'stib|tram|0', 'stib|tram|1']);
+    expect(read.lines.every((l) => l.stops.length === ALIGHTS_PER_LINE)).toBe(true);
+    expect(read.lines[0].stops.map((x) => x.fr)).toEqual(['Arrêt 1', 'Arrêt 2', 'Arrêt 3']);
+  });
+
+  it('même arrêt : la zone quand les deux la donnent (deux arrêts du même nom restent deux arrêts), sinon le nom', () => {
+    const flagey = { id: 'stib:Flagey', fr: 'Flagey' };
+    // même nom, autre zone : ce n'est pas le même arrêt
+    expect(sameKept(flagey, { areaId: 'stib:Flagey', name: N('Flagey (quai 2)') })).toBe(true);
+    expect(sameKept(flagey, { areaId: 'delijn:Flagey', name: N('Flagey') })).toBe(false);
+    // une zone manque d'un côté : le nom, sans la casse, les accents ni la ponctuation ; le néerlandais compte aussi
+    expect(sameKept({ fr: 'Gare Centrale' }, { areaId: 'stib:GareCentrale', name: N('gare centrale') })).toBe(true);
+    expect(sameKept(flagey, { name: N('Germoir') })).toBe(false);
+    expect(sameKept({ fr: 'Gare Centrale', nl: 'Centraal Station' }, { name: { fr: 'Bruxelles-Central', nl: 'Centraal station' } })).toBe(true);
+    // la liste s'ouvre sur l'arrêt de la bonne zone, pas sur son homonyme d'avant
+    const calls = [{ areaId: 'delijn:Flagey', name: N('Flagey') }, { areaId: 'stib:Germoir', name: N('Germoir') }, { areaId: 'stib:Flagey', name: N('Flagey') }];
+    expect(keptIndex(calls, [flagey], () => true)).toBe(2);
+    // deux fois le même arrêt (zone) : une seule entrée, la plus récente en tête
+    const m = noteAlight(noteAlight(noteAlight(emptyAlights(), 'stib|bus|71', calls[2]), 'stib|bus|71', calls[1]), 'stib|bus|71', calls[2]);
+    expect(keptStops(m, 'stib|bus|71').map((x) => x.id)).toEqual(['stib:Flagey', 'stib:Germoir']);
   });
 });
