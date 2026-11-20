@@ -776,6 +776,114 @@ describe('B18 (P6, P8) : deux virages proches annoncés ensemble, distance stabl
   });
 });
 
+/* ------------------------------ Remarque 10 du contrôle ------------------------------ */
+
+describe('« Tu as passé … » jamais pour l’arrêt d’avant quand la montée suivante n’a pas été constatée (contrôle du moteur, remarque 10)', () => {
+  type Way = { t: number; p: LatLon }[];
+  /** Position vraie à l'instant `t` le long de points de passage datés, et sa vitesse. */
+  const posAt = (w: Way, t: number): { p: LatLon; v: number } => {
+    if (t <= w[0].t) return { p: w[0].p, v: 0 };
+    for (let i = 1; i < w.length; i++) {
+      if (t > w[i].t) continue;
+      const a = w[i - 1];
+      const b = w[i];
+      return { p: lerp(a.p, b.p, (t - a.t) / (b.t - a.t)), v: distanceM(a.p, b.p) / ((b.t - a.t) / SEC) };
+    }
+    return { p: w[w.length - 1].p, v: 0 };
+  };
+  /**
+   * Trajet du PRD rejoué de `from` à `to`, un pas toutes les 5 s : bus 6 (retard `late` min) jusqu'à Gare des Guillemins,
+   * à pied jusqu'au quai `quai`, IC de 07:30 vers Ans, Louvain, Bruxelles-Nord, Bruxelles-Central. `awake` : le moteur
+   * tourne ; `seen` : une position arrive.
+   */
+  const replay = (o: { from: string; to: string; quai?: LatLon; late?: number; awake?: (t: number) => boolean; seen?: (t: number) => boolean }) => {
+    const L = (o.late ?? 0) * MIN;
+    const quai = o.quai ?? P.guillemins;
+    const w: Way = [
+      { t: at('07:12') + L, p: P.gramme }, { t: at('07:14') + L, p: P.leman }, { t: at('07:14:20') + L, p: P.leman }, { t: at('07:19:40') + L, p: P.guilleminsBus },
+      { t: at('07:20:30') + L, p: P.guilleminsBus }, { t: at('07:23') + L, p: quai }, { t: at('07:30'), p: quai }, { t: at('07:37'), p: P.ans }, { t: at('07:38'), p: P.ans },
+      { t: at('08:05'), p: P.louvain }, { t: at('08:06'), p: P.louvain }, { t: at('08:22'), p: P.nord }, { t: at('08:23'), p: P.nord }, { t: at('08:27'), p: P.central }, { t: at('08:30'), p: P.central },
+    ];
+    const r = guide(prdTrip({ bus6Delay: o.late ?? 0 }), { startedAt: at(o.from) });
+    const out: { t: number; s: GuideState }[] = [];
+    for (let t = at(o.from); t <= at(o.to); t += 5 * SEC) {
+      if (o.awake && !o.awake(t)) continue;
+      const q = posAt(w, t);
+      out.push({ t, s: step(r, t, !o.seen || o.seen(t) ? fix(q.p, t, { speed: q.v }) : undefined) });
+    }
+    return { r, out };
+  };
+  const never = (out: { t: number; s: GuideState }[]) => {
+    for (const x of out) {
+      expect(x.s.moment?.kind, hm(x.t)).not.toBe('passed');
+      expect(x.s.replan, hm(x.t)).toBeUndefined();
+    }
+  };
+
+  it('téléphone verrouillé de 07:25 à 08:26 (monté dans l’IC pendant ce temps) : au réveil, « Descends » à Bruxelles-Central, jamais « Tu as passé Gare des Guillemins »', () => {
+    const { r, out } = replay({ from: '07:12:30', to: '08:28', awake: (t) => t < at('07:25') || t > at('08:26') });
+    expect(r.mem.alighted?.leg).toBeGreaterThanOrEqual(1);
+    never(out);
+    // avant : au réveil, « Tu as passé Gare des Guillemins » (l'arrêt du bus 6) et un nouveau trajet demandé, devant « Descends »
+    const woke = out.find((x) => x.t > at('08:26'))!;
+    expect(woke.s.phase).toMatchObject({ kind: 'ride', leg: 3 });
+    expect(m(woke.s.moment, 'alight')).toMatchObject({ leg: 3, stop: S.central.name, at: at('08:27') });
+  });
+
+  it('moteur éveillé mais aucune position de 07:25 à 08:26 (gare sous terre) : pareil', () => {
+    const { out } = replay({ from: '07:12:30', to: '08:28', seen: (t) => t < at('07:25') || t > at('08:26') });
+    never(out);
+    expect(m(out.find((x) => x.t > at('08:26:05'))!.s.moment, 'alight').leg).toBe(3);
+  });
+
+  it('verrouillé 7 min seulement (bus en retard de 4 min, réveil dans l’IC à 07:31) : aucune position à l’arrêt du bus depuis 3 min, rien', () => {
+    const { r, out } = replay({ from: '07:12:30', to: '07:33', late: 4, awake: (t) => t < at('07:24') || t >= at('07:31') });
+    expect(r.mem.alighted).toMatchObject({ leg: 1 });
+    expect(at('07:31') - (r.mem.alighted as { at: number }).at).toBeLessThan(GUIDE.passedAfterMs);
+    never(out);
+  });
+
+  it('sans verrouillage, quai à 160 m de l’arrêt du bus (montée dans l’IC non constatée), l’IC repasse à 135 m de cet arrêt : reparti à pied, donc rien', () => {
+    // bus en retard de 4 min : descente vers 07:23, 7 min avant le départ de l'IC ; quai à 150 m du point de la gare (la
+    // montée ne se constate qu'à 60 m de lui) ; ni la marche ni le train ne passent à 60 m de ce point
+    const quai = offset(P.guillemins, 100, 115);
+    expect(distanceM(quai, P.guilleminsBus)).toBeGreaterThan(GUIDE.alightNearM);
+    const { r, out } = replay({ from: '07:12:30', to: '07:33', late: 4, quai });
+    expect((r.mem as { boarded?: { leg: number } }).boarded?.leg).toBe(1);
+    expect(at('07:31') - (r.mem.alighted as { at: number }).at).toBeLessThan(GUIDE.passedAfterMs);
+    never(out);
+  });
+
+  it('sans verrouillage, quai à moins de 150 m de l’arrêt du bus, 11 min d’attente : plus « resté à bord » 10 min après la descente', () => {
+    // quai à 155 m du point de la gare (montée non constatée) et à 120 m de l'arrêt du bus : jamais « reparti à pied »
+    const quai = offset(P.guillemins, 40, 150);
+    expect(distanceM(quai, P.guilleminsBus)).toBeLessThan(GUIDE.alightNearM);
+    const { r, out } = replay({ from: '07:12:30', to: '07:33', quai });
+    expect((r.mem as { walkedOff?: number }).walkedOff).toBeUndefined();
+    expect((r.mem as { boarded?: { leg: number } }).boarded?.leg).toBe(1);
+    never(out);
+  });
+
+  it('le vrai « Tu as passé » reste : descente constatée à l’arrêt (bus immobile 50 s), puis le bus repart avec nous : dit dès 300 m, nouveau trajet demandé', () => {
+    const r = guide(prdTrip(), { startedAt: at('07:12:30') });
+    const south = offset(P.guilleminsBus, 0, -900);
+    const w: Way = [{ t: at('07:12'), p: P.gramme }, { t: at('07:14'), p: P.leman }, { t: at('07:14:20'), p: P.leman }, { t: at('07:19:40'), p: P.guilleminsBus }, { t: at('07:20:30'), p: P.guilleminsBus }, { t: at('07:22:30'), p: south }];
+    const out: { t: number; s: GuideState }[] = [];
+    for (let t = at('07:12:30'); t <= at('07:22'); t += 5 * SEC) {
+      const q = posAt(w, t);
+      out.push({ t, s: step(r, t, fix(q.p, t, { speed: q.v })) });
+      if (t === at('07:20:30')) expect(r.mem.alighted).toMatchObject({ leg: 1 });
+    }
+    const said = out.find((x) => x.s.moment?.kind === 'passed')!;
+    expect(said, 'arrêt dépassé').toBeDefined();
+    expect(m(said.s.moment, 'passed')).toMatchObject({ passed: S.guilleminsBus.name, leg: 1 });
+    expect(said.s.replan).toMatchObject({ reason: 'passed' });
+    // 300 m au-delà à 7,5 m/s : 40 s après le départ ; dit dans la minute qui suit
+    expect(said.t).toBeGreaterThan(at('07:21:05'));
+    expect(said.t).toBeLessThanOrEqual(at('07:21:30'));
+  });
+});
+
 /* ------------------------------ Seuils ------------------------------ */
 
 describe('1.3.1 : seuils ajoutés du moteur', () => {
