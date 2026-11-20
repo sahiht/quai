@@ -147,6 +147,8 @@ const homeReady = (s: Screen) => s.screen === 'home' && !s.lines.some((l) => / �
 async function open(guide = true) {
   const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0', display: { ...settingsWith([]).display, guide } }), core: (now) => stubCore(now, { answers }) });
   await h.until(homeReady);
+  // 1.3.1 (PRD-1.3.1 § 8) : le curseur s'ouvre sur « Autour de moi » ; posé sur le favori (« Favoris », puis Bureau)
+  await h.gesture('down', 'down');
   return h;
 }
 

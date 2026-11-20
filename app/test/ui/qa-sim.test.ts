@@ -117,9 +117,10 @@ describe('étapes : un message ne passe pas d’une page à l’autre (1.2.1 : �
     // S3 : le bureau est à 12 min à pied, une seule proposition
     const t = await setupController({ scenario: 's3' });
     await t.until((s) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l)));
-    expect(t.last().lines[2]).toMatch(/^Bureau {3}maintenant → /);
-    // du premier favori (Gand-Saint-Pierre), le suivant : le bureau
-    await t.gesture('down', 'tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : « Autour de moi », « Favoris », Gand-Saint-Pierre, puis le bureau
+    expect(t.last().lines[3]).toMatch(/^Bureau {3}maintenant → /);
+    // de « Autour de moi » (curseur à l'ouverture) : « Favoris », le premier favori (Gand-Saint-Pierre), puis le bureau
+    await t.gesture('down', 'down', 'down', 'tap');
     const st = await t.until((s) => s.screen === 'steps' && s.page === 1);
     expect(st.pages).toBe(1);
     // 1.2.10 (PRD-1.2.10 § 3.1) : un trajet entièrement à pied se guide aussi : « y aller » (1.3.0, PRD-1.3.0 § 1 : sa
@@ -140,7 +141,8 @@ describe('étapes : un message ne passe pas d’une page à l’autre (1.2.1 : �
       return { ...x, display: { ...x.display, guide: false } };
     };
     await t.until((s) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l)));
-    await t.gesture('tap');
+    // 1.3.1 (§ 8) : de « Autour de moi », « Favoris », puis le premier favori
+    await t.gesture('down', 'down', 'tap');
     await t.until((s) => s.screen === 'steps' && s.page === 1);
     // ▼ jusqu'au bout des étapes, puis « Autres trajets », puis la 1re entrée
     for (let i = 0; i < 4 && t.last().screen === 'steps'; i++) await t.gesture('down');

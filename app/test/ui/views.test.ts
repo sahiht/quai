@@ -136,7 +136,8 @@ async function stopLines(core: ReturnType<typeof fakeCore>, areaId: string): Pro
 
 const HINT_HOME = '△▽ choisir   toucher : ouvrir   double : quitter';
 /** 1.2.6 (PRD-1.2.6 § 1) : les trois rubriques du préréglage (Namur ; Bruxelles-Nord De Lijn ; tram 3 et tram 4). */
-const SECTIONS = ['Gares de train   1 gare', 'Arrêts de bus, tram, métro   1 arrêt', 'Lignes de bus, tram, métro   2 lignes'];
+// 1.3.1 (PRD-1.3.1 § 8) : « Lignes… » avant « Arrêts… »
+const SECTIONS = ['Gares de train   1 gare', 'Lignes de bus, tram, métro   2 lignes', 'Arrêts de bus, tram, métro   1 arrêt'];
 /** Titre d'une ligne de l'accueil : la colonne a, ou les mots clairs et pâles d'une rubrique (1.2.6). */
 const titleOf = (i: { a?: string; segs?: { t: string }[] }) => i.a || (i.segs ?? []).map((g) => g.t).join(' ');
 
@@ -180,45 +181,46 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     // titres dans la colonne a, nombre ou prochain départ à droite ; favoris en retrait (nom et réponse dans la colonne b)
     // 1.2.6 : le mot clé de chaque rubrique au plus clair, sa précision pâle (segs)
     const all = v.items.map((i) => [titleOf(i), i.b ?? '', nb(i.c ?? i.bRight ?? '')]);
+    // 1.3.1 (PRD-1.3.1 § 8) : « Autour de moi » en tête, puis « Favoris » et ses favoris, puis les rubriques
     expect(all).toEqual([
+      ['Autour de moi', '', '3 arrêts'],
       ['Favoris', '', '3'],
       ['', 'Bureau', 'dans 2 min → 08:58'],
       ['', 'Vers Gand-Saint-Pierre', '07:40 → 08:09'],
-      ['Autour de moi', '', '3 arrêts'],
       ['Gares de train', '', '1 gare'],
-      ['Arrêts de bus, tram, métro', '', '1 arrêt'],
       ['Lignes de bus, tram, métro', '', '2 lignes'],
+      ['Arrêts de bus, tram, métro', '', '1 arrêt'],
     ]);
     // la ligne du haut et l'aide des gestes prennent la place de la ligne vide (PRD-1.2.6 § 1) ; « Aller à… » n'existe
     // plus (PRD-1.2.2 § 1.1)
-    expect(v.items[3].gap).toBeUndefined();
-    expect(v.items.slice(1, 3).every((i) => !i.c && i.bRight)).toBe(true);
+    expect(v.items.some((i) => i.gap)).toBe(false);
+    expect(v.items.slice(2, 4).every((i) => !i.c && i.bRight)).toBe(true);
     expect(v.items.map((i) => i.action)).toEqual([
+      { kind: 'open', route: { screen: 'nearby' } },
       { kind: 'open', route: { screen: 'favorites' } },
       { kind: 'openFavorite', id: 'fav-bureau' },
       { kind: 'openFavorite', id: 'fav-gand' },
-      { kind: 'open', route: { screen: 'nearby' } },
       { kind: 'open', route: { screen: 'stations' } },
-      { kind: 'open', route: { screen: 'lines' } },
       { kind: 'open', route: { screen: 'follows' } },
+      { kind: 'open', route: { screen: 'lines' } },
     ]);
-    // curseur à l'ouverture sur le premier favori
-    expect(v.initialSel).toBe(1);
+    // 1.3.1 (§ 8) : curseur à l'ouverture sur « Autour de moi »
+    expect(v.initialSel).toBe(0);
     const lines = check(v);
     expect(lines).not.toContain('~ horaire prévu, sans temps réel');
     expect(lines.join(' ')).not.toMatch(/~|Aller à/);
     expect(lines).toEqual([
       'Temps réel indisponible : horaires prévus',
+      'Autour de moi   3 arrêts',
       'Favoris   3',
       'Bureau   dans 2 min → 08:58',
       'Vers Gand-Saint-Pierre   07:40 → 08:09',
-      'Autour de moi   3 arrêts',
       ...SECTIONS,
       HINT_HOME,
     ]);
     const p = page(v);
     expect(p.visible).toBe(v.items.length);
-    expect(p.sel).toBe(1);
+    expect(p.sel).toBe(0);
     // relief : titres et nombres au niveau 4, favoris (nom et réponse) au niveau 2
     expect(p.containers.filter((c) => ['colA', 'colB', 'colC'].includes(c.name)).map((c) => [c.name, c.level])).toEqual([['colA', 4], ['colB', 2], ['colC', 4]]);
   });
@@ -226,12 +228,13 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
   it('CA-M1.2 : temps réel, retard et voie modifiée sur une ligne : « Gares   IC 07:42 +2 voie 6 ! » (Namur)', async () => {
     const s = settings();
     const lines = check(homeView(home(await answers(now, here, s)), ctxOf(now, s, { rt: 'ok' })));
+    // 1.3.1 : « Autour de moi » en tête (§ 8) ; le bureau, voie modifiée, porte son « ! » (B15, comme dans « Favoris »)
     expect(lines).toEqual([
+      'Autour de moi   3 arrêts',
       'Favoris   3',
-      'Bureau   dans 4 min → 08:58',
+      'Bureau !   dans 4 min → 08:58',
       'Vers Gand-Saint-Pierre   07:40 → 08:09',
       '',
-      'Autour de moi   3 arrêts',
       ...SECTIONS,
       HINT_HOME,
     ]);
@@ -422,16 +425,17 @@ describe('scénario 2 : en ville, gare du Nord (S2, 12:10)', () => {
     // Maison (17:13) : rien dans les 3 heures, règle 5 : dans « Favoris » seulement
     expect([...a.last]).toEqual(['fav-maison']);
     const v = homeView(home(a, { nearbyCount: 4 }), ctxOf(now, s, { rt: 'ok' }));
+    // 1.3.1 (PRD-1.3.1 § 8) : « Autour de moi » en tête, « Favoris » juste dessous
     expect(check(v)).toEqual([
+      'Autour de moi   4 arrêts',
       'Favoris   3',
       'Bureau   maintenant → 12:26',
       'Vers Gand-Saint-Pierre   14:10 → 14:39',
       '',
-      'Autour de moi   4 arrêts',
       ...SECTIONS,
       HINT_HOME,
     ]);
-    expect(v.items[0].action).toEqual({ kind: 'open', route: { screen: 'favorites' } });
+    expect(v.items[1].action).toEqual({ kind: 'open', route: { screen: 'favorites' } });
     // la liste ouverte par « Favoris » : tous les favoris, la ligne de l'accueil ; 1.2.10 : le détail du favori sous
     // le curseur en bas (PRD-1.2.10 § 2)
     const list = favoritesView({ entries: a.entries }, ctxOf(now, s));
@@ -578,7 +582,8 @@ describe('scénario 3 : l’après-midi vers Gand (S3, 13:55)', () => {
     const a = await answers(now, here, s);
     expect(a.order[0]).toBe('fav-gand');
     // un trajet fixe : son titre, puis le départ conseillé et l'arrivée
-    expect(check(homeView(home(a), ctxOf(now, s))).slice(0, 3)).toEqual(['Favoris   3', 'Vers Gand-Saint-Pierre   dans 13 min → 14:39', 'Bureau   maintenant → 14:07']);
+    // 1.3.1 (PRD-1.3.1 § 8) : sous « Autour de moi »
+    expect(check(homeView(home(a), ctxOf(now, s))).slice(0, 4)).toEqual(['Autour de moi   3 arrêts', 'Favoris   3', 'Vers Gand-Saint-Pierre   dans 13 min → 14:39', 'Bureau   maintenant → 14:07']);
     const journeys = a.map.get('fav-gand')!.plan!.journeys;
     const v = stepsPage({ title: 'Vers Gand-Saint-Pierre', label: '' }, { journeys, index: 0, followedId: journeys[0].id, fresh: true }, ctxOf(now, s));
     // 1.2.10 (PRD-1.2.10 § 5) : le nom du trajet, le départ et l'arrivée en haut, une rangée par étape
@@ -687,11 +692,11 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     const s = settings();
     const v = homeView(home(await answers(now, null, s), { noPosition: true, nearbyCount: undefined }), ctxOf(now, s));
     expect(check(v)).toEqual([
+      'Autour de moi   sans position',
       'Favoris   3',
       'Bureau   sans position',
       'Vers Gand-Saint-Pierre   07:40 → 08:09',
       'Maison   sans position',
-      'Autour de moi   sans position',
       ...SECTIONS,
       HINT_HOME,
     ]);
@@ -702,13 +707,14 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     const s = settings();
     const v = homeView({ favorites: s.favorites.slice(0, 3).map((fav) => ({ fav })), nearbyCount: 3 }, ctxOf(now, s));
     // une ligne par favori, même en calcul (rien ne saute quand la réponse arrive) ; rubriques en calcul : « … »
-    expect(v.items.slice(1, 4).map((i) => [i.b, i.bRight, i.two])).toEqual([['Bureau', '…', undefined], ['Vers Gand-Saint-Pierre', '…', undefined], ['Maison', '…', undefined]]);
-    expect(check(v)).toEqual(['Favoris   3', 'Bureau   …', 'Vers Gand-Saint-Pierre   …', 'Maison   …', 'Autour de moi   3 arrêts', ...SECTIONS, HINT_HOME]);
+    // 1.3.1 (PRD-1.3.1 § 8) : « Autour de moi » en tête, « Favoris » et ses favoris dessous
+    expect(v.items.slice(2, 5).map((i) => [i.b, i.bRight, i.two])).toEqual([['Bureau', '…', undefined], ['Vers Gand-Saint-Pierre', '…', undefined], ['Maison', '…', undefined]]);
+    expect(check(v)).toEqual(['Autour de moi   3 arrêts', 'Favoris   3', 'Bureau   …', 'Vers Gand-Saint-Pierre   …', 'Maison   …', ...SECTIONS, HINT_HOME]);
     // aucun favori : « Ajouter un favori » ouvre « Favoris », où « Ajouter un favori » dit comment faire
     const none = { ...s, favorites: [] };
     const empty = homeView({ nearbyCount: 3, near: 'Namur' }, ctxOf(now, none));
-    expect(check(empty)).toEqual(['Près de Namur', 'Ajouter un favori', '', 'Autour de moi   3 arrêts', ...SECTIONS, HINT_HOME]);
-    expect(empty.items[0].action).toEqual({ kind: 'open', route: { screen: 'favorites' } });
+    expect(check(empty)).toEqual(['Près de Namur', 'Autour de moi   3 arrêts', 'Ajouter un favori', '', ...SECTIONS, HINT_HOME]);
+    expect(empty.items[1].action).toEqual({ kind: 'open', route: { screen: 'favorites' } });
     const list = favoritesView({}, ctxOf(now, none));
     expect(list.screen).toBe('favorites');
     expect(check(list)).toEqual(['Ajouter un favori   sur le téléphone', 'Autre adresse   sur le téléphone', '△▽ choisir   toucher : ouvrir   double : retour']);
@@ -716,24 +722,24 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     expect(favoritesView({}, ctxOf(now, none, { web: true })).items[0]).toMatchObject({ a: 'Ajouter un favori', c: 'dans Réglages', action: { kind: 'phone', hash: '#/favoris/nouveau', text: 'Ajoute Maison ou Bureau dans l’onglet Réglages.' } });
     // « Accueil sans favoris » : « Favoris   3 » sans favori dessous (il ouvre la liste) et « Près de … »
     const plain = homeView({ noFavorites: true, favorites: s.favorites.slice(0, 3).map((fav) => ({ fav })), nearbyCount: 3, near: 'Namur' }, ctxOf(now, s));
-    expect(check(plain)).toEqual(['Près de Namur', 'Favoris   3', '', 'Autour de moi   3 arrêts', ...SECTIONS, HINT_HOME]);
-    expect(plain.items[0].action).toEqual({ kind: 'open', route: { screen: 'favorites' } });
+    expect(check(plain)).toEqual(['Près de Namur', 'Autour de moi   3 arrêts', 'Favoris   3', '', ...SECTIONS, HINT_HOME]);
+    expect(plain.items[1].action).toEqual({ kind: 'open', route: { screen: 'favorites' } });
     // aide des gestes passée (7 premiers jours, contrôleur) : plus de pied du tout
-    expect(check(homeView({ noFavorites: true, nearbyCount: 3, gestureHelp: false }, ctxOf(now, s))).at(-1)).toBe('Lignes de bus, tram, métro   2 lignes');
+    expect(check(homeView({ noFavorites: true, nearbyCount: 3, gestureHelp: false }, ctxOf(now, s))).at(-1)).toBe('Arrêts de bus, tram, métro   1 arrêt');
     // rubriques vides : « à choisir » ; toucher : où les choisir (Quai Web : l'ajout de l'onglet Réglages, #/…/ajouter)
     const bare: Settings = { ...s, stations: [], lines: [], follows: [] };
     const b = homeView({ favorites: [], nearbyCount: 3 }, ctxOf(now, bare));
-    expect(check(b).slice(-4)).toEqual(['Gares de train   à choisir', 'Arrêts de bus, tram, métro   à choisir', 'Lignes de bus, tram, métro   à choisir', HINT_HOME]);
+    expect(check(b).slice(-4)).toEqual(['Gares de train   à choisir', 'Lignes de bus, tram, métro   à choisir', 'Arrêts de bus, tram, métro   à choisir', HINT_HOME]);
     expect(b.items.slice(-3).map((i) => i.action)).toEqual([
       { kind: 'phone', hash: '#/gares/ajouter', text: 'Choisis tes gares dans Quai, sur le téléphone' },
-      { kind: 'phone', hash: '#/arrets/ajouter', text: 'Choisis tes arrêts dans Quai, sur le téléphone' },
       { kind: 'phone', hash: '#/lignes/ajouter', text: 'Choisis tes lignes dans Quai, sur le téléphone' },
+      { kind: 'phone', hash: '#/arrets/ajouter', text: 'Choisis tes arrêts dans Quai, sur le téléphone' },
     ]);
     const bw = homeView({ favorites: [], nearbyCount: 3 }, ctxOf(now, bare, { web: true }));
     expect(bw.items.slice(-3).map((i) => i.action)).toEqual([
       { kind: 'phone', hash: '#/gares/ajouter', text: 'Choisis tes gares dans l’onglet Réglages' },
-      { kind: 'phone', hash: '#/arrets/ajouter', text: 'Choisis tes arrêts dans l’onglet Réglages' },
       { kind: 'phone', hash: '#/lignes/ajouter', text: 'Choisis tes lignes dans l’onglet Réglages' },
+      { kind: 'phone', hash: '#/arrets/ajouter', text: 'Choisis tes arrêts dans l’onglet Réglages' },
     ]);
     // les rubriques vides, ouvertes quand même (retirées pendant qu'on les regarde) : où les choisir
     expect(check(stationsView([], ctxOf(now, bare)))).toEqual(['Choisis tes gares dans Quai, sur le téléphone.', 'double toucher : retour']);
@@ -746,7 +752,8 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     const s = settings();
     const a = await answers(now, { lat: SCENARIO.s1.lat, lon: SCENARIO.s1.lon }, s);
     const v = homeView(home(a, { running: { title: 'Vers le bureau', next: 'IC 07:42 +2 voie 6 !', favoriteId: 'fav-bureau' } }), ctxOf(now, s));
-    expect(check(v).slice(0, 3)).toEqual(['En cours : vers le bureau   IC 07:42 +2 voie 6 !', 'Favoris   3', 'Vers Gand-Saint-Pierre   07:40 → 08:09']);
+    // 1.3.1 (PRD-1.3.1 § 8) : « En cours » reste en tête, « Autour de moi » juste dessous
+    expect(check(v).slice(0, 4)).toEqual(['En cours : vers le bureau   IC 07:42 +2 voie 6 !', 'Autour de moi   3 arrêts', 'Favoris   3', 'Vers Gand-Saint-Pierre   07:40 → 08:09']);
     expect(v.items[0].action).toEqual({ kind: 'resume' });
     expect(v.log).toMatchObject({ shown: ['fav-gand'] });
     expect(page(v).visible).toBe(v.items.length);

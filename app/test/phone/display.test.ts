@@ -141,11 +141,14 @@ describe('Affichage', () => {
   });
 
   it('aperçu : l’accueil 1.2.2 (PRD-1.2.2 § 1.1), 3 favoris, puis les trois rubriques (1.2.6) et leur nombre à droite', () => {
-    // l'aide des gestes prend la place de la ligne vide (PRD-1.2.6 § 1)
-    const tail = ['Autour de moi | 3 arrêts', 'Gares de train | 1 gare', 'Arrêts de bus, tram, métro | 1 arrêt', 'Lignes de bus, tram, métro | 1 ligne'];
-    const favs = ['Favoris | 3', 'Bureau | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04', 'Vers Gand-Saint-Pierre | 08:58 → 09:30'];
-    expect(lines(homePreview(defaults()))).toEqual([...favs, ...tail]);
-    expect(lines(homePreview(defaults({ display: { ...defaults().display, gestureHints: false } })))).toEqual([...favs, '', ...tail]);
+    // l'aide des gestes prend la place de la ligne vide (PRD-1.2.6 § 1) ; 1.3.1 (PRD-1.3.1 § 8) : l'aperçu est l'accueil
+    // des lunettes : « Autour de moi » en tête, « Favoris » et ses favoris, puis les rubriques, « Lignes » avant « Arrêts » ;
+    // le bureau (voie modifiée dans l'exemple) porte son « ! » (B15)
+    const head = ['Autour de moi | 3 arrêts'];
+    const tail = ['Gares de train | 1 gare', 'Lignes de bus, tram, métro | 1 ligne', 'Arrêts de bus, tram, métro | 1 arrêt'];
+    const favs = ['Favoris | 3', 'Bureau ! | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04', 'Vers Gand-Saint-Pierre | 08:58 → 09:30'];
+    expect(lines(homePreview(defaults()))).toEqual([...head, ...favs, ...tail]);
+    expect(lines(homePreview(defaults({ display: { ...defaults().display, gestureHints: false } })))).toEqual([...head, ...favs, '', ...tail]);
   });
 
   it('aperçu : selon l’ouverture, l’ordre et le rayon (T5, PRD-1.2.1 § 4)', () => {
@@ -154,14 +157,15 @@ describe('Affichage', () => {
     const favs = (v: ReturnType<typeof homePreview>) => v.items.filter((i) => i.action?.kind === 'openFavorite').map((i) => lines({ ...v, items: [i] })[0]);
     const around = (v: ReturnType<typeof homePreview>) => lines(v).find((l) => l.startsWith('Autour de moi'));
     const v = homePreview(defaults());
-    expect(lines(v)[0]).toBe('Favoris | 3');
-    expect(favs(v)).toEqual(['Bureau | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04', 'Vers Gand-Saint-Pierre | 08:58 → 09:30']);
+    // 1.3.1 (PRD-1.3.1 § 8) : « Autour de moi » en tête, « Favoris » dessous ; le « ! » du bureau (B15)
+    expect(lines(v).slice(0, 2)).toEqual(['Autour de moi | 3 arrêts', 'Favoris | 3']);
+    expect(favs(v)).toEqual(['Bureau ! | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04', 'Vers Gand-Saint-Pierre | 08:58 → 09:30']);
     expect(around(v)).toBe('Autour de moi | 3 arrêts');
     // « Dans mon ordre » : l'ordre du téléphone, le trajet vers Gand en tête
-    expect(favs(homePreview(defaults({ display: { ...d, favOrder: 'mine' } })))).toEqual(['Vers Gand-Saint-Pierre | 08:58 → 09:30', 'Bureau | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04']);
+    expect(favs(homePreview(defaults({ display: { ...d, favOrder: 'mine' } })))).toEqual(['Vers Gand-Saint-Pierre | 08:58 → 09:30', 'Bureau ! | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04']);
     // « L’accueil, sans favoris », rayon de 800 m : « Favoris » sans favori dessous, 4 arrêts ; 300 m : 2 arrêts
     const bare = homePreview(defaults({ display: { ...d, opening: 'home', radiusM: 800 } }));
-    expect(lines(bare)[0]).toBe('Favoris | 3');
+    expect(lines(bare)[1]).toBe('Favoris | 3');
     expect(favs(bare)).toEqual([]);
     expect(around(bare)).toBe('Autour de moi | 4 arrêts');
     expect(around(homePreview(defaults({ display: { ...d, radiusM: 300 } })))).toBe('Autour de moi | 2 arrêts');
@@ -176,7 +180,8 @@ describe('Affichage', () => {
     }
     const el = mount(displayScreen(harness({ settings: defaults() }).ctx));
     const label = el.querySelector('.preview')!.getAttribute('aria-label')!.replace(/\u00a0/g, ' ');
-    expect(label).toBe('Aperçu dans les lunettes : Quai, Favoris 3, Bureau dans 4 min → 09:00, Vers Mons dans 14 min → 09:04, Vers Gand-Saint-Pierre 08:58 → 09:30, Autour de moi 3 arrêts, Gares de train 1 gare, Arrêts de bus, tram, métro 1 arrêt, Lignes de bus, tram, métro 1 ligne');
+    // 1.3.1 (PRD-1.3.1 § 8, B15) : l'ordre des lunettes, le « ! » du bureau
+    expect(label).toBe('Aperçu dans les lunettes : Quai, Autour de moi 3 arrêts, Favoris 3, Bureau ! dans 4 min → 09:00, Vers Mons dans 14 min → 09:04, Vers Gand-Saint-Pierre 08:58 → 09:30, Gares de train 1 gare, Lignes de bus, tram, métro 1 ligne, Arrêts de bus, tram, métro 1 arrêt');
   });
 });
 
@@ -189,11 +194,12 @@ describe('1.2.10 : Affichage sur un seul écran, l’ouverture sur son écran (P
     const legend = el.querySelector('legend')!;
     expect([textOf(legend), legend.className]).toEqual(['À l’ouverture de Quai', 'sr-only']);
     const label = () => el.querySelector('.preview')!.getAttribute('aria-label')!.replace(/ /g, ' ');
-    expect(label()).toMatch(/^Aperçu dans les lunettes : Quai, Favoris 3, Bureau /);
+    // 1.3.1 (PRD-1.3.1 § 8) : « Autour de moi » en tête de l'accueil des lunettes
+    expect(label()).toMatch(/^Aperçu dans les lunettes : Quai, Autour de moi 3 arrêts, Favoris 3, Bureau /);
     expect(el.querySelector<HTMLInputElement>('input[value="suggest"]')!.checked).toBe(true);
     el.querySelector<HTMLInputElement>('input[value="home"]')!.click();
     // « L’accueil, sans favoris » : plus aucun favori sous « Favoris » dans l'aperçu
-    await until(() => hz.settings.get().display.opening === 'home' && /Favoris 3, Autour de moi/.test(label()));
+    await until(() => hz.settings.get().display.opening === 'home' && /Favoris 3, Gares de train/.test(label()));
     el.querySelector<HTMLInputElement>('input[value="firstFavorite"]')!.click();
     await until(() => hz.settings.get().display.opening === 'firstFavorite');
     // retour à Affichage, qui montre la valeur choisie
