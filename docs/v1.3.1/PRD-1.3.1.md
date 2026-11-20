@@ -99,3 +99,61 @@ personnelle nulle part.
 | A1 accueil | 8 | glasses/views.ts (homeView seulement), controller.ts (curseur à l'ouverture), phone/screens/home.ts |
 | T1 téléphone | 4 (téléphone), 5, 7 (téléphone), 2 (textes du téléphone) | phone/** (sauf l'accueil) |
 | B1 bout en bout | tous | tests/e2e/** |
+
+## 12. Propositions des experts retenues (le propriétaire, 20/11 à 18:32 : « l'ensemble des éléments proposés »)
+
+Cinq experts (ergonomie des lunettes, usager quotidien, guidage à pied, langage, innovation sobre) ont relu les écrans,
+le code et rejoué le moteur. Leurs notes détaillées, avec les textes exacts et les mesures au pixel :
+`docs/v1.3.1/experts/` (identifiants E, U, P, L, I). Le propriétaire a validé toute la liste qui lui a été présentée :
+
+**A. Défauts** : A1 les six messages importants (partir, monter, voie modifiée, descendre, imprévu, arrêt dépassé)
+ramènent l'écran du guidage quel que soit l'écran affiché (E2) ; A2 bus raté en marchant : on reste « à pied » tant
+qu'on marche vers l'arrêt, puis « Ton bus … est parti » et le suivant depuis là où l'on est (P1) ; A3 sans temps réel,
+le véhicule est gardé jusqu'à 15 min avant le suivant, jamais moins de 10 min après l'heure (I1) ; A4 « très juste »
+seulement quand le moteur le dit (P4) ; A5 « Partir maintenant » n'est plus caché par le premier virage (P2) ; A6
+« Fais demi-tour » (P3) ; A7 un toucher ne masque qu'un message affiché depuis au moins 1,5 s (E3) ; A8 sous terre,
+pas de message de position à l'arrêt ni à bord (I4).
+
+**B. Améliorations** : B9 à bord, la ligne de progression remplace les trois points sur l'écran calme (E1) ; B10 menu
+de l'appui long : « Voir tout le trajet », « Voir les arrêts », « Arrêter le guidage » en dernier (E4) ; B11 l'arrêt où
+l'on descend d'habitude est retenu et la ligne d'action dit son nom (I2) ; B12 « Tram 3 dans ~1 min », « À gauche dans
+30 m », « Nouveau trajet : IC à 08:42, voie 5 » (E5, L4) ; B13 un train en retard s'écrit « IC 07:42 +2 » dans le
+guidage (U6) ; B14 l'heure d'arrivée sur la dernière marche de l'écran du trajet (U1) ; B15 le « ! » d'un favori sur
+l'accueil (U2) ; B16 correspondance très juste dite avant, avec « Si tu le rates : tram 3 à 08:51 » (U4) ; B17 après la
+descente, la marche suivante s'affiche (P7) ; B18 deux virages proches annoncés ensemble, distance stable (P6, P8) ;
+B19 « pluie prévue » sur « Partir maintenant » (I5) ; B20 le soir, l'accueil montre les favoris avec « demain »
+(U8) ; B21 « Gares de train » en accordéon avec la direction (U7).
+
+**C. Finitions de textes** : L2 et U3 (« masquer » et le nom de l'arrêt aux endroits oubliés : virage sans rue, carte
+« En cours » du téléphone, journal, guides, aide du réglage « Me guider ») ; L3 « Pas de position : Quai suit
+l'horaire » ; L5 carte « En cours » : « Ensuite : partir à 07:05 » avant le départ ; L6 aides des listes identiques
+pour le même geste ; L7 mêmes noms et « tes » entre lunettes et téléphone ; L8 « dans l'onglet Réglages » dans Quai Web.
+
+**« Où tu en es »** (remplace le § 3 pour les mots, L1 et E1) : « Guidage en cours » ; « Jusqu'à … » pour la
+destination (aussi le titre de « j'y descends ») ; « Ensuite : … » pour le prochain geste avec son heure (« Ensuite :
+partir à 07:33 », « Ensuite : bus W à 17:49 », « Ensuite : descente à Bruxelles-Nord, 08:42 », « Ensuite : arrivée
+~19:05 ») ; « Prochain arrêt : … » seulement pour l'arrêt suivant à bord ; chaque chose une seule fois ; avant de
+partir « 9 min à pied jusqu'à la gare de Namur » ; « j'y descends » : « Quai te dit quand descendre » ; la progression
+ne s'efface jamais (ordre : arrivée, chaîne, arrêt suivant).
+
+Conflit réglé : dans le message « monter » d'une correspondance, « 2 min à pied → Gare du Nord, très juste » si le nom
+tient (coupé au mot, « très juste » jamais), sinon « jusqu'à l'arrêt ».
+
+Non retenu (pas présenté au propriétaire ; la R&D peut le reproposer) : E6, E7, E8, U5, P5, I3.
+
+## 13. Organisation
+
+Demandée par le propriétaire le 20/11 : un directeur, des managers, des experts techniques, de petits contrôles
+qualité par sujet, et une équipe de recherche et développement qui propose de nouvelles fonctions en même temps.
+
+| Rôle | Mission |
+|---|---|
+| Directeur (coordinateur) | priorités, arbitrages, fusion, vérifications finales, publication, compte rendu au propriétaire |
+| Pôle Guidage (manager + experts) | points 1 à 3, guidage du point 4 ; A1 à A8 ; B9, B10, B12, B13, B16 à B19 ; C du guidage |
+| Pôle Écrans et téléphone (manager + experts) | points 4 à 8 hors guidage ; B11, B14, B15, B20, B21 ; C des listes, de l'accueil et du téléphone |
+| Pôle Qualité (manager + contrôleurs) | un petit contrôle usager et technique par sujet fini, scénarios de bout en bout s131, balayages des vraies données, contrôle final |
+| Recherche et développement (manager + chercheurs) | veille et essais ; propositions de nouvelles fonctions, soumises au propriétaire avant toute construction |
+
+Méthodes (celles des plugins Engineering, Design et Product Management de l'annuaire d'Anthropic, non installés) :
+revue de code et stratégie de tests, critique de design, accessibilité et textes d'interface, cadrage des
+fonctions et synthèse de recherche.
