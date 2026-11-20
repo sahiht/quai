@@ -12,7 +12,8 @@ vi.mock('../../src/glasses/guide-views', async () => (await import('./controller
 
 import type { Favorite, FavoriteAnswer, Journey } from '../../src/core/api';
 import type { GuideState, Moment } from '../../src/core/guide-types';
-import { TAP_MASK_AFTER_MS, nextOfFirst } from '../../src/glasses/controller';
+import { GlassesController, TAP_MASK_AFTER_MS, nextOfFirst } from '../../src/glasses/controller';
+import { createKV, memoryBackend } from '../../src/platform/kv';
 import { engine, moment, views } from './controller-guide-doubles';
 import { NOW, cleanupKit, door, guideSetup, type Kit, type KitOptions } from './controller-guide-kit';
 import { MIN, PLACES, boardOf, dep, journey, settingsWith } from './helpers';
@@ -129,12 +130,46 @@ describe('1.3.1, A1 (E2) : les six messages importants ramènent l’écran du g
     expect(screensOf(h)).toEqual(['home', 'guide']);
     cleanupKit();
     views.reset();
+    // contrôle qualité : le message de la première moitié ne doit pas déjà être là au lancement (il serait compté avant
+    // la mesure de `before`, et le test passerait sans la condition du réglage)
+    current = null;
     const off = await guided({ settings: settings(false) });
     const before = screensOf(off);
-    expect(before).not.toContain('guide');
+    expect(before).toEqual(['home']);
     await show(off, board());
     expect(screensOf(off)).toEqual(before);
     expect(views.calls.filter((c) => c.show === 'moment')).toEqual([]);
+  });
+
+  it('contrôle qualité : instantané repris (téléphone verrouillé, nouvelle WebView), après ou avant le démarrage : le message arrivé pendant la reprise ramène le guidage sur l’écran repris', async () => {
+    const a = await guided();
+    await a.gesture('double');
+    expect(screensOf(a)).toEqual(['home']);
+    const snap = JSON.parse(JSON.stringify(a.c.snapshot()));
+    cleanupKit();
+    // reprise après le démarrage de la nouvelle WebView (__restoreState appelé une fois le contrôleur prêt)
+    const b = await guideSetup({ settings: settings(), stub: { answers }, kv: createKV(memoryBackend()) });
+    current = board();
+    b.c.restore(snap);
+    await b.settle(100);
+    expect(screensOf(b)).toEqual(['home', 'guide']);
+    expect(b.last()).toMatchObject({ screen: 'guide', show: 'moment', moment: 'board:j-bureau:1' });
+    cleanupKit();
+    // reprise avant le démarrage (main.ts : restore, puis start)
+    current = null;
+    const start = GlassesController.prototype.start;
+    const spy = vi.spyOn(GlassesController.prototype, 'start').mockImplementationOnce(async function (this: GlassesController) {
+      current = alight();
+      this.restore(snap);
+      return start.call(this);
+    });
+    const c = await guideSetup({ settings: settings(), stub: { answers }, kv: createKV(memoryBackend()) });
+    spy.mockRestore();
+    await c.settle(100);
+    expect(screensOf(c)).toEqual(['home', 'guide']);
+    expect(c.last()).toMatchObject({ screen: 'guide', show: 'moment', moment: 'alight:j-bureau:1' });
+    expect(c.logs).toContain('QUAI_GUIDE retour à l’écran du guidage depuis home : alight');
+    expect(c.logs.filter((l) => l.startsWith('QUAI_GUIDE retour'))).toHaveLength(1);
   });
 });
 
@@ -291,6 +326,33 @@ describe('1.3.1, B16 (U4) et A3 (I1) : le départ suivant donné au moteur (Guid
     const g = await guided({ stub: { calls: calls2, board: () => undefined } });
     await g.settle(MIN);
     expect(calls2.filter((c) => c.startsWith('board:'))).toEqual([]);
+  });
+
+  it('contrôle qualité : ligne à l’heure, tableau lu une heure avant : le passage suivant, une heure après la correspondance ; une autre ligne vers la même destination ne compte pas', async () => {
+    // bus 4 jusqu'à Monument Gramme (arrivée +56), 1 min à pied, bus 6 à +58 : très juste ; le bus 6 suivant à +118
+    const j = journey('j-heure', [
+      { walk: 3, to: 'Place Général Leman' },
+      { ride: '4', mode: 'bus', dep: NOW + 41 * MIN, arr: NOW + 56 * MIN, from: 'Place Général Leman', to: 'Monument Gramme', head: 'Monument Gramme' },
+      { walk: 1, to: 'Monument Gramme' },
+      { ride: '6', mode: 'bus', dep: NOW + 58 * MIN, arr: NOW + 70 * MIN, from: 'Monument Gramme', to: 'Gare des Guillemins', head: 'Gare des Guillemins' },
+      { walk: 4 },
+    ]);
+    j.legs[3].from.areaId = 'tec:gramme';
+    plan = [j];
+    engine.tight = [3];
+    const calls: string[] = [];
+    const guillemins = N('Gare des Guillemins');
+    // comme le cœur (core/boards.ts, withinUntil) : seulement les départs de l'horizon demandé
+    const hourly = (now: number, horizonMin = 120) =>
+      boardOf('tec:gramme', 'Monument Gramme', [
+        dep(NOW, 58, { line: '6', head: guillemins }),
+        dep(NOW, 70, { line: '9', head: guillemins }),
+        dep(NOW, 118, { line: '6', head: guillemins, rt: false }),
+      ].filter((d) => d.est <= now + horizonMin * MIN));
+    const h = await guided({ stub: { calls, board: (id, now, o) => (id === 'tec:gramme' ? hourly(now, o?.horizonMin) : undefined) } });
+    await h.settle(MIN);
+    expect(calls.filter((c) => c === 'board:tec:gramme')).toHaveLength(1);
+    expect(engine.last().input.nextByLeg?.[3]).toEqual({ vehicle: { op: 'tec', mode: 'bus', line: '6' }, depAt: NOW + 118 * MIN, rt: false });
   });
 
   it('premier véhicule : le plus tôt des autres trajets proposés depuis le même arrêt', async () => {

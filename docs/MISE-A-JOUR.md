@@ -24,7 +24,7 @@ Si tu passes directement de la 1.2.9 (ou d'avant) à la 1.3.0, voici aussi ce qu
 
 - « Y aller » : ouvre un favori, puis touche « y aller » (ou le bouton « Y aller » du favori sur le téléphone). Quai te guide de ta porte jusqu'à destination : à pied, puis en bus, tram, métro ou train, avec les correspondances. L'écran reste vide tant qu'il n'y a rien à faire. Un message paraît seulement quand il faut agir : partir, tourner, monter (la ligne, ou la voie en grand), descendre (1 minute avant ton arrêt), un imprévu (correspondance ratée ou train supprimé : le trajet suivant ; arrêt dépassé : où descendre), l'arrivée.
 - Déjà dans le train, le bus, le tram ou le métro ? Dans Gares, Arrêts, Lignes ou Autour de moi, ouvre le départ, puis touche la gare ou l'arrêt où tu descends : « j'y descends ». Quai te prévient 1 minute avant.
-- Pendant le guidage : touche une fois pour voir où tu en es, ou pour effacer le message. Appui long : le menu, avec « Arrêter le guidage » et « Voir tout le trajet ».
+- Pendant le guidage : touche une fois pour voir où tu en es, ou pour masquer le message. Appui long : le menu, avec « Arrêter le guidage » et « Voir tout le trajet ».
 - À pied, le vrai chemin, rue par rue, d'après OpenStreetMap (toute la Belgique). Il est calculé sur le téléphone : ta position ne le quitte pas. Hors de Belgique, la marche est indiquée en ligne droite.
 - Un seul réglage, sur le téléphone, dans « Réglages » (« Pendant un trajet ») : « Me guider pendant un trajet », allumé au départ. Éteint, Quai montre le trajet comme avant, sans guidage.
 - Favoris : une ligne chacun, le détail du favori choisi en bas. Les étapes d'un trajet : une ligne par étape.
