@@ -23,7 +23,7 @@
 import { readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { decodeTile, F_BWD, F_FWD, F_UNDER, isWalkIndex, isWalkTile, leafKeysForBox, WALK_UNIT, type DecodedTile } from '../../../app/src/core/walk/format.ts';
-import { isExitsFile, MAX_EXITS, type ExitsFile, type ExitTuple } from '../../../app/src/core/walk/exits-format.ts';
+import { exitKey, isExitsFile, MAX_EXITS, type ExitsFile, type ExitTuple } from '../../../app/src/core/walk/exits-format.ts';
 import { tagsOf, underground, wayName } from './filter.ts';
 import { firstBlockWithoutNodes, PbfFile, readKeyedNodes, readWays, type Tags } from './pbf.ts';
 import { ATTRIBUTION, LICENCE, SOURCE } from './tiles.ts';
@@ -654,6 +654,44 @@ export async function officialMetroStations(dataDir: string): Promise<OfficialSt
   return out;
 }
 
+/**
+ * Arrêts physiques de la STIB publiés : numéros des fichiers de ligne (data/lines/stib/*.json, `pats[].s`), ceux que
+ * l'appli donne à ses étapes (Leg.toStop). null : pas de fichiers de ligne lisibles.
+ */
+export async function publishedStibStops(dataDir: string): Promise<Set<string> | null> {
+  const dir = join(dataDir, 'lines', 'stib');
+  let files: string[];
+  try {
+    files = (await readdir(dir)).filter((x) => x.endsWith('.json')).sort();
+  } catch {
+    return null;
+  }
+  const out = new Set<string>();
+  for (const n of files) {
+    try {
+      const f = JSON.parse(await readFile(join(dir, n), 'utf8')) as { pats?: { s?: unknown }[] };
+      for (const p of f.pats ?? []) if (Array.isArray(p.s)) for (const id of p.s) if (typeof id === 'string' && id) out.add(id);
+    } catch {
+      /* fichier illisible : ignoré */
+    }
+  }
+  return out.size ? out : null;
+}
+
+/**
+ * Jointure du fichier des sorties avec les arrêts physiques publiés, comme le fait l'appli (exitKey : numéro exact,
+ * sinon sans sa lettre) : numéros du fichier qu'au moins un arrêt publié retrouve, et ceux que personne ne retrouve.
+ */
+export function joinPublished(file: ExitsFile, published: ReadonlySet<string>): { reached: string[]; lost: string[] } {
+  const hit = new Set<string>();
+  for (const id of published) {
+    const k = exitKey(file, id);
+    if (k !== null) hit.add(k);
+  }
+  const keys = Object.keys(file.stops);
+  return { reached: keys.filter((k) => hit.has(k)), lost: keys.filter((k) => !hit.has(k)) };
+}
+
 const groundM = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => metres(a.lat / WALK_UNIT, a.lon / WALK_UNIT, b.lat / WALK_UNIT, b.lon / WALK_UNIT);
 
 /* ------------------------------ Bilan ------------------------------ */
@@ -664,6 +702,8 @@ export interface ExitReport {
   rate: number;
   codes: CodeResult[];
   official?: { stations: number; covered: number; named: number };
+  /** arrêts physiques STIB publiés, numéros du fichier des sorties que l'appli retrouve, et ceux qu'elle ne retrouve pas */
+  join?: { published: number; reached: number; lost: number };
 }
 
 const pct = (a: number, b: number) => (b ? `${((100 * a) / b).toFixed(1).replace('.', ',')} %` : '-');
@@ -674,7 +714,7 @@ const quantile = (xs: number[], q: number) => {
 };
 
 /** Mesure complète et lignes du journal (préfixe « Sorties du métro »). */
-export function exitReport(g: ExitGraph, features: readonly StibFeature[], stations: readonly OfficialStation[] | null, meta: { osmDate?: string; key?: string } = {}): ExitReport {
+export function exitReport(g: ExitGraph, features: readonly StibFeature[], stations: readonly OfficialStation[] | null, meta: { osmDate?: string; key?: string; published?: ReadonlySet<string> | null } = {}): ExitReport {
   const key = meta.key ?? STIB_KEY;
   const P = 'Sorties du métro';
   const lines: string[] = [];
@@ -704,6 +744,20 @@ export function exitReport(g: ExitGraph, features: readonly StibFeature[], stati
   const ex = [...byStation.entries()].sort((a, b) => a[0].localeCompare(b[0], 'fr'));
   lines.push(`${P} : sorties retenues pour ${ex.length} stations (rue ou place, 3 au plus par arrêt, la plus proche du quai d'abord) :`);
   for (const [st, xs] of ex) lines.push(`${P} : ${st} → ${xs.map((x) => `${x.name} (${x.m} m)`).join(', ')}`);
+  // le fichier publié : taille, nom le plus long (l'écran le coupe entre deux mots), jointure avec les arrêts de l'appli
+  const file = exitsFile(codes, { version: g.version || '1970-01-01', builtAt: '' });
+  const allNames = Object.values(file.stops).flatMap((s) => s.x.map((x) => x[0]));
+  const longest = allNames.reduce((a, b) => (b.length > a.length ? b : a), '');
+  lines.push(`${P} : fichier des sorties : ${Object.keys(file.stops).length} arrêts, ${allNames.length} sorties, ${new Set(allNames).size} noms, ${Buffer.byteLength(JSON.stringify(file), 'utf8')} octets ; nom le plus long : « ${longest} » (${longest.length} caractères)`);
+  let join: ExitReport['join'];
+  if (meta.published) {
+    const j = joinPublished(file, meta.published);
+    const total = j.reached.length + j.lost.length;
+    join = { published: meta.published.size, reached: j.reached.length, lost: j.lost.length };
+    lines.push(`${P} : arrêts de l'appli : ${meta.published.size} arrêts physiques STIB publiés (fichiers de ligne) ; numéros du fichier des sorties retrouvés par l'appli ${j.reached.length} sur ${total} (${pct(j.reached.length, total)})`);
+    const lost = j.lost.map((k) => `${file.stops[k].s || '?'} (${k})`);
+    for (let i = 0; i < lost.length; i += 12) lines.push(`${P} : numéros du fichier sans arrêt publié : ${lost.slice(i, i + 12).join(', ')}`);
+  }
   const fails = codes.filter((c) => c.cls !== 'E');
   const failLine = (cls: ExitClass[], label: string) => {
     const xs = fails.filter((c) => cls.includes(c.cls)).map((c) => `${c.name || '?'} (${c.code}, ${c.cls})`);
@@ -734,5 +788,5 @@ export function exitReport(g: ExitGraph, features: readonly StibFeature[], stati
     for (let i = 0; i < missing.length; i += 12) lines.push(`${P} : stations de métro sans arrêt OSM sous terre : ${missing.slice(i, i + 12).join(', ')}`);
     for (let i = 0; i < notNamed.length; i += 12) lines.push(`${P} : stations de métro sans sortie nommée : ${notNamed.slice(i, i + 12).join(', ')}`);
   }
-  return { lines, rate, codes, ...(official ? { official } : {}) };
+  return { lines, rate, codes, ...(official ? { official } : {}), ...(join ? { join } : {}) };
 }

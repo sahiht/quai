@@ -76,11 +76,17 @@ const own = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k)
  * d'arrêt ou sans sortie connue (arrêt en surface). Numéro exact, sinon sans sa lettre finale (« 6357F » → « 6357 »).
  */
 export function exitsOf(f: ExitsFile | null | undefined, op: string | undefined, stopId: string | undefined): ExitPoint[] {
-  if (!f || op !== 'stib' || !stopId) return [];
-  const bare = stopId.replace(/[A-Za-z]+$/, '');
-  const key = own(f.stops, stopId) ? stopId : bare && own(f.stops, bare) ? bare : null;
+  if (!f || op !== 'stib') return [];
+  const key = exitKey(f, stopId);
   if (key === null) return [];
   return f.stops[key].x.map(([name, lat, lon, m]) => ({ name, lat, lon, m }));
+}
+
+/** Clé du fichier pour un numéro d'arrêt physique : le numéro exact, sinon sans sa lettre finale ; null s'il n'y est pas. */
+export function exitKey(f: ExitsFile, stopId: string | undefined): string | null {
+  if (!stopId) return null;
+  const bare = stopId.replace(/[A-Za-z]+$/, '');
+  return own(f.stops, stopId) ? stopId : bare && own(f.stops, bare) ? bare : null;
 }
 
 const RAD = Math.PI / 180;
