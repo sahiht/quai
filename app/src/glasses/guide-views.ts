@@ -697,8 +697,11 @@ function whereRows(s: GuideState, j: Journey, ctx: ViewCtx, maxPx: number): Wher
   return rows;
 }
 
-/** Les rangées qui tiennent : l'arrivée s'efface d'abord, puis la chaîne, puis l'arrêt suivant (§ 12). */
-function fitWhere(rows: WhereRow[], max: number): WhereRow[] {
+/**
+ * 1.3.1 (PRD-1.3.1 § 12) : les rangées de « Où tu en es » qui tiennent dans `max` : l'arrivée s'efface d'abord, puis la
+ * chaîne, puis l'arrêt suivant (`drop` : 1, 2, 3) ; les autres, dont la progression, jamais.
+ */
+export function fitWhere<T extends { drop?: number }>(rows: T[], max: number): T[] {
   let out = rows;
   for (const rank of [DROP.arr, DROP.chain, DROP.next]) {
     if (out.length <= max) break;
