@@ -526,7 +526,7 @@ async function s131trajet(ctx: Ctx131): Promise<void> {
     const bad = want.filter(([re]) => !rows.some((l) => re.test(l))).map(([, w]) => w);
     check(!bad.length, `écran du trajet, rangées attendues absentes :\n        ${bad.join('\n        ')}\n      vu : ${JSON.stringify(s.lines)}`);
     // dernière marche (après le tram) : jamais de « → » (la destination n'est pas un arrêt)
-    const last = s.lines.find((l) => /^~?08:4\d à pied \d+ min/.test(N(l)))!;
+    const last = [...s.lines].reverse().find((l) => /^~?\d\d:\d\d à pied \d+ min/.test(N(l)))!;
     check(last && !/→/.test(last), `la dernière marche ne nomme pas d’arrêt (§ 4 : inchangée) : ${JSON.stringify(s.lines)}`);
     // B14 (U1) : l'heure d'arrivée de la dernière marche, pâle (niveau 2)
     await sleep(300);

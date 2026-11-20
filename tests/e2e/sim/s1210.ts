@@ -976,7 +976,9 @@ async function s1210sim(ctx: Ctx): Promise<void> {
     check(s.lines[0] === '! Voie modifiée : l’IC part de la voie 6' || /^Départ \d\d:\d\d, dans \d+ min {3}arrivée ~?\d\d:\d\d$/.test(s.lines[0] ?? ''), `ligne du haut « ${s.lines[0]} » (§ 5 : « Départ 07:05, dans 3 min   arrivée 08:54 », ou l’alerte du trajet)`);
     // 1.3.0 : la ligne d'action prend place juste au-dessus des aides (PRD-1.3.0 § 1)
     const rows = s.lines.slice(1, ctx.v130 ? -3 : -2);
-    const re = /^~?\d\d:\d\d (à pied \d+ min(, pluie)?|(Bus|Tram|Métro|IC|S\d+|L|P|Bus SNCB)\b.*? → .+?)( {3}(~?\d\d:\d\d|marge \d+ min|très juste|SUPPRIMÉ))?$/;
+    // 1.3.1 (PRD-1.3.1 § 4) : une marche vers un véhicule nomme l'arrêt où monter (« à pied 7 min → Flagey ») ; B14 : la
+    // dernière porte l'heure d'arrivée à droite
+    const re = /^~?\d\d:\d\d (à pied \d+ min(?: → .+?)?(, pluie)?|(Bus|Tram|Métro|IC|S\d+|L|P|Bus SNCB)\b.*? → .+?)( {3}(~?\d\d:\d\d|marge \d+ min|très juste|SUPPRIMÉ))?$/;
     const bad = rows.filter((l) => l && !re.test(l) && !/^Fin du trajet\.|^▽ /.test(l));
     check(!bad.length, `rangées d’étapes (§ 5 : « 07:12   Bus 6 → Gare des Guillemins   07:20 », « à pied 5 min ») : ${JSON.stringify(bad)}`);
     check(rows.some((l) => /^~?07:4[24] IC voie 6 ! → Bruxelles-Nord {3}08:42$/.test(l)), `rangée de l’IC « 07:44 IC voie 6 ! → Bruxelles-Nord   08:42 » (voie modifiée, § 5) : ${JSON.stringify(rows)}`);

@@ -72,7 +72,10 @@ export const TXT = {
   /** 1.2.10, inchangé : le toucher ouvre toujours les arrêts du départ, où l'on choisit « j'y descends ». */
   stops: '△▽ arrêts   toucher : j’y descends   double : retour',
   favorites: '△▽ choisir   toucher : ouvrir   double : retour',
-  moment: 'toucher : effacer   appui long : arrêter',
+  /** 1.3.1 (PRD-1.3.1 § 2) : « masquer » (TXT.moment suit la spécification jouée, guide-oracle.ts useSpec) */
+  get moment(): string {
+    return O.HINTS.moment;
+  },
   /** § 4 */
   offMap: 'Hors de Belgique',
   offMapArrow: 'pas de chemin à pied : suis la flèche',
@@ -394,7 +397,27 @@ interface Run {
   blocked?: string;
 }
 const isGuide = (s: GlassesScreen) => s.screen === 'guide';
-const isEmpty = (s: GlassesScreen) => s.screen === 'guide' && !s.title && s.lines.every((l) => !l.trim());
+/**
+ * Écran calme du guidage : rien jusqu'à la 1.3.0 ; 1.3.1 (PRD-1.3.1 § 1, B9) : « · · · » seul, ou à bord la ligne de
+ * progression. Aussi pour les écrans du simulateur (`calm`).
+ */
+const calm = (s: { screen: string; title: string; lines: string[] }) =>
+  s.screen === 'guide' && !s.title && s.lines.every((l) => !l.trim() || (O.SPEC.v131 && (O.matches(l, O.T131.dots) || O.PROGRESS_RE.test(O.norm(l)))));
+const isEmpty = (s: GlassesScreen) => calm(s);
+/** 1.3.1 (A7, E3) : un toucher ne masque qu'un message affiché depuis au moins 1,5 s. */
+const maskWait = () => (O.SPEC.v131 ? sleep(1_600) : Promise.resolve());
+
+/**
+ * Menu de Quai Web : le curseur sur le choix `label` (1.3.0 : « Arrêter le guidage », « Voir tout le trajet » ; 1.3.1, B10 :
+ * « Voir tout le trajet », « Voir les arrêts », « Arrêter le guidage », curseur sur le premier).
+ */
+async function menuChoose(r: Run, label: string): Promise<void> {
+  const m = r.page.lastScreen()!;
+  const k = m.lines.findIndex((l) => O.norm(l).endsWith(label));
+  check(m.screen === 'menu' && k >= 0, `choix « ${label} » absent du menu : ${show(m)}`);
+  for (let i = 0; i < 6 && r.page.lastScreen()?.sel !== k; i++) await gesture(r, (r.page.lastScreen()?.sel ?? 0) < k ? 'down' : 'up');
+  check(r.page.lastScreen()?.sel === k, `curseur du menu pas arrivé sur « ${label} » (sel ${r.page.lastScreen()?.sel})`);
+}
 const momentKind = (s: GlassesScreen) => (s.moment && typeof s.moment === 'object' ? String((s.moment as { kind?: unknown }).kind ?? '') : '');
 
 async function openWeb(r: Run, url: string): Promise<GlassesScreen> {
@@ -578,7 +601,7 @@ async function s130actionWeb(ctx: Ctx130): Promise<void> {
       // menu de l'appui long, « Voir tout le trajet » : l'écran du trajet guidé
       await gesture(r, 'long');
       await waitGuide(r, 'menu de l’appui long', (s) => s.screen === 'menu');
-      await gesture(r, 'down');
+      await menuChoose(r, 'Voir tout le trajet');
       await gesture(r, 'tap');
       const s = await waitGuide(r, 'écran du trajet guidé', (x) => x.screen === 'steps' && loaded(x));
       stepsCommon(s, TXT.guided);
@@ -593,6 +616,7 @@ async function s130actionWeb(ctx: Ctx130): Promise<void> {
       // arrêter le guidage, puis « Me guider pendant un trajet » éteint (PRD-1.2.10 § 3.5)
       await gesture(r, 'long');
       await waitGuide(r, 'menu', (s) => s.screen === 'menu');
+      await menuChoose(r, 'Arrêter le guidage');
       await gesture(r, 'tap');
       await waitGuide(r, 'accueil après « Arrêter le guidage »', (s) => s.screen === 'home');
       await page.eval(`(() => { const s = JSON.parse(localStorage.getItem('quai.settings')); s.display = { ...s.display, guide: false }; localStorage.setItem('quai.settings', JSON.stringify(s)); return true; })()`);
@@ -863,6 +887,7 @@ async function s130offmap(ctx: Ctx130): Promise<void> {
       // § 4 : une fois, au début de la marche (après « Partir maintenant », PRIO) ; aucun virage
       const cur = r.page.lastScreen();
       if (cur && isGuide(cur) && !isEmpty(cur)) {
+        await maskWait();
         await gesture(r, 'tap');
         await waitGuide(r, 'écran vide', isEmpty);
       }
@@ -910,6 +935,7 @@ async function s130offmap(ctx: Ctx130): Promise<void> {
       await goTo(r, tr, mid);
       const cur = r.page.lastScreen();
       if (cur && isGuide(cur) && !isEmpty(cur)) {
+        await maskWait();
         await gesture(r, 'tap');
         await waitGuide(r, 'écran vide', isEmpty);
       }
@@ -1095,9 +1121,10 @@ async function simGuideToLeave(ctx: Ctx130, preset: string): Promise<{ s: Screen
   await host.eval(`window.__quaiPushFix(${JSON.stringify({ ...fix, at: j.leaveAt - 20_000 })})`);
   await sleep(600);
   await sim.drain();
-  if (sim.last?.screen === 'guide' && sim.last.lines.some((l) => l.trim())) {
+  if (sim.last?.screen === 'guide' && !calm(sim.last)) {
+    await maskWait();
     await sim.input('click');
-    await sim.waitScreen((x) => x.screen === 'guide' && !x.title && x.lines.every((l) => !l.trim()), 8_000, 'écran calme avant l’heure de partir');
+    await sim.waitScreen(calm, 8_000, 'écran calme avant l’heure de partir');
   }
   await sim.drain();
   const from = sim.entries.length;
@@ -1202,8 +1229,9 @@ async function s130remind(ctx: Ctx130): Promise<void> {
       check(rebuilds(sim, from) >= 2, `pages entières : ${rebuilds(sim, from)} pour 2 rappels`);
       const j = (await host.storage('quai.journal')) ?? '';
       check(/"remind"/.test(j), 'journal : les rappels ne sont pas notés (PRD-1.3.0 § 6.2, § 6.4)');
+      await maskWait();
       await sim.input('click');
-      const e = await sim.waitScreen((x) => x.screen === 'guide' && !x.title && x.lines.every((l) => !l.trim()), 8_000, 'écran vide après le toucher');
+      const e = await sim.waitScreen(calm, 8_000, 'écran vide après le toucher');
       return { screen: e, shot: false };
     });
     await ctx.step('vu-tete-levee', async () => {
@@ -1286,8 +1314,10 @@ async function s130check(ctx: Ctx130): Promise<void> {
     return {};
   });
   await ctx.step('toucher-efface', async () => {
+    // 1.3.1 (A7) : le toucher masque un message affiché depuis 1,5 s au moins
+    await maskWait();
     await sim.input('click');
-    const e = await sim.waitScreen((x) => x.screen === 'guide' && !x.title && x.lines.every((l) => !l.trim()), 8_000, 'écran vide après le toucher');
+    const e = await sim.waitScreen(calm, 8_000, 'écran calme après le toucher');
     const j = (await host.storage('quai.journal')) ?? '';
     check(/"battery"|batterie/i.test(j), 'journal : batterie au départ pas notée (PRD-1.3.0 § 6.4)');
     return { screen: e, shot: false };
@@ -1369,11 +1399,15 @@ async function s130journal(ctx: Ctx130): Promise<void> {
           await goTo(r, tr, t);
           pushed.push(pointAt(tr.points, t));
           const cur = r.page.lastScreen();
-          if (cur && isGuide(cur) && !isEmpty(cur)) await gesture(r, 'tap');
+          if (cur && isGuide(cur) && !isEmpty(cur)) {
+            await maskWait();
+            await gesture(r, 'tap');
+          }
         }
         // arrêter le guidage (menu de l'appui long)
         await gesture(r, 'long');
         await waitGuide(r, 'menu', (x) => x.screen === 'menu');
+        await menuChoose(r, 'Arrêter le guidage');
         await gesture(r, 'tap');
         await waitGuide(r, 'accueil', (x) => x.screen === 'home');
         return { screen: s };

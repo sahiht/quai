@@ -150,6 +150,61 @@ chaque écriture du stockage ; il exécute les ordres du test (`host.eval` : pag
 Formes vérifiées sur le SDK 0.0.16. Rien n'est ajouté à l'appli construite, et les scénarios existants ne le
 chargent pas.
 
+### 1.3.1 : la commande de l'intégrateur
+
+`app.json` passe en 1.3.1 dès la spécification : comme en 1.3.0, les attentes se choisissent par `--spec` (ou
+`QUAI_E2E_SPEC`), 1.3.1 par défaut. Sur la version fusionnée (pôles Guidage et Écrans et téléphone) :
+
+```sh
+# 1.3.1 (défaut) : les treize scénarios s131, puis toute la suite (s1210, s130 et s131 compris)
+cd tests/e2e && npm test && npm run typecheck && npm run sim -- --port 9971 --only 's131*'
+npm run sim -- --port 9971
+
+# rejouer les attentes de la 1.3.0 (sur release-1.3.0, ou pour comparer) : s131 pas joués
+npm run sim -- --port 9971 --spec 1.3.0
+```
+
+Sur la branche du pôle Qualité avant les pôles (1.3.0 et la spécification de la 1.3.1), `--spec 1.3.0` : 326/326 en
+1947 s (seul l'en-tête du journal suit désormais `app.json`). Textes attendus : `sim/guide-oracle.ts` (`T131`, et
+`useSpec('1.3.1')` qui passe l'oracle du guidage aux mots du PRD-1.3.1 § 12 : « masquer », « Où tu en es », B10, B12,
+B13, B16), écrits d'après le PRD seul ; quand le PRD laisse la forme aux pôles, un motif, et chaque échec dit le texte
+du PRD et celui de l'écran.
+
+| Scénario | Où | Ce qui est vérifié (PRD-1.3.1) |
+| --- | --- | --- |
+| `s131accueil` | simulateur Even Hub | Ordre « Autour de moi », « Favoris » et ses favoris, « Gares », « Lignes », « Arrêts », curseur sur « Autour de moi » (§ 8), aucun message pour qui vient de la 1.3.0 (§ 9), « ! » d'un favori (B15), relief mesuré ; aides des listes (L6) ; « Gares de train » en accordéon (B21) ; « En cours » en tête, curseur dessus (§ 8) |
+| `s131trajet` | simulateur Even Hub | « à pied 9 min → Namur » dans l'accordéon et l'écran du trajet, la correspondance « → Gare du Nord », dernière marche sans nom, son arrivée pâle mesurée (§ 4, B14) |
+| `s131arrets` | simulateur Even Hub | « ▶ Me guider jusqu'à … » au plus clair (alpha 255) au-dessus de « △▽ arrêts   double : retour », qui suit le curseur, une rangée de moins (tram 3) ; rien sur la gare de la montée, puis Gembloux, Bruxelles-Central et le guidage (IC, § 6) |
+| `s131soir` | simulateur Even Hub | 23:30 : favoris avec « demain HH:MM → HH:MM » (B20) |
+| `s131apos` | simulateur Even Hub | Données des fixtures avec la gare de « Braine-l'Alleud » (apostrophe droite, comme la SNCB) : « Gares de train », tableau de Waterloo, tout le trajet d'un S1, toujours « ’ », réglage enregistré inchangé (§ 7) |
+| `s131calme` | Quai Web | « Où tu en es » au lancement (« Guidage en cours », « Jusqu'à … », « Ensuite : partir à … »), « · · · » au plus pâle en bas au centre et fixes (§ 1), « masquer » (§ 2), toucher trop tôt sans effet (A7), « monter » ramène l'écran du guidage depuis l'accueil, jamais un virage (A1), progression à bord (B9), « Où tu en es » à bord, menu à trois choix et « Voir les arrêts » (B10), marche après la descente (B17), dernière marche, rien hors du guidage |
+| `s131memo` | Quai Web | « j'y descends » à Bruxelles-Central, puis la liste s'ouvre sur lui avec « ▶ Me guider jusqu'à Bruxelles-Central » (B11) |
+| `s131rate` | Quai Web | Parti trop tard : « à pied » tant qu'on marche vers la gare, puis « Ton IC … est parti », « Nouveau trajet : IC à 08:42, voie 5 » (A2, B12) |
+| `s131sansrt` | Quai Web, scène noRT | IC gardé 12 min après son heure, « Ensuite : IC à ~07:42 », « Si tu le rates : … », jamais « dans ~1 min » ; « Nouveau trajet » sans « est parti » (A3) |
+| `s131demitour` | Quai Web | « Fais demi-tour », « vers … », la flèche, après 40 m dans le mauvais sens (A6) |
+| `s131sousterre` | Quai Web | « Position perdue » avant de partir avec « Quai suit l'horaire en attendant » ; rien à bord sans position (A8) ; « Pas de position : Quai suit l'horaire » (L3) |
+| `s131pluie` | Quai Web | Place Rogier à 08:46 sous la pluie du faux Open-Meteo : « pluie prévue » sur « Partir maintenant » (B19) |
+| `s131tel` | Chrome (téléphone), Quai Web | Ordre de l'accueil du téléphone, « Où vas-tu ? » en haut (§ 8), « Bureau » (L7), « ! » (B15), aide de « Me guider » (L2), « Autre adresse   dans l'onglet Réglages » (L8), carte « En cours » : « Ensuite : partir à … » (L5), « Maintenant : à pied vers l'arrêt Gare du Nord » (U3) |
+
+Avec les attentes 1.3.1 (défaut), les scénarios existants attendent les textes de la 1.3.1 :
+
+- accueil (`s1`, `s1noRT`, `s1run`, `s2`, `s3`, `waterloo`, `holiday`, `news`, `firstrun`, `stale`, `phone`, `web`,
+  `reopen`, `s1210sim`) : l'ordre du § 8, curseur sur « Autour de moi » à l'ouverture (rangs lus sur l'écran :
+  `favSel`, `firstFavSel`), dernière rubrique « Arrêts », « ! » d'un favori (B15) ; téléphone : mêmes rubriques dans
+  le même ordre, « Bureau » et « Maison » (L7) ;
+- écran du trajet et accordéon (`s1`, `waterloo`, `s1210sim`, `s130fav`, `s2`) : « 07:35 à pied 7 min → Namur »,
+  « 08:21 à pied 2 min → Gare du Midi », l'arrivée de la dernière marche, « à pied 9 min → Namur » puis « IC 07:42 +2
+  voie 6 au lieu de 4, 1 changement : tram 3 » (§ 4, B14) ;
+- arrêts d'un départ et trajet d'un train (`s1`, `s1210ride`, `s130board`) : aides « △▽ arrêts   double : retour », la
+  ligne d'action au-dessus (ôtée des rangées lues), un arrêt cherché par ▼ de page en page (`cursorRowText`) ;
+- guidage de Quai Web (`s1210go` et les autres s1210) : « masquer », toucher après 1,5 s (A7), « · · · » sur l'écran
+  calme (contrôle au pixel `checkCalmPixels`), « Où tu en es » de la 1.3.1 (`where131`), virage avec une majuscule,
+  « Tram 3 dans ~1 min », menu à trois choix ;
+- listes (`s1`, `s2`, `reopen`) : « toucher : départs » (Arrêts, Autour de moi), « toucher : parcours » (Lignes) (L6).
+
+Contrôle au pixel : la rangée de la ligne d'action qui suit le curseur reste réservée même vide (§ 6) : `pixels.ts`
+la déduit de l'aide sans « toucher » (« △▽ arrêts   double : retour »).
+
 Suites partielles : `npm run test:data` (données et téléchargement), `npm run test:core` (cœur, robustesse, trajets
 et adresses). Données réelles, à la demande : `QUAI_REAL_DATA=/home/claude/real-data-11/data npm run test:real`
 (instantané 1.1 couvrant le 11/11 et le 12/11/2026).
