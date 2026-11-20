@@ -131,6 +131,22 @@ describe('nightly.yml', () => {
     expect(wf.jobs.deploy.if).toBe('${{ !inputs.verification }}');
   });
 
+  it('1.3.1 (R1) : mesure des sorties du métro seulement en vérification, sans bloquer, extrait hors du cache des nuits', () => {
+    const steps = wf.jobs.build.steps;
+    const i = (pred: (s: Step) => boolean) => steps.findIndex(pred);
+    const k = i((s) => s.name === 'Mesurer les sorties du métro (vérification)');
+    expect(steps[k]).toMatchObject({
+      if: "${{ inputs.verification && !cancelled() && steps.data.outcome == 'success' }}",
+      'continue-on-error': true,
+      'working-directory': 'pipeline',
+      run: 'node --experimental-strip-types src/walk/cli.ts exits --tiles ../site/data/walk --stops ../site/data --input "$RUNNER_TEMP/belgium-latest.osm.pbf"',
+    });
+    // après la publication des chemins à pied de la nuit (les tuiles mesurées), avant la sauvegarde du cache
+    expect(k).toBeGreaterThan(i((s) => s.name === 'Publier les chemins à pied (site/data/walk)'));
+    expect(k).toBeLessThan(i((s) => s.uses === 'actions/cache/save@v6'));
+    expect(steps[k].run).not.toContain('gtfs-cache');
+  });
+
   it('job deploy : environnement github-pages, deploy-pages avec délai de 30 min et un nouvel essai', () => {
     const d = wf.jobs.deploy;
     expect(d.needs).toBe('build');

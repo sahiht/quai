@@ -497,3 +497,116 @@ export function firstBlockWithoutNodes(f: PbfFile): number | null {
   }
   return lo;
 }
+
+/* ------------------------------ 1.3.1 : nœuds étiquetés (mesure de vérification) ------------------------------ */
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 14, R1 ; mesure de vérification, rien de publié) : nœuds d'un bloc qui portent la clé `key`,
+ * avec toutes leurs étiquettes (`onKeyed`), et coordonnées des nœuds que demande `wanted` (`onWanted`). Un bloc dont
+ * la table de chaînes n'a pas la clé ne décode aucune étiquette. Ne sert pas au graphe piéton (readNodes reste seul).
+ */
+export function readKeyedNodes(
+  buf: Uint8Array,
+  key: string,
+  onKeyed: (id: number, lat: number, lon: number, tags: Map<string, string>) => void,
+  wanted?: (id: number) => boolean,
+  onWanted?: (id: number, lat: number, lon: number) => void,
+): void {
+  const info = blockInfo(buf);
+  const s = info.strings;
+  const keyIdx = s.indexOf(key);
+  const want = wanted && onWanted ? wanted : null;
+  if (keyIdx <= 0 && !want) return;
+  const scale = info.granularity * 1e-9;
+  const latOff = info.latOffset * 1e-9;
+  const lonOff = info.lonOffset * 1e-9;
+  const keys: number[] = [];
+  const vals: number[] = [];
+  const tagsOfIdx = () => {
+    const m = new Map<string, string>();
+    for (let i = 0; i < keys.length; i++) {
+      if (keys[i] >= s.length || vals[i] >= s.length) throw new PbfError('étiquette hors de la table');
+      m.set(s[keys[i]], s[vals[i]]);
+    }
+    return m;
+  };
+  for (const [gs, ge] of info.groups) {
+    const g = new Pb(buf, gs, ge);
+    while (g.pos < g.end) {
+      const tag = g.varint();
+      const field = tag >>> 3;
+      const wire = tag & 7;
+      if (field === 2 && wire === 2) {
+        const [ds, de] = g.bytes();
+        const d = new Pb(buf, ds, de);
+        let idAt: [number, number] | null = null;
+        let latAt: [number, number] | null = null;
+        let lonAt: [number, number] | null = null;
+        let kvAt: [number, number] | null = null;
+        while (d.pos < d.end) {
+          const t = d.varint();
+          const f = t >>> 3;
+          if (f === 1 && (t & 7) === 2) idAt = d.bytes();
+          else if (f === 8 && (t & 7) === 2) latAt = d.bytes();
+          else if (f === 9 && (t & 7) === 2) lonAt = d.bytes();
+          else if (f === 10 && (t & 7) === 2) kvAt = d.bytes();
+          else d.skip(t & 7);
+        }
+        if (!idAt) continue;
+        if (!latAt || !lonAt) throw new PbfError('nœuds sans coordonnées');
+        const pi = new Pb(buf, idAt[0], idAt[1]);
+        const pa = new Pb(buf, latAt[0], latAt[1]);
+        const po = new Pb(buf, lonAt[0], lonAt[1]);
+        // keys_vals : pour chaque nœud, des paires (clé, valeur) terminées par 0 ; absent si aucun nœud n'est étiqueté
+        const kv = keyIdx > 0 && kvAt ? new Pb(buf, kvAt[0], kvAt[1]) : null;
+        let id = 0;
+        let la = 0;
+        let lo = 0;
+        while (pi.pos < pi.end) {
+          if (pa.pos >= pa.end || po.pos >= po.end) throw new PbfError('nœuds incohérents');
+          id += pi.sint();
+          la += pa.sint();
+          lo += po.sint();
+          let keyed = false;
+          if (kv) {
+            keys.length = 0;
+            vals.length = 0;
+            while (kv.pos < kv.end) {
+              const k = kv.varint();
+              if (k === 0) break;
+              keys.push(k);
+              vals.push(kv.varint());
+              if (k === keyIdx) keyed = true;
+            }
+          }
+          if (keyed) onKeyed(id, latOff + scale * la, lonOff + scale * lo, tagsOfIdx());
+          if (want && want(id)) onWanted!(id, latOff + scale * la, lonOff + scale * lo);
+        }
+      } else if (field === 1 && wire === 2) {
+        const [ns, ne] = g.bytes();
+        const p = new Pb(buf, ns, ne);
+        let id = 0;
+        let la = 0;
+        let lo = 0;
+        keys.length = 0;
+        vals.length = 0;
+        while (p.pos < p.end) {
+          const t = p.varint();
+          const f = t >>> 3;
+          if (f === 1 && (t & 7) === 0) id = p.sint();
+          else if ((f === 2 || f === 3) && (t & 7) === 2) {
+            const [a, b] = p.bytes();
+            const q = new Pb(buf, a, b);
+            const into = f === 2 ? keys : vals;
+            while (q.pos < q.end) into.push(q.varint());
+          } else if (f === 8 && (t & 7) === 0) la = p.sint();
+          else if (f === 9 && (t & 7) === 0) lo = p.sint();
+          else p.skip(t & 7);
+        }
+        if (keys.length !== vals.length) throw new PbfError('étiquettes de nœud incohérentes');
+        if (keyIdx > 0 && keys.includes(keyIdx)) onKeyed(id, latOff + scale * la, lonOff + scale * lo, tagsOfIdx());
+        if (want && want(id)) onWanted!(id, latOff + scale * la, lonOff + scale * lo);
+      } else g.skip(wire);
+    }
+  }
+}

@@ -117,6 +117,17 @@ jobs:
         working-directory: pipeline
         run: node --experimental-strip-types src/walk/cli.ts publish --cache ../gtfs-cache/walk --data ../site/data
 
+      # 1.3.1 (PRD-1.3.1 § 14, R1) : branche de vérification seulement, rien de publié. Arrêts STIB sous terre
+      # d'OpenStreetMap (ref:STIB_MIVB) et sorties nommées par les couloirs, sur les tuiles piétonnes de la nuit ;
+      # bilan dans le journal (lignes « Sorties du métro »). L'extrait est téléchargé à part, dans le dossier temporaire
+      # du runner (jamais dans le cache des nuits).
+      - name: Mesurer les sorties du métro (vérification)
+        if: ${{ inputs.verification && !cancelled() && steps.data.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 40
+        working-directory: pipeline
+        run: node --experimental-strip-types src/walk/cli.ts exits --tiles ../site/data/walk --stops ../site/data --input "$RUNNER_TEMP/belgium-latest.osm.pbf"
+
       # Même si un réseau a échoué : on garde les GTFS de cette nuit et ceux qui ont servi de repli.
       - name: Garder les GTFS pour les nuits suivantes
         if: ${{ !cancelled() && steps.data.outcome != 'skipped' }}
