@@ -9,6 +9,7 @@
  *  - Modification : pas de choix, le formulaire du favori ; suppression confirmée dans la page.
  */
 import type { Endpoint, Favorite, FavoriteTrip, Propose, SearchItem } from '../../core/api';
+import { apos } from '../../core/typo';
 import { displayName } from '../../core/util';
 import { LIMITS, newId } from '../../settings';
 import { header, type PhoneCtx } from '../app';
@@ -48,7 +49,8 @@ export function withFavorite(list: Favorite[], fav: Favorite): Favorite[] | null
  */
 export function departuresLink(ctx: PhoneCtx, it: SearchItem): HTMLElement {
   if (it.op !== 'sncb') return h('a', { class: 'jump', href: `#/arrets/ajouter?arret=${encodeURIComponent(it.id)}` }, typo(T.nextPassagesLink));
-  const name = displayName(it.n, ctx.settings.get().lang);
+  // 1.3.1 (§ 7) : le nom affiché ; la gare gardée (station) garde le nom des données
+  const name = apos(displayName(it.n, ctx.settings.get().lang));
   const hub = messageHub();
   const msg = hub.slot();
   const station = { areaId: it.id, name: it.n, lat: it.lat, lon: it.lon };

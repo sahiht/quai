@@ -62,12 +62,13 @@ describe('palier de marche (§ 1.1)', () => {
 });
 
 describe('ligne « moyens » (§ 2.3, § 7.2)', () => {
-  it('les véhicules, puis les marches dans l’ordre ; plus de 3 marches : le total ; sans marche : les véhicules', () => {
-    expect(meansLine(maisonParc().journeys[0])).toBe('bus W + S1, à pied 6 + 1 + 9 min');
-    expect(meansLine(maisonParc().journeys[1])).toBe('IC + IC, à pied 19 + 9 min');
-    expect(meansLine(maisonBureau().journeys[0])).toBe('bus 36 + IC + métro 2, 13 min à pied');
+  // 1.3.1 (PRD-1.3.1 § 4) : la première marche nomme l'arrêt où monter (« → Départ » : nom des trajets de trips.ts)
+  it('les véhicules, puis les marches dans l’ordre (la première vers l’arrêt où monter, puis les autres) ; plus de 2 autres : leur total ; sans marche : les véhicules', () => {
+    expect(meansLine(maisonParc().journeys[0])).toBe('bus W + S1, à pied 6 min → Départ, puis 1 + 9 min');
+    expect(meansLine(maisonParc().journeys[1])).toBe('IC + IC, à pied 19 min → Départ, puis 9 min');
+    expect(meansLine(maisonBureau().journeys[0])).toBe('bus 36 + IC + métro 2, à pied 5 min → Départ, puis 8 min');
     expect(meansLine(trip('short', at(8, 0), [[at(8, 0), at(8, 30), 'IC'], [at(8, 36), at(9, 0), 'IC']]))).toBe('IC + IC');
-    expect(typo(meansLine(braineMadou().journeys[0]))).toBe(`bus W + métro 2, à${NB}pied 8 + 1 + 2${NB}min`);
+    expect(typo(meansLine(braineMadou().journeys[0]))).toBe(`bus W + métro 2, à${NB}pied 8${NB}min${NB}→${NB}Départ, puis 1 + 2${NB}min`);
   });
 
   it('trajet à pied : pas de ligne (la carte dit déjà « 22 min à pied »)', () => {
@@ -79,10 +80,10 @@ describe('cartes des trois cas réels (§ 1.5, marche maximale 5 min)', () => {
   it('Maison → Parc : « Moins de marche » arrive 13 min après le plus rapide ; « Plus tôt de 13 min, mais 19 min à pied. »', () => {
     const r = maisonParc();
     expect(texts(r, 5)).toEqual([
-      ['Moins de marche', 'bus W + S1, à pied 6 + 1 + 9 min', 'Arrive 13 min après le plus rapide, avec moins de marche.'],
-      ['Plus tôt', 'IC + IC, à pied 19 + 9 min', 'Plus tôt de 13 min, mais 19 min à pied.'],
+      ['Moins de marche', 'bus W + S1, à pied 6 min → Départ, puis 1 + 9 min', 'Arrive 13 min après le plus rapide, avec moins de marche.'],
+      ['Plus tôt', 'IC + IC, à pied 19 min → Départ, puis 9 min', 'Plus tôt de 13 min, mais 19 min à pied.'],
       // même arrivée que la proposition 1, en partant plus tôt, mais palier 3 contre 1 : la marche le dit
-      ['Sans changement', 'S1, à pied 19 + 9 min', 'Aucun changement, même heure d’arrivée, mais avec 19 min à pied.'],
+      ['Sans changement', 'S1, à pied 19 min → Départ, puis 9 min', 'Aucun changement, même heure d’arrivée, mais avec 19 min à pied.'],
     ]);
     // heures du « Plus tôt » comme sur les lunettes (§ 3.3 : « 19:47 → 20:58 »)
     expect(timesText(r.journeys[1], nov11(19, 42))).toBe('19:47 → 20:58');
@@ -91,17 +92,17 @@ describe('cartes des trois cas réels (§ 1.5, marche maximale 5 min)', () => {
 
   it('Maison → Bureau : rien n’arrive avant, « Le plus court » arrive le plus tôt ; « Moins de changements » marche 19 min', () => {
     expect(texts(maisonBureau(), 5)).toEqual([
-      ['Le plus court', 'bus 36 + IC + métro 2, 13 min à pied', 'Arrive le plus tôt.'],
-      ['Moins de changements', 'IC + métro 2, à pied 19 + 3 + 2 min', 'Moins de changements, même heure d’arrivée, mais avec 19 min à pied.'],
-      ['Plus tard', 'S1 + métro 2, à pied 19 + 3 + 2 min', 'Un autre trajet, plus tard.'],
+      ['Le plus court', 'bus 36 + IC + métro 2, à pied 5 min → Départ, puis 8 min', 'Arrive le plus tôt.'],
+      ['Moins de changements', 'IC + métro 2, à pied 19 min → Départ, puis 3 + 2 min', 'Moins de changements, même heure d’arrivée, mais avec 19 min à pied.'],
+      ['Plus tard', 'S1 + métro 2, à pied 19 min → Départ, puis 3 + 2 min', 'Un autre trajet, plus tard.'],
     ]);
   });
 
   it('Braine-l’Alleud → Madou : « Moins de marche » (bus W, métro 2), « Plus tôt de 8 min, mais 22 min à pied. »', () => {
     expect(texts(braineMadou(), 5)).toEqual([
-      ['Moins de marche', 'bus W + métro 2, à pied 8 + 1 + 2 min', 'Arrive 8 min après le plus rapide, avec moins de marche.'],
-      ['Plus tôt', 'IC + métro 2, à pied 22 + 3 + 2 min', 'Plus tôt de 8 min, mais 22 min à pied.'],
-      ['Le suivant', 'bus W + métro 2, à pied 8 + 1 + 2 min', 'Même trajet, départ suivant.'],
+      ['Moins de marche', 'bus W + métro 2, à pied 8 min → Départ, puis 1 + 2 min', 'Arrive 8 min après le plus rapide, avec moins de marche.'],
+      ['Plus tôt', 'IC + métro 2, à pied 22 min → Départ, puis 3 + 2 min', 'Plus tôt de 8 min, mais 22 min à pied.'],
+      ['Le suivant', 'bus W + métro 2, à pied 8 min → Départ, puis 1 + 2 min', 'Même trajet, départ suivant.'],
     ]);
   });
 });
@@ -113,8 +114,8 @@ describe('phrases des autres propositions (§ 7.2, § 2.2)', () => {
     const r = (lw: Journey): PlanResult => ({ journeys: [first, lw] });
     const lw = later(at(8, 46));
     expect(texts(r(lw), 5)).toEqual([
-      ['Le plus court', 'S1, à pied 9 + 5 min', 'Arrive le plus tôt.'],
-      ['Moins de marche', 'bus W + métro 2, à pied 2 + 2 + 3 min', 'Arrive 16 min plus tard, avec moins de marche.'],
+      ['Le plus court', 'S1, à pied 9 min → Départ, puis 5 min', 'Arrive le plus tôt.'],
+      ['Moins de marche', 'bus W + métro 2, à pied 2 min → Départ, puis 2 + 3 min', 'Arrive 16 min plus tard, avec moins de marche.'],
     ]);
     expect(cardPhrase(later(at(8, 30)), r(later(at(8, 30))), 5)).toBe('Même heure d’arrivée, avec moins de marche.');
     expect(cardPhrase(later(at(8, 28)), r(later(at(8, 28))), 5)).toBe('Arrive 2 min plus tôt, avec moins de marche.');
@@ -125,9 +126,9 @@ describe('phrases des autres propositions (§ 7.2, § 2.2)', () => {
     const earlier = trip('earlier', nov11(13, 34), [22, [nov11(13, 56), nov11(14, 28), 'IC'], 11]);
     const lw = trip('lesswalk', nov11(13, 52), [4, [nov11(13, 56), nov11(14, 55), 'bus W'], 1, [nov11(14, 58), nov11(15, 10), 'métro 2'], 2]);
     expect(texts({ journeys: [first, earlier, lw] }, 5)).toEqual([
-      ['Le plus court', 'bus W + métro 2, à pied 8 + 1 + 2 min', 'Arrive 13 min après le plus rapide, avec moins de marche.'],
-      ['Plus tôt', 'IC, à pied 22 + 11 min', 'Plus tôt de 13 min, mais 22 min à pied.'],
-      ['Moins de marche', 'bus W + métro 2, à pied 4 + 1 + 2 min', 'Arrive 20 min plus tard, avec moins de marche.'],
+      ['Le plus court', 'bus W + métro 2, à pied 8 min → Départ, puis 1 + 2 min', 'Arrive 13 min après le plus rapide, avec moins de marche.'],
+      ['Plus tôt', 'IC, à pied 22 min → Départ, puis 11 min', 'Plus tôt de 13 min, mais 22 min à pied.'],
+      ['Moins de marche', 'bus W + métro 2, à pied 4 min → Départ, puis 1 + 2 min', 'Arrive 20 min plus tard, avec moins de marche.'],
     ]);
   });
 
@@ -148,15 +149,15 @@ describe('phrases des autres propositions (§ 7.2, § 2.2)', () => {
     const first = trip('short', at(7, 30), [6, [at(7, 36), at(8, 20), 'S1'], 2]);
     const earlier = trip('earlier', at(7, 25), [7, [at(7, 32), at(8, 10), 'IC'], 2]);
     expect(texts({ journeys: [first, earlier] }, 10)).toEqual([
-      ['Moins de marche', 'S1, à pied 6 + 2 min', 'Arrive 10 min après le plus rapide, avec moins de marche.'],
-      ['Plus tôt', 'IC, à pied 7 + 2 min', 'Plus tôt de 10 min, mais 7 min à pied.'],
+      ['Moins de marche', 'S1, à pied 6 min → Départ, puis 2 min', 'Arrive 10 min après le plus rapide, avec moins de marche.'],
+      ['Plus tôt', 'IC, à pied 7 min → Départ, puis 2 min', 'Plus tôt de 10 min, mais 7 min à pied.'],
     ]);
     // 4 min à pied contre 2 : pas « plus de marche » ; il part plus tôt
     const near = trip('short', at(7, 30), [2, [at(7, 32), at(8, 20), 'S1'], 2]);
     const early = trip('earlier', at(7, 25), [4, [at(7, 29), at(8, 10), 'IC'], 2]);
     expect(texts({ journeys: [near, early] }, 10)).toEqual([
-      ['Le plus court', 'S1, à pied 2 + 2 min', 'Le plus court sans partir plus tôt.'],
-      ['Plus tôt', 'IC, à pied 4 + 2 min', 'Plus tôt de 10 min, en partant à 07:23.'],
+      ['Le plus court', 'S1, à pied 2 min → Départ, puis 2 min', 'Le plus court sans partir plus tôt.'],
+      ['Plus tôt', 'IC, à pied 4 min → Départ, puis 2 min', 'Plus tôt de 10 min, en partant à 07:23.'],
     ]);
   });
 
@@ -208,7 +209,7 @@ describe('cartes de la recherche (§ 7.2)', () => {
     await until(() => el.querySelectorAll('.result').length === 3);
     const cards = [...el.querySelectorAll('.result')];
     expect(cards.map((c) => textOf(c.querySelector('.tag')))).toEqual(['Moins de marche', 'Plus tôt', 'Sans changement']);
-    expect(cards.map((c) => textOf(c.querySelector('.means')))).toEqual(['bus W + S1, à pied 6 + 1 + 9 min', 'IC + IC, à pied 19 + 9 min', 'S1, à pied 19 + 9 min']);
+    expect(cards.map((c) => textOf(c.querySelector('.means')))).toEqual(['bus W + S1, à pied 6 min → Départ, puis 1 + 9 min', 'IC + IC, à pied 19 min → Départ, puis 9 min', 'S1, à pied 19 min → Départ, puis 9 min']);
     expect(cards.map((c) => textOf(c.querySelector('.why')))).toEqual(['Arrive 13 min après le plus rapide, avec moins de marche.', 'Plus tôt de 13 min, mais 19 min à pied.', 'Aucun changement, même heure d’arrivée, mais avec 19 min à pied.']);
     expect(cards[0].querySelector('.btn-glasses')!.getAttribute('aria-label')).toBe('Afficher Moins de marche dans les lunettes');
     expect(cards[0].querySelector('.means')!.textContent).toContain(`9${NB}min`);

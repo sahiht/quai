@@ -284,6 +284,10 @@ button.add-link { border: 0; background: transparent; padding-left: 0; color: va
 .now-now { margin: 0; font-size: 15px; line-height: 21px; color: var(--body); overflow-wrap: anywhere; }
 .now-stop { align-self: flex-start; margin-top: 8px; }
 .now-card .msg { margin-top: 4px; }
+/* 1.3.1 (R6) : « Copier mon heure d’arrivée », après « Arrêter le guidage », et son message (« Copié : J’arrive vers 08:54. ») */
+.now-copy { align-self: flex-start; margin-top: 8px; }
+.now-copied { overflow-wrap: anywhere; }
+.now-copied-text { font-weight: 600; }
 .now-done { padding-left: 4px; }
 /* 1.3.0 : carte « En cours » : les problèmes de la vérification (batterie des lunettes, position perdue), deux au plus */
 .now-checks { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
@@ -294,6 +298,8 @@ button.add-link { border: 0; background: transparent; padding-left: 0; color: va
 .test-last { padding: 0 2px; }
 .test-box { padding: 18px 16px 16px; display: flex; flex-direction: column; gap: 14px; }
 .test-step { margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; }
+/* 1.3.1 (R7) : sous le conseil « Head-Up » ou « Rien », ce qu'il faut vérifier si l'affichage ne réagit pas */
+.test-note { margin: -4px 0 0; font-size: 15px; line-height: 21px; color: var(--body); }
 .test-left { margin: 0; font-size: 34px; line-height: 40px; font-weight: 600; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
 .test-actions, .test-answers { display: flex; flex-direction: column; gap: 10px; }
 

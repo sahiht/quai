@@ -77,11 +77,12 @@ describe('ligne des moyens d’un trajet : « pluie prévue »', () => {
 
   it('une marche de 5 min ou plus sous la pluie : « , pluie prévue » ; 4 min : rien', () => {
     const dry = j([leg('walk', T, 6), leg('ride', T + 6 * 60_000, 10), leg('walk', T + 16 * 60_000, 4)]);
-    expect(plain(meansLine(dry))).toBe('tram 3, à pied 6 + 4 min');
+    // 1.3.1 (PRD-1.3.1 § 4) : la première marche nomme l'arrêt où monter (ici « A »)
+    expect(plain(meansLine(dry))).toBe('tram 3, à pied 6 min → A, puis 4 min');
     const wet = j([leg('walk', T, 6, { rain: true }), leg('ride', T + 6 * 60_000, 10), leg('walk', T + 16 * 60_000, 4)]);
-    expect(plain(meansLine(wet))).toBe('tram 3, à pied 6 + 4 min, pluie prévue');
+    expect(plain(meansLine(wet))).toBe('tram 3, à pied 6 min → A, puis 4 min, pluie prévue');
     const short = j([leg('walk', T, 6), leg('ride', T + 6 * 60_000, 10), leg('walk', T + 16 * 60_000, 4, { rain: true })]);
-    expect(plain(meansLine(short))).toBe('tram 3, à pied 6 + 4 min');
+    expect(plain(meansLine(short))).toBe('tram 3, à pied 6 min → A, puis 4 min');
     // à pied tout du long : rien d'habitude (la carte le dit), « pluie prévue » sous la pluie
     expect(meansLine(j([leg('walk', T, 22)]))).toBe('');
     expect(meansLine(j([leg('walk', T, 22, { rain: true })]))).toBe('pluie prévue');

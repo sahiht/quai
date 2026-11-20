@@ -163,12 +163,15 @@ export const SECTION = {
   noPassage: 'aucun passage',
   /** Une ligne sans aucun passage (« Bus, tram, métro », détail d'une ligne). */
   noPassageAll: 'aucun passage dans les prochaines heures',
-  /** Arrêt d'une ligne choisie introuvable dans les données (§ 3, lineBoard `missing`) ; Quai Web : dans l'onglet Réglages. */
+  /**
+   * Arrêt d'une ligne choisie introuvable dans les données (§ 3, lineBoard `missing`) ; Quai Web : dans l'onglet
+   * Réglages (1.3.1, PRD-1.3.1 § 12, L8 : « Réglages » seul désigne aussi le bouton de cet onglet).
+   */
   missing: `introuvable${NB}: modifie-la sur le téléphone`,
-  missingWeb: `introuvable${NB}: modifie-la dans Réglages`,
+  missingWeb: `introuvable${NB}: modifie-la dans l’onglet Réglages`,
   /** 1.2.4 : sous « ARRÊTS », un arrêt (toutes ses lignes) introuvable. */
   missingStop: `introuvable${NB}: modifie-le sur le téléphone`,
-  missingStopWeb: `introuvable${NB}: modifie-le dans Réglages`,
+  missingStopWeb: `introuvable${NB}: modifie-le dans l’onglet Réglages`,
   /** Accueil, « Gares » : gare ou arrêt introuvable dans les données du jour (zone ni retrouvée ni déplacée). */
   missingStation: 'introuvable',
   /** Arrêt sans filtre (arrêt favori de la 1.2.1 migré) : « Gare du Nord · toutes les lignes ». */

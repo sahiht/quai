@@ -406,9 +406,9 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     expect(overflowing(bottom)).toEqual([]);
     expect(v.items[3].action).toEqual({ kind: 'go', key: korenmarkt, to: { type: 'address', label: 'Korenmarkt, 9000 Gent', lat: 51.0547, lon: 3.7217 }, label: 'Korenmarkt' });
     expect(v.items.at(-1)!.action).toEqual({ kind: 'toast', text: 'Tape l’adresse dans Quai, sur le téléphone' });
-    // Quai Web : « dans Réglages », la recherche de l'onglet Réglages
+    // Quai Web : « dans l’onglet Réglages » (1.3.1, L8), la recherche de l'onglet Réglages
     const web = favoritesView({ entries: a.entries }, ctxOf(now, s, { web: true }));
-    expect(web.items.at(-1)).toMatchObject({ a: 'Autre adresse', c: 'dans Réglages', action: { kind: 'phone', hash: '#/recherche', text: 'Tape l’adresse dans l’onglet Réglages' } });
+    expect(web.items.at(-1)).toMatchObject({ a: 'Autre adresse', c: 'dans l’onglet Réglages', action: { kind: 'phone', hash: '#/recherche', text: 'Tape l’adresse dans l’onglet Réglages' } });
     // la réponse d'une adresse récente : au format de l'accueil (planHomeText)
     const res = await fakeCore(() => now).route({ type: 'here' }, { type: 'place', placeId: 'fav-bureau' }, now, s, here);
     expect(nb(planHomeText(res, now))).toBe('dans 4 min → 08:58');
@@ -722,7 +722,7 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
     expect(list.screen).toBe('favorites');
     expect(check(list)).toEqual(['Ajouter un favori   sur le téléphone', 'Autre adresse   sur le téléphone', '△▽ choisir   toucher : ouvrir   double : retour']);
     expect(list.items[0].action).toEqual({ kind: 'open', route: { screen: 'message', kind: 'info', title: 'Favoris', lines: ['Aucun favori pour l’instant.', 'Ajoute Maison ou Bureau sur le téléphone.'] } });
-    expect(favoritesView({}, ctxOf(now, none, { web: true })).items[0]).toMatchObject({ a: 'Ajouter un favori', c: 'dans Réglages', action: { kind: 'phone', hash: '#/favoris/nouveau', text: 'Ajoute Maison ou Bureau dans l’onglet Réglages.' } });
+    expect(favoritesView({}, ctxOf(now, none, { web: true })).items[0]).toMatchObject({ a: 'Ajouter un favori', c: 'dans l’onglet Réglages', action: { kind: 'phone', hash: '#/favoris/nouveau', text: 'Ajoute Maison ou Bureau dans l’onglet Réglages.' } });
     // « Accueil sans favoris » : « Favoris   3 » sans favori dessous (il ouvre la liste) et « Près de … »
     const plain = homeView({ noFavorites: true, favorites: s.favorites.slice(0, 3).map((fav) => ({ fav })), nearbyCount: 3, near: 'Namur' }, ctxOf(now, s));
     expect(check(plain)).toEqual(['Près de Namur', 'Autour de moi   3 arrêts', 'Favoris   3', '', ...SECTIONS, HINT_HOME]);
