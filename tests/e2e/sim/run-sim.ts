@@ -2352,7 +2352,8 @@ async function late(): Promise<void> {
     await sim.select(1);
     await sim.input('click');
     const s = await sim.waitScreen(is('board', (x) => loaded(x) && /train/.test(x.title)), 15_000, 'trains');
-    check(/^IC {3}Anvers-Central {3}~?00:01 {2}voie 9$/.test(s.lines[1] ?? ''), `train de 00:01 sans « demain » (CA-S6.4) : « ${s.lines[1]} »`);
+    // 1.3.1 (§ 14, R3) : le dernier train vers Anvers d'après l'horaire : « , dernier » après sa destination
+    check((V131 ? /^IC {3}Anvers-Central, dernier {3}~?00:01 {2}voie 9$/ : /^IC {3}Anvers-Central {3}~?00:01 {2}voie 9$/).test(s.lines[1] ?? ''), `train de 00:01 sans « demain » (CA-S6.4)${V131 ? ', avec « , dernier » (R3)' : ''} : « ${s.lines[1]} »`);
     return { screen: s, pixels: false };
   });
 }

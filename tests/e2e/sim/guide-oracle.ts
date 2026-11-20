@@ -359,6 +359,10 @@ export const T131 = {
   starLine: '★ Ajoutée à tes lignes',
   starAlready: '★ Déjà dans tes favoris',
   starTrip: '★ Trajet ajouté à tes favoris',
+  /** § 14 (R4, R5, R6) : textes exacts des réglages et de la carte « En cours » (docs/v1.3.1/experts/06-rd.md) */
+  avoidStepsSub: 'Un chemin sans marches quand il existe (poussette, valise).',
+  sunSub: 'Le texte pâle devient plus clair.',
+  copyArrival: 'Copier mon heure d’arrivée',
   /** § 5 : conseil du test de l'écran, résultat « Head-Up » (tête levée) */
   headUp:
     'Pour voir les messages sans bouger la tête : dans l’appli Even, règle l’angle de l’affichage Head-Up à 0, en regardant un peu vers le bas pendant le réglage. L’écran restera allumé quand tu regardes devant toi ; la batterie des lunettes s’use un peu plus vite.',

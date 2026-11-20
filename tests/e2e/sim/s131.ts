@@ -181,6 +181,12 @@ export function homeOrderIssues(s: { lines: string[] }): { bad: string[]; at: nu
   return { bad, at, favs };
 }
 
+/**
+ * § 14 (R3) : rangée d'un tableau marquée « , dernier » : la ligne et sa destination (groupe 1), la marque, puis l'heure.
+ * À compléter ici si la règle change encore (elle ne fait que retirer des marques).
+ */
+export const LAST_ROW = /^(\S+(?: \S+)? {3}.+?), dernier {3}/;
+
 /** Ligne d'action (juste au-dessus des aides) d'un écran, si elle commence par « ▶ ». */
 const actionOf = (s: { lines: string[] }): string | undefined => {
   const l = s.lines[s.lines.length - 2];
@@ -455,6 +461,28 @@ async function s131accueil(ctx: Ctx131): Promise<void> {
     check(/^vers Bruxelles-Midi$/.test(N(open[0])), `1re ligne « ${open[0]} » au lieu de « vers Bruxelles-Midi » (B21, U7)`);
     check(/^puis IC vers Bruxelles-Midi, ~?08:42( voie 5)?$/.test(N(open[1])), `2e ligne « ${open[1]} » au lieu de « puis IC vers Bruxelles-Midi, 08:42 voie 5 » (B21, U7 : le train suivant)`);
     return { screen: s };
+  });
+  await ctx.step('tableau-dernier', async () => {
+    // § 14 (R3) : « , dernier » après la destination du dernier départ que l'on peut prendre d'après l'horaire. Tableau de
+    // Namur à 07:20 (données de test : un IC par heure vers Bruxelles-Midi, celui de 08:42 est le dernier du jour).
+    // La règle finale (décision du 20/11 à 21:58 : « peut-on le prendre ? ») ne fait que retirer des marques : LAST_ROW.
+    await sim.input('click');
+    const b = await sim.waitScreen((x) => x.screen === 'board' && loaded(x) && /^Namur/.test(x.title), 15_000, 'tableau de Namur');
+    const rows = b.lines.map((l) => N(l));
+    const marked = rows.filter((l) => LAST_ROW.test(l));
+    check(marked.length >= 1, `aucun départ marqué « , dernier » au tableau de Namur (attendu : « IC   Bruxelles-Midi, dernier   ~08:42  voie 5 », § 14 R3) : ${show(b)}`);
+    check(marked.some((l) => /^IC {3}Bruxelles-Midi, dernier {3}~?08:42( \+\d+)? {2}voie 5$/.test(l)), `« IC   Bruxelles-Midi, dernier   ~08:42  voie 5 » attendu : ${JSON.stringify(marked)}`);
+    // jamais la marque quand un départ de la même ligne vers la même destination suit plus bas dans le tableau
+    rows.forEach((l, i) => {
+      const m = LAST_ROW.exec(l);
+      if (!m) return;
+      const later = rows.slice(i + 1).find((x) => x.startsWith(`${m[1]}   `) || x.startsWith(`${m[1]}, dernier   `));
+      check(!later, `« ${l} » marqué « dernier » alors que « ${later} » suit (R3 : jamais quand un départ suit)`);
+    });
+    check(!rows.some((l) => /^IC {3}Bruxelles-Midi, dernier {3}07:42/.test(l)), `l’IC de 07:42 marqué « dernier » alors que celui de 08:42 suit : ${show(b)}`);
+    const typo = O.typographyIssues([b.title, ...b.lines]);
+    check(!typo.length, typo.join(' ; '));
+    return { screen: b };
   });
   await ctx.step('lignes', async () => {
     await simBackHome(sim);
@@ -1008,7 +1036,16 @@ async function s131memo(ctx: Ctx131): Promise<void> {
       const g = await waitGuide(r, 'guidage « j’y descends »', (x) => isGuide(x) && !!x.title, 15_000);
       const ft = await webFollowed(r);
       check(ft?.guide?.kind === 'ride' || ft?.journey?.legs?.length === 1, `« j’y descends » attendu (genre ride) : ${JSON.stringify(ft?.guide ?? null)}`);
-      return { screen: g };
+      // § 12 : « Jusqu’à … » est aussi le titre de « j'y descends »
+      check(O.matches(g.title, 'Jusqu’à Bruxelles-Central'), `titre « ${g.title} » au lieu de « Jusqu’à Bruxelles-Central » (PRD-1.3.1 § 12)`);
+      // § 15 (décision du 20/11 à 21:15), B12 : au moment de monter, « descente dans 6 arrêts, à … » : « à Bruxelles-Central »
+      // ne tient pas à côté de l'image (378 px pour 374) : le diminutif « Bxl-Central », jamais un nom coupé par « … »
+      const board = isGuide(g) && /^IC /.test(N(g.lines[0])) ? g : await waitGuide(r, 'moment « monter » de l’IC', (x) => isGuide(x) && /^IC /.test(N(x.lines[0])), 10_000);
+      const down = board.lines.map((l) => N(l)).find((l) => /^descente /.test(l));
+      check(down && /^descente dans \d+ arrêts, à Bxl-Central$/.test(down), `« ${down ?? '(aucune ligne « descente »)'} » au lieu de « descente dans 6 arrêts, à Bxl-Central » (§ 15 : le diminutif quand le nom entier ne tient pas) : ${show(board)}`);
+      const cut = board.lines.filter((l) => /…/.test(l));
+      check(!cut.length, `nom coupé par « … » alors que le diminutif tient (§ 15) : ${JSON.stringify(cut)}`);
+      return { screen: board, shot: (board.images as unknown[] | undefined)?.length ? 'guideImage' : 'guide' };
     }, { critical: true });
     await wstep(r, 'arreter-puis-rouvrir', async () => {
       await gesture(r, 'long');
@@ -1348,6 +1385,44 @@ async function s131tel(ctx: Ctx131): Promise<void> {
       return { shot: true };
     });
   });
+  await ctx.withChrome(async (page) => {
+    await page.addStyle(NO_EMU);
+    await tstep(ctx, page, 'reglages-escaliers-plein-soleil', async () => {
+      await page.goto(ctx.pageUrl({ mockLat: '50.4655', mockLon: '4.859', mockNow: '2026-11-10T07:31:00+01:00', ...ctx.preset('p/nice.json') }, false) + '#/reglages');
+      await pageWait(page, /Éviter les escaliers/, 15_000, 'Réglages : « Éviter les escaliers » (§ 14, R4)');
+      const sw = (label: string) => `[...document.querySelectorAll('.switch-row')].find((r) => n(r.querySelector('.c1')?.textContent) === ${JSON.stringify(label)})`;
+      const read = (label: string) => page.eval<{ sub: string; on: boolean; group: string } | null>(`(() => { ${NORM_JS} const r = ${sw(label)}; if (!r) return null; const g = r.closest('.group, section, fieldset'); return { sub: n(r.querySelector('.c2')?.textContent), on: !!r.querySelector('input')?.checked, group: n(g?.querySelector('.group-title')?.textContent) }; })()`);
+      const flip = (label: string) => page.eval(`(() => { ${NORM_JS} ${sw(label)}?.querySelector('input')?.click(); return true; })()`);
+      const saved = (path: string) => `(() => { const s = JSON.parse(localStorage.getItem('quai.settings') || '{}'); return ${path}; })()`;
+      // R4 : avec la marche maximale et la marge (« Tes trajets »), éteint par défaut, sa ligne pâle ; enregistré tout de suite
+      const steps = await read('Éviter les escaliers');
+      check(steps, '« Éviter les escaliers » absent de Réglages (PRD-1.3.1 § 14, R4)');
+      check(steps.sub === TXT.avoidStepsSub, `ligne pâle « ${steps.sub} » au lieu de « ${TXT.avoidStepsSub} » (R4)`);
+      check(!steps.on, '« Éviter les escaliers » allumé par défaut (R4 : éteint par défaut)');
+      check(/Tes trajets/.test(steps.group) || !steps.group, `« Éviter les escaliers » sous « ${steps.group} » au lieu de « Tes trajets » (R4)`);
+      await flip('Éviter les escaliers');
+      await page.waitFor(saved('s.avoidSteps === true'), 5_000, '« Éviter les escaliers » allumé : avoidSteps enregistré');
+      await flip('Éviter les escaliers');
+      await page.waitFor(saved('s.avoidSteps !== true'), 5_000, '« Éviter les escaliers » éteint : plus de avoidSteps à vrai');
+      // R5 : Affichage, « Sur tous les écrans » : « Plein soleil », éteint par défaut ; allumé : enregistré, l'aperçu suit
+      await page.eval(`(location.hash = '#/affichage', true)`);
+      await pageWait(page, /Plein soleil/, 10_000, 'Affichage : « Plein soleil » (§ 14, R5)');
+      const sun = await read('Plein soleil');
+      check(sun, '« Plein soleil » absent de Affichage (PRD-1.3.1 § 14, R5)');
+      check(sun.sub === TXT.sunSub, `aide « ${sun.sub} » au lieu de « ${TXT.sunSub} » (R5)`);
+      check(!sun.on, '« Plein soleil » allumé par défaut (R5 : éteint par défaut)');
+      await flip('Plein soleil');
+      await page.waitFor(saved('s.display && s.display.sun === true'), 5_000, '« Plein soleil » allumé : display.sun enregistré');
+      // tout tient dans 390 × 844 sans défiler (contrôle des réglages, remarque du 20/11)
+      const bottom = await page.eval<number>(`(() => { ${NORM_JS} return Math.round(${sw('Plein soleil')}.getBoundingClientRect().bottom); })()`);
+      check(bottom <= 844, `« Plein soleil » coupé en bas de l’écran du téléphone (bas à ${bottom} px pour 844)`);
+      return { shot: true };
+    });
+    await tstep(ctx, page, 'plein-soleil-eteint', async () => {
+      await page.eval(`(() => { ${NORM_JS} [...document.querySelectorAll('.switch-row')].find((r) => n(r.querySelector('.c1')?.textContent) === 'Plein soleil')?.querySelector('input')?.click(); return true; })()`);
+      await page.waitFor(`(() => { const s = JSON.parse(localStorage.getItem('quai.settings') || '{}'); return !(s.display && s.display.sun === true); })()`, 5_000, '« Plein soleil » éteint : plus de display.sun à vrai');
+    });
+  });
   // Quai Web : l'onglet Lunettes et l'onglet Réglages (la page du téléphone) côte à côte
   await ctx.withChrome(async (page) => {
     const r: Run = { ctx, page, mark: 0 };
@@ -1376,6 +1451,24 @@ async function s131tel(ctx: Ctx131): Promise<void> {
       check(!/Maintenant : partir à/.test(t), `« Maintenant : partir à … » remplacé par « Ensuite : … » (L5) : « ${t.slice(0, 500)} »`);
       return {};
     }, { critical: true });
+    await wstep(r, 'carte-en-cours-copier-l-heure-d-arrivee', async () => {
+      // § 14 (R6) : « Copier mon heure d’arrivée », après « Arrêter le guidage » ; « J’arrive vers 08:58. », l'heure seule
+      const buttons = await page.eval<string[]>(`(() => { ${NORM_JS} return [...document.querySelectorAll('.now-card button')].filter((b) => !b.hidden).map((b) => n(b.textContent)); })()`);
+      check(buttons.join(' | ') === `Arrêter le guidage | ${TXT.copyArrival}`, `boutons de la carte « En cours » ${JSON.stringify(buttons)} au lieu de « Arrêter le guidage », « ${TXT.copyArrival} » (R6)`);
+      const before = await page.eval<string>(`localStorage.getItem('quai.settings') || ''`);
+      await page.eval(`(document.querySelector('.now-card .now-copy')?.click(), true)`);
+      await page.waitFor(`(() => { const m = document.querySelector('.now-card .now-copied'); return !!m && !m.hidden && /\\d\\d:\\d\\d/.test(m.textContent || ''); })()`, 5_000, 'message de la copie');
+      const raw = await page.eval<string>(`document.querySelector('.now-card .now-copied')?.textContent || ''`);
+      const said = N(raw).trim();
+      const want = `J’arrive vers ${O.hm(j.arr)}.`;
+      // presse-papiers permis : « Copié : J’arrive vers 08:58. » ; refusé (Chrome sans affichage) : le texte reste à copier à la main
+      check(said === `Copié : ${want}` || said.endsWith(want), `message de la copie « ${said} » au lieu de « Copié : ${want} » (R6 : l’heure d’arrivée du trajet suivi, ${O.hm(j.arr)})`);
+      check(!/[—–']/.test(raw), `tiret long ou apostrophe droite dans « ${raw} »`);
+      check(!/\d{2}[.,]\d{3,}|Namur|Fontainas|place/i.test(said.replace(want, '')), `le texte copié ne dit que l’heure (ni lieu ni position, R6) : « ${said} »`);
+      const after = await page.eval<string>(`localStorage.getItem('quai.settings') || ''`);
+      check(before === after, 'réglages changés par la copie de l’heure d’arrivée (R6 : rien d’enregistré)');
+      return {};
+    });
     await wstep(r, 'arreter', async () => {
       await page.eval(`(document.querySelector('#w-tab-lunettes')?.click(), true)`);
       await gesture(r, 'long');
