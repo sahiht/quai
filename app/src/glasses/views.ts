@@ -586,15 +586,18 @@ export function emptyFavoritesLines(web = false): string[] {
   return ['Aucun favori pour l’instant.', web ? 'Ajoute Maison ou Bureau dans l’onglet Réglages.' : 'Ajoute Maison ou Bureau sur le téléphone.'];
 }
 
-/** « Ajouter un favori » en tête de « Favoris » sans favori (§ 1.2) ; Quai Web : « Nouveau favori » dans Réglages. */
+/**
+ * « Ajouter un favori » en tête de « Favoris » sans favori (§ 1.2) ; Quai Web : « Nouveau favori » dans l'onglet
+ * Réglages (1.3.1, PRD-1.3.1 § 12, L8 : « dans l’onglet Réglages », 195 px dans la colonne de 210).
+ */
 function addFavoriteItem(ctx: ViewCtx): Item {
-  if (ctx.web) return { a: 'Ajouter un favori', c: 'dans Réglages', action: { kind: 'phone', hash: '#/favoris/nouveau', text: emptyFavoritesLines(true)[1] } };
+  if (ctx.web) return { a: 'Ajouter un favori', c: 'dans l’onglet Réglages', action: { kind: 'phone', hash: '#/favoris/nouveau', text: emptyFavoritesLines(true)[1] } };
   return { a: 'Ajouter un favori', c: 'sur le téléphone', action: { kind: 'open', route: { screen: 'message', kind: 'info', title: 'Favoris', lines: emptyFavoritesLines() } } };
 }
 
-/** « Autre adresse » en bas de « Favoris » (1.2.1 : de « Aller à… », inchangée). */
+/** « Autre adresse » en bas de « Favoris » (1.2.1 : de « Aller à… », inchangée ; 1.3.1, L8 : « dans l’onglet Réglages »). */
 function otherAddressItem(ctx: ViewCtx): Item {
-  if (ctx.web) return { a: 'Autre adresse', c: 'dans Réglages', action: { kind: 'phone', hash: '#/recherche', text: 'Tape l’adresse dans l’onglet Réglages' } };
+  if (ctx.web) return { a: 'Autre adresse', c: 'dans l’onglet Réglages', action: { kind: 'phone', hash: '#/recherche', text: 'Tape l’adresse dans l’onglet Réglages' } };
   return { a: 'Autre adresse', c: 'sur le téléphone', action: { kind: 'toast', text: 'Tape l’adresse dans Quai, sur le téléphone' } };
 }
 

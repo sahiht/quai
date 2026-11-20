@@ -65,7 +65,7 @@ describe('relecture 1.2.6 : lunettes', () => {
     await w.until((x) => x.screen === 'home');
     await w.c.show({ screen: 'lineRun', follow: 'f-99', dir: 0 });
     const ws = await w.until((x: Screen) => x.screen === 'lineRun' && !/Chargement/.test(x.lines.join(' ')));
-    expect(ws.lines[0]).toBe('Introuvable : modifie-la dans Réglages.');
+    expect(ws.lines[0]).toBe('Introuvable : modifie-la dans l’onglet Réglages.');
     await w.gesture('tap');
     expect(opened).toEqual(['#/lignes']);
     w.c.stop();

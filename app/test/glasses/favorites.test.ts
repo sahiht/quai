@@ -121,7 +121,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
     h.c.stop();
   });
 
-  it('sur place : « tu y es » ; sans position : « sans position » ; Quai Web : « dans Réglages » et #/recherche', async () => {
+  it('sur place : « tu y es » ; sans position : « sans position » ; Quai Web : « dans l’onglet Réglages » (1.3.1, L8) et #/recherche', async () => {
     expect(planHomeText({ journeys: [], empty: 'here' }, NOW)).toBe('tu y es');
     expect(planHomeText({ journeys: [], empty: 'noPosition' }, NOW)).toBe('sans position');
     expect(planHomeText({ journeys: [], empty: 'noTrip' }, NOW)).toBe('aucun trajet');
@@ -133,7 +133,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
     await h.c.replaceRoute({ screen: 'favorites' });
     const s = await h.until((x) => listReady(x) && x.lines.some((l) => l.startsWith('Rue Neuve 1')));
     // 1.3.0 (PRD-1.3.0 § 7) : le curseur est sur « Bureau » : son accordéon ouvert dessous, puis les adresses récentes
-    expect(s.lines.slice(1, 6)).toEqual(['à pied 5 min → Arrêt', 'bus W 07:40, direct', 'ADRESSES RÉCENTES', 'Rue Neuve 1   tu y es', 'Autre adresse   dans Réglages']);
+    expect(s.lines.slice(1, 6)).toEqual(['à pied 5 min → Arrêt', 'bus W 07:40, direct', 'ADRESSES RÉCENTES', 'Rue Neuve 1   tu y es', 'Autre adresse   dans l’onglet Réglages']);
     await h.gesture('down', 'down', 'tap');
     expect(opened).toEqual(['#/recherche']);
     h.c.stop();
@@ -151,7 +151,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
     h.c.stop();
     // Quai Web : « Nouveau favori » dans l'onglet Réglages
     const v = favoritesView({}, { now: NOW, settings: settingsWith([]), web: true });
-    expect(v.items[0]).toMatchObject({ a: 'Ajouter un favori', c: 'dans Réglages', action: { kind: 'phone', hash: '#/favoris/nouveau' } });
+    expect(v.items[0]).toMatchObject({ a: 'Ajouter un favori', c: 'dans l’onglet Réglages', action: { kind: 'phone', hash: '#/favoris/nouveau' } });
   });
 
   it('« Aller à… » n’existe plus : ni sur l’accueil, ni comme écran ; un état de la 1.2.1 sur « Aller à… » ouvre « Favoris »', async () => {

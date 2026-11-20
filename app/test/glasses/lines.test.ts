@@ -89,7 +89,7 @@ describe('CA-126.2 : « Arrêts de bus, tram, métro »', () => {
     await w.until((x) => x.screen === 'home');
     await w.c.replaceRoute({ screen: 'lines' });
     const ws = await w.until(linesReady);
-    expect(ws.lines[1]).toBe('introuvable : modifie-le dans Réglages');
+    expect(ws.lines[1]).toBe('introuvable : modifie-le dans l’onglet Réglages');
     await w.gesture('tap');
     expect(opened).toEqual(['#/arrets']);
     w.c.stop();
@@ -189,7 +189,7 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
     await w.until((x) => x.screen === 'home');
     await w.c.replaceRoute({ screen: 'follows' });
     const ws = await w.until(followsReady);
-    expect(ws.lines.slice(0, 2)).toEqual(['Bus ZZ9', 'introuvable : modifie-la dans Réglages']);
+    expect(ws.lines.slice(0, 2)).toEqual(['Bus ZZ9', 'introuvable : modifie-la dans l’onglet Réglages']);
     await w.gesture('tap');
     expect(opened).toEqual(['#/lignes']);
     w.c.stop();
