@@ -133,7 +133,7 @@ describe('PRD-1.2.10 § 3.1 : « j’y descends » dans les arrêts d’un dépa
     return d;
   }
 
-  it('le véhicule seul est guidé jusqu’à l’arrêt touché (rang dans les arrêts du départ) ; titre « Vers … »', async () => {
+  it('le véhicule seul est guidé jusqu’à l’arrêt touché (rang dans les arrêts du départ) ; titre « Jusqu’à … » (1.3.1, § 12)', async () => {
     const h = await guideSetup({ settings: settings(), stub: { departureStops: (_a, _d, now) => busStops(now), board: (id, now) => (id === 'tec:MonumentGramme' ? { area: { id, op: 'tec', n: { fr: 'Monument Gramme', nl: 'Monument Gramme' }, lat: 50.8, lon: 4.3, modes: ['bus'], lines: ['6'] }, departures: [bus(now)], anyPlanned: false, rtErrors: [], updatedAt: now } : undefined) } });
     await openStops(h);
     await intent(h, { kind: 'alight', index: 2 });
@@ -144,7 +144,8 @@ describe('PRD-1.2.10 § 3.1 : « j’y descends » dans les arrêts d’un dépa
     expect(t).toMatchObject({ title: 'Vers Gare des Guillemins', guide: { kind: 'ride' }, journey: { id: expect.stringMatching(/^ride:6:/) } });
     // la position de départ n'est pas celle du moment (on peut être déjà à bord) : arrêt de montée sans coordonnées
     expect(t.origin).toBeUndefined();
-    expect(engine.last().input).toMatchObject({ kind: 'ride', title: 'Vers Gare des Guillemins' });
+    // 1.3.1 (PRD-1.3.1 § 12) : le titre du guidage de « j'y descends » : « Jusqu’à … » (le trajet suivi garde son nom)
+    expect(engine.last().input).toMatchObject({ kind: 'ride', title: 'Jusqu’à Gare des Guillemins' });
     expect(h.c.state.nav.stack.map((f) => f.route.screen)).toEqual(['home', 'guide']);
     expect(h.last()).toMatchObject({ screen: 'guide', show: 'where' });
   });

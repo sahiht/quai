@@ -8,12 +8,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../src/core/guide', async () => (await import('./controller-guide-doubles')).guideModule);
 
-import type { Favorite, FavoriteAnswer, Journey, Stopover } from '../../src/core/api';
+import type { Departure, Favorite, FavoriteAnswer, Journey, Stopover } from '../../src/core/api';
+import type { JournalEvent, TripJournal } from '../../src/core/journal-types';
+import type { ControllerDeps } from '../../src/glasses/controller';
 import type { GuideState, Moment, WhereAmI } from '../../src/core/guide-types';
 import type { ContainerSpec } from '../../src/glasses/types';
 import { engine, moment } from './controller-guide-doubles';
-import { NOW, SPOTS, cleanupKit, door, guideSetup, type Kit, type KitOptions } from './controller-guide-kit';
-import { MIN, PLACES, journey, nb, settingsWith } from './helpers';
+import { NOW, SPOTS, busStops, cleanupKit, door, guideSetup, type Kit, type KitOptions } from './controller-guide-kit';
+import { MIN, PLACES, dep, journey, nb, settingsWith } from './helpers';
 
 const N = (fr: string) => ({ fr, nl: fr });
 const settings = (gestureHints = true) => settingsWith([PLACES.bureau], { seenVersion: '1.3.0', display: { ...settingsWith([]).display, gestureHints } });
@@ -158,5 +160,38 @@ describe('1.3.1, point 1 et B9 : l’écran calme du guidage, vu du contrôleur'
     plan = [trip()];
     const g = await guided();
     expect((g.last() as unknown as { menu: { label: string }[] }).menu.map((m) => m.label)).toEqual(['Voir tout le trajet', 'Voir les arrêts', 'Arrêter le guidage']);
+  });
+
+  it('« j’y descends » : « Jusqu’à … » sur l’écran, sur la carte « En cours » du téléphone et au journal (§ 12) ; le trajet suivi garde son nom', async () => {
+    const bus = (now: number): Departure => dep(now, 4, { op: 'tec', mode: 'bus', line: '6', head: { fr: 'Gare des Guillemins', nl: 'Gare des Guillemins' }, tripId: 't6' });
+    const trips: { title: string; kind: string; events: JournalEvent[] }[] = [];
+    const journal: TripJournal = {
+      begin(meta) {
+        trips.push({ ...meta, events: [] });
+        return `t${trips.length}`;
+      },
+      add: () => undefined,
+      end: () => undefined,
+      list: () => [],
+      text: () => '',
+      clear: () => undefined,
+    };
+    engine.script = () => ({ phase: { kind: 'ride', leg: 0, next: 1 }, moment: null, location: 'medium' });
+    const h = await guideSetup({
+      settings: settings(),
+      stub: { departureStops: (_a, _d, now) => busStops(now), board: (id, now) => (id === 'tec:MonumentGramme' ? { area: { id, op: 'tec', n: N('Monument Gramme'), lat: 50.8, lon: 4.3, modes: ['bus'], lines: ['6'] }, departures: [bus(now)], anyPlanned: false, rtErrors: [], updatedAt: now } : undefined) },
+    });
+    (h.c as unknown as { d: ControllerDeps }).d.journal = journal;
+    await h.c.show({ screen: 'stops', areaId: 'tec:MonumentGramme', dep: bus(NOW) });
+    await h.until((s) => typeof (s as { stops?: unknown }).stops === 'number');
+    await (h.c as unknown as { runIntent(i: { kind: 'alight'; index: number }): Promise<void> }).runIntent({ kind: 'alight', index: 2 });
+    await h.settle();
+    expect(h.c.followed).toMatchObject({ title: 'Vers Gare des Guillemins', guide: { kind: 'ride' } });
+    // l'écran : « Guidage en cours », puis « Jusqu’à … » ; le moteur, la carte « En cours » et le journal : le même titre
+    expect(h.last()).toMatchObject({ screen: 'guide', show: 'where', title: 'Guidage en cours' });
+    expect(h.last().lines[0]).toBe('Jusqu’à Gare des Guillemins');
+    expect(engine.last().input.title).toBe('Jusqu’à Gare des Guillemins');
+    expect(h.c.guideStatus()).toMatchObject({ kind: 'ride', title: 'Jusqu’à Gare des Guillemins' });
+    expect(trips).toEqual([{ title: 'Jusqu’à Gare des Guillemins', kind: 'ride', at: expect.any(Number), events: [] }]);
   });
 });

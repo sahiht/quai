@@ -67,7 +67,7 @@ import { LIMITS, newId, type SettingsStore } from '../settings';
 import { APP_VERSION, compareVersions } from '../version';
 import { BOARD, HINTS, NB, SECTION, atTitle, catchable, lowerFirst, planHomeText, runningNext, shownMessage, towards, tripName, tripShort, upcoming, vehicleLong, walkMinOf } from './format';
 import { DEBOUNCE, GestureFilter, type HubSignal } from './gestures';
-import { GUIDE_MENU, checkLines, guideView, menuView, type GuideShow } from './guide-views';
+import { GUIDE_MENU, checkLines, guideTitleText, guideView, menuView, type GuideShow } from './guide-views';
 import { HeadUpLearner } from './headup';
 import { GuideTrail, IMPORTANT, MomentReminder, journalTitle, readRemindMemo, type ReminderNote, type RemindMemo, type ShownMoment } from './reminder';
 import { geometry, layoutPage } from './layout';
@@ -4503,11 +4503,12 @@ function journeyStartMs(t: FollowedTrip): number {
 }
 
 /**
- * 1.2.10 (PRD-1.2.10 § 3.2, § 5) : titre du guidage (écran du guidage, carte « En cours » du téléphone) : le nom du trajet
- * (« Bureau » pour « Vers le bureau ») ; « j'y descends » : « Vers Bruxelles-Central ».
+ * 1.2.10 (PRD-1.2.10 § 3.2, § 5) : titre du guidage (écran du guidage, carte « En cours » du téléphone, journal) : le nom
+ * du trajet (« Bureau » pour « Vers le bureau ») ; « j'y descends » : 1.3.1 (PRD-1.3.1 § 12) « Jusqu’à Bruxelles-Central »
+ * (guideTitleText), plus « Vers Bruxelles-Central ».
  */
 function guideTitle(t: Pick<FollowedTrip, 'title'>, kind: GuideKind): string {
-  return kind === 'ride' ? t.title : tripName(t.title);
+  return guideTitleText(kind === 'ride' ? t.title : tripName(t.title), kind);
 }
 
 /**
