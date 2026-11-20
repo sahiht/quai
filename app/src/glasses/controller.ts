@@ -1261,12 +1261,48 @@ export class GlassesController implements GlassesApi {
   }
 
   /**
-   * 1.3.1 (vrai chemin partout) : le cœur vient de connaître un chemin qui allonge une première marche. Les réponses des
-   * favoris et des adresses récentes déjà calculées sont à refaire (comme après un déplacement : celle qui est montrée
-   * reste en attendant, sans « … »), et l'écran affiché est rafraîchi tout de suite, une fois.
+   * 1.3.1 (vrai chemin partout) : le cœur vient de connaître un chemin qui allonge une première marche. Tous les trajets
+   * que les lunettes gardent (réponses des favoris, propositions des écrans ouverts, trajet suivi) prennent tout de
+   * suite l'heure de partir du cœur, sans réseau (Core.firstWalk) : la même heure sur tous les écrans, d'un seul coup.
+   * Une réponse dont le premier véhicule ne peut plus être attrapé garde son trajet en attendant d'être refaite (le
+   * suivant vient alors, comme après un départ raté, sans passer par « … »). Puis les réponses des favoris et des
+   * adresses récentes sont à refaire (comme après un déplacement) et l'écran affiché est rafraîchi, une fois.
    */
   private firstWalkKnown(): void {
     if (this.stopped) return;
+    const core = this.d.core;
+    if (core.firstWalk) {
+      const s = this.settings();
+      const now = this.d.clock.now();
+      const fix = (j: Journey): Journey => core.firstWalk!(j, s);
+      for (const [id, a] of this.answers) {
+        const js = a.plan?.journeys;
+        if (!a.plan || !js?.length) continue;
+        const out = js.map(fix);
+        if (out.every((j, i) => j === js[i]) || !catchable(out[0], now)) continue;
+        this.answers.set(id, { ...a, plan: { ...a.plan, journeys: out } });
+      }
+      const held: Journey[] = [];
+      for (const f of this.nav.stack) {
+        const r = f.route as { journeys?: Journey[]; journey?: Journey };
+        if (Array.isArray(r.journeys)) held.push(...r.journeys);
+        if (r.journey) held.push(r.journey);
+      }
+      for (const x of held) {
+        const cur = this.journeyOf(x);
+        const out = fix(cur);
+        if (out !== cur) this.journeysById.set(out.id, out);
+      }
+      const t = this.trip;
+      if (t) {
+        const cur = this.journeyOf(t.journey);
+        const out = fix(cur);
+        if (out !== cur) {
+          this.journeysById.set(out.id, out);
+          this.setFollowedJourney(out);
+        }
+      }
+    }
     this.answerAt.clear();
     for (const [k, v] of this.recents) this.recents.set(k, { ...v, at: 0 });
     if (this.ready && !this.paused) void this.refreshCurrent();

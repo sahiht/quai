@@ -221,7 +221,7 @@ describe('règles 4 et 5 : heure déjà passée, classement', () => {
     // le trajet déjà à l'écran : même trajet, heure de partir passée (l'écran du trajet le garde, comme en 1.3.0)
     const shown = await w.core.refresh(r0.journeys[0], w.s);
     expect(shown.id).toBe(r0.journeys[0].id);
-    expect(read(shown)).toMatchObject({ leave: '07:12', walk: 6, ride: '3 07:20' });
+    expect(read(shown)).toMatchObject({ leave: '07:12', walk: 6, ride: '3 07:20', walkAt: '07:12-07:18' });
     // le favori (plan mémorisé) : son premier véhicule n'est plus attrapable, il est recalculé : le suivant
     const a = await w.core.answer(BOURSE, START, w.s);
     expect(read(a.plan!.journeys[0])).toMatchObject({ ride: '3 07:28', leave: '07:20' });

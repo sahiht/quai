@@ -62,6 +62,23 @@ describe('accueil du téléphone : la réponse du favori', () => {
   });
 });
 
+describe('accueil du téléphone : chemin connu pendant qu’on regarde un autre écran', () => {
+  it('l’accueil rouvert montre « partir à 07:12 » dès sa première peinture (la réponse gardée a suivi, sans réseau)', async () => {
+    const { sc, hz } = phone('long', 7, 10, { hold: true });
+    const el = mount(homeScreen(hz.ctx));
+    await until(() => answer(el) !== '…');
+    expect(answer(el)).toBe('partir à 07:15');
+    // un autre écran ; la tuile arrive pendant ce temps
+    document.body.replaceChildren();
+    const calls = sc.server.calls.length;
+    sc.release();
+    await sleep(200);
+    expect(sc.server.calls.length).toBe(calls);
+    const again = mount(homeScreen(hz.ctx));
+    expect(answer(again)).toBe('partir à 07:12');
+  });
+});
+
 describe('« Rechercher un trajet » : les cartes', () => {
   it('07:10, de ma position à la Bourse : « 07:12 → 07:37 » sur la première carte ; mêmes cartes, même ordre qu’avec l’estimation', async () => {
     const a = phone('long', 7, 10, { params: 'de=ici&vers=bourse' });

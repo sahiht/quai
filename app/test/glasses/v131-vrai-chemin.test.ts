@@ -387,6 +387,26 @@ describe('B. la même heure partout (vrai contrôleur des lunettes, vrai cœur, 
     expect(sc.walkCalls().filter((u) => u.includes('2544_144'))).toHaveLength(1);
   });
 
+  it('le chemin connu pendant qu’on regarde l’écran du trajet : au retour, les favoris et l’accueil disent déjà 07:12 (jamais l’estimation un instant)', async () => {
+    const { h, sc, rows } = await glasses('long', '07:10', { hold: true });
+    await h.gesture('down', 'tap', 'tap');
+    await h.until((s) => s.screen === 'steps');
+    await h.settle(150);
+    expect(rows()[1]).toBe('07:15 à pied 3 min → Esplanade');
+    sc.release();
+    await h.until((s) => s.screen === 'steps' && s.lines.some((l) => nb(l).startsWith('07:12 à pied 6 min')));
+    const n = h.screens().length;
+    await h.gesture('double');
+    await h.until((s) => s.screen === 'favorites');
+    await h.gesture('double');
+    await h.until((s) => s.screen === 'home');
+    await h.settle(200);
+    const after = h.screens().slice(n).flatMap((s) => s.lines.map(nb));
+    expect(after).toContain('Bourse   dans 2 min → 07:37');
+    expect(after).toContain('à pied 6 min → Esplanade');
+    expect(after.join('\n')).not.toMatch(/dans 5 min|à pied 3 min|07:15/);
+  });
+
   it('règles 4 et 5 : chemin connu trop tard (07:15) : l’écran du trajet garde son trajet (heure passée, comme en 1.3.0) ; l’accueil passe au suivant, comme après un départ raté', async () => {
     const { h, sc, rows } = await glasses('long', '07:15', { hold: true });
     // l'estimation : « maintenant » pour le tram de 07:20
@@ -414,6 +434,20 @@ describe('B. la même heure partout (vrai contrôleur des lunettes, vrai cœur, 
     const seen = h.screens().filter((s) => s.screen === 'home').map((s) => nb(s.lines.find((l) => l.startsWith('Bourse')) ?? ''));
     const changes = seen.filter((l, i) => i === 0 || l !== seen[i - 1]);
     expect(changes).toEqual(['Bourse   …', 'Bourse   maintenant → 07:37', 'Bourse   dans 5 min → 07:45']);
+  });
+
+  it('règles 4 et 5, au retour sur l’accueil : chemin connu trop tard pendant qu’on regardait l’écran du trajet : le favori est refait tout de suite (le suivant), sans attendre les 30 s', async () => {
+    const { h, sc } = await glasses('long', '07:15', { hold: true });
+    await h.gesture('down', 'tap', 'tap');
+    await h.until((s) => s.screen === 'steps');
+    sc.release();
+    await h.until((s) => s.screen === 'steps' && s.lines.some((l) => nb(l).startsWith('07:12 à pied 6 min')));
+    await h.gesture('double');
+    await h.until((s) => s.screen === 'favorites');
+    await h.gesture('double');
+    // l'horloge n'avance pas : sans réponse à refaire, l'accueil garderait « maintenant → 07:37 » jusqu'au tour suivant
+    await h.until((s) => s.screen === 'home' && s.lines.some((l) => nb(l) === 'Bourse   dans 5 min → 07:45'));
+    expect(h.last().lines.map(nb)).toContain('Bourse   dans 5 min → 07:45');
   });
 
   it('plafond sur les écrans : chemin de 1 000 m (13 min) : « à pied 8 min », jamais 13', async () => {
