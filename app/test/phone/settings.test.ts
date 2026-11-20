@@ -29,7 +29,7 @@ describe('écran Réglages', () => {
     const hz = harness({ settings: defaults() });
     const el = mount(settingsScreen(hz.ctx));
     expect(textOf(el.querySelector('h1'))).toBe('Réglages');
-    expect(textOf(el.querySelector('.lead'))).toBe('Favoris, gares, arrêts et lignes se règlent sur l’accueil, dans l’ordre des lunettes.');
+    expect(textOf(el.querySelector('.lead'))).toBe('Favoris, gares, lignes et arrêts se règlent sur l’accueil, dans l’ordre des lunettes.');
     const groups = [...el.querySelectorAll<HTMLElement>('section.group')];
     expect(groups.map((g) => textOf(g.querySelector('h2')))).toEqual(['Dans les lunettes', 'Pendant un trajet', 'Tes trajets', 'Quai']);
     for (const g of groups) expect(g.getAttribute('aria-labelledby')).toBe(g.querySelector('h2')!.id);

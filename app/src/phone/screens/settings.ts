@@ -4,7 +4,7 @@
  * 1.2.10 (PRD-1.2.10 § 4.1) : « Pendant un trajet » : « Me guider pendant un trajet », allumé par défaut, lu par les
  * lunettes dès qu'il change (réglages partagés) ; « Tes trajets » : « Marche maximale » et « Marge avant de partir »
  * réglables sur place (les pas-à-pas de l'écran Trajets), puis « Position et langue » ; « Quai » : Données ; en bas, les
- * sources des horaires. Favoris, gares, arrêts et lignes se règlent sur l'accueil. Affichage, Alertes, Données et
+ * sources des horaires. Favoris, gares, lignes et arrêts se règlent sur l'accueil. Affichage, Alertes, Données et
  * Position et langue reviennent ici.
  * 1.3.0 (PRD-1.3.0 § 6.1) : sous « Me guider pendant un trajet », le bouton « Tester l’écran des lunettes » (pas dans
  * Quai Web, ni avec des lunettes qui ne savent pas le faire), et dessous, pâle, le dernier résultat s'il existe.

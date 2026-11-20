@@ -147,7 +147,7 @@ export const T = {
    * bouton « Réglages ».
    */
   settings: 'Réglages',
-  settingsLead: 'Favoris, gares, arrêts et lignes se règlent sur l’accueil, dans l’ordre des lunettes.',
+  settingsLead: 'Favoris, gares, lignes et arrêts se règlent sur l’accueil, dans l’ordre des lunettes.',
   inGlasses: 'Dans tes lunettes',
   mirrorLead: 'Mêmes rubriques, même ordre.',
   preview: 'Aperçu',
