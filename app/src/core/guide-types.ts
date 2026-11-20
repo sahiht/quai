@@ -222,6 +222,8 @@ export type Moment =
       sched?: number;
       platform?: string;
       arr?: number;
+      /** 1.3.1 (PRD-1.3.1 § 14, R1) : rue de la sortie du métro vers la suite du chemin (« Sortie : Boulevard Anspach ») */
+      exit?: string;
     })
   /** 1.3.0 (PRD-1.3.0 § 4) : marche sans chemin à pied (hors de Belgique) : la direction et le temps, sans virage. */
   | (MomentBase & { kind: 'offMap'; walkMin: number; distM?: number; bearingDeg?: number; toward?: Names })

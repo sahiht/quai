@@ -9,6 +9,7 @@ import { QuaiError, type QuaiErrorCode } from './errors';
 import { getText, HttpStatusError, safeJson, type FetchLike } from './net';
 import { localDate } from './util';
 import type { PersistentCache } from './persist';
+import { EXITS_FILE, isExitsFile, type ExitsFile } from './walk/exits-format';
 import { isTileKey, isWalkIndex, isWalkTile, type WalkIndex, type WalkTileFile } from './walk/format';
 
 const TIMEOUT_MS = 10_000;
@@ -156,6 +157,15 @@ export class DataClient {
    */
   walkIndex(): Promise<WalkIndex | null> {
     return this.file('walk/index.json', isWalkIndex, null);
+  }
+
+  /**
+   * 1.3.1 (PRD-1.3.1 § 14, R1) : sorties du métro et du prémétro (exits.json), par le cache commun (petit fichier) ;
+   * null : pas de sorties dans cette publication (aucune ligne « Sortie : … »). Rien n'est envoyé : la sortie se
+   * choisit sur le téléphone.
+   */
+  walkExits(): Promise<ExitsFile | null> {
+    return this.file(EXITS_FILE, isExitsFile, null);
   }
 
   /**

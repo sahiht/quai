@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { chooseExit, exitsOf, isExitsFile, type ExitsFile } from '../../src/core/walk/exits-format';
+import { makeEnv } from './support/env';
 
 const file: ExitsFile = {
   v: 1,
@@ -63,5 +64,40 @@ describe('1.3.1 : sorties du métro (fichier exits.json)', () => {
     expect(chooseExit(xs, null)?.name).toBe('Rue Jules Van Praet');
     expect(chooseExit(xs, { lat: Number.NaN, lon: 4.35 })?.name).toBe('Rue Jules Van Praet');
     expect(chooseExit([], { lat: 50.85, lon: 4.35 })).toBeNull();
+  });
+});
+
+describe('1.3.1 : Core.walkExits (data/exits.json lu par le client des données)', () => {
+  const env = () => makeEnv({ now: '2026-11-20T08:00' });
+  const serve = (e: ReturnType<typeof env>, body: string, status = 200) => e.server.overrides.set('/quai/data/exits.json', () => new Response(body, { status }));
+
+  it('fichier publié : lu une fois par publication, par une seule adresse sans paramètre (rien d’envoyé)', async () => {
+    const e = env();
+    serve(e, JSON.stringify(file));
+    expect(await e.core.walkExits!()).toEqual(file);
+    expect(await e.core.walkExits!()).toEqual(file);
+    const calls = e.server.calls.filter((u) => u.includes('exits'));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(/\/quai\/data\/exits\.json$/);
+  });
+
+  it('fichier absent (publication d’avant, 1.3.0), illisible, d’une autre forme, ou réseau coupé : null, jamais d’exception', async () => {
+    const none = env();
+    await expect(none.core.walkExits!()).resolves.toBeNull();
+    // absent : noté pour cette publication, pas redemandé
+    await expect(none.core.walkExits!()).resolves.toBeNull();
+    expect(none.server.calls.filter((u) => u.includes('exits'))).toHaveLength(1);
+    const broken = env();
+    serve(broken, '{ illisible');
+    await expect(broken.core.walkExits!()).resolves.toBeNull();
+    const other = env();
+    serve(other, JSON.stringify({ ...file, v: 2 }));
+    await expect(other.core.walkExits!()).resolves.toBeNull();
+    const tooMany = env();
+    serve(tooMany, JSON.stringify({ ...file, stops: { '1': { s: 'X', x: [['Rue A', 50, 4, 1], ['Rue B', 50, 4, 2], ['Rue C', 50, 4, 3], ['Rue D', 50, 4, 4]] } } }));
+    await expect(tooMany.core.walkExits!()).resolves.toBeNull();
+    const down = env();
+    down.server.networkDown = true;
+    await expect(down.core.walkExits!()).resolves.toBeNull();
   });
 });

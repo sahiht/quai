@@ -205,6 +205,11 @@ export interface GuideInput {
    * (tightLegs), le suivant de la même ligne, même destination, lu au tableau de l'arrêt par le contrôleur.
    */
   nextByLeg?: Record<number, { vehicle: VehicleRef; depAt: number; rt: boolean }>;
+  /**
+   * 1.3.1 (PRD-1.3.1 § 14, R1) : sortie du métro ou du prémétro par rang de la marche qui suit une descente à un arrêt
+   * STIB sous terre (contrôleur : exits.json, core/exits.ts) ; le moment walk (B17) la dit en 3e ligne pâle.
+   */
+  exitByLeg?: Record<number, string>;
 }
 
 /* ------------------------------ Mémoire ------------------------------ */
@@ -1576,6 +1581,9 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
           const pl = platformOf(r);
           if (pl && isTrain(r)) mo.platform = pl;
         } else if (final) mo.arr = j.arr;
+        // 1.3.1 (PRD-1.3.1 § 14, R1) : la sortie du métro à prendre, si le contrôleur la connaît (core/exits.ts)
+        const exit = c.in.exitByLeg?.[w];
+        if (exit) mo.exit = exit;
         return mo;
       },
     });
