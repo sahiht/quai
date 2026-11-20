@@ -1000,14 +1000,23 @@ export { truncateWords };
 
 /**
  * 1.2.10 : un texte en trois parties dont seule celle du milieu (un nom) est raccourcie, au mot : « Prochain arrêt : »
- * et « , 07:16 » restent entiers. Sans place pour le nom, la fin seule.
+ * et « , 07:16 » restent entiers. Sans place pour le nom, la fin seule. 1.3.1 (balayage des vrais noms, « Gares » en
+ * accordéon) : le texte rendu tient vraiment dans `maxPx` : le crénage aux jonctions peut coûter un pixel de plus que la
+ * somme des trois parties (« puis IC vers Kortenaken Krawatenstraat, 08:37 +12 voie 12a ! » : 523 px pour 522), et la
+ * mise en page aurait alors recoupé la fin ; le nom est alors raccourci d'un mot de plus.
  */
 export function fitName(head: string, name: string, tail: string, maxPx: number): string {
   const full = `${head}${name}${tail}`;
   if (textWidth(full) <= maxPx) return full;
-  const room = maxPx - textWidth(head) - textWidth(tail);
-  const n = room > 0 ? truncateWords(name, room) : '';
-  return n ? `${head}${n}${tail}` : truncateWords(full, maxPx);
+  let room = maxPx - textWidth(head) - textWidth(tail);
+  while (room > 0) {
+    const n = truncateWords(name, room);
+    if (!n) break;
+    const t = `${head}${n}${tail}`;
+    if (textWidth(t) <= maxPx) return t;
+    room = Math.min(room - 1, textWidth(n) - 1);
+  }
+  return truncateWords(full, maxPx);
 }
 
 /**
