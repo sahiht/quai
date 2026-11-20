@@ -417,11 +417,15 @@ export async function buildBoards(reqs: BoardRequest[], rt: RealtimeClient, now:
 /**
  * « Ligne » d'un départ pour « , dernier » : le numéro sans casse, espaces ni zéros de tête (« 036 » = « 36 »), quel que
  * soit le mode. Tous les trains de la SNCB n'en font qu'une (IC, L, P, S… : quand un L suit le dernier IC, l'IC n'est
- * pas le dernier train), ses bus à part.
+ * pas le dernier train), ses bus à part. Les variantes d'un numéro (lettres ou barre après les chiffres : « 20a » et
+ * « 20b » de De Lijn, « 27 » et « 27/ », « 86A » et « 86C » du TEC) n'en font qu'une : quand un 20b suit le dernier
+ * 20a dans le même sens, le 20a n'est pas le dernier (contrôle du 20/11 : 1 857 marques des vraies données). Une lettre
+ * devant le numéro (N10 de nuit, X64 express, T39) reste une autre ligne.
  */
 export function lastLineKey(op: Op, mode: Mode, line: string): string {
   if (op === 'sncb' && mode === 'train') return 'sncb:train';
-  return `${op}:${String(line ?? '').replace(/\s+/g, '').toLowerCase().replace(/^0+(?=.)/, '')}`;
+  const key = String(line ?? '').replace(/\s+/g, '').toLowerCase().replace(/^0+(?=.)/, '');
+  return `${op}:${key.replace(/^(\d+)[a-z/]+$/, '$1')}`;
 }
 
 /** Début de « demain » pour un départ à `t` : 04:00 (heure belge) qui suit ; avant, c'est la nuit en cours (dayWord). */
@@ -455,6 +459,9 @@ export function lastCover(dates: readonly string[] | undefined): LastCover | nul
   return { from: ends[0], to: serviceDayBase(addDays(last, 1)), ends };
 }
 
+/** Un départ du même sens moins de 2 h plus tard, même après 04:00 : la ligne roule encore, jamais « dernier ». */
+export const LAST_QUIET_MS = 2 * 3_600_000;
+
 /** Un départ vu par « , dernier » : instant, sens (même nombre : même ligne, même sens), identité (`same`, doublons). */
 interface WayDep {
   t: number;
@@ -468,6 +475,12 @@ interface WayDep {
  * fenêtre jusqu'à demain dans les départs connus (`cover`), et aucun autre départ du même sens dans [t, demain), même
  * ligne et même destination à la même minute exceptées (le même départ). Deux départs différents du même sens à la même
  * minute : aucun des deux n'est le dernier.
+ *
+ * 04:00 n'est pas une coupure pour une ligne qui roule (contrôle du 20/11, vraies données : le N62 de De Lijn passe
+ * toute la nuit, 03:48 puis 04:18 ; le premier bus du matin part parfois à 03:48). Jamais la marque non plus quand le
+ * départ suivant du même sens, après 04:00, part moins de 2 h plus tard (LAST_QUIET_MS) ; ni, pour un départ de la nuit
+ * (avant 04:00), quand ce suivant est aussi proche ou plus proche que le précédent, ou qu'aucun ne le précède depuis
+ * 04:00 la veille : c'est le premier du matin, pas le dernier de la nuit.
  */
 function lastFlags(deps: readonly WayDep[], cover: LastCover | null): Uint8Array {
   const out = new Uint8Array(deps.length);
@@ -487,12 +500,25 @@ function lastFlags(deps: readonly WayDep[], cover: LastCover | null): Uint8Array
       if (!(end <= cover.to)) continue;
       let alone = true;
       for (let k = j - 1; k >= 0 && alone && deps[list[k]].t === d.t; k--) if (deps[list[k]].same !== d.same) alone = false;
-      for (let k = j + 1; k < list.length && alone; k++) {
+      let k = j + 1;
+      for (; k < list.length && alone; k++) {
         const o = deps[list[k]];
         if (o.t >= end) break;
         if (o.t !== d.t || o.same !== d.same) alone = false;
       }
-      if (alone) out[list[j]] = 1;
+      if (!alone) continue;
+      // le premier départ du même sens de demain (à 04:00 ou après), s'il est connu
+      const next = k < list.length ? deps[list[k]] : undefined;
+      if (next) {
+        const gap = next.t - d.t;
+        if (gap < LAST_QUIET_MS) continue;
+        if (end - d.t <= DAY_START_HOUR * 3_600_000) {
+          let p = j - 1;
+          while (p >= 0 && deps[list[p]].t === d.t) p--;
+          if (p < 0 || gap <= d.t - deps[list[p]].t) continue;
+        }
+      }
+      out[list[j]] = 1;
     }
   }
   return out;

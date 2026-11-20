@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import type { AreaFile, Meta, Mode, Names, Op, TrainsDay } from '../../../shared/types';
 import { DEFAULT_SETTINGS, type Departure, type Journey, type Leg } from '../../src/core/api';
 import { prepareArea } from '../../src/core/areas';
-import { lastCover, scheduleLast, tomorrowAt, trainLegLast } from '../../src/core/boards';
+import { lastCover, lastLineKey, scheduleLast, tomorrowAt, trainLegLast } from '../../src/core/boards';
 import { markLast, type RefreshEnv } from '../../src/core/journeys';
 import { indexDay } from '../../src/core/trains';
 import { brusselsParts, gtfsTime, hhmm } from '../../src/core/util';
@@ -130,6 +130,102 @@ describe('R3 : la règle, sur un fichier de zone', () => {
       ],
     );
     expect(marked(f)).toEqual(['N1 Gent Korenmarkt 0 24:05', 'N2 Brugge Station 1 00:30']);
+  });
+
+  it('04:00 n’est pas une coupure pour une ligne qui roule toute la nuit (N62 : 03:48 puis 04:18) : aucune marque', () => {
+    const f = areaFile(
+      'delijn:R3h',
+      [
+        ['N62', 'Brussels Airport', ['delijn:h1', 'delijn:h2']],
+        // une ligne de nuit qui s'arrête vraiment : 03:13 puis 05:27 (plus de 2 h, et le précédent 1 h avant)
+        ['30', 'Westkerke Marktplein', ['delijn:w1', 'delijn:w2']],
+      ],
+      [
+        [0, '23:18', 0],
+        [0, '24:18', 0],
+        [0, '25:18', 0],
+        [0, '26:18', 0],
+        // la suite de la nuit écrite sur le samedi, comme dans les vraies données
+        [1, '03:18', 0],
+        [1, '03:48', 0],
+        [1, '04:18', 0],
+        [1, '04:48', 0],
+        [0, '25:13', 1],
+        [0, '26:13', 1],
+        [0, '27:13', 1],
+        [1, '05:27', 1],
+      ],
+    );
+    expect(marked(f)).toEqual(['30 Westkerke Marktplein 0 27:13']);
+  });
+
+  it('le premier départ du matin, avant 04:00, n’est jamais « dernier » ; ni un départ suivi moins de 2 h après, même après 04:00', () => {
+    const f = areaFile(
+      'tec:R3m',
+      [
+        // 109a : rien de la soirée, premier bus à 03:48, le suivant à 06:40 (près de 3 h après, mais bien plus près que le précédent)
+        ['109a', 'Charleroi Gare Centrale', ['tec:c1', 'tec:c2']],
+        // 82 : toutes les 30 min jusqu'à 03:30, reprise à 05:00 (1 h 30 après) : la ligne roule encore
+        ['82', 'Mons Gare', ['tec:m1', 'tec:m2']],
+        // 83 : toutes les 30 min jusqu'à 01:30, reprise à 05:45 : un vrai dernier
+        ['83', 'Mons Gare', ['tec:n1', 'tec:n2']],
+        // 84 : un seul départ de nuit à 00:15 (aucun avant depuis 04:00), le suivant à 08:20 : pas la fin d'un service
+        ['84', 'Jurbise Gare', ['tec:j1', 'tec:j2']],
+      ],
+      [
+        [0, '12:10', 0],
+        [1, '03:48', 0],
+        [1, '06:40', 0],
+        [0, '26:30', 1],
+        [0, '27:00', 1],
+        [0, '27:30', 1],
+        [1, '05:00', 1],
+        [0, '24:30', 2],
+        [0, '25:00', 2],
+        [0, '25:30', 2],
+        [1, '05:45', 2],
+        [0, '24:15', 3],
+        [1, '08:20', 3],
+      ],
+    );
+    expect(marked(f)).toEqual(['83 Mons Gare 0 25:30']);
+    // sans départ le lendemain (rien ne suit du tout) : le 109a de 03:48 et le 84 de 00:15 sont bien les derniers
+    const g = areaFile('tec:R3m', f.patterns.map((p): Pat => [p.line, p.head.fr, p.next.map(([z]) => z)]), [
+      [0, '12:10', 0],
+      [1, '03:48', 0],
+      [0, '24:15', 3],
+    ]);
+    expect(marked(g)).toEqual(['109a Charleroi Gare Centrale 1 03:48', '84 Jurbise Gare 0 24:15']);
+  });
+
+  it('variantes d’un numéro (20a et 20b, 27 et 27/, 86A et 86C) : une seule ligne dans le même sens ; N10, X64 et T39 restent d’autres lignes', () => {
+    expect(lastLineKey('delijn', 'bus', '20a')).toBe(lastLineKey('delijn', 'bus', '20b'));
+    expect(lastLineKey('delijn', 'bus', '20a')).toBe(lastLineKey('delijn', 'bus', '20'));
+    expect(lastLineKey('tec', 'bus', '27/')).toBe(lastLineKey('tec', 'bus', '027'));
+    expect(lastLineKey('tec', 'bus', '86C')).toBe(lastLineKey('tec', 'bus', '86A'));
+    expect(lastLineKey('stib', 'bus', 'N10')).not.toBe(lastLineKey('stib', 'bus', '10'));
+    expect(lastLineKey('delijn', 'bus', 'X64')).not.toBe(lastLineKey('delijn', 'bus', '64'));
+    expect(lastLineKey('stib', 'bus', 'T39')).not.toBe(lastLineKey('stib', 'tram', '39'));
+    expect(lastLineKey('tec', 'bus', '20a')).not.toBe(lastLineKey('delijn', 'bus', '20a'));
+    const f = areaFile(
+      'delijn:R3s',
+      [
+        ['20a', 'F. Rooseveltplaats', ['delijn:r1', 'delijn:r2']],
+        ['20b', 'F. Rooseveltplaats', ['delijn:r1', 'delijn:r3']],
+        // l'autre sens : le 20b n'y passe plus, le 20a y est bien le dernier
+        ['20a', 'Veemarkt', ['delijn:v1', 'delijn:v2']],
+        // une lettre devant : une autre ligne, même chemin
+        ['X20', 'F. Rooseveltplaats', ['delijn:r1', 'delijn:r2']],
+      ],
+      [
+        [0, '23:13', 0],
+        [0, '23:43', 0],
+        [0, '24:13', 1],
+        [0, '23:23', 2],
+        [0, '22:50', 3],
+      ],
+    );
+    expect(marked(f)).toEqual(['20b F. Rooseveltplaats 0 24:13', '20a Veemarkt 0 23:23', 'X20 F. Rooseveltplaats 0 22:50']);
   });
 
   it('les deux jours publiés : rien avant 04:00 du premier (la veille manque), rien après 04:00 du second (le surlendemain manque)', () => {
