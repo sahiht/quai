@@ -313,6 +313,12 @@ export interface Leg {
   dep: number; arr: number;               // estimés (= prévus sans temps réel)
   schedDep: number; schedArr: number;
   walkMin?: number;                       // marche
+  /**
+   * 1.3.1 (vrai chemin partout, core/firstwalk.ts) : sur la première marche seulement, l'estimation d'origine (vol
+   * d'oiseau × 1,3) quand `walkMin` a été allongé d'après le vrai chemin à pied (au plus 5 min de plus). Absent : la
+   * marche est estimée, comme en 1.3.0.
+   */
+  walkEst?: number;
   op?: Op; mode?: Mode; line?: string;    // trajet en véhicule
   cat?: string; num?: string;             // trains : 'IC', '2112'
   head?: Names;
@@ -478,6 +484,16 @@ export interface Core {
    * le chemin habituel (core/walk/router.ts).
    */
   walkRoute?(from: LatLon, to: LatLon, opts?: { avoidSteps?: boolean }): Promise<WalkRoute | null>;
+  /**
+   * 1.3.1 (décision du 20/11 à 21:59, core/firstwalk.ts) : l'heure de partir d'après le vrai chemin de la première marche.
+   * route(), answer() et refresh() rendent déjà les trajets corrigés quand le chemin est connu ; ils n'attendent jamais
+   * le chemin (0,1 s au plus). `onFirstWalk` prévient quand un chemin tout juste connu allonge une première marche : les
+   * écrans rafraîchissent alors une fois leurs trajets (rend la fonction de désabonnement). `firstWalk` : le même
+   * trajet avec la correction connue à cet instant, sans réseau ni attente (le même objet si rien ne change), pour une
+   * liste de résultats qui n'est pas rafraîchie (recherche du téléphone).
+   */
+  onFirstWalk?(cb: () => void): () => void;
+  firstWalk?(j: Journey, settings: Settings): Journey;
   /**
    * 1.2.10 : chemins à pied publiés (data/walk/index.json), pour la carte « Chemins à pied » de l'écran Données :
    * `date` = date des données OpenStreetMap (AAAA-MM-JJ), `tiles` = nombre de tuiles. null : pas de chemins à pied

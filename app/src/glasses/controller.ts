@@ -577,6 +577,8 @@ export class GlassesController implements GlassesApi {
   private unsubscribe: (() => void) | null = null;
   /** 1.2.10 (mode test) : abonnement à l'horloge simulée réglée par window.__quaiClock.set. */
   private offClock: (() => void) | null = null;
+  /** 1.3.1 : désabonnement de Core.onFirstWalk */
+  private offFirstWalk: (() => void) | null = null;
   private pendingRestore: NavState | null = null;
   private pendingShow: NavState | null = null;
   private seq = 0;
@@ -755,6 +757,10 @@ export class GlassesController implements GlassesApi {
     this.unsubscribe = this.d.platform.glasses.onSignal((s) => this.onSignal(s));
     this.listenClock();
     this.d.core.onGeneration?.(() => this.generationChanged());
+    // 1.3.1 (vrai chemin partout, core/firstwalk.ts) : le vrai chemin d'une première marche vient d'être connu et il est
+    // plus long : un rafraîchissement tout de suite, celui des 30 s (trajet suivi, favoris de l'écran, écran affiché),
+    // pour que la même heure de partir soit partout (firstWalkKnown) ; même file de calcul des favoris
+    this.offFirstWalk = this.d.core.onFirstWalk?.(() => this.firstWalkKnown()) ?? null;
     await this.render(true);
     if (!this.d.configured) {
       this.nav = initNav(this.notConfiguredRoute());
@@ -1011,6 +1017,8 @@ export class GlassesController implements GlassesApi {
     this.unsubscribe = null;
     this.offClock?.();
     this.offClock = null;
+    this.offFirstWalk?.();
+    this.offFirstWalk = null;
     // 1.2.10 : positions continues et minuterie du guidage arrêtées ; un enregistrement différé est fait tout de suite
     this.stopWatch();
     clearTimeout(this.guideTimer);
@@ -1257,6 +1265,54 @@ export class GlassesController implements GlassesApi {
         await this.guideMenu(i.id);
         return;
     }
+  }
+
+  /**
+   * 1.3.1 (vrai chemin partout) : le cœur vient de connaître un chemin qui allonge une première marche. Tous les trajets
+   * que les lunettes gardent (réponses des favoris, propositions des écrans ouverts, trajet suivi) prennent tout de
+   * suite l'heure de partir du cœur, sans réseau (Core.firstWalk) : la même heure sur tous les écrans, d'un seul coup.
+   * Une réponse dont le premier véhicule ne peut plus être attrapé garde son trajet en attendant d'être refaite (le
+   * suivant vient alors, comme après un départ raté, sans passer par « … »). Puis les réponses des favoris et des
+   * adresses récentes sont à refaire (comme après un déplacement) et l'écran affiché est rafraîchi, une fois.
+   */
+  private firstWalkKnown(): void {
+    if (this.stopped) return;
+    const core = this.d.core;
+    if (core.firstWalk) {
+      const s = this.settings();
+      const now = this.d.clock.now();
+      const fix = (j: Journey): Journey => core.firstWalk!(j, s);
+      for (const [id, a] of this.answers) {
+        const js = a.plan?.journeys;
+        if (!a.plan || !js?.length) continue;
+        const out = js.map(fix);
+        if (out.every((j, i) => j === js[i]) || !catchable(out[0], now)) continue;
+        this.answers.set(id, { ...a, plan: { ...a.plan, journeys: out } });
+      }
+      const held: Journey[] = [];
+      for (const f of this.nav.stack) {
+        const r = f.route as { journeys?: Journey[]; journey?: Journey };
+        if (Array.isArray(r.journeys)) held.push(...r.journeys);
+        if (r.journey) held.push(r.journey);
+      }
+      for (const x of held) {
+        const cur = this.journeyOf(x);
+        const out = fix(cur);
+        if (out !== cur) this.journeysById.set(out.id, out);
+      }
+      const t = this.trip;
+      if (t) {
+        const cur = this.journeyOf(t.journey);
+        const out = fix(cur);
+        if (out !== cur) {
+          this.journeysById.set(out.id, out);
+          this.setFollowedJourney(out);
+        }
+      }
+    }
+    this.answerAt.clear();
+    for (const [k, v] of this.recents) this.recents.set(k, { ...v, at: 0 });
+    if (this.ready && !this.paused) void this.refreshCurrent();
   }
 
   /** Après un changement d'écran : afficher tout de suite, rafraîchir si les données sont anciennes. */

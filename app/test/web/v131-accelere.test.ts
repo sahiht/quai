@@ -13,7 +13,9 @@ import { fileURLToPath, URL as NodeURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Favorite, FavoriteAnswer, Journey, LatLon, Settings } from '../../src/core/api';
 import { DEFAULT_SETTINGS } from '../../src/core/api';
+import { firstWalkMin, realWalkMin, setFirstWalk } from '../../src/core/firstwalk';
 import { GUIDE } from '../../src/core/guide';
+import { withFirstWalk } from '../../src/core/journeys';
 import { createJournal, JOURNAL_KEY } from '../../src/core/journal';
 import { distanceM } from '../../src/core/util';
 import { dataFreshness } from '../../src/dev/fake-core';
@@ -276,6 +278,24 @@ describe('trajet aux heures prévues et positions simulées (fonctions pures)', 
     expect(realFirstWalk(ride, path, 2)).toBe(ride);
     const walk = plannedJourney(journeyOf([j.legs[0]], 'jpied', j.legs[0].dep), 2);
     expect(realFirstWalk(walk, path, 2)).toBe(walk);
+  });
+
+  it('« 7h12 partout » : l’essai et le cœur sont d’accord (mêmes fonctions) : 5 min d’avance au plus, jamais deux corrections l’une sur l’autre', () => {
+    const j = plannedJourney(trip(), 2);
+    const path = firstWalkRoute();
+    // un chemin faux de 5 km (65 min pour 9 prévues) : 5 min d'avance, 14 min affichées, la même arrivée à l'arrêt
+    const huge = realFirstWalk(j, { ...path, lengthM: 5200 }, 2);
+    expect(huge.legs[0]).toMatchObject({ walkMin: 14, walkEst: 9, dep: at('06:56'), arr: at('07:10') });
+    expect(huge.leaveAt).toBe(at('06:56'));
+    // le trajet d'un favori arrive déjà corrigé par le cœur (11 min, estimation 9) : l'essai n'y ajoute rien
+    const core = withFirstWalk(j, { ...DEFAULT_SETTINGS }, at('06:00'), (legs) => setFirstWalk(legs, firstWalkMin(legs[0], realWalkMin(path.lengthM))));
+    expect(core.legs[0]).toMatchObject({ walkMin: 11, walkEst: 9 });
+    expect(realFirstWalk(core, path, 2)).toBe(core);
+    expect(realFirstWalk(core, { ...path, lengthM: 5200 }, 2)).toBe(core);
+    // et l'essai seul donne les mêmes minutes et la même heure que le cœur
+    const alone = realFirstWalk(j, path, 2);
+    expect(alone.legs[0]).toMatchObject({ walkMin: core.legs[0].walkMin, walkEst: 9, dep: core.legs[0].dep, arr: core.legs[0].arr });
+    expect(alone.leaveAt).toBe(core.leaveAt);
   });
 
   it('gatedPort : rien n’est dessiné tant que la porte est fermée ; gestes et signaux passent', async () => {
