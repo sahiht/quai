@@ -29,7 +29,8 @@ import type { Intent } from '../../src/glasses/types';
 import { at as atTime, firstWalkRoute, guide, journeyOf, P, prdTrip, rideLeg, stop, step, walkLeg, fix as guideFix } from './guide-fixtures';
 import { cleanupKit, guideSetup } from '../glasses/controller-guide-kit';
 import { settingsWith } from '../glasses/helpers';
-import { at, checkRoute, diskSource, memorySource, metres, prng, tileOf, type GraphDef } from './walk-helpers';
+import { makeEnv } from './support/env';
+import { at, checkRoute, diskSource, indexOf, memorySource, metres, prng, tileOf, type GraphDef } from './walk-helpers';
 import { defaults, harness, mount, textOf, until } from '../phone/helpers';
 
 const NOW = 1000;
@@ -190,6 +191,55 @@ describe('R4 : réglage éteint, rien ne change', () => {
     routeOn(v, at(0, -50), at(0, 110), NOW);
     expect(g.scratch).toBeDefined();
     expect(v.scratch).toBe(g.scratch);
+  });
+});
+
+/* ------------------------------ Du cœur au routeur, mêmes tuiles ------------------------------ */
+
+describe('R4 : le cœur passe le réglage au routeur (Core.walkRoute), sans une tuile de plus', () => {
+  // contrôle du 20/11 : sans ce passage (core/index.ts), l'interrupteur ne changerait rien dans l'appli
+  it('Core.walkRoute : allumé, la rampe ; éteint ou absent, l’escalier ; les mêmes demandes au serveur', async () => {
+    const calls = async (opts?: { avoidSteps?: boolean }) => {
+      const e = makeEnv({ now: '2026-11-10T12:10' });
+      e.server.overrides.set('/quai/data/walk/index.json', () => new Response(JSON.stringify(indexOf({ version: '2026-11-09' })), { status: 200 }));
+      e.server.overrides.set('/quai/data/walk/2541_145.json', () => new Response(JSON.stringify(tileOf(hill(60), { ver: '2026-11-09' })), { status: 200 }));
+      const r = (await (opts ? e.core.walkRoute!(at(0, -50), at(0, 110), opts) : e.core.walkRoute!(at(0, -50), at(0, 110)))) as WalkRoute;
+      return { r, walk: e.server.calls.filter((u) => u.includes('/walk/')) };
+    };
+    const usual = await calls();
+    const off = await calls({ avoidSteps: false });
+    const on = await calls({ avoidSteps: true });
+    expect(usual.r.source).toBe('osm');
+    expect(passes(usual.r, [60, 10])).toBe(false);
+    expect(off.r).toEqual(usual.r);
+    expect(passes(on.r, [60, 10]) && passes(on.r, [60, 50])).toBe(true);
+    between(on.r.lengthM, 258, 266);
+    expect(on.walk.length).toBeGreaterThan(1);
+    expect(on.walk).toEqual(usual.walk);
+    expect(off.walk).toEqual(usual.walk);
+  });
+
+  it('routeur, marche à cheval sur deux tuiles : les mêmes tuiles demandées, dans le même ordre, avec ou sans le réglage', async () => {
+    const dir = join(__dirname, 'walk-data', 'kotka');
+    const nodes = (key: string) => {
+      const t = decodeTile(JSON.parse(readFileSync(join(dir, `${key}.json`), 'utf8')) as WalkTileFile);
+      const out: LatLon[] = [];
+      for (let e = 0; e < t.edgeFrom.length; e++) if (t.edgeComp[e] === 0) out.push({ lat: t.nodeLat[t.edgeTo[e]] * WALK_UNIT, lon: t.nodeLon[t.edgeTo[e]] * WALK_UNIT });
+      return out;
+    };
+    const KOTKA_A = nodes('3026_897')[0];
+    const KOTKA_B = nodes('3026_898').find((b) => metres(KOTKA_A, b) > 200 && metres(KOTKA_A, b) < 1500)!;
+    const keys = async (opts: { avoidSteps?: boolean }) => {
+      const disk = diskSource(dir);
+      const asked: string[] = [];
+      const r = await new WalkRouter({ index: () => disk.index(), tile: (k, v) => (asked.push(`${v}|${k}`), disk.tile(k, v)) }, { now: () => NOW }).route(KOTKA_A, KOTKA_B, opts);
+      return { r, asked };
+    };
+    const usual = await keys({});
+    const on = await keys({ avoidSteps: true });
+    expect(usual.r?.source).toBe('osm');
+    expect(new Set(usual.asked.map((k) => k.split('|')[1])).size).toBeGreaterThan(1);
+    expect(on.asked).toEqual(usual.asked);
   });
 });
 
