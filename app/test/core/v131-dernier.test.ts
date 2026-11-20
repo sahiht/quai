@@ -234,6 +234,7 @@ describe('R3 : la règle, sur un fichier de zone', () => {
       [['E', 'Charleroi Sud', ['tec:c1', 'tec:c2']]],
       [
         // la nuit de jeudi à vendredi, écrite sur le vendredi : des voyages du jeudi après minuit peuvent manquer
+        [0, '01:00', 0],
         [0, '01:30', 0],
         [0, '18:40', 0],
         [0, '19:40', 0],
