@@ -170,6 +170,11 @@ export type Moment =
       /** marche dans la gare jusqu'au quai (correspondance), et marge */
       walkMin?: number;
       marginMin?: number;
+      /**
+       * 1.3.1 (B16, U4, A4 ; contrôle du moteur) : correspondance très juste (marge de 1 min ou moins, comme `Then.tight`
+       * de « Descends ») : « 2 min à pied → Gare du Nord, très juste », jamais « marge 1 min » après « très juste »
+       */
+      tight?: boolean;
       alight: Names;
       stopsToAlight: number;
       /** 1.3.1 (§ 4, § 12 « conflit réglé ») : l'arrêt ou la gare où monter (« 2 min à pied → Gare du Nord, très juste ») */

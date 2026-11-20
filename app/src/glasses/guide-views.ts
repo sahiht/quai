@@ -341,7 +341,9 @@ function boardMoment(m: Extract<Moment, { kind: 'board' }>, ctx: ViewCtx): Momen
   // train, « jusqu'à l'arrêt » pour un bus, un tram, un métro (contrôle technique du 15/11)
   if (m.walkMin !== undefined) {
     const walkMin = m.walkMin;
-    const tail = m.marginMin !== undefined ? `, ${marginText(m.marginMin)}` : '';
+    // 1.3.1 (B16, A4 ; contrôle du moteur) : très juste quand le moteur le dit (marge de 1 min ou moins, comme la ligne
+    // « ensuite » de « Descends » juste avant), jamais « marge 1 min » pour la même correspondance
+    const tail = m.tight === true ? `, ${GUIDE_TEXT.tight}` : m.marginMin !== undefined ? `, ${marginText(m.marginMin)}` : '';
     lines.push(F('pale', (w) => walkToStopText(walkMin, nameOf(m.stop, ctx), train, tail, w)));
   } else {
     // 1.3.1 (B12, E5 ; contrôle du sujet, remarque 2) : « descente dans 5 arrêts, à Bruxelles-Nord » : le nom entier s'il
