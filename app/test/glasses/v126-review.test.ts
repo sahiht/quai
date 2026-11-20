@@ -65,7 +65,7 @@ describe('relecture 1.2.6 : lunettes', () => {
     await w.until((x) => x.screen === 'home');
     await w.c.show({ screen: 'lineRun', follow: 'f-99', dir: 0 });
     const ws = await w.until((x: Screen) => x.screen === 'lineRun' && !/Chargement/.test(x.lines.join(' ')));
-    expect(ws.lines[0]).toBe('Introuvable : modifie-la dans Réglages.');
+    expect(ws.lines[0]).toBe('Introuvable : modifie-la dans l’onglet Réglages.');
     await w.gesture('tap');
     expect(opened).toEqual(['#/lignes']);
     w.c.stop();
@@ -80,7 +80,8 @@ describe('relecture 1.2.6 : lunettes', () => {
       core: (now) => Object.assign(stubCore(now), { lineHeads: async () => [] }),
     });
     const home = await h.until((x) => x.screen === 'home' && x.lines.some((l) => l.startsWith('Lignes de bus, tram, métro   2')));
-    expect(home.lines.at(-1)).toBe('Lignes de bus, tram, métro   2 lignes');
+    // 1.3.1 (PRD-1.3.1 § 8) : « Lignes… » avant « Arrêts… », la dernière rubrique
+    expect(home.lines.slice(-2)).toEqual(['Lignes de bus, tram, métro   2 lignes', 'Arrêts de bus, tram, métro   à choisir']);
     await h.c.replaceRoute({ screen: 'follows' });
     const s = await h.until((x) => x.screen === 'follows' && !x.lines.some((l) => / {3}…$/.test(l)) && x.lines.length > 4);
     expect(s.lines.slice(0, 4)).toEqual(['Tram 3', 'introuvable : modifie-la sur le téléphone', 'Tram 4', 'introuvable : modifie-la sur le téléphone']);

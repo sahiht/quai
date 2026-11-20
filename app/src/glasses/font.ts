@@ -4,6 +4,7 @@
  * (« 1 » = 8 px, « 4 » = 13 px, espace = 5 px) : on ne peut aligner qu'en mesurant.
  */
 import { getAdvW, getTextWidth } from '@evenrealities/pretext';
+import { apos } from '../core/typo';
 
 export const SCREEN_W = 576;
 export const SCREEN_H = 288;
@@ -67,10 +68,14 @@ export function hasGlyph(cp: number): boolean {
   return v;
 }
 
-/** Remplace les caractères absents par un équivalent affichable (accent retiré, sinon « ? »). */
+/**
+ * Remplace les caractères absents par un équivalent affichable (accent retiré, sinon « ? »). 1.3.1 (PRD-1.3.1 § 7) :
+ * l'apostrophe droite des données devient typographique (apos, « Braine-l’Alleud ») : tout ce qui s'affiche dans les
+ * lunettes, et chaque mesure (textWidth, truncate) se fait sur le texte affiché ; les données elles-mêmes ne changent pas.
+ */
 export function glyphSafe(text: string): string {
   let out = '';
-  for (const ch of text) {
+  for (const ch of apos(text)) {
     if (DROP.has(ch)) continue;
     const sub = SUBST[ch];
     if (sub !== undefined) {

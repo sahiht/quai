@@ -268,7 +268,13 @@ export function createCore(opts: CoreOptions): Core {
     return scopeTexts(alerts, scope, BOARD_BUDGET);
   }
 
-  const refreshEnv: RefreshEnv = { rt, now, trainDays, area: preparedOrNull };
+  // 1.3.1 (R3) : « , dernier » d'une étape en bus, tram ou métro d'après une zone déjà connue, jamais demandée au réseau
+  const cachedArea = async (id: string): Promise<PreparedArea | null> => {
+    const f = await data.cachedArea(aliasOf.get(id) ?? id).catch(() => null);
+    const meta = data.meta;
+    return f && meta ? prepareArea(f, meta) : null;
+  };
+  const refreshEnv: RefreshEnv = { rt, now, trainDays, area: preparedOrNull, cachedArea };
 
   const core: Core = {
     get meta() {
@@ -288,9 +294,10 @@ export function createCore(opts: CoreOptions): Core {
      * voie à 100 m ou qu'aucun chemin ne les relie ; null si les données manquent ou que le réseau fait défaut (le
      * guidage réessaie au besoin). Jamais d'exception.
      */
-    async walkRoute(from: LatLon, to: LatLon): Promise<WalkRoute | null> {
+    async walkRoute(from: LatLon, to: LatLon, opts?: { avoidSteps?: boolean }): Promise<WalkRoute | null> {
       try {
-        return await walk.route(from, to);
+        // 1.3.1 (R4) : « Éviter les escaliers » (opts.avoidSteps), sans lui le chemin de toujours
+        return await walk.route(from, to, opts);
       } catch {
         return null;
       }

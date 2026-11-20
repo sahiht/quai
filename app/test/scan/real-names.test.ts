@@ -20,11 +20,13 @@ import type { LineFile, LineIndex, Meta, Names, TrainsDay } from '../../../share
 import type { LineFollow, LineRun } from '../../src/core/linerun';
 import { linePath } from '../../src/core/linepicks';
 import { gtfsTime } from '../../src/core/util';
-import { textWidth } from '../../src/glasses/font';
+import { apos, shortName } from '../../src/core/typo';
+import { textWidth, truncate } from '../../src/glasses/font';
+import { EXPAND_PX } from '../../src/glasses/format';
 import type { GlassesView } from '../../src/glasses/types';
-import { boardView, followsView, lineRunView, lineView, stopsView, trainRunView, type ViewCtx } from '../../src/glasses/views';
-import { boardOf, dep, lineBoardOf, overflowing, page, settingsWith, stopsOf, trainAt, trainRunOf } from '../glasses/helpers';
-import { newTally, pageCuts, tally } from './cuts';
+import { boardView, favoritesView, followsView, lineRunView, lineView, stationsView, stepsPage, stopsView, trainRunView, type ViewCtx } from '../../src/glasses/views';
+import { PLACES, boardOf, dep, journey, lineBoardOf, overflowing, page, settingsWith, stopsOf, trainAt, trainRunOf } from '../glasses/helpers';
+import { cutKind, newTally, pageCuts, tally } from './cuts';
 
 const DIR = process.env.QUAI_SCAN_DATA;
 const MIN = 60_000;
@@ -82,7 +84,7 @@ describe.skipIf(!DIR)('1.3.0 : balayage des vrais noms dans les rangées des lun
       const p = page(v);
       const bad = overflowing(p);
       if (bad.length) err(`${label} : ${bad[0]}`);
-      tally(words, pageCuts(v, p), label);
+      tally(words, pageCuts(v, p), label, p);
       const ls = p.lines.map(nb);
       rows += p.visible;
       for (const re of kept) if (!ls.some((l) => re.test(l))) err(`${label} : rien ne finit par ${re.source} (${ls.slice(0, 4).join(' | ')})`);
@@ -104,6 +106,11 @@ describe.skipIf(!DIR)('1.3.0 : balayage des vrais noms dans les rangées des lun
         check(`Passages d'une ligne, vers ${name}`, lineView({ screen: 'line', areaId: 'tec:scan', op: 'tec', line: '163b', name: N('Arrêt') }, lb, ctx), [/dans 7 min$/, /dans 9 min$/]);
         // « Lignes » : un sens par rangée
         check(`Lignes, vers ${name}`, followsView([{ follow, mode: 'bus', heads: [N(name), N('Wavre')] }], ctx), []);
+        // 1.3.1 (B21) : « Gares de train » en accordéon : la direction, puis le train d'après, son heure, son retard et sa
+        // voie modifiée entiers
+        const station = { id: 'scan', areaId: 'sncb:scan', name: N('Gare'), lat: 50.8, lon: 4.3 };
+        const after = trainAt(now, 37, { head: N(name), platform: '12', newPlatform: '12a', delayMin: 12, est: now + 49 * MIN });
+        check(`Gares, vers ${name}`, stationsView([{ pick: station, next: trainAt(now, 7, { head: N(name) }), after, state: 'ok' }], ctx), [/^vers /, /, 08:37 \+12 voie 12a !$/]);
       } catch (e) {
         err(`${name} : ${(e as Error).message}`);
       }
@@ -129,10 +136,88 @@ describe.skipIf(!DIR)('1.3.0 : balayage des vrais noms dans les rangées des lun
       }
     }
 
+    // 1.3.1 (PRD-1.3.1 § 7) : chaque nom des données qui a une apostrophe droite (« Braine-l'Alleud ») : dans les écrans
+    // ci-dessus, la liste « Gares », l'écran du trajet (marche vers l'arrêt, véhicule, « depuis … ») et l'accordéon
+    // d'un favori ; aucune rangée affichée ne garde l'apostrophe droite
+    const withApos = [...new Set([...stops, ...heads])].filter((n) => n.includes("'"));
+    for (const name of withApos) {
+      try {
+        check(`Tableau d'un arrêt, vers ${name}`, boardView(boardOf('tec:scan', 'Arrêt', [dep(now, 5, { head: N(name), line: '163b' })]), ctx, { kept: false }), []);
+        const ds = stopsOf({ op: 'tec', mode: 'bus', line: '163b', head: N(name) }, now, [['Wavre', 1], [name, 5], [name, 9]]);
+        check(`Arrêts d'un départ, ${name}`, stopsView({ screen: 'stops', areaId: 'tec:scan', dep: dep(now, 1) }, ds, ctx), []);
+        const tr = trainRunOf({ op: 'sncb', mode: 'train', line: 'IC', head: N(name) }, now, [['Namur', 2, { platform: '4' }], [name, 30, { platform: '3' }]], 0);
+        check(`Tout le trajet d'un train, ${name}`, trainRunView(tr, ctx), []);
+        check(`Gares, ${name}`, stationsView([{ pick: { id: 'scan', areaId: 'sncb:scan', name: N(name), lat: 50.8, lon: 4.3 }, next: trainAt(now, 7, { head: N(name) }), state: 'ok' }], ctx), []);
+        const j = journey('scan', [
+          { walk: 6, to: name },
+          { ride: '163b', mode: 'bus', dep: now + 10 * MIN, arr: now + 30 * MIN, from: name, to: name, head: name },
+          { walk: 3 },
+        ]);
+        check(`Écran du trajet, ${name}`, stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0, fresh: true }, ctx), []);
+        const aboard = journey('scan2', [{ ride: 'IC', mode: 'train', dep: now + 10 * MIN, arr: now + 40 * MIN, from: name, to: 'Namur', platform: '2' }]);
+        check(`Écran du trajet à bord, ${name}`, stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [aboard], index: 0, fresh: true }, ctx), []);
+        const fav = { fav: PLACES.bureau, answer: { favoriteId: PLACES.bureau.id, kind: 'trip' as const, state: 'ok' as const, plan: { journeys: [j] }, updatedAt: now } };
+        check(`Accordéon d'un favori, ${name}`, favoritesView({ entries: [fav] }, { ...ctx, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.9' }) }), []);
+      } catch (e) {
+        err(`${name} : ${(e as Error).message}`);
+      }
+    }
+
+    // 1.3.1 (PRD-1.3.1 § 15) : le nom de l'arrêt où l'on marche, pour chaque long nom d'arrêt ou de gare : écran du
+    // trajet (« à pied 6 min → … ») et première ligne de l'accordéon d'un favori (« à pied 6 min → … », « depuis … »).
+    // Lu sur la page elle-même : le nom entier (toujours, s'il tient), sinon son diminutif entier, sinon le nom entier
+    // coupé au mot ; jamais au milieu d'un mot, jamais un diminutif coupé.
+    const walked = { full: 0, short: 0, cut: 0, mid: 0, wrong: 0 };
+    const WALK_PX = 460;
+    const walkName = (label: string, line: string | undefined, head: string, name: string, maxPx: number): void => {
+      // comme l'affichage : apostrophe typographique, caractères sûrs des lunettes
+      const shown = nb(truncate(apos(name), Number.MAX_SAFE_INTEGER));
+      if (!line || !line.startsWith(head)) {
+        walked.wrong++;
+        err(`${label} : ligne attendue « ${head}… », lue « ${line ?? ''} »`);
+        return;
+      }
+      const said = line.slice(head.length);
+      const fits = textWidth(`${head}${shown}`) <= maxPx;
+      if (said === shown) walked.full++;
+      else if (!fits && said === shortName(shown) && said !== shown) walked.short++;
+      else if (!fits && said.endsWith('…') && shown.startsWith(said.slice(0, -1))) {
+        walked.cut++;
+        if (cutKind(said.slice(0, -1), shown) === 'mid') {
+          walked.mid++;
+          err(`${label} : coupé au milieu d'un mot : ${line}`);
+        }
+      } else {
+        walked.wrong++;
+        err(`${label} : ni le nom entier, ni son diminutif, ni sa coupe au mot : ${line}`);
+      }
+    };
+    for (const name of longStops) {
+      try {
+        const bus = { ride: '163b', mode: 'bus' as const, dep: now + 10 * MIN, arr: now + 30 * MIN, from: name, to: 'Wavre', head: 'Wavre' };
+        const j = journey('scan3', [{ walk: 6, to: name }, bus, { walk: 3 }]);
+        const steps = stepsPage({ title: 'Vers le bureau', label: '' }, { journeys: [j], index: 0, fresh: true }, ctx);
+        check(`Écran du trajet, à pied vers ${name}`, steps, []);
+        const row = page(steps).lines.map(nb).find((l) => l.includes('à pied 6 min → '));
+        walkName(`Écran du trajet, ${name}`, row?.slice(row.indexOf('à pied')), 'à pied 6 min → ', name, WALK_PX);
+        const favCtx = { ...ctx, settings: settingsWith([PLACES.bureau], { seenVersion: '1.2.9' }) };
+        for (const [head, legs] of [['à pied 6 min → ', j], ['depuis ', journey('scan4', [bus])]] as const) {
+          const fav = { fav: PLACES.bureau, answer: { favoriteId: PLACES.bureau.id, kind: 'trip' as const, state: 'ok' as const, plan: { journeys: [legs] }, updatedAt: now } };
+          const v = favoritesView({ entries: [fav] }, favCtx);
+          check(`Accordéon d'un favori, ${head}${name}`, v, []);
+          walkName(`Accordéon d'un favori, ${name}`, page(v).lines.map(nb).find((l) => l.startsWith(head)), head, name, EXPAND_PX);
+        }
+      } catch (e) {
+        err(`${name} : ${(e as Error).message}`);
+      }
+    }
+
     const top = [...longStops, ...longHeads].sort((a, b) => textWidth(b) - textWidth(a)).slice(0, 5);
     const report = [
       `Balayage des vrais noms (${meta.serviceDates[0]}) : ${stops.size} noms d'arrêts et de gares, ${heads.size} destinations ; ${longStops.length} + ${longHeads.length} de ${MIN_PX} px et plus, dans ${views} vues (${rows} rangées), ${Math.round((Date.now() - t0) / 1000)} s.`,
       `Rangées coupées : ${words.cut} ; au milieu d'un mot (0 exigé) : ${words.mid} ; premier mot seul trop long (coupé au caractère) : ${words.first} ; coupes introuvables : ${words.unknown}.${words.samples.length ? ` Ex. : ${words.samples.join(' | ')}` : ''}`,
+      `Noms à apostrophe droite : ${withApos.length} ; rangées affichées avec une apostrophe droite (1.3.1, 0 exigé) : ${words.straight}.${words.straightSamples.length ? ` Ex. : ${words.straightSamples.join(' | ')}` : ''}`,
+      `Arrêt où l'on marche (1.3.1 § 15), ${longStops.length} noms sur 3 lignes : nom entier ${walked.full}, diminutif ${walked.short}, coupé au mot ${walked.cut} ; au milieu d'un mot (0 exigé) : ${walked.mid} ; autre (0 exigé) : ${walked.wrong}.`,
       `Noms les plus longs : ${top.map((s) => `${s} (${textWidth(s)} px)`).join(', ')}.`,
       errors.length ? `Erreurs :\n  ${errors.join('\n  ')}` : 'Aucune erreur.',
     ];
@@ -142,5 +227,11 @@ describe.skipIf(!DIR)('1.3.0 : balayage des vrais noms dans les rangées des lun
     expect(errors).toEqual([]);
     expect(words.mid).toBe(0);
     expect(words.unknown).toBe(0);
+    // 1.3.1 (PRD-1.3.1 § 15) : l'arrêt où l'on marche : jamais au milieu d'un mot, et le diminutif sert vraiment
+    expect([walked.mid, walked.wrong]).toEqual([0, 0]);
+    expect(walked.short).toBeGreaterThan(0);
+    // 1.3.1 (PRD-1.3.1 § 7) : aucune apostrophe droite affichée, et il y en avait dans les données
+    expect(withApos.length).toBeGreaterThan(0);
+    expect(words.straight).toBe(0);
   }, 1_200_000);
 });

@@ -16,6 +16,10 @@
  * métro » (§ 1.1), « Aller à… » a rejoint « Favoris » (§ 1.2) ; ouvrir un trajet ne le fait plus suivre : « Suivre ce
  * trajet » d'un toucher, ou le bouton « Lunettes » du téléphone (§ 6) ; à Gare du Nord (S2), « Bus, tram, métro »
  * s'ouvre d'office sur le tram 3 (ligne « près », REVUE-USAGE n° 4).
+ *
+ * 1.3.1 (PRD-1.3.1 § 8) : l'accueil commence par « Autour de moi » (sous « En cours » s'il y est), puis « Favoris » et
+ * ses favoris, « Gares de train », « Lignes… », « Arrêts… » ; le curseur s'ouvre sur « Autour de moi » : ▼▼ mène au
+ * premier favori (tests mis à jour, même intention).
  */
 import { describe, expect, it, vi } from 'vitest';
 
@@ -44,7 +48,8 @@ const linesReady = (s: Screen) => s.screen === 'lines' && s.lines.length > 2 && 
 const boardReady = (s: Screen) => s.screen === 'board' && s.lines.length > 2;
 const followsReady = (s: Screen) => s.screen === 'follows' && s.lines.length > 1 && !s.lines.some((l) => l.endsWith('…'));
 /** 1.2.6 (PRD-1.2.6 § 1) : les trois rubriques du préréglage (Namur ; Bruxelles-Nord De Lijn ; tram 3 et tram 4). */
-const SECTIONS = ['Gares de train   1 gare', 'Arrêts de bus, tram, métro   1 arrêt', 'Lignes de bus, tram, métro   2 lignes'];
+// 1.3.1 (PRD-1.3.1 § 8) : « Lignes… » avant « Arrêts… »
+const SECTIONS = ['Gares de train   1 gare', 'Lignes de bus, tram, métro   2 lignes', 'Arrêts de bus, tram, métro   1 arrêt'];
 
 /**
  * 1.2.10 (PRD-1.2.10 § 5) : aides de l'écran du trajet : « y aller » sur une proposition, rien à lancer sur le trajet déjà
@@ -54,11 +59,23 @@ const HINT_GO = '△▽ étapes   double : retour';
 const HINT_GUIDED = '△▽ étapes   double : retour';
 
 /**
- * Ouvre le favori sous le curseur, puis le fait suivre sans guidage, comme le bouton « Lunettes » du téléphone (1.2.10 : le
- * seul suivi sans guidage ; « y aller » sur les lunettes lance le guidage) : le suivi de la 1.2.9 (« Dans le train », aide
- * à l'arrivée, reprise) s'applique.
+ * 1.3.1 (PRD-1.3.1 § 8) : sur l'accueil, le curseur s'ouvre sur « Autour de moi » (sous « En cours » s'il y est) : ▼ jusqu'au
+ * premier favori, sous « Favoris ».
+ */
+async function toFirstFavorite(h: Awaited<ReturnType<typeof setupController>>): Promise<void> {
+  const s = h.last();
+  if (s.screen !== 'home') return;
+  const first = (s.lines.some((l) => l.startsWith('En cours')) ? 1 : 0) + 2;
+  for (let i = s.sel; i < first; i++) await h.gesture('down');
+}
+
+/**
+ * Ouvre le favori sous le curseur (sur l'accueil, le premier favori : toFirstFavorite), puis le fait suivre sans
+ * guidage, comme le bouton « Lunettes » du téléphone (1.2.10 : le seul suivi sans guidage ; « y aller » sur les lunettes
+ * lance le guidage) : le suivi de la 1.2.9 (« Dans le train », aide à l'arrivée, reprise) s'applique.
  */
 async function openAndFollow(h: Awaited<ReturnType<typeof setupController>>): Promise<Screen> {
+  await toFirstFavorite(h);
   await h.gesture('tap');
   await h.until(stepsReady);
   const r = current(h.c.state.nav).route as StepsRoute;
@@ -99,7 +116,8 @@ describe('contrôleur des lunettes : démarrage, rendu, sortie', () => {
     // nouvelle installation : l'aide des gestes de l'accueil (7 premiers jours) dit « double : quitter »
     const { c, last, gesture, until, rec, closeWebView } = await setupController({ settings: { ...preset11(), seenVersion: '' } });
     expect((await until(homeReady)).lines.at(-1)).toBe('△▽ choisir   toucher : ouvrir   double : quitter');
-    await gesture('tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi », « Favoris », puis le premier favori
+    await gesture('down', 'down', 'tap');
     expect((await until(stepsReady)).title).toBe('Bureau');
     await gesture('double');
     expect(last().screen).toBe('home');
@@ -160,11 +178,11 @@ describe('contrôleur des lunettes : démarrage, rendu, sortie', () => {
     await until(boardReady);
     await gesture('double');
     await until(homeReady);
-    // du premier favori : le suivant, puis « Autour de moi »
-    await gesture('down', 'down', 'tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : l'accueil, pas encore touché, garde la règle d'ouverture : le curseur sur « Autour de moi »
+    await gesture('tap');
     await until((s) => s.screen === 'nearby' && s.lines.length > 2);
     expect(last().lines).toContain('~ horaire prévu, sans temps réel');
-    expect(last().lines.at(-1)).toBe('△▽ arrêt   toucher : départs   double : retour');
+    expect(last().lines.at(-1)).toBe('△▽ choisir   toucher : départs   double : retour');
     await settings.update((s) => ({ ...s, display: { ...s.display, markPlanned: false, gestureHints: false } }));
     await settle(60);
     expect(last().screen).toBe('nearby');
@@ -181,11 +199,12 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     expect(s.lines).toEqual([
       // sans « ~ » sur l'accueil, qui n'en affiche pas
       'Temps réel indisponible : horaires prévus',
+      // 1.3.1 (PRD-1.3.1 § 8) : « Autour de moi » en tête, la ligne vide au-dessus de « Gares de train »
+      'Autour de moi   3 arrêts',
       'Favoris   3',
       'Bureau   dans 2 min → 08:58',
       'Vers Gand-Saint-Pierre   07:40 → 08:09',
       '',
-      'Autour de moi   3 arrêts',
       ...SECTIONS,
     ]);
     // ordre intelligent, Maison (tu y es) en fin de liste et jamais sur l'accueil
@@ -197,19 +216,20 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
   it('CA-M1.2 et CA-M1.9 : S1 temps réel ; les trois rubriques toujours à l’écran, même avec la ligne du haut', async () => {
     const a = await setupController();
     const s = await a.until(homeReady);
-    expect(s.lines).toEqual(['Favoris   3', 'Bureau   dans 4 min → 08:58', 'Vers Gand-Saint-Pierre   07:40 → 08:09', '', 'Autour de moi   3 arrêts', ...SECTIONS]);
+    // 1.3.1 : « Autour de moi » en tête (§ 8) ; le bureau, voie modifiée, porte son « ! » comme dans « Favoris » (B15)
+    expect(s.lines).toEqual(['Autour de moi   3 arrêts', 'Favoris   3', 'Bureau !   dans 4 min → 08:58', 'Vers Gand-Saint-Pierre   07:40 → 08:09', '', ...SECTIONS]);
     a.c.stop();
     // horaires périmés : la ligne du haut prend une ligne ; rien ne passe sous le bord
     const b = await setupController({ flags: { stale: true, noRt: true } });
     const st = await b.until(homeReady);
     expect(st.lines[0]).toMatch(/^Horaires périmés : mise à jour arrêtée le /);
-    expect(st.lines[1]).toBe('Favoris   3');
-    expect(st.lines.slice(-5)).toEqual(['', 'Autour de moi   3 arrêts', ...SECTIONS]);
-    // du premier favori (curseur à l'ouverture) jusqu'à « Lignes de bus, tram, métro »
-    expect(st.sel).toBe(1);
-    await b.gesture('down', 'down', 'down', 'down', 'down');
+    expect(st.lines.slice(1, 3)).toEqual(['Autour de moi   3 arrêts', 'Favoris   3']);
+    expect(st.lines.slice(-4)).toEqual(['', ...SECTIONS]);
+    // 1.3.1 (§ 8) : de « Autour de moi » (curseur à l'ouverture) jusqu'à « Arrêts de bus, tram, métro », la dernière
+    expect(st.sel).toBe(0);
+    await b.gesture('down', 'down', 'down', 'down', 'down', 'down');
     expect(b.last().sel).toBe(6);
-    expect(b.last().lines.at(-1)).toBe('Lignes de bus, tram, métro   2 lignes');
+    expect(b.last().lines.at(-1)).toBe('Arrêts de bus, tram, métro   1 arrêt');
     b.c.stop();
   });
 
@@ -223,11 +243,11 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     expect(board.sel).toBe(1);
     await gesture('double');
     const home = await until(homeReady);
-    expect(home.lines).toEqual(['Favoris   3', 'Bureau   maintenant → 12:26', 'Vers Gand-Saint-Pierre   14:10 → 14:39', '', 'Autour de moi   4 arrêts', ...SECTIONS]);
+    expect(home.lines).toEqual(['Autour de moi   4 arrêts', 'Favoris   3', 'Bureau   maintenant → 12:26', 'Vers Gand-Saint-Pierre   14:10 → 14:39', '', ...SECTIONS]);
     expect(home.lines.some((l) => l.startsWith('Près de'))).toBe(false);
-    // curseur sur le premier favori ; ▲ : « Favoris »
-    expect(home.sel).toBe(1);
-    await gesture('up', 'tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : curseur sur « Autour de moi » (l'accueil n'avait pas été touché) ; ▼ : « Favoris »
+    expect(home.sel).toBe(0);
+    await gesture('down', 'tap');
     const list = await until(listReady);
     expect(list.title).toBe('Favoris');
     expect(list.order).toEqual(['fav-bureau', 'fav-gand', 'fav-maison']);
@@ -235,7 +255,10 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     // favori choisi s'ouvre sous lui (accordéon, rendu par la mise en page), plus de ligne du détail en bas
     expect(list.lines[0]).toBe('Bureau   maintenant → 12:26');
     expect(list.lines).toContain('Vers Gand-Saint-Pierre   14:10 → 14:39');
-    expect(list.lines).not.toContain('tram 3 12:12, direct');
+    // 1.3.1 (PRD-1.3.1 § 4) : le tram et son heure sont dans l'accordéon du curseur, sous « à pied 2 min → Gare du Nord » ;
+    // plus jamais en bas (ligne du détail de la 1.2.10)
+    expect(list.lines.slice(1, 3)).toEqual(['à pied 2 min → Gare du Nord', 'tram 3 12:12, direct']);
+    expect(list.lines.filter((l) => l === 'tram 3 12:12, direct')).toHaveLength(1);
     expect(last().lines.at(-1)).toBe('△▽ choisir   toucher : ouvrir   double : retour');
     c.stop();
   });
@@ -243,7 +266,8 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
   it('CA-M1.4 : S3, « Vers Gand-Saint-Pierre » en tête', async () => {
     const { c, until } = await setupController({ scenario: 's3' });
     const s = await until(homeReady);
-    expect(s.lines.slice(0, 3)).toEqual(['Favoris   3', 'Vers Gand-Saint-Pierre   dans 13 min → 14:39', 'Bureau   maintenant → 14:07']);
+    // 1.3.1 (PRD-1.3.1 § 8) : sous « Autour de moi »
+    expect(s.lines.slice(0, 4)).toEqual(['Autour de moi   1 arrêt', 'Favoris   3', 'Vers Gand-Saint-Pierre   dans 13 min → 14:39', 'Bureau   maintenant → 14:07']);
     expect(s.order?.[0]).toBe('fav-gand');
     c.stop();
   });
@@ -252,7 +276,8 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     const { c, last, gesture, until, settle } = await setupController({ pos: { lat: 50.8441, lon: 4.3474 } });
     const home = await until(homeReady);
     expect(home.lines.some((l) => l.startsWith('Bureau'))).toBe(false);
-    await gesture('up', 'tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi », « Favoris » juste dessous
+    await gesture('down', 'tap');
     const list = await until(listReady);
     expect(list.title).toBe('Favoris');
     const pos = list.order!.indexOf('fav-bureau');
@@ -273,8 +298,8 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
   it('CA-M1.6 : l’ordre de la liste reste figé pendant 2 min de rafraîchissements, les heures changent', async () => {
     const { c, gesture, until, flags, advance, last } = await setupController({ flags: { noRt: true } });
     await until(homeReady);
-    // « Favoris » : la liste de tous les favoris
-    await gesture('up', 'tap');
+    // « Favoris » : la liste de tous les favoris (1.3.1 : sous « Autour de moi »)
+    await gesture('down', 'tap');
     const first = await until(listReady);
     expect(first).toMatchObject({ screen: 'favorites', title: 'Favoris' });
     expect(first.order).toHaveLength(3);
@@ -295,15 +320,16 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     const { c, gesture, until } = await setupController({ pos: null });
     const s = await until(homeReady);
     expect(s.lines).toEqual([
+      'Autour de moi   sans position',
       'Favoris   3',
       'Bureau   sans position',
       'Vers Gand-Saint-Pierre   07:40 → 08:09',
       'Maison   sans position',
       '',
-      'Autour de moi   sans position',
       ...SECTIONS,
     ]);
-    await gesture('tap');
+    // 1.3.1 (§ 8) : de « Autour de moi », « Favoris », puis le trajet du bureau
+    await gesture('down', 'down', 'tap');
     expect((await until((x) => x.screen === 'message')).lines.slice(0, 2)).toEqual(['Position indisponible.', 'Autorise la position pour Quai dans l’appli Even.']);
     c.stop();
   });
@@ -311,8 +337,9 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
   it('accueil sans favori (CA-S1.3) : « Ajouter un favori » ouvre « Favoris », où « Ajouter un favori » dit comment faire', async () => {
     const { c, gesture, until } = await setupController({ settings: { ...preset11(), favorites: [] } });
     const s = await until((x) => x.screen === 'home' && !x.lines.some((l) => l.endsWith('…')));
-    expect(s.lines).toEqual(['Près de Namur', 'Ajouter un favori', '', 'Autour de moi   3 arrêts', ...SECTIONS]);
-    await gesture('tap');
+    expect(s.lines).toEqual(['Près de Namur', 'Autour de moi   3 arrêts', 'Ajouter un favori', '', ...SECTIONS]);
+    // 1.3.1 (PRD-1.3.1 § 8) : « Ajouter un favori » sous « Autour de moi »
+    await gesture('down', 'tap');
     expect((await until((x) => x.screen === 'favorites')).lines).toEqual(['Ajouter un favori   sur le téléphone', 'Autre adresse   sur le téléphone', '△▽ choisir   toucher : ouvrir   double : retour']);
     await gesture('tap');
     expect((await until((x) => x.screen === 'message')).lines).toEqual(['Aucun favori pour l’instant.', 'Ajoute Maison ou Bureau sur le téléphone.', 'double toucher : retour']);
@@ -324,8 +351,9 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     s.display.opening = 'home';
     const { c, gesture, until } = await setupController({ settings: s });
     const home = await until((x) => x.screen === 'home' && x.lines.some((l) => l.startsWith('Autour de moi   3')) && !x.lines.some((l) => l.endsWith('…')));
-    expect(home.lines).toEqual(['Près de Namur', 'Favoris   3', '', 'Autour de moi   3 arrêts', ...SECTIONS]);
-    await gesture('tap');
+    expect(home.lines).toEqual(['Près de Namur', 'Autour de moi   3 arrêts', 'Favoris   3', '', ...SECTIONS]);
+    // 1.3.1 (PRD-1.3.1 § 8) : « Favoris » sous « Autour de moi »
+    await gesture('down', 'tap');
     const list = await until(listReady);
     expect(list.title).toBe('Favoris');
     expect(list.order).toEqual(['fav-bureau', 'fav-gand', 'fav-maison']);
@@ -349,11 +377,11 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     await until(boardReady);
     await gesture('double');
     await until(homeReady);
-    // « Lignes de bus, tram, métro » : un sens par rangée, sans attente (du premier favori : 5 fois ▼)
+    // « Lignes de bus, tram, métro » : un sens par rangée, sans attente (1.3.1 : de « Autour de moi », 5 fois ▼)
     await gesture('down', 'down', 'down', 'down', 'down', 'tap');
     const f = await until(followsReady);
     expect(f.title).toBe('Lignes de bus, tram, métro');
-    expect(f.lines).toEqual(['Tram 3 vers Churchill', 'Tram 3 vers Esplanade', 'Tram 4 vers Stalle', '△▽ choisir   toucher : la ligne   double : retour']);
+    expect(f.lines).toEqual(['Tram 3 vers Churchill', 'Tram 3 vers Esplanade', 'Tram 4 vers Stalle', '△▽ choisir   toucher : parcours   double : retour']);
     // toucher : toute la ligne dans ce sens, le curseur sur l'arrêt le plus proche (à 80 m), le prochain passage en clair ;
     // 1.2.7 : ● seulement d'après le temps réel (ici, l'horaire prévu : aucun ●, pas de ligne du haut)
     await gesture('tap');
@@ -382,20 +410,22 @@ describe('M1 : favoris « réponse directe » ; accueil de la 1.2.2', () => {
     await gesture('double');
     expect(last()).toMatchObject({ screen: 'lineRun', title: 'Tram 3 vers Churchill', sel: 1 });
     await gesture('double', 'double');
-    // retour à l'accueil, le curseur sur « Lignes… » ; ▲ : « Arrêts… » : Bruxelles-Nord (De Lijn, toutes les lignes)
-    expect((await until(homeReady)).sel).toBe(6);
-    await gesture('up', 'tap');
+    // retour à l'accueil, le curseur sur « Lignes… » ; ▼ : « Arrêts… » (1.3.1, PRD-1.3.1 § 8 : la dernière rubrique) :
+    // Bruxelles-Nord (De Lijn, toutes les lignes)
+    expect((await until(homeReady)).sel).toBe(5);
+    await gesture('down', 'tap');
     const stops = await until(linesReady);
     expect(stops.title).toBe('Arrêts de bus, tram, métro');
     expect(stops.lines[0]).toBe('Bruxelles-Nord');
     await gesture('tap');
     expect((await until((x) => x.screen === 'board' && x.title.startsWith('Bruxelles-Nord'))).title).toBe('Bruxelles-Nord, bus (De Lijn) ★');
     await gesture('double', 'double');
-    // « Gares de train » : Namur ; toucher, son tableau
-    expect((await until(homeReady)).sel).toBe(5);
-    await gesture('up', 'tap');
+    // « Gares de train » : Namur (1.3.1 : deux rangées au-dessus de « Arrêts… ») ; toucher, son tableau
+    expect((await until(homeReady)).sel).toBe(6);
+    await gesture('up', 'up', 'tap');
     const st = await until((x) => x.screen === 'stations' && !x.lines.some((l) => l.endsWith('…')));
-    expect(st).toMatchObject({ title: 'Gares de train', lines: ['Namur   IC 12:42 voie 4', '△▽ choisir   toucher : départs   double : retour'] });
+    // 1.3.1 (B21) : l'accordéon de la gare : la direction du prochain train, puis le train d'après (déjà lu au tableau)
+    expect(st).toMatchObject({ title: 'Gares de train', lines: ['Namur   IC 12:42 voie 4', 'vers Bruxelles-Midi', 'puis IC vers Bruxelles-Midi, 13:42 voie 4', '△▽ choisir   toucher : départs   double : retour'] });
     await gesture('tap');
     const namur = await until((x) => x.screen === 'board' && x.lines.length > 2);
     expect(namur.title).toBe('Namur, train (SNCB) ★');
@@ -412,18 +442,20 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     const h = await setupController();
     const { c, gesture, until, last } = h;
     await until(homeReady);
+    // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi », « Favoris », puis le premier favori
+    await toFirstFavorite(h);
     await gesture('tap');
     const s = await until(stepsReady);
     expect(s).toMatchObject({ page: 1, pages: 3, label: 'short', followed: false, sel: -1, title: 'Bureau' });
     // 1.2.10 (PRD-1.2.10 § 5) : l'alerte du trajet en haut ; une rangée par étape, l'heure au début
     expect(s.lines).toEqual([
       '! Voie modifiée : l’IC part de la voie 6',
-      '07:35 à pied 7 min',
+      '07:35 à pied 7 min → Namur',
       '07:44 IC voie 6 ! → Bruxelles-Nord   08:42',
-      '08:42 à pied 2 min',
+      '08:42 à pied 2 min → Gare du Nord',
       // 1.2.5 (PRD-1.2.5 § 2) : l'IC a 2 min de retard, 2 min à pied, le tram à 08:44 : aucune marge
       '~08:44 Tram 3 → Bourse   très juste',
-      '08:49 à pied 9 min',
+      '08:49 à pied 9 min   08:58',
       'Fin du trajet. ▽ 2 autres trajets',
       // 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action, entre la note et les aides
       '▶ Y aller',
@@ -496,7 +528,8 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     const h = await setupController();
     const { c, gesture, until, screens } = h;
     await until(homeReady);
-    await gesture('up', 'tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : « Favoris » sous « Autour de moi »
+    await gesture('down', 'tap');
     const list = await until(listReady);
     // 1.2.10 (PRD-1.2.10 § 2) : « ! » (voie modifiée) après le nom ; 1.3.0 : son détail dans l'accordéon (PRD-1.3.0 § 7)
     expect(list.lines[0]).toBe('Bureau !   dans 4 min → 08:58');
@@ -517,7 +550,8 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     s.recent = [{ label: 'Korenmarkt, 9000 Gent', lat: 51.0547, lon: 3.7217, at: 1 }];
     const { c, gesture, until, settings } = await setupController({ scenario: 's3', settings: s });
     await until(homeReady);
-    await gesture('up', 'tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : « Favoris » sous « Autour de moi »
+    await gesture('down', 'tap');
     await until(listReady);
     // Vers Gand-Saint-Pierre, Bureau, Maison, puis l'adresse, sous la ligne pâle (jamais sous le curseur)
     await gesture('down', 'down', 'down');
@@ -530,7 +564,7 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     await gesture('tap');
     const st = await until(stepsReady);
     expect(st).toMatchObject({ page: 1, followed: false, label: 'short', title: 'Korenmarkt' });
-    expect(st.lines).toContain('14:39 à pied 1 min');
+    expect(st.lines).toContain('14:39 à pied 1 min → Gand-Saint-Pierre');
     await gesture('double');
     await settings.update((x) => ({ ...x, recent: [] }));
     const after = await until((x) => x.screen === 'favorites' && !x.lines.includes('ADRESSES RÉCENTES'));
@@ -541,7 +575,8 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
   it('« Favoris » : Maison depuis la maison, « Tu es déjà à la maison. » ; « Autre adresse » : un message', async () => {
     const { c, gesture, until, last } = await setupController();
     await until(homeReady);
-    await gesture('up', 'tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : « Favoris » sous « Autour de moi »
+    await gesture('down', 'tap');
     const list = await until(listReady);
     expect(list.lines).toContain('Maison   tu y es');
     // Bureau, Vers Gand-Saint-Pierre, puis Maison
@@ -556,6 +591,8 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     const h = await setupController({ scenario: 's3' });
     const { c, gesture, until, last, goTo } = h;
     await until(homeReady);
+    // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi », « Favoris », puis le premier favori
+    await toFirstFavorite(h);
     await gesture('tap');
     const s = await until(stepsReady);
     expect(s.title).toBe('Gand-Saint-Pierre');
@@ -599,9 +636,10 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
   it('CA-M2.7 et PRD-1.2.10 § 3.1 : trajet entièrement à pied : « y aller » le guide aussi (marche seule)', async () => {
     const { c, gesture, until, last } = await setupController({ pos: { lat: 50.848, lon: 4.352 }, now: at(10, 0) });
     const home = await until(homeReady);
-    // à pied : on part quand on veut, l'arrivée suit
-    expect(home.lines.slice(0, 2)).toEqual(['Favoris   3', 'Bureau   maintenant → 10:09']);
-    await gesture('tap');
+    // à pied : on part quand on veut, l'arrivée suit (1.3.1, § 8 : sous « Autour de moi »)
+    expect(home.lines.slice(1, 3)).toEqual(['Favoris   3', 'Bureau   maintenant → 10:09']);
+    expect(home.lines[0]).toMatch(/^Autour de moi {3}/);
+    await gesture('down', 'down', 'tap');
     const s = await until(stepsReady);
     expect(s).toMatchObject({ title: 'Bureau', followed: false });
     expect(s.lines.at(-1)).toBe(HINT_GO);
@@ -637,6 +675,8 @@ describe('M2 : un toucher, le trajet ; ▼ la suite, puis les autres trajets (1.
     // ne change (l'écran du guidage, sans « Dans le train »)
     const b = await setupController({ flags: { noRt: true } });
     await b.until(homeReady);
+    // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi », « Favoris », puis le premier favori
+    await toFirstFavorite(b);
     await b.gesture('tap');
     await b.until(stepsReady);
     await b.gesture('down');
@@ -659,8 +699,8 @@ describe('M6 : sans mauvaise surprise', () => {
   /** « Gares » puis Namur : le tableau de la gare gardée (« ★ » dans le titre). */
   const openNamur = async (h: Awaited<ReturnType<typeof setupController>>) => {
     await h.until(homeReady);
-    // du premier favori : le suivant, « Autour de moi », puis « Gares »
-    await h.gesture('down', 'down', 'down', 'tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi », « Favoris », ses deux favoris, puis « Gares de train »
+    await h.gesture('down', 'down', 'down', 'down', 'tap');
     await h.until((x) => x.screen === 'stations' && !x.lines.some((l) => l.endsWith('…')));
     await h.gesture('tap');
     return h.until((x) => x.screen === 'board' && x.lines.length > 2);
@@ -726,7 +766,7 @@ describe('M6 : sans mauvaise surprise', () => {
     await gesture('tap');
     advance(6_000);
     await gesture('tap');
-    expect(last().lines.at(-1)).toBe('★ Ajoutée aux lignes');
+    expect(last().lines.at(-1)).toBe('★ Ajoutée à tes lignes');
     expect(last().lines.slice(0, 2)).toEqual(['tram 3   ★', 'tram 4   ★']);
     expect(ids()?.[0]).toBe('f-fav-gdn-3 3 stib:6357F');
     expect(ids()?.[1]).toMatch(/^fl-\S+ 4 stib:6357F$/);
@@ -749,8 +789,8 @@ describe('M6 : sans mauvaise surprise', () => {
     expect(last().lines).not.toContain('★ Retirée. Toucher encore : annuler');
     await gesture('double');
     const home = await until((x) => x.screen === 'home' && x.lines.includes('Gares de train   à choisir'));
-    // 1.2.1 : pas de pied sur l'accueil (aide des gestes passée) : la dernière ligne reste « Lignes… »
-    expect(home.lines.at(-1)).toBe('Lignes de bus, tram, métro   2 lignes');
+    // 1.2.1 : pas de pied sur l'accueil (aide des gestes passée) : la dernière ligne reste « Arrêts… » (1.3.1, § 8)
+    expect(home.lines.at(-1)).toBe('Arrêts de bus, tram, métro   1 arrêt');
     expect(settings.get().stations).toEqual([]);
     c.stop();
   });
@@ -764,7 +804,8 @@ describe('M6 : sans mauvaise surprise', () => {
     await a.gesture('double');
     const home = await a.until(homeReady);
     // REVUE-USAGE n° 1 et n° 8 : « En cours » remplace la ligne de son favori ; le train, son heure et sa voie
-    expect(home.lines.slice(0, 3)).toEqual(['En cours : vers le bureau   IC 07:42 +2 voie 6 !', 'Favoris   3', 'Vers Gand-Saint-Pierre   07:40 → 08:09']);
+    // 1.3.1 (PRD-1.3.1 § 8) : « En cours » reste en tête, « Autour de moi » dessous
+    expect(home.lines.slice(0, 4)).toEqual(['En cours : vers le bureau   IC 07:42 +2 voie 6 !', 'Autour de moi   3 arrêts', 'Favoris   3', 'Vers Gand-Saint-Pierre   07:40 → 08:09']);
     // T sur « En cours » : le trajet, à l'écran qui correspond à l'heure
     await a.gesture('up', 'tap');
     expect(a.last()).toMatchObject({ screen: 'steps', followed: true, page: 1 });
@@ -840,8 +881,8 @@ describe('M6 : sans mauvaise surprise', () => {
     await gesture('double');
     const home = await until(homeReady);
     expect(home.lines[0]).toMatch(/^En cours/);
-    // « Favoris » (sous « En cours ») puis Gand-Saint-Pierre (de gare à gare)
-    await gesture('up', 'up', 'down', 'tap');
+    // « Favoris » (1.3.1 : sous « En cours » et « Autour de moi ») puis Gand-Saint-Pierre (de gare à gare)
+    await gesture('up', 'up', 'down', 'down', 'tap');
     const list = await until(listReady);
     const k = list.order!.indexOf('fav-gand');
     for (let i = 0; i < k; i++) c.onGesture('down');
@@ -870,9 +911,9 @@ describe('M6 : sans mauvaise surprise', () => {
     await gesture('double');
     const home = await until(homeReady);
     expect(home.lines.some((l) => l.startsWith('Bureau'))).toBe(false);
-    // « Favoris » : le favori du bureau, sa réponse d'un nouveau départ (l'IC de 07:42 est pris), mais le toucher
-    // rouvre le trajet en cours
-    await gesture('up', 'down', 'tap');
+    // « Favoris » (1.3.1 : sous « En cours » et « Autour de moi ») : le favori du bureau, sa réponse d'un nouveau départ
+    // (l'IC de 07:42 est pris), mais le toucher rouvre le trajet en cours
+    await gesture('up', 'down', 'down', 'tap');
     const list = await until(listReady);
     expect(list.lines[0]).toBe('Bureau   08:33 → 09:57');
     await gesture('tap');
@@ -1045,11 +1086,11 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
     // en haut : « Si tu le rates » (fenêtre de la 1.2.5, gardée en 1.2.10)
     expect(p2.lines.map(nb)).toEqual([
       'Si tu le rates : arrivée 09:57, 1 h 04 plus tard',
-      '07:33 à pied 7 min',
+      '07:33 à pied 7 min → Namur',
       '~07:42 IC voie 4 → Bruxelles-Nord   08:40',
-      '08:40 à pied 2 min',
+      '08:40 à pied 2 min → Gare du Nord',
       '~08:44 Tram 3 → Bourse   marge 2 min',
-      '08:49 à pied 4 min',
+      '08:49 à pied 4 min   08:53',
       'Fin du trajet. ▽ autres trajets',
       // 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action, entre la note et les aides
       '▶ Y aller',
@@ -1283,19 +1324,20 @@ describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-
     const { c, gesture, until, last, settle } = await setupController({ flags: { noRt: true } });
     const home = await until(homeReady);
     expect(home.order?.[0]).toBe('fav-bureau');
-    // le lieu sous son nom, « Bureau » (la ligne 0 est « Temps réel indisponible… »)
-    expect(home.lines.slice(1, 3)).toEqual(['Favoris   3', 'Bureau   dans 2 min → 08:58']);
-    // « Arrêts… » : l'arrêt De Lijn et ses départs (curseur sur le premier favori : 4 fois ▼) ; « Lignes… » : tram 3 et
-    // tram 4, un sens par rangée
-    await gesture('down', 'down', 'down', 'down', 'tap');
+    // le lieu sous son nom, « Bureau » (la ligne 0 est « Temps réel indisponible… » ; 1.3.1 : puis « Autour de moi »)
+    expect(home.lines.slice(1, 4)).toEqual(['Autour de moi   3 arrêts', 'Favoris   3', 'Bureau   dans 2 min → 08:58']);
+    // « Arrêts… » : l'arrêt De Lijn et ses départs (1.3.1 : de « Autour de moi », 6 fois ▼, la dernière rubrique) ;
+    // « Lignes… », juste au-dessus : tram 3 et tram 4, un sens par rangée
+    await gesture('down', 'down', 'down', 'down', 'down', 'down', 'tap');
     const stops = await until(linesReady);
     expect(stops.lines[0]).toBe('Bruxelles-Nord');
-    await gesture('double', 'down', 'tap');
+    await gesture('double', 'up', 'tap');
     const follows = await until(followsReady);
     expect(follows.lines.filter((l) => l.startsWith('Tram 3 vers '))).toHaveLength(2);
     expect(follows.lines.filter((l) => l.startsWith('Tram 4 vers '))).toHaveLength(1);
-    // « Favoris » : le lieu « Maison » comme le trajet « Ma position → maison » de la 1.1, en fin de liste
-    await gesture('double', 'up', 'up', 'up', 'up', 'up', 'up', 'tap');
+    // « Favoris » : le lieu « Maison » comme le trajet « Ma position → maison » de la 1.1, en fin de liste (1.3.1 : de
+    // « Lignes… », 4 fois ▲)
+    await gesture('double', 'up', 'up', 'up', 'up', 'tap');
     const list = await until(listReady);
     expect(list.order).toEqual(['fav-bureau', 'fav-gand', 'fav-maison']);
     for (let i = 0; i < 2; i++) c.onGesture('down');
@@ -1306,7 +1348,7 @@ describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-
     c.stop();
   });
 
-  it('« ★ garder ce trajet » : parti de « Ma position », un lieu (l’arrêt d’arrivée) ; une seconde fois, « Déjà dans les favoris »', async () => {
+  it('« ★ garder ce trajet » : parti de « Ma position », un lieu (l’arrêt d’arrivée) ; une seconde fois, « Déjà dans tes favoris » (1.3.1, L7)', async () => {
     const h = await setupController({ scenario: 's3' });
     await h.until(homeReady);
     const gand = gandTrip();
@@ -1314,17 +1356,17 @@ describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-
     await h.c.showTrip({ title: 'Vers Gand-Saint-Pierre', from: { type: 'here' }, to: gand.to, result, index: 0 });
     await toArrival(h);
     await h.gesture('tap');
-    expect(h.last().lines.at(-1)).toBe('★ Trajet ajouté aux favoris');
+    expect(h.last().lines.at(-1)).toBe('★ Trajet ajouté à tes favoris');
     expect(h.settings.get().favorites).toHaveLength(4);
     expect(h.settings.get().favorites.at(-1)).toMatchObject({ kind: 'place', label: 'Gand-Saint-Pierre', src: 'stop', areaId: gand.to.areaId, address: 'Près de Gand-Saint-Pierre', propose: 'never' });
     expect(h.settings.get().favorites.some((f) => f.kind === 'trip' && f.from.type === 'here')).toBe(false);
     await h.gesture('tap');
-    expect(h.last().lines.at(-1)).toBe('★ Déjà dans les favoris');
+    expect(h.last().lines.at(-1)).toBe('★ Déjà dans tes favoris');
     expect(h.settings.get().favorites).toHaveLength(4);
     h.c.stop();
   });
 
-  it('« ★ garder ce trajet » : de gare à gare, hors favoris, un trajet fixe ; le trajet d’un favori : « Déjà dans les favoris »', async () => {
+  it('« ★ garder ce trajet » : de gare à gare, hors favoris, un trajet fixe ; le trajet d’un favori : « Déjà dans tes favoris » (1.3.1, L7)', async () => {
     const gand = gandTrip();
     const base = preset11();
     const h = await setupController({ scenario: 's3', settings: { ...base, favorites: base.favorites.filter((f) => f.id !== 'fav-gand') } });
@@ -1333,10 +1375,10 @@ describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-
     await h.c.showTrip({ title: 'Vers Gand-Saint-Pierre', from: gand.from, to: gand.to, result, index: 0 });
     await toArrival(h);
     await h.gesture('tap');
-    expect(h.last().lines.at(-1)).toBe('★ Trajet ajouté aux favoris');
+    expect(h.last().lines.at(-1)).toBe('★ Trajet ajouté à tes favoris');
     expect(h.settings.get().favorites.at(-1)).toMatchObject({ kind: 'trip', from: { type: 'area', areaId: gand.from.type === 'area' ? gand.from.areaId : '' }, to: { type: 'area', areaId: gand.to.areaId }, propose: 'never' });
     await h.gesture('tap');
-    expect(h.last().lines.at(-1)).toBe('★ Déjà dans les favoris');
+    expect(h.last().lines.at(-1)).toBe('★ Déjà dans tes favoris');
     expect(h.settings.get().favorites).toHaveLength(3);
     h.c.stop();
     // le favori « Vers Gand-Saint-Pierre » ouvert depuis l'accueil (le curseur y est), puis suivi (bouton « Lunettes »
@@ -1347,7 +1389,7 @@ describe('1.2 : lieux dans les favoris, « Le plus court » (PRD-1.2 § 2.3, CA-
     expect(f.c.followed?.favoriteId).toBe('fav-gand');
     await toArrival(f);
     await f.gesture('tap');
-    expect(f.last().lines.at(-1)).toBe('★ Déjà dans les favoris');
+    expect(f.last().lines.at(-1)).toBe('★ Déjà dans tes favoris');
     expect(f.settings.get().favorites).toHaveLength(3);
     f.c.stop();
   });

@@ -272,7 +272,8 @@ describe('1.3.0 : écran du test de l’écran des lunettes (PRD-1.3.0 § 6.1)',
 
   it('chaque réponse est envoyée aux lunettes (quai, dashboard, nothing), une seule fois ; done : le conseil exact du PRD', async () => {
     const advice: [string, DisplayTestCmd, string][] = [
-      ['Le test de Quai', { kind: 'answer', answer: 'quai' }, 'Lève un peu la tête pour voir les messages. Pour le moindre mouvement : dans l’appli Even, règle l’angle d’affichage au plus bas.'],
+      // 1.3.1 (PRD-1.3.1 § 5) : le conseil précis pour « Head-Up »
+      ['Le test de Quai', { kind: 'answer', answer: 'quai' }, 'Pour voir les messages sans bouger la tête : dans l’appli Even, règle l’angle de l’affichage Head-Up à 0, en regardant un peu vers le bas pendant le réglage. L’écran restera allumé quand tu regardes devant toi ; la batterie des lunettes s’use un peu plus vite.'],
       ['Le Dashboard', { kind: 'answer', answer: 'dashboard' }, 'En levant la tête, tu vois le Dashboard. Pendant un trajet, touche une fois les lunettes pour voir Quai.'],
       ['Rien', { kind: 'answer', answer: 'nothing' }, 'Les lunettes n’ont rien montré : dans l’appli Even, vérifie le réglage « Head-Up », puis recommence le test.'],
     ];
@@ -585,7 +586,8 @@ describe('1.3.0 : écran du test de l’écran des lunettes (PRD-1.3.0 § 6.1)',
       ['dashboard', 'Le Dashboard'],
       ['nothing', 'Rien'],
     ]);
-    expect(plain(TEST_ADVICE.headUp)).toBe('Lève un peu la tête pour voir les messages. Pour le moindre mouvement : dans l’appli Even, règle l’angle d’affichage au plus bas.');
+    // 1.3.1 (PRD-1.3.1 § 5) : le conseil précis pour « Head-Up »
+    expect(plain(TEST_ADVICE.headUp)).toBe('Pour voir les messages sans bouger la tête : dans l’appli Even, règle l’angle de l’affichage Head-Up à 0, en regardant un peu vers le bas pendant le réglage. L’écran restera allumé quand tu regardes devant toi ; la batterie des lunettes s’use un peu plus vite.');
     expect(TEST_ADVICE.none).toMatch(/Head-Up/);
     expect(secondsLeft(45)).toBe('45\u00a0s');
     for (const [k, v] of Object.entries(T).filter(([k]) => /^test/.test(k))) typoOk(v, k);

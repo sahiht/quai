@@ -34,7 +34,8 @@ describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
   it('ouvrir un favori ne le suit pas : « Suivre ce trajet » ; au départ, pas de « En cours » ni de « Dans le train »', async () => {
     const h = await open();
     await h.until(homeReady);
-    await h.gesture('tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi », « Favoris », puis le premier favori
+    await h.gesture('down', 'down', 'tap');
     const s = await h.until(steps);
     expect(nb(s.title)).toBe('Bureau');
     expect(s).toMatchObject({ followed: false, sel: -1 });
@@ -71,7 +72,8 @@ describe('CA-122.7 : un trajet n’est suivi que sur demande', () => {
   it('sans aide des gestes (réglage) : aucune aide, le toucher lance toujours le guidage', async () => {
     const h = await open({ display: { ...settingsWith([]).display, gestureHints: false } });
     await h.until(homeReady);
-    await h.gesture('tap');
+    // 1.3.1 (§ 8) : de « Autour de moi », « Favoris », puis le premier favori
+    await h.gesture('down', 'down', 'tap');
     const s = await h.until(steps);
     expect(nb(s.title)).toBe('Bureau');
     expect(s.lines.some((l) => l.startsWith('△▽'))).toBe(false);

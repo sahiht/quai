@@ -8,7 +8,9 @@
  *   consigne « Touche une fois les lunettes » est seulement dans les lunettes : le téléphone ne la souffle pas) ;
  * - ask : « Lève la tête. Que vois-tu dans les lunettes ? », trois réponses (« Le test de Quai », « Le Dashboard »,
  *   « Rien ») ;
- * - done : le conseil du PRD selon le résultat (aucun résultat : vérifier « Head-Up » dans l'appli Even) ;
+ * - done : le conseil du PRD selon le résultat (aucun résultat : vérifier « Head-Up » dans l'appli Even) ; 1.3.1
+ *   (PRD-1.3.1 § 5) : « Head-Up », le conseil précis (angle à 0) ; § 14, R7 : « Head-Up » et « Rien », dessous, ce qu'il
+ *   faut vérifier si l'affichage Head-Up ne réagit pas (« Wear Detection », mode silencieux) ;
  * - Quai fermé sur les lunettes : « Ouvre Quai sur les lunettes, puis recommence. » ;
  * - un guidage en cours (le test et le guidage ne vont jamais ensemble) : « Arrête d’abord le guidage en cours, puis
  *   recommence. » ; un guidage qui démarre pendant le test l'arrête : « Test arrêté : un guidage a commencé. » (état
@@ -20,7 +22,7 @@
 import type { DisplayTestCmd, DisplayTestState, GlassesApi } from '../../core/api';
 import { header, parseHash, type PhoneCtx } from '../app';
 import { h } from '../dom';
-import { secondsLeft, T, TEST_ADVICE, TEST_ANSWERS, typo } from '../text';
+import { secondsLeft, T, TEST_ADVICE, TEST_ANSWERS, TEST_CHECK, TEST_CHECKED, typo } from '../text';
 
 /** Ancre de l'écran du test. */
 export const DISPLAY_TEST_HASH = '#/reglages/test-ecran';
@@ -78,13 +80,15 @@ export function displayTestScreen(ctx: PhoneCtx): HTMLElement {
   const startNow = takeStart();
 
   const step = h('p', { class: 'test-step', role: 'status', tabindex: '-1' });
+  /** 1.3.1 (R7) : sous un conseil, ce qu'il faut vérifier, plus petit (annoncé avec lui). */
+  const note = h('p', { class: 'test-note', 'aria-live': 'polite', hidden: true });
   const left = h('p', { class: 'test-left', role: 'timer', hidden: true });
   const actions = h('div', { class: 'test-actions' });
   const el = h(
     'div',
     { class: 'screen display-test' },
     header(ctx, T.testScreen, T.testLead, { label: T.settings, hash: '#/reglages' }),
-    h('section', { class: 'box test-box', 'aria-label': T.testScreen }, step, left, actions),
+    h('section', { class: 'box test-box', 'aria-label': T.testScreen }, step, note, left, actions),
   );
 
   /** Vue montrée (« wait », « done-visible »…) : elle n'est redessinée que si elle change. */
@@ -98,11 +102,13 @@ export function displayTestScreen(ctx: PhoneCtx): HTMLElement {
   let gone = false;
   let tick: ReturnType<typeof setTimeout> | undefined;
 
-  const show = (key: string, text: string, buttons: HTMLElement[]): void => {
+  const show = (key: string, text: string, buttons: HTMLElement[], more = ''): void => {
     if (key === shown) return;
     shown = key;
     const lost = actions.contains(document.activeElement);
     step.textContent = typo(text);
+    note.textContent = more ? typo(more) : '';
+    note.hidden = !more;
     actions.replaceChildren(...buttons);
     // le bouton touché a disparu : le curseur passe au premier bouton de l'étape, sinon à la consigne
     if (lost) (actions.querySelector<HTMLElement>('button:not([disabled])') ?? step).focus();
@@ -229,13 +235,18 @@ export function displayTestScreen(ctx: PhoneCtx): HTMLElement {
         active = false;
         countdown(undefined);
         const r = s.result ?? 'none';
-        return show(`done-${r}`, TEST_ADVICE[r], [
-          button(T.done, 'btn-primary', () => {
-            leave();
-            ctx.go('#/reglages');
-          }),
-          restart(),
-        ]);
+        return show(
+          `done-${r}`,
+          TEST_ADVICE[r],
+          [
+            button(T.done, 'btn-primary', () => {
+              leave();
+              ctx.go('#/reglages');
+            }),
+            restart(),
+          ],
+          TEST_CHECKED.has(r) ? TEST_CHECK : '',
+        );
       }
       default:
         // plus de test en cours, arrêté seul (lunettes) : un guidage en cours en est la cause, sinon on le dit seulement

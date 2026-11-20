@@ -10,19 +10,24 @@
  * carte « En cours » en tête pendant un trajet suivi, mise à jour en direct, avec « Arrêter le guidage ».
  * 1.3.0 : la carte « En cours » montre aussi les problèmes de la vérification (PRD-1.3.0 § 6.3) ; bannière « Nouveau »
  * de la 1.3.0 (§ 9).
+ * 1.3.1 (PRD-1.3.1 § 8) : l'ordre des lunettes : « Autour de moi », « Favoris » et ses favoris, « Gares de train »,
+ * « Lignes de bus, tram, métro », « Arrêts de bus, tram, métro » ; « Où vas-tu ? » reste en haut. § 12 : chaque favori
+ * porte le nom de l'accueil des lunettes (L7 : « Bureau », pas « Vers le bureau ») et le même « ! » quand il a un souci
+ * (B15) ; noms des données avec l'apostrophe typographique (§ 7).
  */
-import type { Core, FavoriteAnswer, GlassesApi, Settings } from '../../core/api';
+import type { Core, FavoriteAnswer, GlassesApi, Journey, Settings } from '../../core/api';
 import type { GuideStatus } from '../../core/guide-types';
 import { asTrip, favoriteTitle } from '../../core/favorites';
 import type { LineFollow } from '../../core/linerun';
+import { apos } from '../../core/typo';
 import { NEWS_SINCE, type PhoneCtx } from '../app';
 import { lineBadge } from '../badges';
 import { h, icon, ICON, svgNode, type Child } from '../dom';
 import { canGo, glassesButton, goButton, goFavorite, showTrip } from '../glasses-link';
-import { catchable, SECTION } from '../../glasses/format';
-import { HOME_FAVORITES } from '../../glasses/views';
-import { checkLinesOf, counted, guideNowLine, guideTitleLine, lineName, newsTitle, shortAnswer, T, typo, withinText } from '../text';
-import { messageHub, MIRROR_ICON, navRow, nextId } from '../ui';
+import { catchable, SECTION, troubleText, upcoming } from '../../glasses/format';
+import { favoriteTrouble, HOME_FAVORITES, homeFavoriteName, TROUBLE_MARK } from '../../glasses/views';
+import { arrivalCopyText, checkLinesOf, copiedText, counted, guideNowLine, guideTitleLine, lineName, newsTitle, shortAnswer, T, typo, withinText } from '../text';
+import { copyText, messageHub, MIRROR_ICON, navRow, nextId } from '../ui';
 import { shownFavorites, type ShownFavorite } from './favorites';
 import { linePickName, stationTitle, type PickKind, completeLater } from './picks';
 
@@ -75,7 +80,10 @@ export interface Rubric {
   href: string;
 }
 
-/** « Gares de train », « Arrêts de bus, tram, métro », « Lignes de bus, tram, métro » : dans l'ordre des lunettes. */
+/**
+ * « Gares de train », « Lignes de bus, tram, métro », « Arrêts de bus, tram, métro » : dans l'ordre des lunettes (1.3.1,
+ * PRD-1.3.1 § 8 : les lignes avant les arrêts ; « Autour de moi » et « Favoris » viennent avant elles).
+ */
 export function rubrics(s: Settings): Rubric[] {
   const rubric = (kind: PickKind, key: string, qual: string, word: string, hash: string, names: string[]): Rubric => ({
     kind,
@@ -86,10 +94,39 @@ export function rubrics(s: Settings): Rubric[] {
     href: names.length ? hash : `${hash}/ajouter`,
   });
   return [
-    rubric('stations', SECTION.stations, SECTION.trainQual, 'gare', '#/gares', s.stations.map((p) => stationTitle(p, s.lang))),
-    rubric('lines', SECTION.stops, SECTION.transitQual, 'arrêt', '#/arrets', s.lines.filter((p) => !p.line).map((p) => linePickName(p, s.lang))),
-    rubric('follows', SECTION.follows, SECTION.transitQual, 'ligne', '#/lignes', (s.follows ?? []).map((f) => lineName(f))),
+    rubric('stations', SECTION.stations, SECTION.trainQual, 'gare', '#/gares', s.stations.map((p) => apos(stationTitle(p, s.lang)))),
+    rubric('follows', SECTION.follows, SECTION.transitQual, 'ligne', '#/lignes', (s.follows ?? []).map((f) => apos(lineName(f)))),
+    rubric('lines', SECTION.stops, SECTION.transitQual, 'arrêt', '#/arrets', s.lines.filter((p) => !p.line).map((p) => apos(linePickName(p, s.lang)))),
   ];
+}
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 12, L7 et B15) : nom d'un favori sur l'accueil du téléphone, celui de l'accueil des lunettes
+ * (homeFavoriteName : le nom du lieu, « Bureau » et pas « Vers le bureau » ; le titre d'un trajet fixe), avec
+ * l'apostrophe typographique (§ 7), suivi du même « ! » que les lunettes quand le favori a un souci (favoriteTrouble :
+ * premier véhicule supprimé, voie modifiée, travaux ; jamais un simple retard), collé au nom (TROUBLE_MARK).
+ */
+export function homeFavoriteText(f: ShownFavorite, a: FavoriteAnswer | undefined, now: number, s: Settings): string {
+  const name = apos(homeFavoriteName({ fav: f, ...(a ? { answer: a } : {}) }, { now, settings: s }));
+  return favoriteTrouble(a, now) ? `${name}${TROUBLE_MARK}` : name;
+}
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 12, B15, contrôle du téléphone) : le souci d'un favori, en mots, pour qui ne voit pas le « ! » (un
+ * lecteur d'écran ne dit pas un signe seul) : exactement les mots des lunettes (troubleText : « IC supprimé », « voie 6
+ * au lieu de 4 », « voie modifiée », le texte de l'alerte de travaux), aucun mot nouveau ; un arrêt favori : son
+ * prochain départ, avec les mêmes mots. Pas de souci (ou pas de réponse) : ''.
+ */
+export function homeFavoriteTrouble(a: FavoriteAnswer | undefined, now: number): string {
+  if (!a || !favoriteTrouble(a, now)) return '';
+  if (a.kind === 'stop') {
+    const d = upcoming(a.board?.departures ?? [], now)[0];
+    if (!d) return '';
+    const ride = { kind: 'ride', op: d.op, mode: d.mode, line: d.line, cancelled: d.cancelled, platform: d.platform, newPlatform: d.newPlatform };
+    return apos(troubleText({ legs: [ride], alerts: [] } as unknown as Journey));
+  }
+  const j = a.plan?.journeys[0];
+  return j ? apos(troubleText(j)) : '';
 }
 
 /* ------------------------------ Carte « Favoris » ------------------------------ */
@@ -126,13 +163,25 @@ function favoritesCard(ctx: PhoneCtx): HTMLElement {
   const ordered = orderedFavorites(ctx.coreNow(), s, here);
   const shown = ordered.slice(0, HOME_FAVORITES);
   const rest = ordered.slice(HOME_FAVORITES);
-  const rows = new Map<string, { name: HTMLElement; answer: HTMLElement }>();
+  const rows = new Map<string, { name: HTMLElement; trouble: HTMLElement; answer: HTMLElement }>();
+  /** 1.3.1 (B15) : le souci dit en mots, caché à l'écran (le « ! » le montre), juste après le nom. */
+  const sayTrouble = (el: HTMLElement, a: FavoriteAnswer | undefined): void => {
+    const words = homeFavoriteTrouble(a, ctx.clock.now());
+    el.textContent = words;
+    el.hidden = !words;
+  };
   const go = canGo(ctx);
   const favRow = (f: ShownFavorite): HTMLLIElement => {
-    const title = favoriteTitle(f, s);
-    const name = h('span', { class: 't1' }, title);
-    const answer = h('span', { class: 't2 answer' }, typo(shortAnswer(lastAnswers.get(f.id), ctx.clock.now(), s)));
-    rows.set(f.id, { name, answer });
+    // 1.3.1 (L7) : le nom de l'accueil des lunettes, sans le « ! » dans le nom des boutons
+    const title = apos(homeFavoriteName({ fav: f }, { now: ctx.clock.now(), settings: s }));
+    const known = lastAnswers.get(f.id);
+    const nameEl = h('span', { class: 't1' }, homeFavoriteText(f, known, ctx.clock.now(), s));
+    const trouble = h('span', { class: 'sr-only fav-trouble' });
+    sayTrouble(trouble, known);
+    // le nom, puis son souci en mots (caché) : ensemble dans la rangée, dont la ligne ne change pas (R2 la complète)
+    const name: Child = [nameEl, trouble];
+    const answer = h('span', { class: 't2 answer' }, typo(shortAnswer(known, ctx.clock.now(), s)));
+    rows.set(f.id, { name: nameEl, trouble, answer });
     const { button, message } = glassesButton(hub, `Afficher ${title} dans les lunettes`, async () => {
       const st = ctx.settings.get();
       const fav = shownFavorites(st.favorites).find((x) => x.id === f.id) ?? f;
@@ -195,7 +244,8 @@ function favoritesCard(ctx: PhoneCtx): HTMLElement {
           lastAnswers.set(fav.id, a);
           const row = rows.get(fav.id);
           if (!row) return;
-          row.name.textContent = favoriteTitle(fav, st);
+          row.name.textContent = homeFavoriteText(fav, a, ctx.clock.now(), st);
+          sayTrouble(row.trouble, a);
           row.answer.textContent = typo(shortAnswer(a, ctx.clock.now(), st));
         }),
       );
@@ -340,10 +390,17 @@ function nowCard(ctx: PhoneCtx, home: () => HTMLElement | null): HTMLElement {
   const checks = h('div', { class: 'now-checks', 'aria-live': 'polite', hidden: true });
   const stop = g.stopGuide ? h('button', { type: 'button', class: 'btn btn-secondary now-stop' }, T.stopGuide) : null;
   const msg = h('p', { class: 'msg', role: 'status' });
-  const card = h('section', { class: 'now-card', 'aria-labelledby': `${id}-titre` }, h('h2', { class: 'now-title', id: `${id}-titre` }, T.nowTitle), trip, now, checks, stop, msg);
+  // 1.3.1 (R6) : « Copier mon heure d’arrivée », après « Arrêter le guidage » ; son message dessous
+  const copy = h('button', { type: 'button', class: 'btn btn-secondary now-copy', hidden: true }, T.copyArrival);
+  const copySaid = h('span', null);
+  const copyValue = h('span', { class: 'now-copied-text' });
+  const copyMsg = h('p', { class: 'msg now-copied', role: 'status', 'aria-atomic': 'true', hidden: true }, copySaid, copyValue);
+  const card = h('section', { class: 'now-card', 'aria-labelledby': `${id}-titre` }, h('h2', { class: 'now-title', id: `${id}-titre` }, T.nowTitle), trip, now, checks, stop, msg, copy, copyMsg);
   const done = h('p', { class: 'msg now-done', role: 'status', tabindex: '-1' });
   let guided = true;
   let checked = '';
+  /** 1.3.1 (R6) : le texte à copier, d'après le dernier état (« J’arrive vers 08:54. ») ; '' : pas d'heure, pas de bouton. */
+  let arrival = '';
   /** 1.3.0 : les lignes de la vérification, redessinées seulement quand elles changent (pas d'annonce répétée). */
   const paintChecks = (st: GuideStatus): void => {
     const lines = checkLinesOf(st);
@@ -372,12 +429,40 @@ function nowCard(ctx: PhoneCtx, home: () => HTMLElement | null): HTMLElement {
     now.hidden = !line;
     paintChecks(st);
     if (stop) stop.textContent = guided ? T.stopGuide : T.stopFollow;
+    arrival = arrivalCopyText(st);
+    copy.hidden = !arrival;
     if (card.parentNode !== slot) {
       msg.textContent = '';
       msg.classList.remove('err');
+      copyMsg.hidden = true;
+      copySaid.textContent = '';
+      copyValue.textContent = '';
       slot.replaceChildren(card);
     }
   };
+  /** Une copie en cours ignore un second toucher (le bouton n'est jamais grisé : le curseur y reste). */
+  let copying = false;
+  /**
+   * 1.3.1 (PRD-1.3.1 § 14, R6) : « Copier mon heure d’arrivée » : « J’arrive vers 08:54. » dans le presse-papiers, comme
+   * « Copier » du journal (copyText, avec son repli), puis « Copié : J’arrive vers 08:54. ». Copie impossible : le texte,
+   * écrit dans le message, est sélectionné pour le menu du téléphone. Rien n'est envoyé.
+   */
+  copy.addEventListener('click', async () => {
+    const text = arrival;
+    if (!text || copying) return;
+    copying = true;
+    copyMsg.classList.remove('err');
+    copySaid.textContent = '';
+    copyValue.textContent = text;
+    copyMsg.hidden = false;
+    try {
+      const ok = await copyText(text, copyValue);
+      copySaid.textContent = ok ? copiedText('') : `${typo(T.journalCopyManual)} `;
+      copyMsg.classList.toggle('err', !ok);
+    } finally {
+      copying = false;
+    }
+  });
   stop?.addEventListener('click', async () => {
     stop.disabled = true;
     msg.textContent = '';
@@ -431,17 +516,17 @@ export function homeScreen(ctx: PhoneCtx): HTMLElement {
     h('span', { class: 'where-box', html: `${ICON.searchGrey}<span>${T.wherePlaceholder}</span>` }),
   );
   const heading = h('h2', { id: 'h-miroir' }, T.inGlasses);
-  // « Autour de moi » et les trois rubriques ; 1.2.9 (relecture) : une gare, un arrêt ou une ligne gardés ou retirés
-  // ailleurs (★ des lunettes, Quai Web côte à côte) : la carte suit
+  // 1.3.1 (PRD-1.3.1 § 8) : l'ordre des lunettes, « Autour de moi » en tête, puis « Favoris », puis les trois rubriques ;
+  // 1.2.9 (relecture) : une gare, un arrêt ou une ligne gardés ou retirés ailleurs (★ des lunettes, Quai Web côte à
+  // côte) : les cartes suivent
+  const nearbyList = h('ul', { class: 'list box mirror nearby-card' });
   const rubricList = h('ul', { class: 'list box mirror' });
   const paintRubrics = (st: Settings): void => {
     // 1.2.9 (relecture) : une ligne reprise de la 1.2.5, pas encore complétée (« Ligne 3 ») : l'accueil la complète, comme
     // en 1.2.8 ; la carte suit alors (« Tram 3 »)
     for (const f of st.follows ?? []) if (!f.routes.length) void completeLater(ctx, f);
-    rubricList.replaceChildren(
-      navRow({ href: AFFICHAGE_FROM_HOME, icon: h('span', { class: 'ico', html: MIRROR_ICON.nearby }), title: T.nearby, sub: withinText(st.display.radiusM) }),
-      ...rubrics(st).map((r) => rubricRow(ctx, r, st)),
-    );
+    nearbyList.replaceChildren(navRow({ href: AFFICHAGE_FROM_HOME, icon: h('span', { class: 'ico', html: MIRROR_ICON.nearby }), title: T.nearby, sub: withinText(st.display.radiusM) }));
+    rubricList.replaceChildren(...rubrics(st).map((r) => rubricRow(ctx, r, st)));
   };
   const mirror = h(
     'section',
@@ -452,6 +537,7 @@ export function homeScreen(ctx: PhoneCtx): HTMLElement {
       h('div', { class: 'sec-titles' }, heading, h('p', { class: 'sec-lead' }, T.mirrorLead)),
       h('a', { class: 'sec-link', href: AFFICHAGE_FROM_HOME, 'aria-label': T.previewLabel }, svgNode(MIRROR_ICON.eye), h('span', null, T.preview)),
     ),
+    nearbyList,
     favoritesCard(ctx),
     rubricList,
   );

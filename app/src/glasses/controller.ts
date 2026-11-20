@@ -54,6 +54,8 @@ import type {
 import { LABEL_TEXT, labelOf, type LineMatch } from '../core/api';
 import { MESSAGES, QuaiError } from '../core/errors';
 import { NEAR_M, asTrip, endpointPoint, favoriteTitle, placeOf } from '../core/favorites';
+// 1.3.1 (B20) : le soir, les favoris de la règle 5 qui ont un trajet plus tard (homeShown)
+import { answerTime, isLastAnswer } from '../core/favorites';
 import { dismissMoment, guideStatusOf, guideStep, newGuideMemory, replanJourney, replanNone, rideJourney, rideOnJourney, tightLegs } from '../core/guide';
 import type { GuideFix, GuideKind, GuideMemory, GuideState, GuideStatus, LocationNeed, VehicleRef, WalkRoute } from '../core/guide-types';
 import { shortAddress } from '../core/text';
@@ -70,6 +72,7 @@ import { DEBOUNCE, GestureFilter, type HubSignal } from './gestures';
 import { GUIDE_MENU, checkLines, guideTitleText, guideView, menuView, type GuideShow } from './guide-views';
 import { HeadUpLearner } from './headup';
 import { GuideTrail, IMPORTANT, MomentReminder, journalTitle, readRemindMemo, type ReminderNote, type RemindMemo, type ShownMoment } from './reminder';
+import { ALIGHTS_KEY, alightLineKey, emptyAlights, keptStops, noteAlight, parseAlights, type AlightMemory, type KeptStop } from './alights';
 import { geometry, layoutPage } from './layout';
 import { anchorIndex, current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replace, replaceAt, reset, setSelection, type Gesture, type NavFrame, type NavState } from './nav';
 import { MENU_IDS, type AreaRef, type ContainerSpec, type GlassesView, type Intent, type Item, type KeepLineRoute, type MenuItem, type OthersRoute, type PageSpec, type Route, type StepsRoute, type StopsRoute } from './types';
@@ -613,6 +616,23 @@ export class GlassesController implements GlassesApi {
   /** Trajet suivi (M2) et en cours (M6). */
   private trip: FollowedTrip | null = null;
   private tripLoaded = false;
+  /**
+   * 1.3.1 (PRD-1.3.1 § 12, B11) : arrêts où l'on descend d'habitude, par ligne (clé quai.descentes), lus une fois
+   * (alightsRead), en arrière-plan : au démarrage, puis, après une lecture sans réponse, à l'ouverture suivante d'une
+   * liste des arrêts ou au prochain « j'y descends » (warmAlights), jamais à chaque rafraîchissement. Aucun écran
+   * n'attend cette lecture (règle de la 1.3.0) : la liste s'affiche avec ce qui est déjà lu. Ceux retenus avant la
+   * lecture passent devant ceux relus. `alightsGen` : « Effacer le journal » pendant une lecture l'emporte sur elle.
+   */
+  private alights: AlightMemory = emptyAlights();
+  private alightsRead = false;
+  private alightsLoading: Promise<void> | null = null;
+  private alightsGen = 0;
+  /**
+   * 1.3.1 (B11) : la liste des arrêts ouverte (clé de sa route) et les arrêts retenus à sa première image, gardés tant
+   * qu'elle reste dans la pile : une lecture qui finit après ne déplace jamais le curseur ; elle sert à l'ouverture
+   * suivante.
+   */
+  private stopsShown: { key: string; kept?: KeptStop[] } | null = null;
   private tripSaved = '';
   /**
    * 1.2.2 : gare ou ligne retirée par ★ (départs, « garder une ligne »), rétablissable à l'identique pendant 5 s (M6.1).
@@ -855,6 +875,8 @@ export class GlassesController implements GlassesApi {
     // 1.3.1 (A1, contrôle qualité) : un message important du guidage repris ramène l'écran du guidage sur l'écran
     // d'ouverture ou l'écran repris (instantané de la WebView précédente), maintenant qu'il est posé
     if (this.guideState) this.bringBack(this.guideState);
+    // 1.3.1 (B11) : les arrêts retenus se lisent dès maintenant, en arrière-plan (aucun écran ne les attend)
+    this.warmAlights();
     // 1.2.10 : repris sur l'écran du guidage, « Où tu en es » le dit (pas de message en plus sur l'écran calme)
     if (resumed && this.trip && !this.guideShown()) this.showToast(`Trajet en cours${NB}: ${lowerFirst(this.trip.title)}`, RESUME_MS);
     await this.render(true);
@@ -1272,6 +1294,13 @@ export class GlassesController implements GlassesApi {
   /**
    * Favoris montrés sur l'accueil (PRD-1.2.1 § 4.2) : les 3 premiers de l'ordre réglé, jamais un favori de la règle 5
    * (il reste dans la liste ouverte par « Favoris ») ; aucun avec « Accueil sans favoris ».
+   * 1.3.1 (B20, U8) : le soir, quand aucun favori ne peut aller sur l'accueil (tous de la règle 5), jusqu'à 3 favoris de
+   * la règle 5 qui ont quand même un trajet plus tard (« demain 05:52 → 06:46 »), dans l'ordre réglé ; jamais « tu y
+   * es » ni « aucun trajet ». Un favori encore en calcul (« … ») ne compte pas encore : tant qu'aucun favori ne peut y
+   * aller d'après sa réponse, ceux du soir gardent leur place à côté de lui (pas de ligne qui part puis revient pendant
+   * que les réponses arrivent) ; dès qu'un favori peut y aller, la règle de la 1.2.1 seule. Contrôle 1.3.1 : « peut y
+   * aller » se lit dans la réponse elle-même (isLastAnswer), pas seulement dans la règle 5, figée dès que l'accueil est
+   * touché : un favori ajouté ou recalculé ensuite (« aucun trajet », « tu y es », « demain ») ne chasse pas ceux du soir.
    */
   private homeShown(): string[] {
     const s = this.settings();
@@ -1283,9 +1312,11 @@ export class GlassesController implements GlassesApi {
     const { order, last } = this.homeOrder ? { order: this.homeOrder, last: this.homeLast } : this.computeRanking();
     // 1.2.2 (REVUE-USAGE n° 1) : le favori du trajet en cours n'est pas répété sous « En cours ».
     const run = this.runningFavoriteId();
-    return this.validOrder(order)
-      .filter((id) => !last.has(id) && id !== run)
-      .slice(0, HOME_FAVORITES);
+    const ids = this.validOrder(order).filter((id) => id !== run);
+    const now = this.d.clock.now();
+    const sure = ids.some((id) => !last.has(id) && canGo(this.answers.get(id), now));
+    const evening = (id: string): boolean => !sure && last.has(id) && laterTrip(this.answers.get(id), now);
+    return ids.filter((id) => !last.has(id) || evening(id)).slice(0, HOME_FAVORITES);
   }
 
   /** Favori du trajet suivi quand il est en cours (« En cours » sur l'accueil). */
@@ -2069,7 +2100,8 @@ export class GlassesController implements GlassesApi {
   /**
    * 1.2.2 (REVUE-USAGE n° 3) : « garder une ligne » : la ligne rejoint « Bus, tram, métro » à cet arrêt, ses deux sens
    * (« ★ Ajoutée à Bus, tram, métro », dans la limite des réglages, LIMITS : 32 lignes), ou en sort, annulable 5 s comme
-   * une gare (« ★ Ligne rétablie »).
+   * une gare (« ★ Ligne rétablie »). 1.3.1 (L7) : « ★ Ajoutée à tes lignes », comme « ★ Ajoutée à tes gares » et le
+   * téléphone.
    */
   private async toggleLine(line: string, mode: Mode): Promise<void> {
     const r = current(this.nav).route;
@@ -2110,7 +2142,7 @@ export class GlassesController implements GlassesApi {
     const follow = here ? completeFollow(base, here) : base;
     await this.d.settings.update((x) => ({ ...x, follows: [...(x.follows ?? []), follow] }));
     this.resolved.delete(follow.id);
-    this.showToast('★ Ajoutée aux lignes');
+    this.showToast('★ Ajoutée à tes lignes');
     void this.resolveFollow(follow.id).catch(() => undefined);
   }
 
@@ -2132,14 +2164,15 @@ export class GlassesController implements GlassesApi {
 
   /**
    * « ★ garder ce trajet » (aide à l'arrivée, PRD-1.2 § 2.3) : le trajet suivi parti de « Ma position » devient un
-   * lieu (sa destination) ; sinon un trajet fixe, du départ à l'arrivée du trajet suivi, ou de gare à gare.
+   * lieu (sa destination) ; sinon un trajet fixe, du départ à l'arrivée du trajet suivi, ou de gare à gare. 1.3.1 (L7) :
+   * « tes favoris », comme le téléphone (« ★ Trajet ajouté à tes favoris », « ★ Déjà dans tes favoris »).
    */
   private async saveTrip(): Promise<void> {
     const r = current(this.nav).route;
     if (r.screen !== 'arrival') return;
     const s = this.settings();
     const t = this.trip && this.trip.journey.id === r.journey.id ? this.trip : null;
-    const already = (): void => this.showToast('★ Déjà dans les favoris');
+    const already = (): void => this.showToast('★ Déjà dans tes favoris');
     if (t?.favoriteId && s.favorites.some((f) => f.id === t.favoriteId)) return already();
     const id = newId('fav', s.favorites.map((f) => f.id));
     let fav: Favorite;
@@ -2160,7 +2193,7 @@ export class GlassesController implements GlassesApi {
       fav = { kind: 'trip', id, ...ends, propose: 'never' };
     }
     await this.d.settings.update((x) => ({ ...x, favorites: [...x.favorites, fav] }));
-    this.showToast('★ Trajet ajouté aux favoris');
+    this.showToast('★ Trajet ajouté à tes favoris');
   }
 
   /* ------------------------------ Téléphone (GlassesApi) ------------------------------ */
@@ -2651,6 +2684,8 @@ export class GlassesController implements GlassesApi {
       return;
     }
     const title = towards(displayName(ds.stops[index].name, this.settings().lang));
+    // 1.3.1 (PRD-1.3.1 § 12, B11) : l'arrêt choisi est retenu pour cette ligne (la prochaine liste s'ouvre sur lui)
+    this.rememberAlight(ds, index);
     // lancé tout de suite (à l'heure) ; la position des arrêts suit dès qu'elle est trouvée
     this.startGuide('ride', j, { key: this.newKey(), title, journeys: [j] }, beyondOf(ds, index));
     await this.openGuide();
@@ -2680,6 +2715,76 @@ export class GlassesController implements GlassesApi {
     this.trip = { ...t, journey: j, journeys: t.journeys.map((x) => (x.id === j.id ? j : x)), guide };
     this.saveFollowed();
     this.stepGuide();
+  }
+
+  /** 1.3.1 (B11) : lit une fois les arrêts retenus (quai.descentes) ; illisibles : mémoire vide, jamais d'exception. */
+  private loadAlights(): Promise<void> {
+    if (this.alightsRead) return Promise.resolve();
+    this.alightsLoading ??= (async () => {
+      const gen = this.alightsGen;
+      const kv = this.d.platform.kv;
+      let raw: string | null;
+      try {
+        // lecture stricte si le stockage la connaît : une lecture sans réponse n'est pas une mémoire vide (rien n'est
+        // alors écrit, nouvel essai à la prochaine liste)
+        raw = kv.getStrict ? await kv.getStrict(ALIGHTS_KEY) : await kv.get(ALIGHTS_KEY);
+      } catch (e) {
+        console.warn('[Quai] arrêts retenus illisibles', errText(e));
+        this.alightsLoading = null;
+        return;
+      }
+      this.alightsLoading = null;
+      if (gen !== this.alightsGen || this.alightsRead) return;
+      // les arrêts retenus pendant la lecture passent devant ceux qui sont relus, dans leur ordre
+      let m = parseAlights(raw);
+      for (const l of [...this.alights.lines].reverse()) {
+        for (const st of [...l.stops].reverse()) m = noteAlight(m, l.key, { ...(st.id ? { areaId: st.id } : {}), name: { fr: st.fr, nl: st.nl ?? st.fr } });
+      }
+      const merged = this.alights.lines.length > 0;
+      this.alights = m;
+      this.alightsRead = true;
+      if (merged) this.saveAlights();
+    })();
+    return this.alightsLoading;
+  }
+
+  /** 1.3.1 (B11) : lance la lecture des arrêts retenus en arrière-plan, si elle n'est ni faite ni en cours ; jamais attendue. */
+  private warmAlights(): void {
+    if (!this.alightsRead && !this.alightsLoading) void this.loadAlights();
+  }
+
+  /** 1.3.1 (B11) : arrêts retenus de la ligne d'un départ, du plus récent au plus ancien (pas encore lus : ceux de la session). */
+  private keptFor(ds: Pick<DepartureStops, 'op' | 'mode' | 'line'>): KeptStop[] {
+    return keptStops(this.alights, alightLineKey(ds));
+  }
+
+  /**
+   * 1.3.1 (B11) : retient l'arrêt `index` de « j'y descends » pour la ligne du départ ; enregistré sur le téléphone tout de
+   * suite si la mémoire a été lue, sinon après sa lecture (jamais une mémoire de la seule session à la place de l'autre).
+   */
+  private rememberAlight(ds: DepartureStops, index: number): void {
+    const stop = ds.stops[index];
+    if (!stop) return;
+    this.alights = noteAlight(this.alights, alightLineKey(ds), stop);
+    if (this.alightsRead) this.saveAlights();
+    else void this.loadAlights();
+  }
+
+  private saveAlights(): void {
+    const raw = this.alights.lines.length ? JSON.stringify(this.alights) : '';
+    void this.d.platform.kv.set(ALIGHTS_KEY, raw).catch((e: unknown) => console.warn('[Quai] arrêts retenus non enregistrés', errText(e)));
+  }
+
+  /**
+   * 1.3.1 (PRD-1.3.1 § 12, B11) : « Effacer le journal » (téléphone) oublie aussi les arrêts retenus de « j'y descends ».
+   * GlassesApi.forgetAlights.
+   */
+  forgetAlights(): void {
+    this.alightsGen++;
+    this.alights = emptyAlights();
+    this.alightsRead = true;
+    this.alightsLoading = null;
+    this.saveAlights();
   }
 
   /** Positions des arrêts `board` à `alight` (et quelques-uns après), par zone. */
@@ -3195,7 +3300,8 @@ export class GlassesController implements GlassesApi {
     this.routeAsked.set(key, now);
     const job = `${key}#${++this.routeSeq}`;
     this.routeJob = job;
-    void deadline(core.walkRoute(ask.from, ask.to), CORE_TIMEOUT_MS, 'chemin à pied trop lent')
+    // 1.3.1 (PRD-1.3.1 § 14, R4) : « Éviter les escaliers » lu à chaque demande (le chemin suivant le suit)
+    void deadline(core.walkRoute(ask.from, ask.to, { avoidSteps: this.settings().avoidSteps === true }), CORE_TIMEOUT_MS, 'chemin à pied trop lent')
       .then((route) => {
         if (this.routeJob !== job) return;
         const cur = this.trip;
@@ -3772,7 +3878,8 @@ export class GlassesController implements GlassesApi {
       }
       case 'stops': {
         // 1.2.3 (§ 2) : les arrêts du départ touché, de l'arrêt du tableau au terminus (voyage disparu : missing) ;
-        // 1.2.10 : avec le départ à jour, celui que « j'y descends » fait suivre
+        // 1.2.10 : avec le départ à jour, celui que « j'y descends » fait suivre. 1.3.1 (B11) : la lecture des arrêts
+        // retenus n'est jamais attendue ici (un écran n'attend pas le stockage) : voir warmAlights et stopsShown
         const dep = await this.freshDeparture(r);
         return { stops: await core.departureStops(r.areaId, dep), dep };
       }
@@ -3841,8 +3948,9 @@ export class GlassesController implements GlassesApi {
       try {
         const b = await this.d.core.board(p.areaId, { limit: 3, near: pickPlace(p) });
         this.pickMoved('stations', p, b.movedTo, b.area);
-        const next = upcoming(b.departures, this.d.clock.now())[0];
-        out[p.id] = b.missing ? { state: 'missing' } : next ? { state: 'ok', next } : { state: 'none' };
+        // 1.3.1 (PRD-1.3.1 § 12, B21) : le train d'après aussi (accordéon), parmi les départs déjà lus
+        const [next, after] = upcoming(b.departures, this.d.clock.now());
+        out[p.id] = b.missing ? { state: 'missing' } : next ? { state: 'ok', next, ...(after ? { after } : {}) } : { state: 'none' };
       } catch (e) {
         if (areaUnknown(e)) out[p.id] = { state: 'missing' };
         else console.warn('[Quai] gare', p.areaId, errText(e));
@@ -4092,6 +4200,9 @@ export class GlassesController implements GlassesApi {
     this.syncEntry();
     const f = current(this.nav);
     const r = f.route;
+    // 1.3.1 (B11) : liste des arrêts quittée (plus dans la pile) : sa première image est oubliée
+    const shownKey = this.stopsShown?.key;
+    if (shownKey && !this.nav.stack.some((x) => x.route.screen === 'stops' && routeKey(x.route) === shownKey)) this.stopsShown = null;
     const ctx = this.ctx();
     if (r.screen === 'guide') return this.guideViewOf(ctx);
     if (r.screen === 'menu') return this.menuViewOf(r.items, ctx);
@@ -4181,8 +4292,18 @@ export class GlassesController implements GlassesApi {
         return lineView(r, board, ctx, works?.[0]);
       }
       case 'stops': {
+        // 1.3.1 (B11) : à l'ouverture (pas à chaque rafraîchissement), un nouvel essai de lecture si la précédente n'a
+        // pas répondu, en arrière-plan ; les arrêts retenus de la première image restent ceux de cette liste
+        let shown = this.stopsShown;
+        if (shown?.key !== key) {
+          shown = this.stopsShown = { key };
+          this.warmAlights();
+        }
         if (!value) return loadingView(stopsTitle(r.dep, ctx.settings.lang), 'Chargement des arrêts…', ctx, 'stops');
-        return stopsView(r, (value as { stops: DepartureStops }).stops, ctx);
+        const ds = (value as { stops: DepartureStops }).stops;
+        if (ds.state !== 'ok') return stopsView(r, ds, ctx, []);
+        shown.kept ??= this.keptFor(ds);
+        return stopsView(r, ds, ctx, shown.kept);
       }
       case 'keepLine': {
         if (!value) return loadingView(keepLineTitle(displayName(r.name, ctx.settings.lang)), 'Chargement des lignes…', ctx, 'keepLine');
@@ -4265,7 +4386,8 @@ export class GlassesController implements GlassesApi {
     const shown = inTitle ? { ...view, title: message } : view;
     const g = geometry(shown, !!toast);
     const frame = effectiveFrame(current(this.nav), view, g.capacity);
-    const page = layoutPage(shown, frame, { toast });
+    // 1.3.1 (PRD-1.3.1 § 14, R5) : « Plein soleil » (layout.ts, SUN_LEVEL) ; un changement de réglage redessine la page
+    const page = layoutPage(shown, frame, { toast, sun: this.settings().display.sun === true });
     // 1.2.10 : images et choix du menu système de la page (guidage), s'ils n'y sont pas déjà
     if (view.images?.length && !page.images) page.images = view.images;
     if (view.menu?.length && !page.menu) page.menu = view.menu;
@@ -4426,7 +4548,7 @@ const pickPlace = (p: StationPick | LinePick): PickPlace => ({ lat: p.lat, lon: 
 const areaUnknown = (e: unknown): boolean => e instanceof QuaiError && e.code === 'areaUnknown';
 
 /** 1.2.2 : « Gares » : prochain train d'une gare. */
-type StationData = Pick<StationRow, 'next' | 'state'>;
+type StationData = Pick<StationRow, 'next' | 'after' | 'state'>;
 /** 1.2.2 : « Bus, tram, métro » : sens d'une ligne ou départs d'un arrêt (ou arrêt introuvable). */
 type LineData = Pick<LineRow, 'board' | 'stop' | 'missing'>;
 
@@ -4496,6 +4618,23 @@ function outdatedAt(a: FavoriteAnswer): number {
 
 /** 1.3.0 (§ 8) : la réponse montre autre chose que « … » (tripHomeText). */
 const answerShown = (a: FavoriteAnswer, now: number): boolean => now < outdatedAt(a);
+
+/**
+ * 1.3.1 (B20, U8) : un favori de la règle 5 qui a quand même un trajet plus tard (un départ, pour un arrêt favori),
+ * montré le soir sur l'accueil (« demain 05:52 → 06:46 ») ; jamais « tu y es », « aucun trajet », ni une réponse qui ne
+ * montre plus que « … ».
+ */
+function laterTrip(a: FavoriteAnswer | undefined, now: number): boolean {
+  return !!a && a.state === 'ok' && answerTime(a) !== undefined && answerShown(a, now);
+}
+
+/**
+ * 1.3.1 (B20), contrôle : un favori peut aller sur l'accueil d'après sa réponse (autre chose que « tu y es », « aucun
+ * trajet » ou rien dans les 3 heures, la règle 5 du cœur) ; pas encore de réponse : on ne sait pas.
+ */
+function canGo(a: FavoriteAnswer | undefined, now: number): boolean {
+  return !!a && !isLastAnswer(a, now);
+}
 
 /** Départ du trajet suivi (pour savoir quand le rafraîchir). */
 function journeyStartMs(t: FollowedTrip): number {

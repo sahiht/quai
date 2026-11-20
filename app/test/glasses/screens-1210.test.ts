@@ -48,10 +48,12 @@ describe('PRD-1.2.10 § 2 et PRD-1.3.0 § 7 : « Favoris », une ligne par favor
     expect(overflowing(p)).toEqual([]);
     expect(p.lines.slice(0, 1).map(nb)).toEqual(['Lieu 1   dans 2 min → 08:41']);
     expect(nb(p.lines.at(-1)!)).toBe(HINT);
-    // l'ancienne ligne du détail (1.2.10) n'est plus dite
-    expect(p.lines.map(nb)).not.toContain('bus W 07:38, direct');
-    // chaque favori a son accordéon : la marche puis le bus, les changements
-    expect((v.items[0] as DetailItem).expand?.map((l) => nb(l.text))).toEqual(['à pied 5 min, puis bus W 07:38', 'direct']);
+    // l'ancienne ligne du détail (1.2.10) n'est plus dite en bas : le texte du bus n'est que dans l'accordéon ouvert, sous
+    // la rangée du curseur (1.3.1, PRD-1.3.1 § 4 : la 2e ligne garde le premier véhicule et son heure)
+    expect(p.lines.map(nb).slice(1, 3)).toEqual(['à pied 5 min → Merbraine', 'bus W 07:38, direct']);
+    expect(p.lines.map(nb).filter((l) => l === 'bus W 07:38, direct')).toHaveLength(1);
+    // chaque favori a son accordéon : la marche vers l'arrêt, puis le bus et les changements
+    expect((v.items[0] as DetailItem).expand?.map((l) => nb(l.text))).toEqual(['à pied 5 min → Merbraine', 'bus W 07:38, direct']);
     // toujours huit conteneurs de texte
     expect(p.containers).toHaveLength(8);
   });
@@ -66,8 +68,9 @@ describe('PRD-1.2.10 § 2 et PRD-1.3.0 § 7 : « Favoris », une ligne par favor
     const v = favoritesView({ entries: favs.map((fav) => ({ fav, answer: answers[fav.id] })) }, ctx({}, favs));
     const expand = v.items.map((i) => (i as DetailItem).expand?.map((l) => ({ ...l, text: nb(l.text) })));
     expect(expand).toEqual([
-      [{ text: 'à pied 7 min, puis IC 07:42 +2 voie 6 !' }, { text: 'voie 6 au lieu de 4, direct' }],
-      [{ text: 'à pied 5 min, puis bus W ~07:45', planned: true }, { text: 'direct' }],
+      // 1.3.1 (PRD-1.3.1 § 4) : la gare ou l'arrêt où monter, puis le véhicule, son heure (« ~ » : planned) et la voie
+      [{ text: 'à pied 7 min → Braine-l’Alleud' }, { text: 'IC 07:42 +2 voie 6 au lieu de 4, direct' }],
+      [{ text: 'à pied 5 min → Merbraine' }, { text: 'bus W ~07:45, direct', planned: true }],
       undefined,
       undefined,
     ]);
@@ -125,8 +128,8 @@ describe('PRD-1.2.10 § 2 et PRD-1.3.0 § 7 : « Favoris », une ligne par favor
         }
       }
       expect(textWidth(v.items[0].a)).toBeLessThanOrEqual(WIDTHS.wideLeft);
-      // le souci (travaux) en tête de la 2e ligne
-      expect(nb((v.items[0] as DetailItem).expand![1].text)).toBe('Travaux, direct');
+      // le souci (travaux) sur la 2e ligne, juste après le véhicule et son heure (1.3.1)
+      expect(nb((v.items[0] as DetailItem).expand![1].text)).toBe('bus 163b4 07:39, travaux, direct');
     }
   });
 });
@@ -150,11 +153,12 @@ describe('PRD-1.2.10 § 5 : l’écran du trajet, plus facile à lire', () => {
     expect(v.titleRight).toBeUndefined();
     expect(lines(v)).toEqual([
       'Départ 07:36, dans 5 min   arrivée 08:54',
-      '07:36 à pied 5 min',
+      // 1.3.1 (PRD-1.3.1 § 4, B14) : une marche nomme l'arrêt où monter ; la dernière porte l'heure d'arrivée
+      '07:36 à pied 5 min → Monument Gramme',
       '07:41 Bus 6 → Gare des Guillemins   07:49',
-      '07:49 à pied 3 min',
+      '07:49 à pied 3 min → Liège-Guillemins',
       '07:56 IC voie 3 → Bruxelles-Central   marge 4 min',
-      '08:48 à pied 6 min',
+      '08:48 à pied 6 min   08:54',
       'Fin du trajet. Pas d’autre trajet pour l’instant',
       // 1.3.0 (PRD-1.3.0 § 1) : la ligne d'action, entre la note et les aides
       '▶ Y aller',
@@ -169,7 +173,7 @@ describe('PRD-1.2.10 § 5 : l’écran du trajet, plus facile à lire', () => {
     // l'heure et le véhicule au plus clair, l'arrêt de descente et la marche pâles, la marge au plus clair
     expect(rowsOf(container(p, 'colA'))[1].replace(/\s+/g, ' ').trim()).toBe('07:41 Bus 6');
     expect(rowsOf(container(p, 'colB'))[1].replace(/\s+/g, ' ').trim()).toBe('→ Gare des Guillemins 07:49');
-    expect(rowsOf(container(p, 'colB'))[0].trim()).toBe('à pied 5 min');
+    expect(rowsOf(container(p, 'colB'))[0].trim()).toBe('à pied 5 min → Monument Gramme');
     expect(rowsOf(container(p, 'colC'))[3].trim()).toBe('marge 4 min');
     expect(container(p, 'colA').level).toBe(4);
     expect(container(p, 'colB').level).toBe(2);

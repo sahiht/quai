@@ -28,10 +28,13 @@ const homeReady = (s: { screen: string; lines: string[] }) => s.screen === 'home
 /** Arrêts d'un départ chargés (le journal de l'écran compte ses arrêts). */
 const stopsReady = (s: object) => typeof (s as { stops?: unknown }).stops === 'number';
 
-/** Accueil, puis l'écran du trajet du premier favori (Bureau). */
+/**
+ * Accueil, puis l'écran du trajet du premier favori (Bureau). 1.3.1 (PRD-1.3.1 § 8) : le curseur s'ouvre sur « Autour de
+ * moi » ; « Favoris », puis le premier favori.
+ */
 async function openSteps(h: Kit) {
   await h.until(homeReady);
-  await h.gesture('tap');
+  await h.gesture('down', 'down', 'tap');
   return h.until((s) => s.screen === 'steps' && s.page !== undefined);
 }
 

@@ -53,7 +53,8 @@ describe('CA-126.2 : « Arrêts de bus, tram, métro »', () => {
   it('un arrêt « toutes les lignes » : son nom, ses 2 prochains départs, un par ligne ; toucher : le tableau', async () => {
     const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', lines: [LINES.gdnAll] }), core: (now) => stubCore(now) });
     const home = await h.until((x) => x.screen === 'home' && x.lines.some((l) => l.startsWith('Arrêts de bus, tram, métro   1')));
-    expect(home.lines.slice(-2)).toEqual(['Arrêts de bus, tram, métro   1 arrêt', 'Lignes de bus, tram, métro   à choisir']);
+    // 1.3.1 (PRD-1.3.1 § 8) : « Lignes… » avant « Arrêts… », la dernière rubrique
+    expect(home.lines.slice(-2)).toEqual(['Lignes de bus, tram, métro   à choisir', 'Arrêts de bus, tram, métro   1 arrêt']);
     await h.c.replaceRoute({ screen: 'lines' });
     const s = await h.until(linesReady);
     // 1.2.5 (PRD-1.2.5 § 4) : un départ par ligne, « Tram 3 vers Churchill », l'attente à droite ; 1.2.6 : l'écran
@@ -89,7 +90,7 @@ describe('CA-126.2 : « Arrêts de bus, tram, métro »', () => {
     await w.until((x) => x.screen === 'home');
     await w.c.replaceRoute({ screen: 'lines' });
     const ws = await w.until(linesReady);
-    expect(ws.lines[1]).toBe('introuvable : modifie-le dans Réglages');
+    expect(ws.lines[1]).toBe('introuvable : modifie-le dans l’onglet Réglages');
     await w.gesture('tap');
     expect(opened).toEqual(['#/arrets']);
     w.c.stop();
@@ -120,12 +121,13 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
   it('un sens par rangée, sans attente ; toucher : toute la ligne, le curseur sur l’arrêt le plus proche ; « ↔ Autre sens »', async () => {
     const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', follows: [FW, F3] }), core: (now) => stubCore(now) });
     const home = await h.until((x) => x.screen === 'home' && x.lines.some((l) => l.startsWith('Lignes de bus, tram, métro   2')));
-    expect(home.lines.at(-1)).toBe('Lignes de bus, tram, métro   2 lignes');
+    // 1.3.1 (PRD-1.3.1 § 8) : « Lignes… » avant « Arrêts… »
+    expect(home.lines.slice(-2)).toEqual(['Lignes de bus, tram, métro   2 lignes', 'Arrêts de bus, tram, métro   à choisir']);
     await h.c.replaceRoute({ screen: 'follows' });
     const f = await h.until(followsReady);
     expect(f.title).toBe('Lignes de bus, tram, métro');
     // les sens rangés par terminus ; la liste ne demande aucun passage
-    expect(f.lines).toEqual(['Bus W vers Braine-l’Alleud Gare', 'Bus W vers Bruxelles Midi', 'Tram 3 vers Churchill', 'Tram 3 vers Esplanade', '△▽ choisir   toucher : la ligne   double : retour']);
+    expect(f.lines).toEqual(['Bus W vers Braine-l’Alleud Gare', 'Bus W vers Bruxelles Midi', 'Tram 3 vers Churchill', 'Tram 3 vers Esplanade', '△▽ choisir   toucher : parcours   double : retour']);
     // variantes et terminus retrouvés à la première ouverture, puis gardés
     await h.until(() => (h.settings.get().follows ?? []).every((x) => x.routes.length > 0));
     expect(h.settings.get().follows?.map((x) => [x.id, x.routes.length, x.ends?.length])).toEqual([
@@ -189,7 +191,7 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
     await w.until((x) => x.screen === 'home');
     await w.c.replaceRoute({ screen: 'follows' });
     const ws = await w.until(followsReady);
-    expect(ws.lines.slice(0, 2)).toEqual(['Bus ZZ9', 'introuvable : modifie-la dans Réglages']);
+    expect(ws.lines.slice(0, 2)).toEqual(['Bus ZZ9', 'introuvable : modifie-la dans l’onglet Réglages']);
     await w.gesture('tap');
     expect(opened).toEqual(['#/lignes']);
     w.c.stop();
@@ -458,7 +460,7 @@ describe('REVUE-USAGE n° 3 et CA-126.4 : « garder une ligne » depuis les dép
     // garder le tram 4 : la ligne entière, dans « Lignes de bus, tram, métro », cet arrêt en repère
     await h.gesture('down', 'tap');
     expect(h.last().lines.slice(0, 2)).toEqual(['tram 3   ★', 'tram 4   ★']);
-    expect(h.last().lines.at(-1)).toBe('★ Ajoutée aux lignes');
+    expect(h.last().lines.at(-1)).toBe('★ Ajoutée à tes lignes');
     expect(h.settings.get().follows?.at(-1)).toMatchObject({ op: 'stib', line: '4', mode: 'tram', via: { areaId: 'stib:6357F' } });
     expect(h.settings.get().lines).toEqual([]);
     // retirer le tram 3, puis l'annuler dans les 5 s : à l'identique, à sa place
@@ -509,7 +511,7 @@ describe('contrôle qualité 1.2.6 : deux lignes du même numéro dans deux rég
     const k = await h.until((x) => x.screen === 'keepLine' && x.lines[0]?.startsWith('tram 3'));
     expect(k.lines[0]).toBe('tram 3');
     await h.gesture('tap');
-    expect(h.last().lines.at(-1)).toBe('★ Ajoutée aux lignes');
+    expect(h.last().lines.at(-1)).toBe('★ Ajoutée à tes lignes');
     expect(h.settings.get().follows?.map((f) => `${f.line} ${f.id === elsewhere.id ? 'ailleurs' : 'ici'}`)).toEqual(['3 ailleurs', '3 ici']);
     h.c.stop();
     // le tram 3 suivi est bien celui-ci (une variante en commun) : ★, et le toucher le retire

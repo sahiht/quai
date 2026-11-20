@@ -42,7 +42,8 @@ describe('« Y aller » sur la carte « Favoris » de l’accueil (PRD-1.2.10 §
     withGuide(hz.glasses);
     const el = home(hz);
     const rows = favRows(el);
-    expect(rows.map((r) => textOf(r.querySelector('.t1')))).toEqual(['Vers le bureau', 'Vers Gand-Saint-Pierre', 'Vers la maison']);
+    // 1.3.1 (PRD-1.3.1 § 12, L7) : le nom de l'accueil des lunettes
+    expect(rows.map((r) => textOf(r.querySelector('.t1')))).toEqual(['Bureau', 'Vers Gand-Saint-Pierre', 'Maison']);
     for (const r of rows) {
       const name = textOf(r.querySelector('.t1'));
       const buttons = [...r.querySelectorAll<HTMLButtonElement>('button')];
@@ -282,11 +283,13 @@ describe('carte « En cours » de l’accueil (PRD-1.2.10 § 4.3)', () => {
     expect(document.activeElement).toBe(el.querySelector('h1'));
   });
 
-  it('lunettes qui ne savent pas arrêter (stopGuide absent) : la carte sans bouton ; sans onGuide : l’état du rendu', () => {
+  it('lunettes qui ne savent pas arrêter (stopGuide absent) : la carte sans bouton d’arrêt ; sans onGuide : l’état du rendu', () => {
     const hz = harness({ settings: defaults() });
     withGuide(hz.glasses, STATUS, ['guideStatus']);
     const el = home(hz);
-    expect(card(el)!.querySelector('button')).toBeNull();
+    expect(card(el)!.querySelector('.now-stop')).toBeNull();
+    // 1.3.1 (PRD-1.3.1 § 14, R6) : seul reste « Copier mon heure d’arrivée », qui ne demande rien aux lunettes
+    expect([...card(el)!.querySelectorAll('button')].map((b) => textOf(b))).toEqual(['Copier mon heure d’arrivée']);
     expect(cardText(el).slice(0, 3)).toEqual(['En cours', 'Bureau, arrivée 08:54', 'Maintenant : bus 6 vers Gare des Guillemins']);
   });
 
