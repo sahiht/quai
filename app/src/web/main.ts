@@ -23,7 +23,7 @@ import { createKV } from '../platform/kv';
 import type { Platform } from '../platform/types';
 import { loadSettings, SettingsStore } from '../settings';
 import { describeContainers, GlassesCanvas, withCanvasImages } from './display';
-import { createEssai, gatedPort, type Essai } from './essai';
+import { createEssai, gatedPort, placeBanner, type Essai } from './essai';
 import { attachKeyboard, attachScreenGestures, GESTURES } from './gestures';
 import { createWebLocation, type WebLocationState } from './location';
 import { createWebGlassesPort } from './port';
@@ -119,11 +119,15 @@ async function main(): Promise<void> {
     clock,
     showGlasses: () => shell.show('lunettes'),
     visible: () => document.visibilityState !== 'hidden',
-    focusAfter: () => shell.canvas.focus({ preventScroll: true }),
+    // après « Arrêter l'essai » : l'écran des lunettes s'il se voit, sinon l'onglet de la vue ouverte (écran étroit)
+    focusAfter: () => (shell.glassesVisible() ? shell.canvas : shell.root.querySelector<HTMLElement>(`#w-tab-${shell.panel()}`))?.focus({ preventScroll: true }),
     e2e: env.e2e,
   });
   essai = trial;
-  shell.canvas.closest('.w-stage')?.before(trial.banner);
+  // grand écran : au-dessus de l'écran des lunettes ; écran étroit : sous la barre du haut, visible dans les deux vues
+  const banner = (): void => placeBanner(trial.banner, { wide: shell.wide(), stage: shell.canvas.closest('.w-stage'), main: shell.root.querySelector('.w-main') });
+  banner();
+  shell.onChange(banner);
 
   shell.extra.append(h('section', { class: 'box pad w-pos-box', 'aria-labelledby': 'w-pos-title' }, h('h2', { id: 'w-pos-title' }, 'Position'), picker('w-pos')));
 
