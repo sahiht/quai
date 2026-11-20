@@ -14,6 +14,7 @@ import { exitByLegOf } from '../../src/core/exits';
 import { dismissMoment } from '../../src/core/guide';
 import type { GuideState, Moment, WhereAmI } from '../../src/core/guide-types';
 import type { ExitsFile } from '../../src/core/walk/exits-format';
+import { shortName } from '../../src/core/typo';
 import { EXIT_HEAD, exitLineText } from '../../src/glasses/exit-line';
 import { textWidth } from '../../src/glasses/font';
 import { guideView } from '../../src/glasses/guide-views';
@@ -202,28 +203,61 @@ describe('R1 : la ligne « Sortie : … » de l’écran de la marche', () => {
       const shown = line.slice(EXIT_HEAD.length);
       const full = name.replace(/'/g, '’');
       if (shown !== full) {
-        // coupé : des mots entiers du nom, puis « … »
+        // trop long : le diminutif, sinon ses mots entiers puis « … »
+        expect(textWidth(`${EXIT_HEAD}${full}`)).toBeGreaterThan(GUIDE.TEXT_W);
+        if (shown === shortName(full)) continue;
         expect(shown.endsWith('…')).toBe(true);
         const head = shown.slice(0, -1);
-        expect(full.startsWith(`${head} `)).toBe(true);
+        expect(shortName(full).startsWith(`${head} `)).toBe(true);
         expect(head).not.toMatch(/(?:^| )(?:&|et|de|du|des|la|le|les|au|aux|à|van)$/);
       }
     }
     // la plus longue sortie des données : coupée après le nom de la première personne, sans « & » au bout
     expect(screen(walkM({ exit: REAL_NAMES[REAL_NAMES.length - 1] })).lines[2]).toBe('Sortie : Allée Adrienne Gommers…');
-    // tous les autres noms tiennent en entier
+    // tous les autres noms tiennent en entier : jamais de diminutif
     for (const name of REAL_NAMES.slice(0, -1)) expect(screen(walkM({ exit: name })).lines[2]).toBe(`Sortie : ${name.replace(/'/g, '’')}`);
   });
 
-  it('coupe du nom (exitLineText) : mots entiers, mot de liaison retiré, rien faute de place', () => {
+  it('nom trop long (§ 15, décision du 20/11 à 21:15) : le nom entier s’il tient, sinon son diminutif, sinon la coupe au mot ; au pixel', () => {
+    const line = (name: string) => screen(walkM({ exit: name })).raw[2];
+    // tient tout juste (374 px sur 374) : entier, jamais de diminutif
+    expect(GUIDE.TEXT_W).toBe(374);
+    expect(nb(line('Avenue de la Reine Marie-Henriette'))).toBe('Sortie : Avenue de la Reine Marie-Henriette');
+    expect(textWidth(line('Avenue de la Reine Marie-Henriette'))).toBe(374);
+    expect(nb(line('Boulevard du Jardin Botanique'))).toBe('Sortie : Boulevard du Jardin Botanique');
+    expect(textWidth(line('Boulevard du Jardin Botanique'))).toBe(327);
+    // 381 px : ne tient pas ; son diminutif tient (318 px)
+    expect(textWidth('Sortie\u00a0: Boulevard Maria Groeninckx-De May')).toBe(381);
+    expect(nb(line('Boulevard Maria Groeninckx-De May'))).toBe('Sortie : Bd Maria Groeninckx-De May');
+    expect(textWidth(line('Boulevard Maria Groeninckx-De May'))).toBe(318);
+    // même le diminutif ne tient pas : il est coupé entre deux mots
+    expect(nb(line('Boulevard de la Deuxième Armée Britannique'))).toBe('Sortie : Bd de la Deuxième Armée…');
+    // la sortie la plus longue des données belges (603 px entière, aucun mot à diminutif) : coupée au mot, 287 px
+    const longest = REAL_NAMES[REAL_NAMES.length - 1];
+    expect(textWidth(`Sortie\u00a0: ${longest}`)).toBe(603);
+    expect(shortName(longest)).toBe(longest);
+    expect(nb(line(longest))).toBe('Sortie : Allée Adrienne Gommers…');
+    expect(textWidth(line(longest))).toBe(287);
+    // chaque diminutif de la liste, sur une ligne plus étroite d'un pixel que le nom entier
+    const w = (t: string) => textWidth(`Sortie\u00a0: ${t}`);
+    for (const [full, short] of [['Boulevard Anspach', 'Bd Anspach'], ['Avenue Herrmann-Debroux', 'Av. Herrmann-Debroux'], ['Place De Brouckère', 'Pl. De Brouckère'], ['Chaussée de Wavre', 'Ch. de Wavre'], ['Parvis Saint-Gilles', 'Parvis St-Gilles']]) {
+      expect(nb(exitLineText(full, w(full)))).toBe(`Sortie : ${full}`);
+      expect(nb(exitLineText(full, w(full) - 1))).toBe(`Sortie : ${short}`);
+      expect(textWidth(exitLineText(full, w(full) - 1))).toBeLessThanOrEqual(w(full) - 1);
+    }
+  });
+
+  it('coupe du nom (exitLineText) : mots entiers, deux au moins, mot de liaison retiré, rien faute de place', () => {
     const w = (t: string) => textWidth(t);
     expect(exitLineText('Boulevard Anspach', 400)).toBe('Sortie\u00a0: Boulevard Anspach');
     expect(exitLineText('Boulevard Anspach', w('Sortie\u00a0: Boulevard Anspach'))).toBe('Sortie\u00a0: Boulevard Anspach');
-    expect(exitLineText('Boulevard Anspach', w('Sortie\u00a0: Boulevard Anspach') - 1)).toBe('Sortie\u00a0: Boulevard…');
-    expect(exitLineText('Rue de la Loi', w('Sortie\u00a0: Rue de la Loi') - 1)).toBe('Sortie\u00a0: Rue…');
-    expect(exitLineText('Avenue Herrmann-Debroux', w('Sortie\u00a0: Avenue Herrmann-Debroux') - 1)).toBe('Sortie\u00a0: Avenue…');
+    expect(exitLineText('Rue du Champ de la Couronne', w('Sortie\u00a0: Rue du Champ de la Couronne') - 1)).toBe('Sortie\u00a0: Rue du Champ…');
+    expect(exitLineText('Rue Jules Van Praet', w('Sortie\u00a0: Rue Jules Van Praet') - 1)).toBe('Sortie\u00a0: Rue Jules…');
+    // « Rue… » ne dit rien : deux mots du nom au moins, sinon aucune ligne
+    expect(exitLineText('Rue de la Loi', w('Sortie\u00a0: Rue de la Loi') - 1)).toBe('');
+    expect(exitLineText('Rue Neuve', w('Sortie\u00a0: Rue Neuve') - 1)).toBe('');
     expect(exitLineText('Allée Adrienne Gommers & Anne-Marie van Oost-de-Gerlache', w('Sortie\u00a0: Allée Adrienne Gommers & Anne-Marie van…'))).toBe('Sortie\u00a0: Allée Adrienne Gommers & Anne-Marie…');
-    // pas de place pour un mot entier du nom : aucune ligne (jamais « Sortie : … » ni un mot coupé)
+    // pas de place pour deux mots du nom ou de son diminutif : aucune ligne (jamais « Sortie : … » ni un mot coupé)
     expect(exitLineText('Boulevard Anspach', w('Sortie\u00a0: Boul'))).toBe('');
     expect(exitLineText('Boulevard Anspach', 0)).toBe('');
     expect(exitLineText('', 400)).toBe('');
