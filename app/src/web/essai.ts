@@ -56,6 +56,13 @@ export const ESSAI_TEXT = {
 
 /** Vitesse de marche donnée au moteur, au plus (il prend une marche de 2,5 m/s ou plus pour autre chose). */
 const WALK_SPEED_MAX = 2.2;
+/**
+ * Vitesse d'un véhicule simulé, au moins (contrôle qualité) : le moteur constate la montée à partir de 4 m/s
+ * (GUIDE.vehicleMs) et prend pour une marche ce qui va moins vite que 2,5 m/s. Un horaire à la minute donne souvent une
+ * moyenne plus lente entre deux arrêts (566 m en 4 min : 2,4 m/s) : le véhicule simulé roule alors à cette vitesse, puis
+ * attend son heure à l'arrêt, comme un vrai.
+ */
+export const RIDE_SPEED_MIN = 6;
 /** Une position au moins toutes les 20 s simulées, même immobile (comme le flux des vraies positions). */
 const FIX_EVERY_MAX_MS = 20_000;
 const CORE_TIMEOUT_MS = 20_000;
@@ -156,7 +163,11 @@ function walkFix(l: Leg, i: number, t: number, walk: SimWalk | null | undefined,
   return out;
 }
 
-/** À bord de l'étape `l` à l'instant `t` : d'arrêt en arrêt (ceux dont la position est connue), à leurs heures. */
+/**
+ * À bord de l'étape `l` à l'instant `t` : d'arrêt en arrêt (ceux dont la position est connue). Le véhicule quitte chaque
+ * arrêt à son heure, roule à l'allure d'un véhicule (RIDE_SPEED_MIN au moins) et attend à l'arrêt suivant jusqu'à l'heure
+ * de celui-ci : jamais à l'allure d'une marche.
+ */
 function rideFix(l: Leg, t: number, at: number): Fix {
   const pts: { p: LatLon; t: number }[] = [{ p: { lat: l.from.lat, lon: l.from.lon }, t: l.dep }];
   for (const s of l.stops ?? []) if (knownPoint(s) && s.sched > pts[pts.length - 1].t && s.sched < l.arr) pts.push({ p: { lat: s.lat, lon: s.lon }, t: s.sched });
@@ -165,10 +176,12 @@ function rideFix(l: Leg, t: number, at: number): Fix {
   while (k < pts.length - 2 && t > pts[k + 1].t) k++;
   const a = pts[k];
   const b = pts[k + 1];
-  const span = b.t - a.t;
-  const f = span > 0 ? Math.min(1, Math.max(0, (t - a.t) / span)) : 1;
+  const dist = distanceM(a.p, b.p);
+  // durée du roulage : celle de l'horaire si sa moyenne est déjà celle d'un véhicule, sinon plus courte (attente à l'arrêt)
+  const roll = Math.min(b.t - a.t, (dist / RIDE_SPEED_MIN) * 1000);
+  const f = roll > 0 ? Math.min(1, Math.max(0, (t - a.t) / roll)) : 1;
   const p = lerp(a.p, b.p, f);
-  const speed = span > 0 && f < 1 ? distanceM(a.p, b.p) / (span / 1000) : 0;
+  const speed = roll > 0 && f < 1 ? dist / (roll / 1000) : 0;
   const out: Fix = { lat: p.lat, lon: p.lon, accuracy: 10, speed: tenth(speed), at, source: 'mock' };
   if (speed > 0) out.heading = bearingDeg(a.p, b.p);
   return out;

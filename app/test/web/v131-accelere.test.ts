@@ -13,6 +13,7 @@ import { fileURLToPath, URL as NodeURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Favorite, FavoriteAnswer, Journey, LatLon, Settings } from '../../src/core/api';
 import { DEFAULT_SETTINGS } from '../../src/core/api';
+import { GUIDE } from '../../src/core/guide';
 import { createJournal, JOURNAL_KEY } from '../../src/core/journal';
 import { distanceM } from '../../src/core/util';
 import { dataFreshness } from '../../src/dev/fake-core';
@@ -26,7 +27,7 @@ import { createKV, memoryBackend } from '../../src/platform/kv';
 import type { Fix, GlassesPort, LocationPort } from '../../src/platform/types';
 import { SettingsStore } from '../../src/settings';
 import { APP_VERSION } from '../../src/version';
-import { createEssai, ESSAI_LEAD_MS, ESSAI_TEXT, gatedPort, plannedJourney, simulatedFix, type Essai } from '../../src/web/essai';
+import { createEssai, ESSAI_LEAD_MS, ESSAI_TEXT, gatedPort, plannedJourney, RIDE_SPEED_MIN, simulatedFix, type Essai } from '../../src/web/essai';
 import { createWebGlassesPort } from '../../src/web/port';
 import { BUS6, MIN, P, S, at, firstWalkRoute, journeyOf, offset, route, walkLeg } from '../core/guide-fixtures';
 import { stubCore } from '../glasses/helpers';
@@ -184,9 +185,39 @@ describe('trajet aux heures prévues et positions simulées (fonctions pures)', 
     near(simulatedFix(j, at('07:05:30'), null), { lat: (P.avroy.lat + P.gramme.lat) / 2, lon: (P.avroy.lon + P.gramme.lon) / 2 }, 2);
     // à l'arrêt en attendant le bus, puis à bord entre deux arrêts (vitesse de véhicule), puis à l'arrivée
     near(simulatedFix(j, at('07:11'), walk), P.gramme, 1);
-    near(simulatedFix(j, at('07:14'), walk), { lat: (P.gramme.lat + P.leman.lat) / 2, lon: (P.gramme.lon + P.leman.lon) / 2 }, 2);
-    expect(simulatedFix(j, at('07:14'), walk)!.speed).toBeGreaterThan(2);
+    const half = Math.round((distanceM(P.gramme, P.leman) / 2 / RIDE_SPEED_MIN) * 1000);
+    near(simulatedFix(j, at('07:12') + half, walk), { lat: (P.gramme.lat + P.leman.lat) / 2, lon: (P.gramme.lon + P.leman.lon) / 2 }, 2);
+    expect(simulatedFix(j, at('07:12') + half, walk)).toMatchObject({ speed: RIDE_SPEED_MIN });
     near(simulatedFix(j, at('07:30'), walk), P.guillemins, 1);
+  });
+
+  it('à bord, l’allure d’un véhicule, jamais celle d’une marche : il roule (6 m/s au moins), puis attend son heure à l’arrêt', () => {
+    const j = plannedJourney(trip(), 2);
+    const bus = j.legs[1];
+    // l'horaire seul donnerait 2,4 m/s de Monument Gramme à Place Général Leman (566 m en 4 min) : pour le moteur, ni un
+    // véhicule (4 m/s : montée constatée) ni franchement une marche (2,5 m/s)
+    expect(distanceM(P.gramme, P.leman) / 240).toBeLessThan(GUIDE.walkMaxMs);
+    expect(RIDE_SPEED_MIN).toBeGreaterThan(GUIDE.vehicleMs);
+    let rolling = 0;
+    for (let t = bus.dep; t <= bus.arr; t += 1_000) {
+      const f = simulatedFix(j, t)!;
+      expect(f.speed === 0 || f.speed! >= RIDE_SPEED_MIN, `${hhmm(t)} : ${f.speed} m/s`).toBe(true);
+      expect(f.heading === undefined).toBe(f.speed === 0);
+      if (f.speed) rolling++;
+    }
+    expect(rolling).toBeGreaterThan(120);
+    // chaque arrêt à son heure prévue (parti à l'heure, arrivé avant l'heure du suivant et à l'arrêt)
+    const near = (t: number, p: LatLon) => expect(distanceM(simulatedFix(j, t)!, p)).toBeLessThan(1);
+    near(at('07:12'), P.gramme);
+    near(at('07:14'), P.leman);
+    expect(simulatedFix(j, at('07:14'))).toMatchObject({ speed: 0 });
+    near(at('07:16'), P.leman);
+    near(at('07:20'), P.guilleminsBus);
+    // un horaire déjà rapide est suivi tel quel (train : 10 km en 7 min)
+    const fast = plannedJourney(journeyOf([{ ...bus, to: { ...bus.to, lat: bus.from.lat + 0.09, lon: bus.from.lon }, stops: [] }], 'jrapide', bus.dep), 0);
+    const mid = simulatedFix(fast, (fast.legs[0].dep + fast.legs[0].arr) / 2)!;
+    expect(mid.speed).toBeGreaterThan(15);
+    expect(distanceM(mid, { lat: bus.from.lat + 0.045, lon: bus.from.lon })).toBeLessThan(20);
   });
 
   it('gatedPort : rien n’est dessiné tant que la porte est fermée ; gestes et signaux passent', async () => {
@@ -258,6 +289,28 @@ describe('l’essai dans Quai Web (vrai contrôleur, vrai moteur, vrais écrans)
     // fin du guidage de l'essai : les vraies lunettes reprennent l'écran
     expect(lastFrame(b).by).toBe('vraies');
     expect(b.essai.banner.hidden).toBe(true);
+  });
+
+  it('à bord : le moteur constate la montée d’après la position simulée, puis la descente ; aucun virage entre monter et descendre', async () => {
+    const b = await bench();
+    await b.essai.tryFavorite(GARE.id);
+    const seen: string[] = [];
+    for (let s = 0; b.essai.active() && s < 400; s++) {
+      await b.advance(1_000);
+      const mem = b.essai.sandbox()?.followed?.guide?.mem;
+      const state = `${mem?.boarded ? `monté ${hhmm(mem.boarded.at)}` : ''}${mem?.alighted ? `, descendu ${hhmm(mem.alighted.at)}` : ''}`;
+      if (state && seen.at(-1) !== state) seen.push(state);
+    }
+    expect(b.essai.active()).toBe(false);
+    // montée constatée dans la minute du départ prévu (07:12), descente à l'arrêt Gare des Guillemins avant la marche
+    expect(seen[0]).toBe('monté 07:12');
+    expect(seen.some((x) => /^monté 07:12, descendu 07:(18|19|20)$/.test(x))).toBe(true);
+    const ms = b.moments();
+    const board = ms.indexOf('board');
+    const alight = ms.indexOf('alight');
+    expect(board).toBeGreaterThan(0);
+    expect(alight).toBeGreaterThan(board);
+    expect(ms.slice(board + 1, alight)).not.toContain('turn');
   });
 
   it('rien n’est enregistré : ni trajet suivi (quai.trip) ni journal des trajets (quai.journal), réglages intacts', async () => {
