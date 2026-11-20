@@ -100,7 +100,7 @@ export function displayScreen(ctx: PhoneCtx): HTMLElement {
         // 1.2.10 : sous-titre sur une ligne (tout tient sur un écran), même sens
         h('div', { class: 'bordered' }, switchRow({ label: 'Signaler les horaires prévus', sub: 'un ~ devant l’heure sans temps réel', checked: s.display.markPlanned, onChange: (v) => set((d) => ({ ...d, markPlanned: v })) })),
         // 1.2.5 : pluie prévue sur les marches de 5 min ou plus (grille fixe de la Belgique : la position n'est pas envoyée)
-        h('div', { class: 'bordered' }, switchRow({ label: 'Pluie pendant la marche', sub: 'sur les marches de 5 min ou plus, d’après Open-Meteo', checked: s.display.rain, onChange: (v) => set((d) => ({ ...d, rain: v })) })),
+        h('div', { class: 'bordered' }, switchRow({ label: 'Pluie pendant la marche', sub: typo('sur les marches de 5 min ou plus, d’après Open-Meteo'), checked: s.display.rain, onChange: (v) => set((d) => ({ ...d, rain: v })) })),
         // 1.3.1 (PRD-1.3.1 § 14, R5) : « Plein soleil », éteint par défaut (seul `true` est enregistré) ; l'aperçu le suit
         h('div', { class: 'bordered' }, switchRow({ label: 'Plein soleil', sub: 'Le texte pâle devient plus clair.', checked: s.display.sun === true, onChange: (v) => set((d) => ({ ...d, sun: v })) })),
       ),
