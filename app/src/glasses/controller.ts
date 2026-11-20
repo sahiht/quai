@@ -690,7 +690,6 @@ export class GlassesController implements GlassesApi {
   /** 1.3.1 (R1) : sorties du métro publiées (exits.json), lues au premier guidage de trajet ; null tant qu'inconnues */
   private exits: ExitsFile | null = null;
   private exitsAskedAt: number | undefined;
-  private exitsJob = false;
   /** Lunettes connectées au dernier signal `device` (journal) ; null : aucun signal encore. */
   private glassesOn: boolean | null = null;
   /** Lunettes connectées et portées au dernier signal `device` ; faux : rien n'est affiché (rappel suspendu). */
@@ -2903,17 +2902,13 @@ export class GlassesController implements GlassesApi {
    */
   private exitByLegFor(j: Journey, now: number): Record<number, string> | undefined {
     const core = this.d.core;
-    if (!this.exits && !this.exitsJob && core.walkExits && !(this.exitsAskedAt !== undefined && now - this.exitsAskedAt < EXITS_RETRY_MS)) {
+    if (!this.exits && core.walkExits && !(this.exitsAskedAt !== undefined && now - this.exitsAskedAt < EXITS_RETRY_MS)) {
       this.exitsAskedAt = now;
-      this.exitsJob = true;
       void deadline(core.walkExits(), CORE_TIMEOUT_MS, 'sorties du métro trop lentes')
         .then((f) => {
           if (f) this.exits = f;
         })
-        .catch((e: unknown) => console.warn('[Quai] sorties du métro', errText(e)))
-        .finally(() => {
-          this.exitsJob = false;
-        });
+        .catch((e: unknown) => console.warn('[Quai] sorties du métro', errText(e)));
     }
     return exitByLegOf(j, this.exits);
   }
