@@ -170,7 +170,8 @@ describe('retours vers Réglages (PRD-1.2.9 § 2.3) ; les favoris reviennent à 
 });
 
 describe('1.2.10 : « Pendant un trajet » : « Me guider pendant un trajet » (PRD-1.2.10 § 4.1)', () => {
-  const HELP = 'Les lunettes restent vides et t’écrivent seulement quand tu dois agir : partir, tourner, monter, descendre. Éteint : ton trajet est suivi sans rien afficher tout seul.';
+  // 1.3.1 (PRD-1.3.1 § 12, L2) : les lunettes montrent trois petits points pendant le guidage
+  const HELP = 'Les lunettes ne montrent que trois petits points et t’écrivent seulement quand tu dois agir : partir, tourner, monter, descendre. Éteint : ton trajet est suivi sans rien afficher tout seul.';
   const guideRow = (el: HTMLElement): HTMLElement => {
     const group = [...el.querySelectorAll<HTMLElement>('section.group')].find((g) => textOf(g.querySelector('h2')) === 'Pendant un trajet')!;
     const rows = [...group.querySelectorAll<HTMLElement>('.switch-row')];

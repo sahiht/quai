@@ -268,7 +268,8 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
   function card(j: Journey, i: number, r: PlanResult): HTMLElement {
     const now = ctx.clock.now();
     const label = cardTitle(j, r);
-    const means = meansLine(j);
+    // 1.3.1 (PRD-1.3.1 § 4) : la marche nomme l'arrêt où monter, dans la langue des noms
+    const means = meansLine(j, lang());
     const phrase = cardPhrase(j, r, ctx.settings.get().maxWalkMin);
     const radio = h(
       'div',
