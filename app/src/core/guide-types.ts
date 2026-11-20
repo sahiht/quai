@@ -262,8 +262,9 @@ export interface WhereAmI {
     /** 1.3.1 (B13, U6) : heure prévue du train visé, en retard d'au moins 1 min */
     sched?: number;
     /**
-     * 1.3.1 (R4) : avant de partir, l'heure de partir quand le moteur l'a avancée (le vrai chemin de la première marche
-     * est plus long que la marche prévue) : « Ensuite : partir à 07:12 » ; absente : celle du trajet (Journey.leaveAt)
+     * 1.3.1 (vrai chemin partout) : avant de partir, l'heure de partir du trajet quand le cœur l'a avancée d'après le
+     * vrai chemin de la première marche (core/firstwalk.ts) : « Ensuite : partir à 07:12 » ; c'est Journey.leaveAt,
+     * répétée ici ; absente : pas d'avance
      */
     leaveAt?: number;
   };

@@ -22,6 +22,7 @@
 import type { Core, Departure, DepartureStops, FavoriteAnswer, FavoritePlace, FavoriteTrip, GlassesApi, Journey, KV, LatLon, Leg, Settings } from '../core/api';
 import { MESSAGES } from '../core/errors';
 import { asTrip, favoriteTitle } from '../core/favorites';
+import { FIRST_WALK, firstWalkLeg, firstWalkMin, realWalkMin, setFirstWalk } from '../core/firstwalk';
 import { GUIDE } from '../core/guide';
 import type { WalkRoute } from '../core/guide-types';
 import { knownPoint } from '../core/guide-walk';
@@ -131,21 +132,23 @@ export function plannedJourney(j: Journey, leaveBeforeMin: number): Journey {
 
 /**
  * Contrôle qualité : la première marche compte les minutes de son vrai chemin quand il est plus long que la marche
- * prévue (80 m par minute, minute entamée comptée), et le départ avance d'autant : la règle du guidage de la 1.3.1 pour
- * « Partir maintenant » (core/guide.ts, realFirstWalk), appliquée ici avant de commencer, pour que l'essai commence bien
- * 1 min avant l'heure de partir et que la marche simulée garde une allure de marche. Mêmes conditions : un vrai chemin
+ * prévue, et le départ avance d'autant, pour que l'essai commence bien 1 min avant l'heure de partir et que la marche
+ * simulée garde une allure de marche. 1.3.1 (« 7h12 partout ») : ce n'est plus une copie de la règle. Le trajet d'un
+ * favori arrive déjà corrigé par le cœur quand le chemin est connu ; ici, la même règle par les mêmes fonctions
+ * (core/firstwalk.ts : 80 m par minute, au plus 5 min d'avance, jamais deux corrections l'une sur l'autre grâce à
+ * Leg.walkEst), pour le cas où le chemin n'est connu qu'à l'instant de lancer l'essai. Mêmes conditions : un vrai chemin
  * (pas une ligne droite), qui part du départ (40 m) et mène à l'arrêt (30 m), vers un véhicule. Sinon : le trajet donné.
  */
 export function realFirstWalk(j: Journey, route: WalkRoute | null | undefined, leaveBeforeMin: number): Journey {
-  const w = j.legs[0];
-  const r = j.legs[1];
-  if (!route || route.source !== 'osm' || !Number.isFinite(route.lengthM) || !w || w.kind !== 'walk' || !r || r.kind !== 'ride') return j;
+  const w = firstWalkLeg(j.legs);
+  if (!route || route.source !== 'osm' || !Number.isFinite(route.lengthM) || !w) return j;
   if (!knownPoint(w.from) || !knownPoint(w.to) || !knownPoint(route.from) || !knownPoint(route.to)) return j;
-  if (distanceM(route.from, w.from) > GUIDE.leaveM || distanceM(route.to, w.to) > 30) return j;
-  const real = Math.ceil(route.lengthM / GUIDE.walkMPerMin);
-  const planned = Math.max(1, Math.round(w.walkMin ?? (w.arr - w.dep) / 60_000));
-  if (real <= planned) return j;
-  return plannedJourney({ ...j, legs: [{ ...w, walkMin: real }, ...j.legs.slice(1)] }, leaveBeforeMin);
+  if (distanceM(route.from, w.from) > FIRST_WALK.startM || distanceM(route.to, w.to) > FIRST_WALK.endM) return j;
+  // déjà décidé par le cœur pour ce trajet : rien de plus
+  if (w.walkEst !== undefined) return j;
+  const legs = j.legs.map((l) => ({ ...l }));
+  if (!(setFirstWalk(legs, firstWalkMin(w, realWalkMin(route.lengthM))) > 0)) return j;
+  return plannedJourney({ ...j, legs }, leaveBeforeMin);
 }
 
 /* ------------------------------ Positions simulées ------------------------------ */
@@ -518,7 +521,8 @@ export function createEssai(deps: EssaiDeps): Essai {
     // le vrai chemin de la première marche (celui que le guidage demande aussi, mêmes tuiles) : ses minutes, l'heure de partir
     const w = j.legs[0];
     if (w?.kind === 'walk' && core.walkRoute && knownPoint(w.from) && knownPoint(w.to)) {
-      const route = await deadline(core.walkRoute({ lat: w.from.lat, lon: w.from.lon }, { lat: w.to.lat, lon: w.to.lon }), CORE_TIMEOUT_MS, 'chemin à pied trop lent').catch(() => null);
+      // 1.3.1 : le chemin du réglage « Éviter les escaliers », comme le cœur et le guidage
+      const route = await deadline(core.walkRoute({ lat: w.from.lat, lon: w.from.lon }, { lat: w.to.lat, lon: w.to.lon }, { avoidSteps: s.avoidSteps === true }), CORE_TIMEOUT_MS, 'chemin à pied trop lent').catch(() => null);
       j = realFirstWalk(j, route, s.alerts.leaveBeforeMin);
     }
     // une autre demande est arrivée pendant le calcul, ou un vrai guidage a commencé

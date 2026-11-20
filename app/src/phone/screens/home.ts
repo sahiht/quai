@@ -262,11 +262,47 @@ function favoritesCard(ctx: PhoneCtx): HTMLElement {
     }
   };
   queueMicrotask(() => void refresh());
+  // 1.3.1 (vrai chemin partout) : le vrai chemin d'une première marche vient d'être connu : les réponses tout de suite
+  // (la même heure de partir que sur les lunettes), sans attendre les 30 s ; arrêté avec la liste
+  let offWalk: (() => void) | undefined;
+  void ctx
+    .core()
+    .then((c) => {
+      watchFirstWalk(c, ctx);
+      offWalk = c.onFirstWalk?.(() => {
+        if (!first && !list.isConnected) offWalk?.();
+        else if (busy) again = true;
+        else void refresh();
+      });
+    })
+    .catch(() => undefined);
   const timer = setInterval(() => {
-    if (!list.isConnected) clearInterval(timer);
-    else void refresh();
+    if (!list.isConnected) {
+      clearInterval(timer);
+      offWalk?.();
+    } else void refresh();
   }, ANSWER_REFRESH_MS);
   return list;
+}
+
+/**
+ * 1.3.1 (vrai chemin partout) : les réponses gardées d'un affichage à l'autre (lastAnswers : la première peinture de
+ * l'accueil, le bouton « Lunettes ») reprennent tout de suite l'heure de partir du cœur quand un chemin vient d'être
+ * connu, sans réseau (Core.firstWalk), même si l'accueil n'est pas à l'écran. Un abonnement par cœur.
+ */
+let walkWatched: Core | null = null;
+function watchFirstWalk(c: Core, ctx: PhoneCtx): void {
+  if (walkWatched === c || !c.onFirstWalk || !c.firstWalk) return;
+  walkWatched = c;
+  c.onFirstWalk(() => {
+    const st = ctx.settings.get();
+    for (const [id, a] of lastAnswers) {
+      const js = a.plan?.journeys;
+      if (!js?.length || !a.plan) continue;
+      const fixed = js.map((j) => c.firstWalk!(j, st));
+      if (fixed.some((j, i) => j !== js[i])) lastAnswers.set(id, { ...a, plan: { ...a.plan, journeys: fixed } });
+    }
+  });
 }
 
 /* ------------------------------ Carte des rubriques ------------------------------ */
