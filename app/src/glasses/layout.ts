@@ -887,8 +887,11 @@ function layoutGuide(v: GlassesView, opts: LayoutOptions): PageSpec {
     // journal : la rangée telle qu'elle se lit (un seul texte, ou la chaîne composée des trois)
     lines.push(guideRowLog(a, b, c));
   }
-  const hintText = opts.toast ? truncateWordsPx(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? truncateWordsPx(v.hints, X_END - X_TEXT - GEO.SAFETY) : '';
-  if (hintText) lines.push(hintText);
+  // 1.3.1 (PRD-1.3.1 § 1, B9) : le pied de l'écran calme (« · · · », la progression) est centré par la vue, avec des
+  // espaces de tête mesurées : elles restent (le journal les omet)
+  const footLead = !opts.toast && v.hints ? (/^[ \u00a0]*/.exec(v.hints)?.[0] ?? '') : '';
+  const hintText = opts.toast ? truncateWordsPx(opts.toast, X_END - X_TEXT - GEO.SAFETY) : v.hints ? footLead + truncateWordsPx(v.hints.slice(footLead.length), X_END - X_TEXT - GEO.SAFETY - textWidth(footLead)) : '';
+  if (hintText) lines.push(hintText.trim());
   // titre du trajet guidé (« Vers … » d'un « j'y descends ») coupé au mot, jamais au milieu d'un mot
   const title = v.title ? truncateWordsPx(v.title, TITLE_W - GEO.SAFETY) : '';
   const C = (id: number, name: string, cx: number, y: number, cw: number, h: number, content: string, level: Brightness): ContainerSpec => ({

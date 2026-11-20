@@ -679,7 +679,8 @@ function eventText(e: JournalEvent, trip: JournalTrip): string {
     case 'moment':
       return `${momentName(d.m)} affiché`;
     case 'clear':
-      return `${momentName(d.m)} effacé d’un toucher`;
+      // 1.3.1 (PRD-1.3.1 § 2, L2) : « masqué », comme l'aide des lunettes (rien n'est effacé, le guidage continue)
+      return `${momentName(d.m)} masqué d’un toucher`;
     case 'remind': {
       const n = num(d.n);
       return `${momentName(d.m)} renvoyé${n !== undefined ? ` (rappel ${numText(n)})` : ''}`;
