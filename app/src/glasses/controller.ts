@@ -70,6 +70,7 @@ import { DEBOUNCE, GestureFilter, type HubSignal } from './gestures';
 import { GUIDE_MENU, checkLines, guideView, menuView, type GuideShow } from './guide-views';
 import { HeadUpLearner } from './headup';
 import { GuideTrail, MomentReminder, journalTitle, readRemindMemo, type ReminderNote, type RemindMemo, type ShownMoment } from './reminder';
+import { ALIGHTS_KEY, alightLineKey, emptyAlights, keptStops, noteAlight, parseAlights, type AlightMemory, type KeptStop } from './alights';
 import { geometry, layoutPage } from './layout';
 import { anchorIndex, current, effectiveFrame, handleGesture, initNav, mapRoutes, parseNav, pop, push, replace, replaceAt, reset, setSelection, type Gesture, type NavFrame, type NavState } from './nav';
 import { MENU_IDS, type AreaRef, type ContainerSpec, type GlassesView, type Intent, type Item, type KeepLineRoute, type MenuItem, type OthersRoute, type PageSpec, type Route, type StepsRoute, type StopsRoute } from './types';
@@ -608,6 +609,15 @@ export class GlassesController implements GlassesApi {
   /** Trajet suivi (M2) et en cours (M6). */
   private trip: FollowedTrip | null = null;
   private tripLoaded = false;
+  /**
+   * 1.3.1 (PRD-1.3.1 § 12, B11) : arrêts où l'on descend d'habitude, par ligne (clé quai.descentes), lus une fois avant la
+   * première liste des arrêts d'un départ (alightsRead) ; ceux retenus avant la lecture passent devant ceux relus.
+   * `alightsGen` : « Effacer le journal » pendant une lecture l'emporte sur elle.
+   */
+  private alights: AlightMemory = emptyAlights();
+  private alightsRead = false;
+  private alightsLoading: Promise<void> | null = null;
+  private alightsGen = 0;
   private tripSaved = '';
   /**
    * 1.2.2 : gare ou ligne retirée par ★ (départs, « garder une ligne »), rétablissable à l'identique pendant 5 s (M6.1).
@@ -2625,6 +2635,8 @@ export class GlassesController implements GlassesApi {
       return;
     }
     const title = towards(displayName(ds.stops[index].name, this.settings().lang));
+    // 1.3.1 (PRD-1.3.1 § 12, B11) : l'arrêt choisi est retenu pour cette ligne (la prochaine liste s'ouvre sur lui)
+    this.rememberAlight(ds, index);
     // lancé tout de suite (à l'heure) ; la position des arrêts suit dès qu'elle est trouvée
     this.startGuide('ride', j, { key: this.newKey(), title, journeys: [j] }, beyondOf(ds, index));
     await this.openGuide();
@@ -2654,6 +2666,71 @@ export class GlassesController implements GlassesApi {
     this.trip = { ...t, journey: j, journeys: t.journeys.map((x) => (x.id === j.id ? j : x)), guide };
     this.saveFollowed();
     this.stepGuide();
+  }
+
+  /** 1.3.1 (B11) : lit une fois les arrêts retenus (quai.descentes) ; illisibles : mémoire vide, jamais d'exception. */
+  private loadAlights(): Promise<void> {
+    if (this.alightsRead) return Promise.resolve();
+    this.alightsLoading ??= (async () => {
+      const gen = this.alightsGen;
+      const kv = this.d.platform.kv;
+      let raw: string | null;
+      try {
+        // lecture stricte si le stockage la connaît : une lecture sans réponse n'est pas une mémoire vide (rien n'est
+        // alors écrit, nouvel essai à la prochaine liste)
+        raw = kv.getStrict ? await kv.getStrict(ALIGHTS_KEY) : await kv.get(ALIGHTS_KEY);
+      } catch (e) {
+        console.warn('[Quai] arrêts retenus illisibles', errText(e));
+        this.alightsLoading = null;
+        return;
+      }
+      this.alightsLoading = null;
+      if (gen !== this.alightsGen || this.alightsRead) return;
+      // les arrêts retenus pendant la lecture passent devant ceux qui sont relus, dans leur ordre
+      let m = parseAlights(raw);
+      for (const l of [...this.alights.lines].reverse()) {
+        for (const st of [...l.stops].reverse()) m = noteAlight(m, l.key, { ...(st.id ? { areaId: st.id } : {}), name: { fr: st.fr, nl: st.nl ?? st.fr } });
+      }
+      const merged = this.alights.lines.length > 0;
+      this.alights = m;
+      this.alightsRead = true;
+      if (merged) this.saveAlights();
+    })();
+    return this.alightsLoading;
+  }
+
+  /** 1.3.1 (B11) : arrêts retenus de la ligne d'un départ, du plus récent au plus ancien (pas encore lus : ceux de la session). */
+  private keptFor(ds: Pick<DepartureStops, 'op' | 'mode' | 'line'>): KeptStop[] {
+    return keptStops(this.alights, alightLineKey(ds));
+  }
+
+  /**
+   * 1.3.1 (B11) : retient l'arrêt `index` de « j'y descends » pour la ligne du départ ; enregistré sur le téléphone tout de
+   * suite si la mémoire a été lue, sinon après sa lecture (jamais une mémoire de la seule session à la place de l'autre).
+   */
+  private rememberAlight(ds: DepartureStops, index: number): void {
+    const stop = ds.stops[index];
+    if (!stop) return;
+    this.alights = noteAlight(this.alights, alightLineKey(ds), stop);
+    if (this.alightsRead) this.saveAlights();
+    else void this.loadAlights();
+  }
+
+  private saveAlights(): void {
+    const raw = this.alights.lines.length ? JSON.stringify(this.alights) : '';
+    void this.d.platform.kv.set(ALIGHTS_KEY, raw).catch((e: unknown) => console.warn('[Quai] arrêts retenus non enregistrés', errText(e)));
+  }
+
+  /**
+   * 1.3.1 (PRD-1.3.1 § 12, B11) : « Effacer le journal » (téléphone) oublie aussi les arrêts retenus de « j'y descends ».
+   * GlassesApi.forgetAlights.
+   */
+  forgetAlights(): void {
+    this.alightsGen++;
+    this.alights = emptyAlights();
+    this.alightsRead = true;
+    this.alightsLoading = null;
+    this.saveAlights();
   }
 
   /** Positions des arrêts `board` à `alight` (et quelques-uns après), par zone. */
@@ -3608,8 +3685,9 @@ export class GlassesController implements GlassesApi {
       }
       case 'stops': {
         // 1.2.3 (§ 2) : les arrêts du départ touché, de l'arrêt du tableau au terminus (voyage disparu : missing) ;
-        // 1.2.10 : avec le départ à jour, celui que « j'y descends » fait suivre
-        const dep = await this.freshDeparture(r);
+        // 1.2.10 : avec le départ à jour, celui que « j'y descends » fait suivre ; 1.3.1 (B11) : les arrêts retenus, lus
+        // en même temps (la liste s'ouvre sur le plus récent)
+        const [dep] = await Promise.all([this.freshDeparture(r), this.loadAlights()]);
         return { stops: await core.departureStops(r.areaId, dep), dep };
       }
       case 'steps':
@@ -4018,7 +4096,8 @@ export class GlassesController implements GlassesApi {
       }
       case 'stops': {
         if (!value) return loadingView(stopsTitle(r.dep, ctx.settings.lang), 'Chargement des arrêts…', ctx, 'stops');
-        return stopsView(r, (value as { stops: DepartureStops }).stops, ctx);
+        const ds = (value as { stops: DepartureStops }).stops;
+        return stopsView(r, ds, ctx, ds.state === 'ok' ? this.keptFor(ds) : []);
       }
       case 'keepLine': {
         if (!value) return loadingView(keepLineTitle(displayName(r.name, ctx.settings.lang)), 'Chargement des lignes…', ctx, 'keepLine');

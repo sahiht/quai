@@ -304,6 +304,11 @@ export interface Item {
   /** 1.2.8 : la rangée montre un horaire prévu (« ~ ») : GlassesView.notePlanned s'affiche quand elle est à l'écran. */
   planned?: boolean;
   action?: Intent;
+  /**
+   * 1.3.1 (PRD-1.3.1 § 6, § 12 B11) : ligne d'action de cette rangée, dite quand le curseur est sur elle (vue à
+   * `cursorAction`) : « ▶ Me guider jusqu'à Bruxelles-Central ». Absente : la ligne d'action reste vide.
+   */
+  actionText?: string;
 }
 
 /** Gabarits de colonnes (largeurs fixes : pas de reconstruction de page lors des rafraîchissements). */
@@ -374,6 +379,12 @@ export interface GlassesView {
    * guidage », « ▶ Suivre ce trajet », « ▶ Trajet suivi ») : ce que fait un toucher sur cet écran.
    */
   action?: string;
+  /**
+   * 1.3.1 (PRD-1.3.1 § 6, § 12 B11) : la ligne d'action suit le curseur : sa rangée est réservée au-dessus des aides
+   * (une rangée de moins à la liste, même page quelle que soit la rangée du curseur) et dit `Item.actionText` de la
+   * rangée du curseur (vide sur une rangée qui n'en a pas). `action` n'est alors pas utilisé.
+   */
+  cursorAction?: boolean;
   /**
    * 1.3.0 (PRD-1.3.0 § 2) : ▲ sur la première rangée de cette liste n'est pas sans effet : la navigation rend `edge`
    * (vers le haut) et le contrôleur revient à l'écran d'avant (« Autres trajets » : le trajet proposé).

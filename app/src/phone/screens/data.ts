@@ -206,6 +206,12 @@ export function journalCard(ctx: PhoneCtx): HTMLElement | null {
                 } catch {
                   /* le journal se relit ci-dessous */
                 }
+                // 1.3.1 (PRD-1.3.1 § 12, B11) : les arrêts retenus de « j'y descends » sont oubliés avec le journal
+                try {
+                  ctx.glasses()?.forgetAlights?.();
+                } catch {
+                  /* lunettes indisponibles : rien à oublier ici */
+                }
                 paint();
                 const left = trips().length;
                 said.textContent = left ? '' : T.journalCleared;
