@@ -226,8 +226,9 @@ describe('PRD-1.2.10 § 3.7 : persistance et reprise', () => {
     const h = await guided({ kv });
     cur = moment('board', 'board:j-bureau:1', NOW, NOW + 60 * MIN);
     await h.c.refreshCurrent();
-    await h.settle(100);
-    // effacé d'un toucher : la mémoire change, son enregistrement attend (au plus toutes les 5 s)
+    // 1.3.1 (A7) : affiché depuis au moins 1,5 s
+    await h.settle(1_500);
+    // masqué d'un toucher : la mémoire change, son enregistrement attend (au plus toutes les 5 s)
     await h.gesture('tap');
     await h.settle(100);
     const k = kv.tripWrites.length;

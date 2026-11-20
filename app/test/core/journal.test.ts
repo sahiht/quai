@@ -595,6 +595,8 @@ describe('texte à copier', () => {
       check: 'À vérifier',
       nextStop: 'Prochain arrêt',
       arrived: 'Tu y es',
+      // 1.3.1 (B17) : la marche après une descente
+      walk: 'À pied',
     });
     // les mêmes mots que les écrans des lunettes
     for (const m of ['leave', 'alight', 'platform', 'arrived', 'offMap'] as const) expect(JOURNAL_MOMENT_WORDS[m]).toBe(GUIDE_TEXT[m]);
@@ -606,8 +608,9 @@ describe('texte à copier', () => {
     const lines = j.text(id).split('\n').slice(2);
     expect(lines).toEqual([
       ...Object.values(JOURNAL_MOMENT_WORDS).map((w, i) => `08:00:${String(i + 1).padStart(2, '0')} ${w} affiché`),
-      '08:00:12 nouveau affiché',
-      '08:00:13 constructor affiché',
+      // 1.3.1 : le rang suit le nombre de moments (walk ajouté)
+      `08:00:${String(Object.keys(JOURNAL_MOMENT_WORDS).length + 1).padStart(2, '0')} nouveau affiché`,
+      `08:00:${String(Object.keys(JOURNAL_MOMENT_WORDS).length + 2).padStart(2, '0')} constructor affiché`,
       '08:01:00 Message affiché',
     ]);
   });

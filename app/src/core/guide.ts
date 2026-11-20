@@ -35,6 +35,7 @@ import type {
 import { journeyId } from './journeys';
 import { isSncbBus, rideName } from './means';
 import { headName, placeNoun, vers } from './text';
+import { apos } from './typo';
 import { displayName, distanceM, hhmm } from './util';
 import { bearingDeg, cumulative, knownPoint, projectOn, relativeDeg, routePoints, turnsOf, walkProgress } from './guide-walk';
 
@@ -1818,12 +1819,14 @@ export function rideJourney(dep: Departure, stops: DepartureStops, board: number
 
 /**
  * « Maintenant : … » de la carte « En cours » du téléphone : « bus 6 vers Gare des Guillemins », « à pied vers l’arrêt
- * du bus 6 », « IC vers Courtrai, voie 3 », « partir à 07:05 », « à pied, arrivée 08:54 », « tu y es ».
+ * Flagey » (1.3.1, PRD-1.3.1 § 4, U3 : le nom de l'arrêt, plus « l’arrêt du bus 6 »), « IC vers Courtrai, voie 3 »,
+ * « partir à 07:05 » (1.3.1, L5 : la carte écrit alors « Ensuite : … », GuideStatus.then), « à pied, arrivée 08:54 »,
+ * « tu y es ». 1.3.1 (§ 7) : les noms venus des données avec l'apostrophe typographique (apos).
  */
 export function guideNowText(state: GuideState, journey: Journey, lang: NameLang, title?: string): string {
   const legs = journey.legs;
   const ph = state.phase;
-  const toward = (l: Leg): string => `${rideName(l)} vers ${headName({ op: l.op, head: l.head ?? l.to.name }, lang)}`;
+  const toward = (l: Leg): string => `${rideName(l)} vers ${apos(headName({ op: l.op, head: l.head ?? l.to.name }, lang))}`;
   switch (ph.kind) {
     case 'before': {
       const l = legs[ph.leg];
@@ -1838,9 +1841,11 @@ export function guideNowText(state: GuideState, journey: Journey, lang: NameLang
       if (isTrain(r)) {
         const p = platformOf(r);
         if (ph.leg > 0 && legs[ph.leg - 1].kind === 'ride' && p) return `à pied vers la voie ${p}`;
-        return `à pied vers ${displayName(r.from.name, lang)}`;
+        return `à pied vers ${apos(displayName(r.from.name, lang))}`;
       }
-      return `à pied vers l’arrêt du ${rideName(r)}`;
+      // 1.3.1 (§ 4, U3) : le nom de l'arrêt ; sans nom (données incomplètes), le véhicule comme avant
+      const stop = apos(displayName(r.from.name, lang)).trim();
+      return stop ? `à pied vers l’arrêt ${stop}` : `à pied vers l’arrêt du ${rideName(r)}`;
     }
     case 'wait': {
       const l = legs[ph.leg];
@@ -1859,9 +1864,14 @@ export function guideNowText(state: GuideState, journey: Journey, lang: NameLang
   }
 }
 
-/** Carte « En cours » du téléphone (PRD § 4.3). `guided` : réglage « Me guider pendant un trajet ». */
+/**
+ * Carte « En cours » du téléphone (PRD § 4.3). `guided` : réglage « Me guider pendant un trajet ». 1.3.1 (L5) : avant le
+ * départ, la ligne dit ce qui vient (« Ensuite : partir à 07:05 », `then`), pas ce qui se passe.
+ */
 export function guideStatusOf(state: GuideState, journey: Journey, title: string, guided: boolean, lang: NameLang): GuideStatus {
-  return { kind: state.kind, title, arr: journey.arr, now: guideNowText(state, journey, lang, title), guided };
+  const out: GuideStatus = { kind: state.kind, title, arr: journey.arr, now: guideNowText(state, journey, lang, title), guided };
+  if (state.phase.kind === 'before' && out.now) out.then = true;
+  return out;
 }
 
 /** « vers le bureau », « vers Gand-Saint-Pierre », « vers chez Karim » (titre du trajet, « Vers … » gardé). */

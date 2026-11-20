@@ -44,10 +44,15 @@ import { metersText, type ViewCtx } from './views';
 /** Ce que l'écran du guidage montre : rien, le moment du moteur, ou « Où tu en es ». */
 export type GuideShow = 'empty' | 'moment' | 'where';
 
-/** Menu de l'appui long pendant un guidage (PRD § 3.4) : menu système des lunettes, ou écran `menu` de Quai Web. */
+/**
+ * Menu de l'appui long pendant un guidage (PRD § 3.4) : menu système des lunettes, ou écran `menu` de Quai Web. 1.3.1
+ * (B10, E4) : « Voir tout le trajet », « Voir les arrêts » (« Dans le train » du véhicule en cours ; le contrôleur le
+ * retire d'un trajet sans véhicule), « Arrêter le guidage » en dernier (le curseur ne s'ouvre plus sur lui).
+ */
 export const GUIDE_MENU: MenuItem[] = [
-  { id: MENU_IDS.stopGuide, label: 'Arrêter le guidage' },
   { id: MENU_IDS.allSteps, label: 'Voir tout le trajet' },
+  { id: MENU_IDS.stops, label: 'Voir les arrêts' },
+  { id: MENU_IDS.stopGuide, label: 'Arrêter le guidage' },
 ];
 
 /** Textes fixes du guidage (PRD § 3.2, § 3.3). */
