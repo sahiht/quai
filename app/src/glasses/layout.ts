@@ -120,8 +120,11 @@ export const LAYOUTS: Record<Layout, LayoutDef> = {
    * 210 px, comme « Autres trajets »), détail et séparateur « Adresses récentes » un ton plus pâles (colonne b).
    */
   favorites: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 2 }, c: { x: right(WIDE_W), w: WIDE_W, align: 'right', level: 4 }, gap: TIGHT },
-  /** 1.2.2 : « Gares » : nom de la gare, prochain train dans la colonne de droite de l'accueil (PRD-1.2.2 § 2). */
-  stations: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 3 }, c: { x: right(WIDE_W), w: WIDE_W, align: 'right', level: 4 }, gap: TIGHT },
+  /**
+   * 1.2.2 : « Gares » : nom de la gare, prochain train dans la colonne de droite de l'accueil (PRD-1.2.2 § 2). 1.3.1
+   * (PRD-1.3.1 § 12, B21) : la colonne b ne porte que l'accordéon de la gare du curseur, pâle comme celui de « Favoris ».
+   */
+  stations: { a: { x: X_TEXT, level: 4 }, b: { x: X_TEXT, level: 2 }, c: { x: right(WIDE_W), w: WIDE_W, align: 'right', level: 4 }, gap: TIGHT },
   /**
    * 1.2.2 : « Bus, tram, métro » (§ 3) : titre de la ligne au plus clair (colonne a) ; ses sens en retrait, plus pâles,
    * le terminus puis les passages alignés à droite (colonne b, comme les favoris de l'accueil). 1.2.4 (PRD-1.2.4 § 2) :

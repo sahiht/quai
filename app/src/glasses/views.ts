@@ -60,6 +60,7 @@ import {
   departureRightText,
   fitName,
   guideToText,
+  stationDetail,
   distanceText,
   favoriteDetail,
   headText,
@@ -649,6 +650,8 @@ export function recentShown(settings: Settings): Settings['recent'] {
 export interface StationRow {
   pick: StationPick;
   next?: Departure;
+  /** 1.3.1 (PRD-1.3.1 § 12, B21) : le train d'après (2e départ à venir de la gare), dit dans l'accordéon. */
+  after?: Departure;
   /** none : aucun train dans l'horizon des tableaux ; missing : gare introuvable dans les données du jour. */
   state?: 'ok' | 'none' | 'missing';
 }
@@ -664,14 +667,17 @@ function chooseView(kind: 'stations' | 'lines' | 'follows', ctx: ViewCtx): Glass
  * « Gares » (PRD-1.2.2 § 2) : les gares choisies sur le téléphone, dans leur ordre ; une ligne par gare : son nom, et à
  * droite son prochain train, comme sur l'accueil (« S1 07:55 voie 1 », « v.1 » si la place manque, retard « +2 », voie
  * modifiée « ! »), avec « ~ » sans temps réel comme « Autour de moi » ; « aucun train » ; « … » pendant le calcul.
- * Toucher : le tableau des départs de la gare.
+ * Toucher : le tableau des départs de la gare. 1.3.1 (PRD-1.3.1 § 12, B21) : en accordéon (comme « Favoris ») : sous la
+ * gare du curseur, pâles et en retrait, la direction de son prochain train (« vers Bruxelles-Midi »), puis le train
+ * d'après (« puis IC vers Liège-Guillemins, 07:54 voie 4 », stationDetail) ; les autres gares restent fermées.
  */
 export function stationsView(rows: StationRow[], ctx: ViewCtx): GlassesView {
   if (!rows.length) return chooseView('stations', ctx);
   const v = base('stations', 'stations', SECTION.stationsTitle, ctx);
+  v.accordion = true;
   let planned = false;
   for (const r of rows) {
-    const item: Item = { a: displayName(r.pick.name, lang(ctx)), c: '…', action: { kind: 'open', route: { screen: 'board', areaId: r.pick.areaId, name: r.pick.name } } };
+    const item: DetailItem = { a: displayName(r.pick.name, lang(ctx)), c: '…', action: { kind: 'open', route: { screen: 'board', areaId: r.pick.areaId, name: r.pick.name } } };
     const next = r.next && r.next.est >= ctx.now - 30_000 ? r.next : undefined;
     if (r.state === 'missing') item.c = SECTION.missingStation;
     else if (r.state === 'none') item.c = SECTION.noTrain;
@@ -680,6 +686,10 @@ export function stationsView(rows: StationRow[], ctx: ViewCtx): GlassesView {
       item.c = t.text;
       if (t.tail) item.cTail = t.tail;
       if (!next.rt && !next.cancelled) planned = true;
+      const after = r.after && r.after.est >= ctx.now - 30_000 && r.after !== next ? r.after : undefined;
+      const expand = stationDetail(next, after, ctx.now, ctx.settings);
+      if (expand.length) item.expand = expand;
+      if (expand.some((e) => e.planned)) planned = true;
     }
     v.items.push(item);
   }

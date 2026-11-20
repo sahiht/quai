@@ -29,14 +29,15 @@ describe('1.2.9 : une rangée dont le rafraîchissement échoue garde sa derniè
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'stations' });
     const s = await h.until((x) => x.screen === 'stations' && !x.lines.some((l) => / …$/.test(l)));
-    expect(s.lines.slice(0, 2)).toEqual(['Braine-l’Alleud   IC 07:42 voie 1', 'Bruxelles-Nord   S1 07:55 voie 1']);
+    // 1.3.1 (B21) : l'accordéon de la gare du curseur (Braine-l'Alleud) entre les deux rangées
+    expect(s.lines.slice(0, 3)).toEqual(['Braine-l’Alleud   IC 07:42 voie 1', 'vers Bruxelles-Midi', 'Bruxelles-Nord   S1 07:55 voie 1']);
     await h.settle(50);
     // 30 s plus tard, la demande de Bruxelles-Nord échoue (réseau) : son dernier train connu reste à l'écran
     fail = true;
     h.advance(30_000);
     await h.c.refreshCurrent();
     await h.settle(50);
-    expect(h.last().lines.slice(0, 2)).toEqual(['Braine-l’Alleud   IC 07:42 voie 1', 'Bruxelles-Nord   S1 07:55 voie 1']);
+    expect(h.last().lines.slice(0, 3)).toEqual(['Braine-l’Alleud   IC 07:42 voie 1', 'vers Bruxelles-Midi', 'Bruxelles-Nord   S1 07:55 voie 1']);
     h.c.stop();
   });
 

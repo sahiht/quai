@@ -105,8 +105,9 @@ function home(
 async function stationRows(core: ReturnType<typeof fakeCore>, now: number, s: Settings): Promise<StationRow[]> {
   const rows: StationRow[] = [];
   for (const pick of s.stations) {
-    const next = upcoming((await core.board(pick.areaId, { limit: 3 })).departures, now)[0];
-    rows.push(next ? { pick, next, state: 'ok' } : { pick, state: 'none' });
+    // comme le contrôleur (1.3.1, B21) : le prochain train et celui d'après
+    const [next, after] = upcoming((await core.board(pick.areaId, { limit: 3 })).departures, now);
+    rows.push(next ? { pick, next, ...(after ? { after } : {}), state: 'ok' } : { pick, state: 'none' });
   }
   return rows;
 }
@@ -361,7 +362,8 @@ describe('scénario 1 : le matin, vers le bureau (S1, 07:31)', () => {
     const lines = check(nearbyView(list, ctxOf(now, settings())));
     expect(lines[0]).toMatch(/^Namur Place Léopold, bus TEC   150 m   /);
     expect(lines[1]).toMatch(/^Namur, train   420 m   IC 07:42/);
-    expect(lines.at(-1)).toBe('△▽ arrêt   toucher : départs   double : retour');
+    // 1.3.1 (L6) : la même aide que « Gares » et « Arrêts », qui ouvrent le même tableau
+    expect(lines.at(-1)).toBe('△▽ choisir   toucher : départs   double : retour');
   });
 
   it('CA-122.2 et PRD-1.2.10 § 2 : « Favoris » : une ligne comme l’accueil, « ! », le détail en bas ; « Adresses récentes » (3 au plus) ; « Autre adresse »', async () => {
@@ -449,7 +451,8 @@ describe('scénario 2 : en ville, gare du Nord (S2, 12:10)', () => {
     const core = fakeCore(() => now);
     const v = stationsView(await stationRows(core, now, s), ctxOf(now, s));
     expect(v.title).toBe('Gares de train');
-    expect(check(v)).toEqual(['Namur   IC 12:42 voie 4', '△▽ choisir   toucher : départs   double : retour']);
+    // 1.3.1 (B21) : l'accordéon de la gare du curseur : la direction, puis le train d'après
+    expect(check(v)).toEqual(['Namur   IC 12:42 voie 4', 'vers Bruxelles-Midi', 'puis IC vers Bruxelles-Midi, 13:42 voie 4', '△▽ choisir   toucher : départs   double : retour']);
     expect(v.items[0].action).toEqual({ kind: 'open', route: { screen: 'board', areaId: 'sncb:8863008', name: { fr: 'Namur', nl: 'Namen' } } });
     // le tableau complet de la gare (1.2.3) : « ★ » (gardée), la ligne ★ en tête la retire de « Gares »
     const b = boardView(await core.board('sncb:8863008', { horizonMin: 120, limit: 40 }), ctxOf(now, s), { kept: true });
@@ -465,13 +468,13 @@ describe('scénario 2 : en ville, gare du Nord (S2, 12:10)', () => {
     const v = linesView(rows, ctxOf(now, s));
     expect(v.title).toBe('Arrêts de bus, tram, métro');
     // 1.2.5 (PRD-1.2.5 § 4) : sous l'arrêt, ses 2 prochains départs, un par ligne ; 1.2.6 : plus d'intitulé « ARRÊTS »
-    expect(check(v)).toEqual(['Bruxelles-Nord', 'Bus 232 vers Vilvorde   ~5 min', 'Bus 460 vers Meise   10 min', '~ horaire prévu, sans temps réel', '△▽ choisir   toucher : ouvrir   double : retour']);
+    expect(check(v)).toEqual(['Bruxelles-Nord', 'Bus 232 vers Vilvorde   ~5 min', 'Bus 460 vers Meise   10 min', '~ horaire prévu, sans temps réel', '△▽ choisir   toucher : départs   double : retour']);
     expect(v.items.map((i) => i.action)).toEqual([{ kind: 'open', route: { screen: 'board', areaId: 'delijn:308611', name: s.lines[0].name } }]);
     // « Lignes de bus, tram, métro » : tram 3 et tram 4 (Gare du Nord en repère), un sens par rangée, sans attente
     const follows = await Promise.all((s.follows ?? []).map((f) => followRow(core, f)));
     const fv = followsView(follows, ctxOf(now, s));
     expect(fv.title).toBe('Lignes de bus, tram, métro');
-    expect(check(fv)).toEqual(['Tram 3 vers Churchill', 'Tram 3 vers Esplanade', 'Tram 4 vers Stalle', '△▽ choisir   toucher : la ligne   double : retour']);
+    expect(check(fv)).toEqual(['Tram 3 vers Churchill', 'Tram 3 vers Esplanade', 'Tram 4 vers Stalle', '△▽ choisir   toucher : parcours   double : retour']);
     expect(fv.items.map((i) => i.action)).toEqual([
       { kind: 'open', route: { screen: 'lineRun', follow: 'f-fav-gdn-3', dir: 0 } },
       { kind: 'open', route: { screen: 'lineRun', follow: 'f-fav-gdn-3', dir: 1 } },

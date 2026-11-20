@@ -3919,8 +3919,9 @@ export class GlassesController implements GlassesApi {
       try {
         const b = await this.d.core.board(p.areaId, { limit: 3, near: pickPlace(p) });
         this.pickMoved('stations', p, b.movedTo, b.area);
-        const next = upcoming(b.departures, this.d.clock.now())[0];
-        out[p.id] = b.missing ? { state: 'missing' } : next ? { state: 'ok', next } : { state: 'none' };
+        // 1.3.1 (PRD-1.3.1 § 12, B21) : le train d'après aussi (accordéon), parmi les départs déjà lus
+        const [next, after] = upcoming(b.departures, this.d.clock.now());
+        out[p.id] = b.missing ? { state: 'missing' } : next ? { state: 'ok', next, ...(after ? { after } : {}) } : { state: 'none' };
       } catch (e) {
         if (areaUnknown(e)) out[p.id] = { state: 'missing' };
         else console.warn('[Quai] gare', p.areaId, errText(e));
@@ -4505,7 +4506,7 @@ const pickPlace = (p: StationPick | LinePick): PickPlace => ({ lat: p.lat, lon: 
 const areaUnknown = (e: unknown): boolean => e instanceof QuaiError && e.code === 'areaUnknown';
 
 /** 1.2.2 : « Gares » : prochain train d'une gare. */
-type StationData = Pick<StationRow, 'next' | 'state'>;
+type StationData = Pick<StationRow, 'next' | 'after' | 'state'>;
 /** 1.2.2 : « Bus, tram, métro » : sens d'une ligne ou départs d'un arrêt (ou arrêt introuvable). */
 type LineData = Pick<LineRow, 'board' | 'stop' | 'missing'>;
 
