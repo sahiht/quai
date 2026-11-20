@@ -1110,7 +1110,7 @@ export function boardView(b: Board, ctx: ViewCtx, opts: { kept: boolean }): Glas
     // l'identité du départ : le curseur le suit au rafraîchissement et au retour de ses arrêts (la ligne ★ n'en a pas)
     const key = departureKey(d);
     const item: Item = train
-      ? { a: d.line, b: head, cLead: trainCellParts(d, mp(ctx)).lead, c: trainCellParts(d, mp(ctx)).rest, action, key }
+      ? { a: d.line, b: head, bTail: lastMark(d), cLead: trainCellParts(d, mp(ctx)).lead, c: trainCellParts(d, mp(ctx)).rest, action, key }
       : { a: lineLabel(d.mode, d.line), b: head, bTail: lastMark(d), c: minutesText(d, ctx.now, mp(ctx)), action, key };
     // 1.2.8 : la note « ~ » seulement sous une page qui en montre un
     if (`${item.cLead ?? ''}${item.c ?? ''}`.includes('~')) item.planned = true;

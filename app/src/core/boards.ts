@@ -4,11 +4,16 @@
 import type { Mode, Names, Op } from '../../../shared/types';
 import { normalizeForSearch, prettyName } from '../../../shared/names';
 import { normalizeId } from '../../../shared/types';
-import type { Board, Departure, LineFilter } from './api';
+import type { Board, Departure, Leg, LineFilter } from './api';
 import { lowerBound, type PreparedArea } from './areas';
+import { addDays } from './freshness';
+import { isSncbBus } from './means';
 import type { RealtimeClient, RtTrip, StibEntry } from './realtime';
 import { stibPoint } from './realtime';
 import { delayMinutes, headKey, headScore, platformOfStopId, rtAtStop, rtOccurrence, sameStop } from './rtmerge';
+import { DAY_START_HOUR } from './text';
+import type { DayIndex } from './trains';
+import { brusselsParts, gtfsTime, serviceDayBase } from './util';
 
 /** Fenêtre : départs depuis maintenant - 1 min ; voyages GTFS-RT déjà partis en théorie mais en retard : 30 min. */
 const PAST_MS = 60_000;
@@ -296,7 +301,7 @@ export function mergeStib(
     const dep = prep.file.deps[c.di];
     const h = horizon.get(`${dep[3]}|${dep[2]}`);
     if (h !== undefined && c.t <= h) continue;
-    out.push(withPattern(staticDeparture(prep, c.di, c.t), dep[2]));
+    out.push(withPattern(withScheduleLast(prep, c.di, staticDeparture(prep, c.di, c.t)), dep[2]));
   }
   return out;
 }
@@ -390,11 +395,13 @@ export async function buildBoards(reqs: BoardRequest[], rt: RealtimeClient, now:
         if (d.est < now - PAST_MS) continue;
         if (!d.rt && d.sched < now - PAST_MS) continue;
         if (d.cancelled && d.sched < now - PAST_MS) continue;
-        deps.push(withPattern(d, prep.file.deps[c.di][2]));
+        deps.push(withPattern(withScheduleLast(prep, c.di, d), prep.file.deps[c.di][2]));
       }
     }
     deps.sort(byEst);
-    const departures = withinUntil(uniqueDepartures(deps), r.until).slice(0, Math.max(0, r.limit));
+    const unique = uniqueDepartures(deps);
+    settleLast(prep, unique);
+    const departures = withinUntil(unique, r.until).slice(0, Math.max(0, r.limit));
     return {
       area: prep.summary,
       departures,
@@ -403,4 +410,287 @@ export async function buildBoards(reqs: BoardRequest[], rt: RealtimeClient, now:
       updatedAt: now,
     };
   });
+}
+
+/* ------------------------------ 1.3.1 (R3) : « , dernier » d'après l'horaire ------------------------------ */
+
+/**
+ * « Ligne » d'un départ pour « , dernier » : le numéro sans casse, espaces ni zéros de tête (« 036 » = « 36 »), quel que
+ * soit le mode. Tous les trains de la SNCB n'en font qu'une (IC, L, P, S… : quand un L suit le dernier IC, l'IC n'est
+ * pas le dernier train), ses bus à part.
+ */
+export function lastLineKey(op: Op, mode: Mode, line: string): string {
+  if (op === 'sncb' && mode === 'train') return 'sncb:train';
+  return `${op}:${String(line ?? '').replace(/\s+/g, '').toLowerCase().replace(/^0+(?=.)/, '')}`;
+}
+
+/** Début de « demain » pour un départ à `t` : 04:00 (heure belge) qui suit ; avant, c'est la nuit en cours (dayWord). */
+export function tomorrowAt(t: number): number {
+  const p = brusselsParts(t);
+  return gtfsTime(p.h < DAY_START_HOUR ? p.date : addDays(p.date, 1), DAY_START_HOUR * 60);
+}
+
+/**
+ * Instants dont tous les départs sont connus, d'après les jours publiés (ou chargés) `dates`, consécutifs depuis le
+ * premier : de 04:00 du premier (avant, les voyages de la veille après minuit manquent) au début du jour qui suit le
+ * dernier (ses voyages d'avant 04:00, écrits sur ce jour-là, manquent). null : aucun jour.
+ */
+export function lastCover(dates: readonly string[] | undefined): { from: number; to: number } | null {
+  const sorted = [...new Set(dates ?? [])].sort();
+  if (!sorted.length) return null;
+  let last = sorted[0];
+  for (const d of sorted.slice(1)) {
+    if (d !== addDays(last, 1)) break;
+    last = d;
+  }
+  return { from: gtfsTime(sorted[0], DAY_START_HOUR * 60), to: serviceDayBase(addDays(last, 1)) };
+}
+
+/** Un départ vu par « , dernier » : instant, sens (même nombre : même ligne, même sens), identité (`same`, doublons). */
+interface WayDep {
+  t: number;
+  way: number;
+  /** Ligne et destination : à la même minute, le même départ (voyage en double, doublon SNCB), jamais un « suivant ». */
+  same: string;
+}
+
+/**
+ * Pour chaque départ, 1 s'il est le dernier de son sens avant demain (tomorrowAt), d'après l'horaire : toute la fenêtre
+ * jusqu'à demain dans les départs connus (`cover`), et aucun autre départ du même sens dans [t, demain), même ligne et
+ * même destination à la même minute exceptées (le même départ). Deux départs différents du même sens à la même minute :
+ * aucun des deux n'est le dernier.
+ */
+function lastFlags(deps: readonly WayDep[], cover: { from: number; to: number } | null): Uint8Array {
+  const out = new Uint8Array(deps.length);
+  if (!cover) return out;
+  const byWay = new Map<number, number[]>();
+  deps.forEach((d, i) => {
+    if (d.way < 0 || !Number.isFinite(d.t)) return;
+    const list = byWay.get(d.way);
+    if (list) list.push(i);
+    else byWay.set(d.way, [i]);
+  });
+  for (const list of byWay.values()) {
+    list.sort((a, b) => deps[a].t - deps[b].t || a - b);
+    for (let j = 0; j < list.length; j++) {
+      const d = deps[list[j]];
+      if (d.t < cover.from) continue;
+      const end = tomorrowAt(d.t);
+      if (!(end <= cover.to)) continue;
+      let alone = true;
+      for (let k = j - 1; k >= 0 && alone && deps[list[k]].t === d.t; k--) if (deps[list[k]].same !== d.same) alone = false;
+      for (let k = j + 1; k < list.length && alone; k++) {
+        const o = deps[list[k]];
+        if (o.t >= end) break;
+        if (o.t !== d.t || o.same !== d.same) alone = false;
+      }
+      if (alone) out[list[j]] = 1;
+    }
+  }
+  return out;
+}
+
+/** Union de proche en proche : `keys(i)` de chaque élément ; deux éléments qui partagent une clé ont le même sens. */
+function unionWays(n: number, keys: (i: number) => Iterable<string>): Int32Array {
+  const parent = Int32Array.from({ length: n }, (_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) i = parent[i] = parent[parent[i]];
+    return i;
+  };
+  const first = new Map<string, number>();
+  for (let i = 0; i < n; i++)
+    for (const k of keys(i)) {
+      const j = first.get(k);
+      if (j === undefined) first.set(k, i);
+      else parent[find(i)] = find(j);
+    }
+  return Int32Array.from({ length: n }, (_, i) => find(i));
+}
+
+const WAYS = new WeakMap<PreparedArea, Int32Array>();
+const LAST = new WeakMap<PreparedArea, Uint8Array>();
+
+/**
+ * Sens des motifs d'une zone pour « , dernier » : même ligne (lastLineKey), et même destination ou une zone suivante en
+ * commun (toute la liste : un express qui saute les premiers arrêts, une variante qui rejoint le tronc), de proche en
+ * proche. Une boucle parcourue dans les deux sens n'a qu'un sens : moins de « dernier », jamais un faux.
+ */
+export function lastWays(prep: PreparedArea): Int32Array {
+  const hit = WAYS.get(prep);
+  if (hit) return hit;
+  const op = prep.file.op;
+  const pats = prep.file.patterns;
+  const ways = unionWays(pats.length, (i) => {
+    const p = pats[i];
+    if (!p) return [];
+    const line = lastLineKey(op, p.mode, p.line);
+    return [`${line}|>${prep.headKeys[i]}`, ...(p.next ?? []).map(([z]) => `${line}|@${z}`)];
+  });
+  WAYS.set(prep, ways);
+  return ways;
+}
+
+/** 1 pour chaque départ de la zone (rang dans deps) qui est le dernier de sa ligne dans son sens avant demain. */
+export function scheduleLastFlags(prep: PreparedArea): Uint8Array {
+  const hit = LAST.get(prep);
+  if (hit) return hit;
+  const ways = lastWays(prep);
+  const pats = prep.file.patterns;
+  const flags = lastFlags(
+    prep.file.deps.map((d, i) => ({ t: prep.times[i], way: pats[d[2]] ? ways[d[2]] : -1, same: `${pats[d[2]]?.line ?? ''}|${prep.headKeys[d[2]] ?? ''}` })),
+    lastCover(prep.dates),
+  );
+  LAST.set(prep, flags);
+  return flags;
+}
+
+/**
+ * 1.3.1 (R3, PRD-1.3.1 § 14) : le départ `di` de la zone est le dernier de sa ligne dans son sens avant demain, d'après
+ * l'horaire : aucun départ du même sens (lastWays) entre lui et 04:00 qui suit, quel que soit son jour de service (un
+ * voyage de la veille après minuit, un voyage du jour écrit « 00:30 ») ; toute cette fenêtre dans les jours publiés.
+ */
+export function scheduleLast(prep: PreparedArea, di: number): boolean {
+  return scheduleLastFlags(prep)[di] === 1;
+}
+
+/** 1.3.1 (R3) : départs marqués d'après l'horaire (le « Dernier passage » de la STIB n'y est pas). */
+const SCHEDULE_LAST = new WeakSet<Departure>();
+
+/** Marque « dernier » d'après l'horaire d'un départ prévu (rang `di` dans le fichier de zone). */
+function withScheduleLast(prep: PreparedArea, di: number, d: Departure): Departure {
+  if (!d.last && scheduleLast(prep, di)) {
+    d.last = true;
+    SCHEDULE_LAST.add(d);
+  }
+  return d;
+}
+
+/**
+ * 1.3.1 (R3) : la marque de l'horaire reste seulement si rien ne la contredit dans le tableau : aucun départ du même
+ * sens, pas supprimé, à la même heure estimée ou après, avant demain (un voyage en retard qui passe après le dernier,
+ * un passage STIB sans horaire), et aucun « Dernier passage » de la STIB dans ce sens (une seule marque par sens). Un
+ * passage STIB sans motif connu vaut pour tous les sens de sa ligne.
+ */
+function settleLast(prep: PreparedArea, deps: readonly Departure[]): void {
+  const marked = deps.filter((d) => d.last && SCHEDULE_LAST.has(d));
+  if (!marked.length) return;
+  const ways = lastWays(prep);
+  const wayOf = (d: Departure): number => {
+    const pi = PATTERN_OF.get(d);
+    return pi !== undefined && pi >= 0 && pi < ways.length ? ways[pi] : -1;
+  };
+  const lineOf = (d: Departure): string => lastLineKey(d.op, d.mode, d.line);
+  const same = (d: Departure): string => `${d.line}|${headKey(d.head?.fr ?? '')}|${d.sched}`;
+  for (const d of marked) {
+    const w = wayOf(d);
+    const end = tomorrowAt(d.sched);
+    const clash = deps.some((e) => {
+      if (e === d) return false;
+      const ew = wayOf(e);
+      if (ew >= 0 ? ew !== w : lineOf(e) !== lineOf(d)) return false;
+      if (e.last && !SCHEDULE_LAST.has(e)) return true;
+      return !e.cancelled && e.est >= d.est && e.est < end && same(e) !== same(d);
+    });
+    if (w < 0 || clash) {
+      delete d.last;
+      SCHEDULE_LAST.delete(d);
+    }
+  }
+}
+
+/**
+ * 1.3.1 (R3) : départ d'une étape en véhicule dans le fichier de sa zone de montée (rang dans deps) : à sa minute prévue,
+ * même ligne ; puis le même voyage, sinon le même arrêt physique et un motif qui dessert l'arrêt de descente. -1 :
+ * introuvable, ou plusieurs sens possibles.
+ */
+export function legDepartureIn(prep: PreparedArea, leg: Pick<Leg, 'op' | 'mode' | 'line' | 'schedDep' | 'tripId' | 'fromStop' | 'to'>): number {
+  if (!leg.op || leg.op !== prep.file.op || !leg.line) return -1;
+  const key = lastLineKey(leg.op, leg.mode ?? 'bus', leg.line);
+  const { deps, patterns, stops } = prep.file;
+  let cands: number[] = [];
+  for (let k = lowerBound(prep, leg.schedDep - 30_000); k < prep.order.length; k++) {
+    const di = prep.order[k];
+    if (prep.times[di] > leg.schedDep + 30_000) break;
+    const p = patterns[deps[di][2]];
+    if (p && lastLineKey(prep.file.op, p.mode, p.line) === key) cands.push(di);
+  }
+  const trip = leg.tripId ? normalizeId(leg.tripId) : '';
+  const byTrip = trip ? cands.filter((di) => !!deps[di][4] && normalizeId(deps[di][4]) === trip) : [];
+  if (byTrip.length) cands = byTrip;
+  else {
+    const byStop = leg.fromStop ? cands.filter((di) => sameStop(stops[deps[di][3]]?.rt || stops[deps[di][3]]?.id, leg.fromStop)) : [];
+    if (byStop.length) cands = byStop;
+    const to = leg.to?.areaId;
+    const byTo = to ? cands.filter((di) => (patterns[deps[di][2]]?.next ?? []).some(([z]) => z === to)) : [];
+    if (byTo.length) cands = byTo;
+  }
+  if (!cands.length) return -1;
+  const ways = lastWays(prep);
+  const w = ways[deps[cands[0]][2]];
+  return cands.every((di) => ways[deps[di][2]] === w) ? cands[0] : -1;
+}
+
+/** Départs d'une gare dans les jours de trains chargés, avec leurs sens et leurs marques (une fois par jeu de jours). */
+interface StationLast {
+  trips: string[];
+  t: number[];
+  flags: Uint8Array;
+}
+const STATION_LAST = new WeakMap<DayIndex, Map<string, StationLast>>();
+
+/**
+ * 1.3.1 (R3) : départs de la gare `station` dans les trains des jours chargés (trains/{date}.json), là où l'on peut
+ * monter : même règle que les fichiers de zone (tous les trains, sens par destination ou gare suivante commune, une gare
+ * suivante étant une gare où l'on peut descendre), fenêtre couverte par les jours chargés.
+ */
+function stationLast(days: readonly DayIndex[], station: string): StationLast {
+  const sorted = [...days].sort((a, b) => a.base - b.base);
+  const memoKey = `${sorted.map((d) => d.file.date).join(',')}|${station}`;
+  const holder = sorted[0];
+  let memo = holder ? STATION_LAST.get(holder) : undefined;
+  const hit = memo?.get(memoKey);
+  if (hit) return hit;
+  const items: { t: number; line: string; same: string; head: string; next: string[]; trip: string }[] = [];
+  for (const d of sorted) {
+    const at = d.byStation.get(station) ?? [];
+    for (let i = 0; i + 1 < at.length; i += 2) {
+      const trip = d.file.trips[at[i]];
+      const p = at[i + 1];
+      const s = trip?.s;
+      if (!s || !s[p] || s[p][2] < 0) continue;
+      const next: string[] = [];
+      for (let q = p + 1; q < s.length; q++) {
+        const id = d.file.stations[s[q][0]]?.id;
+        if (id && id !== station && s[q][1] >= 0) next.push(id);
+      }
+      if (!next.length) continue;
+      const mode = isSncbBus({ op: 'sncb', cat: trip.cat }) ? 'bus' : 'train';
+      const head = headKey(trip.head?.fr ?? '');
+      items.push({ t: d.base + s[p][2] * 60_000, line: lastLineKey('sncb', mode, trip.cat), same: `${trip.cat}|${head}`, head, next, trip: trip.id });
+    }
+  }
+  const ways = unionWays(items.length, (i) => [`${items[i].line}|>${items[i].head}`, ...items[i].next.map((z) => `${items[i].line}|@${z}`)]);
+  const flags = lastFlags(
+    items.map((x, i) => ({ t: x.t, way: ways[i], same: x.same })),
+    lastCover(sorted.map((d) => d.file.date)),
+  );
+  const out: StationLast = { trips: items.map((x) => x.trip), t: items.map((x) => x.t), flags };
+  if (holder) {
+    if (!memo) STATION_LAST.set(holder, (memo = new Map()));
+    memo.set(memoKey, out);
+  }
+  return out;
+}
+
+/**
+ * 1.3.1 (R3) : une étape en train (ou en bus SNCB) est le dernier train de son sens avant demain, d'après les trains des
+ * jours chargés : son voyage à sa gare de montée, à sa minute prévue. Faux s'il est introuvable.
+ */
+export function trainLegLast(days: readonly DayIndex[], leg: Pick<Leg, 'op' | 'from' | 'tripId' | 'schedDep'>): boolean {
+  const station = leg.from?.areaId;
+  if (leg.op !== 'sncb' || !station || !leg.tripId || !days.length) return false;
+  const x = stationLast(days, station);
+  const trip = normalizeId(leg.tripId);
+  for (let i = 0; i < x.trips.length; i++) if (Math.abs(x.t[i] - leg.schedDep) <= 30_000 && normalizeId(x.trips[i]) === trip) return x.flags[i] === 1;
+  return false;
 }
