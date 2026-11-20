@@ -284,8 +284,11 @@ export const OPENING_ORDER: readonly Settings['display']['opening'][] = ['sugges
 
 /** 1.2.10 : carte « En cours » : « Bureau, arrivée 08:54 » (sans heure connue : le titre seul). */
 export const guideTitleLine = (s: Pick<GuideStatus, 'title' | 'arr'>): string => (Number.isFinite(s.arr) && s.arr > 0 ? `${s.title}, arrivée ${hhmm(s.arr)}` : s.title);
-/** 1.2.10 : « Maintenant : bus 6 vers Gare des Guillemins » (rien si le moteur ne dit rien). */
-export const guideNowLine = (s: Pick<GuideStatus, 'now'>): string => (s.now.trim() ? typo(`Maintenant : ${s.now.trim()}`) : '');
+/**
+ * 1.2.10 : « Maintenant : bus 6 vers Gare des Guillemins » (rien si le moteur ne dit rien). 1.3.1 (L5, pôle Guidage) :
+ * avant le départ, ce qui vient : « Ensuite : partir à 07:05 » (GuideStatus.then).
+ */
+export const guideNowLine = (s: Pick<GuideStatus, 'now' | 'then'>): string => (s.now.trim() ? typo(`${s.then ? 'Ensuite' : 'Maintenant'} : ${s.now.trim()}`) : '');
 /**
  * 1.3.0 (PRD-1.3.0 § 6.3) : carte « En cours » : les problèmes de la vérification (GuideStatus.check, les lignes de
  * checkLines des lunettes : « Lunettes : 12 % de batterie »), deux au plus ; aucun : rien.
