@@ -26,6 +26,9 @@ import { COL_SEP, ensureVisible, geometry, maxTop, visibleRange, WIDTHS, type De
 import type { AreaRef, GlassesView, Intent, Item, KeepLineRoute, LineRoute, LineRunRoute, OthersRoute, Route, Seg, StepsRoute, StopsRoute, SubRow, TopLine } from './types';
 import { isFollowed, type LineFollow, type LineRun } from '../core/linerun';
 import { trainProgress } from '../core/stopcalls';
+// 1.3.1 (B15) : la place du nom d'un favori de l'accueil, mesurée comme la mise en page (homeNameRoom)
+import { truncate } from './font';
+import { GEO, LAYOUTS, withOptionalTail } from './layout';
 import {
   departureWait,
   EXPAND_PX,
@@ -388,7 +391,9 @@ export const HOME_FAVORITES = 3;
 export interface HomeData {
   /**
    * Favoris montrés sous « Favoris » (1.2.1 : 3 au plus, jamais un favori de la règle 5), dans l'ordre réglé. L'accueil
-   * en montre moins si l'écran manque de place (ligne du haut, « En cours », jour férié, aide des gestes).
+   * en montre moins si l'écran manque de place (ligne du haut, « En cours », jour férié, aide des gestes). 1.3.1 (B20,
+   * U8) : le soir, quand aucun favori ne peut y aller, ceux de la règle 5 qui ont un trajet plus tard (« demain 05:52 →
+   * 06:46 ») ; jamais « tu y es » (choix du contrôleur, homeShown).
    */
   favorites?: FavoriteEntry[];
   /** Ordre complet des favoris, figé pendant l'affichage (journal `order`). */
@@ -428,14 +433,42 @@ export function homeFavoriteName(e: FavoriteEntry, ctx: ViewCtx): string {
 
 /**
  * Un favori sur une ligne, en retrait sous « Favoris » (1.2.1, § 4.3) : son nom, puis « maintenant → 21:34 » (lieu,
- * trajet) ou le prochain départ (arrêt). Toucher : ses étapes ou ses départs, comme en 1.2.
+ * trajet) ou le prochain départ (arrêt). Toucher : ses étapes ou ses départs, comme en 1.2. 1.3.1 (B15, U2) : « ! »
+ * collé au nom d'un favori à souci, la même règle que « Favoris » (favoriteTrouble : voie modifiée, suppression,
+ * travaux ; jamais un simple retard) : « Place Fontainas !   dans 12 min → 08:58 » ; le nom est coupé au mot avant
+ * « ! », jamais l'inverse.
  */
 export function homeFavoriteItem(e: FavoriteEntry, ctx: ViewCtx): Item {
   const f = e.fav;
   const right = f.kind === 'stop' ? stopHomeText(e.answer, ctx.now) : { text: tripHomeText(e.answer, ctx.now) };
-  const item: Item = { a: '', b: homeFavoriteName(e, ctx), bRight: right.text, action: { kind: 'openFavorite', id: f.id } };
+  const name = homeFavoriteName(e, ctx);
+  const mark = favoriteTrouble(e.answer, ctx.now) ? TROUBLE_MARK : '';
+  const b = mark ? markedName(name, mark, homeNameRoom(right)) : name;
+  const item: Item = { a: '', b, bRight: right.text, action: { kind: 'openFavorite', id: f.id } };
   if (right.tail) item.bRightTail = right.tail;
   return item;
+}
+
+/**
+ * 1.3.1 (B15) : place du nom d'un favori sur sa ligne de l'accueil, celle que la mise en page lui laisse (layoutPage,
+ * spread) : la ligne en retrait (WIDTHS.homeRow), moins la réponse alignée à droite (sa fin facultative comprise si elle
+ * tient dans WIDTHS.wideRight) et l'écart du gabarit.
+ */
+function homeNameRoom(right: { text: string; tail?: string }): number {
+  const r = truncate(withOptionalTail(right.text, right.tail, WIDTHS.wideRight), WIDTHS.homeRow);
+  return WIDTHS.homeRow - (r ? textWidth(r) + (LAYOUTS.home.gap ?? GEO.GAP) : 0);
+}
+
+/** 1.3.1 (B15) : un nom et sa marque collée (« Place Fontainas ! ») dans `maxPx` : le nom coupé au mot, la marque entière. */
+function markedName(name: string, mark: string, maxPx: number): string {
+  let w = maxPx - textWidth(mark);
+  let head = w > 0 ? truncateWords(name, w) : '';
+  // le crénage à la jonction peut coûter un pixel : chaque essai plus court que le précédent
+  while (head && textWidth(head + mark) > maxPx) {
+    w = Math.min(w - 1, textWidth(head) - 1);
+    head = w > 0 ? truncateWords(name, w) : '';
+  }
+  return `${head}${mark}`;
 }
 
 /**
@@ -530,6 +563,12 @@ function followsHomeItem(ctx: ViewCtx): Item {
  * horaires du dimanche » en dernière ligne, pâle. Les favoris prennent la place qui reste ; s'il manque une ligne, la
  * ligne vide saute d'abord (REVUE-USAGE n° 1) : la liste ne défile jamais. Curseur à l'ouverture, comme en 1.2 : sur
  * « En cours » s'il y est, sinon sur le premier favori montré (▲ : « Favoris ») ; sans favori montré, sur la 1re ligne.
+ *
+ * 1.3.1 (PRD-1.3.1 § 8) : nouvel ordre, le même que l'accueil du téléphone : « En cours » (s'il y est, inchangé) ;
+ * « Autour de moi » ; « Favoris » et ses favoris ; « Gares de train » ; « Lignes de bus, tram, métro » ; « Arrêts de
+ * bus, tram, métro ». La ligne vide ferme toujours le bloc des favoris (au-dessus de « Gares de train ») et saute d'abord,
+ * comme avant ; les cas qui ajoutent une ligne gardent leurs règles. Curseur à l'ouverture sur « Autour de moi »
+ * (décision du 15/11) ; « En cours », s'il y est, garde le sien (un toucher reprend le trajet).
  */
 export function homeView(d: HomeData, ctx: ViewCtx): GlassesView {
   const v = base('home', 'home', 'Quai', ctx);
@@ -553,16 +592,20 @@ export function homeView(d: HomeData, ctx: ViewCtx): GlassesView {
   const blank = fixed + shown.length < capacity;
   const all: Intent = { kind: 'open', route: { screen: 'favorites' } };
   if (d.running) v.items.push({ a: `En cours${NB}: ${lowerFirst(d.running.title)}`, c: d.running.next, action: { kind: 'resume' } });
+  // 1.3.1 (PRD-1.3.1 § 8) : « Autour de moi » en tête (sous « En cours »), puis « Favoris » et ses favoris
+  const nearby: Item = { a: 'Autour de moi', c: d.noPosition ? 'sans position' : stopsCount(d.nearbyCount), action: { kind: 'open', route: { screen: 'nearby' } } };
+  v.items.push(nearby);
   v.items.push(total ? { a: 'Favoris', c: String(total), action: all } : { a: 'Ajouter un favori', action: all });
   for (const e of shown) v.items.push(homeFavoriteItem(e, ctx));
-  const nearby: Item = { a: 'Autour de moi', c: d.noPosition ? 'sans position' : stopsCount(d.nearbyCount), action: { kind: 'open', route: { screen: 'nearby' } } };
-  if (blank) nearby.gap = true;
-  v.items.push(nearby);
-  // 1.2.6 : chaque rubrique dit son mode (« de train », « de bus, tram, métro »)
-  v.items.push(titled(sectionItem('stations', ctx), SECTION.trainQual));
-  v.items.push(titled(stopsHomeItem(ctx), SECTION.transitQual));
+  // 1.2.6 : chaque rubrique dit son mode (« de train », « de bus, tram, métro ») ; 1.3.1 (§ 8) : « Lignes » avant
+  // « Arrêts » ; la ligne vide sous les favoris, au-dessus de « Gares de train »
+  const stations = titled(sectionItem('stations', ctx), SECTION.trainQual);
+  if (blank) stations.gap = true;
+  v.items.push(stations);
   v.items.push(titled(followsHomeItem(ctx), SECTION.transitQual));
-  if (!d.running && shown.length) v.initialSel = v.items.findIndex((i) => i.action?.kind === 'openFavorite');
+  v.items.push(titled(stopsHomeItem(ctx), SECTION.transitQual));
+  // 1.3.1 (§ 8) : curseur à l'ouverture sur « Autour de moi » ; sur « En cours » s'il y est, comme avant
+  v.initialSel = d.running ? 0 : v.items.indexOf(nearby);
   v.log = { order: d.order ?? shown.map((e) => e.fav.id), shown: shown.map((e) => e.fav.id) };
   return v;
 }

@@ -54,6 +54,8 @@ import type {
 import { LABEL_TEXT, labelOf, type LineMatch } from '../core/api';
 import { MESSAGES, QuaiError } from '../core/errors';
 import { NEAR_M, asTrip, endpointPoint, favoriteTitle, placeOf } from '../core/favorites';
+// 1.3.1 (B20) : le soir, les favoris de la règle 5 qui ont un trajet plus tard (homeShown)
+import { answerTime } from '../core/favorites';
 import { dismissMoment, guideStatusOf, guideStep, newGuideMemory, replanJourney, replanNone, rideJourney, rideOnJourney } from '../core/guide';
 import type { GuideFix, GuideKind, GuideMemory, GuideState, GuideStatus, LocationNeed, WalkRoute } from '../core/guide-types';
 import { shortAddress } from '../core/text';
@@ -1271,6 +1273,11 @@ export class GlassesController implements GlassesApi {
   /**
    * Favoris montrés sur l'accueil (PRD-1.2.1 § 4.2) : les 3 premiers de l'ordre réglé, jamais un favori de la règle 5
    * (il reste dans la liste ouverte par « Favoris ») ; aucun avec « Accueil sans favoris ».
+   * 1.3.1 (B20, U8) : le soir, quand aucun favori ne peut aller sur l'accueil (tous de la règle 5), jusqu'à 3 favoris de
+   * la règle 5 qui ont quand même un trajet plus tard (« demain 05:52 → 06:46 »), dans l'ordre réglé ; jamais « tu y
+   * es » ni « aucun trajet ». Un favori encore en calcul (« … ») ne compte pas encore : tant qu'aucun favori ne peut y
+   * aller d'après sa réponse, ceux du soir gardent leur place à côté de lui (pas de ligne qui part puis revient pendant
+   * que les réponses arrivent) ; dès qu'un favori peut y aller, la règle de la 1.2.1 seule.
    */
   private homeShown(): string[] {
     const s = this.settings();
@@ -1282,9 +1289,11 @@ export class GlassesController implements GlassesApi {
     const { order, last } = this.homeOrder ? { order: this.homeOrder, last: this.homeLast } : this.computeRanking();
     // 1.2.2 (REVUE-USAGE n° 1) : le favori du trajet en cours n'est pas répété sous « En cours ».
     const run = this.runningFavoriteId();
-    return this.validOrder(order)
-      .filter((id) => !last.has(id) && id !== run)
-      .slice(0, HOME_FAVORITES);
+    const ids = this.validOrder(order).filter((id) => id !== run);
+    const now = this.d.clock.now();
+    const sure = ids.some((id) => !last.has(id) && this.answers.has(id));
+    const evening = (id: string): boolean => !sure && last.has(id) && laterTrip(this.answers.get(id), now);
+    return ids.filter((id) => !last.has(id) || evening(id)).slice(0, HOME_FAVORITES);
   }
 
   /** Favori du trajet suivi quand il est en cours (« En cours » sur l'accueil). */
@@ -2068,7 +2077,8 @@ export class GlassesController implements GlassesApi {
   /**
    * 1.2.2 (REVUE-USAGE n° 3) : « garder une ligne » : la ligne rejoint « Bus, tram, métro » à cet arrêt, ses deux sens
    * (« ★ Ajoutée à Bus, tram, métro », dans la limite des réglages, LIMITS : 32 lignes), ou en sort, annulable 5 s comme
-   * une gare (« ★ Ligne rétablie »).
+   * une gare (« ★ Ligne rétablie »). 1.3.1 (L7) : « ★ Ajoutée à tes lignes », comme « ★ Ajoutée à tes gares » et le
+   * téléphone.
    */
   private async toggleLine(line: string, mode: Mode): Promise<void> {
     const r = current(this.nav).route;
@@ -2109,7 +2119,7 @@ export class GlassesController implements GlassesApi {
     const follow = here ? completeFollow(base, here) : base;
     await this.d.settings.update((x) => ({ ...x, follows: [...(x.follows ?? []), follow] }));
     this.resolved.delete(follow.id);
-    this.showToast('★ Ajoutée aux lignes');
+    this.showToast('★ Ajoutée à tes lignes');
     void this.resolveFollow(follow.id).catch(() => undefined);
   }
 
@@ -2131,14 +2141,15 @@ export class GlassesController implements GlassesApi {
 
   /**
    * « ★ garder ce trajet » (aide à l'arrivée, PRD-1.2 § 2.3) : le trajet suivi parti de « Ma position » devient un
-   * lieu (sa destination) ; sinon un trajet fixe, du départ à l'arrivée du trajet suivi, ou de gare à gare.
+   * lieu (sa destination) ; sinon un trajet fixe, du départ à l'arrivée du trajet suivi, ou de gare à gare. 1.3.1 (L7) :
+   * « tes favoris », comme le téléphone (« ★ Trajet ajouté à tes favoris », « ★ Déjà dans tes favoris »).
    */
   private async saveTrip(): Promise<void> {
     const r = current(this.nav).route;
     if (r.screen !== 'arrival') return;
     const s = this.settings();
     const t = this.trip && this.trip.journey.id === r.journey.id ? this.trip : null;
-    const already = (): void => this.showToast('★ Déjà dans les favoris');
+    const already = (): void => this.showToast('★ Déjà dans tes favoris');
     if (t?.favoriteId && s.favorites.some((f) => f.id === t.favoriteId)) return already();
     const id = newId('fav', s.favorites.map((f) => f.id));
     let fav: Favorite;
@@ -2159,7 +2170,7 @@ export class GlassesController implements GlassesApi {
       fav = { kind: 'trip', id, ...ends, propose: 'never' };
     }
     await this.d.settings.update((x) => ({ ...x, favorites: [...x.favorites, fav] }));
-    this.showToast('★ Trajet ajouté aux favoris');
+    this.showToast('★ Trajet ajouté à tes favoris');
   }
 
   /* ------------------------------ Téléphone (GlassesApi) ------------------------------ */
@@ -4434,6 +4445,15 @@ function outdatedAt(a: FavoriteAnswer): number {
 
 /** 1.3.0 (§ 8) : la réponse montre autre chose que « … » (tripHomeText). */
 const answerShown = (a: FavoriteAnswer, now: number): boolean => now < outdatedAt(a);
+
+/**
+ * 1.3.1 (B20, U8) : un favori de la règle 5 qui a quand même un trajet plus tard (un départ, pour un arrêt favori),
+ * montré le soir sur l'accueil (« demain 05:52 → 06:46 ») ; jamais « tu y es », « aucun trajet », ni une réponse qui ne
+ * montre plus que « … ».
+ */
+function laterTrip(a: FavoriteAnswer | undefined, now: number): boolean {
+  return !!a && a.state === 'ok' && answerTime(a) !== undefined && answerShown(a, now);
+}
 
 /** Départ du trajet suivi (pour savoir quand le rafraîchir). */
 function journeyStartMs(t: FollowedTrip): number {
