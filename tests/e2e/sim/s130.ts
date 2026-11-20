@@ -69,8 +69,13 @@ export const TXT = {
   /** § 3 */
   board: '△▽ départs   toucher : où descendre   double : retour',
   line: '△▽ passages   toucher : où descendre   double : retour',
-  /** 1.2.10, inchangé : le toucher ouvre toujours les arrêts du départ, où l'on choisit « j'y descends ». */
-  stops: '△▽ arrêts   toucher : j’y descends   double : retour',
+  /**
+   * 1.2.10 : le toucher ouvre toujours les arrêts du départ, où l'on choisit « j'y descends ». 1.3.1 (PRD-1.3.1 § 6) : le
+   * geste est dit par la ligne d'action « ▶ Me guider jusqu’à … », l'aide devient « △▽ arrêts   double : retour ».
+   */
+  get stops(): string {
+    return O.SPEC.v131 ? O.T131.stopsHints : '△▽ arrêts   toucher : j’y descends   double : retour';
+  },
   favorites: '△▽ choisir   toucher : ouvrir   double : retour',
   /** 1.3.1 (PRD-1.3.1 § 2) : « masquer » (TXT.moment suit la spécification jouée, guide-oracle.ts useSpec) */
   get moment(): string {
@@ -917,24 +922,18 @@ async function s130offmap(ctx: Ctx130): Promise<void> {
       momentCommon(s, title);
       return { screen: s, shot: 'guideImage' };
     });
-    await wstep(r, 'aucun-virage', async () => {
-      // toute la marche jusqu'à la gare : ni virage, ni second « Hors de Belgique »
-      await gesture(r, 'tap');
-      const tr = luxWalk(j.leaveAt);
-      const from = r.page.screens().length;
-      const walkEnd = tr.points[tr.points.length - 1].at;
-      for (let t = tOff + 15_000; t <= walkEnd - 30_000; t += 15_000) await goTo(r, tr, t);
-      const after = r.page.screens().slice(from).filter(isGuide);
-      const turns = after.filter((x) => /^(légèrement |franchement )?(à gauche|à droite)( dans \d+ m| maintenant)$|^Fais demi-tour$/.test(O.norm(x.lines[0])) || momentKind(x) === 'turn');
-      check(!turns.length, `virage annoncé sans chemin à pied (hors de Belgique) : ${turns.map(show).join(' | ')}`);
-      const again = after.filter((x) => O.matches(x.lines[0], TXT.offMap));
-      check(!again.length, `« ${TXT.offMap} » montré plus d’une fois : ${again.map(show).join(' | ')}`);
-      return { screen: r.page.lastScreen() };
-    });
+    let walkFrom = 0;
     await wstep(r, 'ou-tu-en-es-hors-de-belgique', async () => {
       // « Où tu en es » à pied, hors de Belgique : la gare, la distance à vol d'oiseau et le temps, puis la raison, pâle
+      // (1.3.1, A7 : un message ne se masque qu'affiché depuis 1,5 s ; l'horloge ne recule donc jamais : cette étape vient
+      // avant la fin de la marche, où « monter » s'affiche)
+      await maskWait();
+      await gesture(r, 'tap');
+      await waitGuide(r, 'écran calme après « Hors de Belgique » masqué', isEmpty);
       const tr = luxWalk(j.leaveAt);
       const mid = j.leaveAt + 20_000 + 120_000;
+      walkFrom = r.page.screens().length;
+      for (let t = tOff + 15_000; t < mid; t += 15_000) await goTo(r, tr, t);
       await goTo(r, tr, mid);
       const cur = r.page.lastScreen();
       if (cur && isGuide(cur) && !isEmpty(cur)) {
@@ -950,8 +949,29 @@ async function s130offmap(ctx: Ctx130): Promise<void> {
       const m = /^(\d[\d ]*) m à vol d’oiseau, (\d+) min$/.exec(O.norm(w.lines[k + 1]));
       check(m && Math.abs(Number(m[1].replace(/ /g, '')) - crow) <= Math.max(30, crow * 0.15), `« ${w.lines[k + 1]} » au lieu de « ${crow} m à vol d’oiseau, N min » (PRD-1.3.0 § 4)`);
       check(O.matches(w.lines[k + 2], TXT.offMapWhere), `« ${w.lines[k + 2]} » au lieu de « ${TXT.offMapWhere} » (pâle)`);
-      momentCommon(w, title);
+      // 1.3.1 (§ 3, § 12) : le titre de « Où tu en es » est « Guidage en cours », la destination sur la ligne « Jusqu’à … »
+      if (O.SPEC.v131) check(O.matches(w.lines[0], O.untilLine(title)), `« ${w.lines[0]} » au lieu de « Jusqu’à … » (${title} ; PRD-1.3.1 § 12)`);
+      momentCommon(w, O.SPEC.v131 ? O.T131.whereTitle : title);
       return { screen: w, shot: (w.images as unknown[] | undefined)?.length ? 'guideImage' : 'guide' };
+    });
+    await wstep(r, 'aucun-virage', async () => {
+      // toute la marche jusqu'à la gare : ni virage, ni second « Hors de Belgique »
+      // (depuis « Hors de Belgique » masqué, étape d'avant comprise ; « Où tu en es » est masqué d'abord)
+      const cur = r.page.lastScreen();
+      if (cur && isGuide(cur) && !isEmpty(cur)) {
+        await maskWait();
+        await gesture(r, 'tap');
+        await waitGuide(r, 'écran calme après « Où tu en es »', isEmpty);
+      }
+      const tr = luxWalk(j.leaveAt);
+      const walkEnd = tr.points[tr.points.length - 1].at;
+      for (let t = j.leaveAt + 20_000 + 120_000 + 15_000; t <= walkEnd - 30_000; t += 15_000) await goTo(r, tr, t);
+      const after = r.page.screens().slice(walkFrom).filter(isGuide);
+      const turns = after.filter((x) => /^(légèrement |franchement )?(à gauche|à droite)( dans \d+ m| maintenant)$|^Fais demi-tour$/.test(O.norm(x.lines[0])) || momentKind(x) === 'turn');
+      check(!turns.length, `virage annoncé sans chemin à pied (hors de Belgique) : ${turns.map(show).join(' | ')}`);
+      const again = after.filter((x) => O.matches(x.lines[0], TXT.offMap));
+      check(!again.length, `« ${TXT.offMap} » montré plus d’une fois : ${again.map(show).join(' | ')}`);
+      return { screen: r.page.lastScreen() };
     });
   }, VIEWPORT);
 }
