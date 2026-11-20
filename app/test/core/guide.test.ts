@@ -172,7 +172,8 @@ describe('heure seule (sans position), trajet complet', () => {
     const s = step(r, at('07:16:30'));
     const mo = m(s.moment, 'alight');
     expect(mo).toMatchObject({ id: 'alight:jprd:1', stop: N('Gare des Guillemins'), at: at('07:20'), rt: true, until: at('07:22') });
-    expect(mo.then).toEqual({ kind: 'ride', vehicle: { op: 'sncb', mode: 'train', line: 'IC', cat: 'IC' }, depAt: at('07:30'), rt: true, platform: '3', walkMin: 3 });
+    // 1.3.1 (PRD-1.3.1 § 4) : l'arrêt où monter, pour « ensuite : 3 min à pied → … »
+    expect(mo.then).toEqual({ kind: 'ride', vehicle: { op: 'sncb', mode: 'train', line: 'IC', cat: 'IC' }, depAt: at('07:30'), rt: true, platform: '3', walkMin: 3, from: S.guillemins.name });
     expect(s.location).toBe('high');
   });
 
@@ -216,7 +217,8 @@ describe('heure seule (sans position), trajet complet', () => {
     expect(step(r, at('08:21')).moment).toBeNull();
     expect(step(r, at('08:22:30')).moment).toBeNull();
     const al = m(step(r, at('08:23')).moment, 'alight');
-    expect(al.then).toEqual({ kind: 'ride', vehicle: { op: 'stib', mode: 'bus', line: '71' }, depAt: at('08:34'), rt: true, walkMin: 3 });
+    // 1.3.1 (PRD-1.3.1 § 4) : l'arrêt où monter, pour « ensuite : 3 min à pied → Gare Centrale »
+    expect(al.then).toEqual({ kind: 'ride', vehicle: { op: 'stib', mode: 'bus', line: '71' }, depAt: at('08:34'), rt: true, walkMin: 3, from: { fr: 'Gare Centrale', nl: 'Gare Centrale' } });
   });
 
   it('« Prochain arrêt » : au plus un toutes les 10 min', () => {

@@ -63,6 +63,8 @@ export const JOURNAL_MOMENT_WORDS: Readonly<Record<string, string>> = {
   check: 'À vérifier',
   nextStop: 'Prochain arrêt',
   arrived: 'Tu y es',
+  /** 1.3.1 (B17) : la marche après une descente */
+  walk: 'À pied',
 };
 
 const END_WORDS: Readonly<Record<string, string>> = { done: 'tu y es', stopped: 'arrêté', ended: 'trajet terminé', replaced: 'nouveau guidage' };

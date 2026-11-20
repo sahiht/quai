@@ -312,6 +312,20 @@ function checkMoment(m: Extract<Moment, { kind: 'check' }>, web = false): Moment
   return { lines: lines.length ? lines : [MAIN(GUIDE_TEXT.check)], hints: HINTS.guide };
 }
 
+/**
+ * 1.3.1 (B17, P7) : la marche après une descente : « 3 min à pied jusqu’à l’arrêt Gare Centrale » au plus clair, puis
+ * « bus 71 à 08:34 » (dernière marche : « 13 min à pied jusqu’au bureau », puis « arrivée 09:01 ») ; panneau « à pied ».
+ * Première forme (contrat du pôle Guidage), mots finis par l'équipe des écrans.
+ */
+function walkMoment(m: Extract<Moment, { kind: 'walk' }>, title: string, ctx: ViewCtx): MomentView {
+  const toward = nameOf(m.toward, ctx);
+  const kind = m.final || !m.vehicle ? 'dest' : isTrainRef(m.vehicle) ? 'station' : 'stop';
+  const lines: GLine[] = [F('hi', (w) => leaveWalkText(m.walkMin, toward, kind, title, w))];
+  if (m.vehicle && m.depAt !== undefined) lines.push(L('norm', `${vehicle(m.vehicle)} à ${timeOf(m.depAt, m.rt ?? false, ctx)}`));
+  else if (m.arr !== undefined) lines.push(L('norm', `arrivée ${hhmm(m.arr)}`));
+  return { lines, image: { kind: 'sign', label: 'à pied', value: String(m.walkMin), foot: 'min' }, hints: HINTS.guide };
+}
+
 function momentView(m: Moment, s: GuideState, j: Journey, ctx: ViewCtx): MomentView {
   const title = s.where.title;
   const ride = s.kind === 'ride';
@@ -338,6 +352,8 @@ function momentView(m: Moment, s: GuideState, j: Journey, ctx: ViewCtx): MomentV
       return offMapMoment(m, j, title, ctx);
     case 'check':
       return checkMoment(m, !!ctx.web);
+    case 'walk':
+      return walkMoment(m, title, ctx);
   }
 }
 
