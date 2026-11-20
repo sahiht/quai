@@ -26,7 +26,7 @@ import { NAMUR_FONTAINAS, PLACES, toFix } from '../traces/traces';
 import type { GlassesScreen, Page } from './cdp';
 import * as O from './guide-oracle';
 import { canvasToShot, checkCalmPixels, checkGuidePixels, litCount, type GuideShot } from './guide-pixels';
-import { accordionLines, alphaIn, checkPixels, HOME_INDENT, levels, truncatedLines } from './pixels';
+import { accordionLines, alphaIn, checkPixels, cursorRowText, HOME_INDENT, levels, truncatedLines } from './pixels';
 import type { Ctx130 } from './s130';
 
 /** Ce que run-sim.ts prête aux scénarios 1.3.1 (les mêmes services que les s130). */
@@ -508,7 +508,8 @@ async function s131trajet(ctx: Ctx131): Promise<void> {
     // § 4 : la 1re ligne nomme l'arrêt (ici la gare) où monter ; la 2e garde le premier véhicule et son heure, puis les
     // changements s'ils tiennent (« bus W ~11:49, 1 changement : métro 2 », sinon « …, 1 changement », sinon « bus W ~11:49 »)
     check(/^à pied \d+ min → Namur$/.test(N(open[0])), `1re ligne de l’accordéon « ${open[0]} » au lieu de « à pied 9 min → Namur » (PRD-1.3.1 § 4)`);
-    check(open.length === 2 && /^IC (~?07:4[24]|07:42 \+2)( voie 6 !)?(, 1 changement( : tram 3)?)?$/.test(N(open[1])), `2e ligne de l’accordéon « ${open[1] ?? ''} » au lieu de « IC 07:42 +2 voie 6 !, 1 changement : tram 3 » (ou plus court ; PRD-1.3.1 § 4)`);
+    // le souci reste avec le véhicule (PRD-1.3.0 § 7) : « voie 6 ! » ou « voie 6 au lieu de 4 »
+    check(open.length === 2 && /^IC (~?07:4[24]|07:42 \+2)( voie 6 !| voie 6 au lieu de 4)?(, 1 changement( : tram 3)?)?$/.test(N(open[1])), `2e ligne de l’accordéon « ${open[1] ?? ''} » au lieu de « IC 07:42 +2 voie 6 au lieu de 4, 1 changement : tram 3 » (ou plus court ; PRD-1.3.1 § 4)`);
     return { screen: f };
   });
   await ctx.step('trajet', async () => {
@@ -524,10 +525,10 @@ async function s131trajet(ctx: Ctx131): Promise<void> {
     ];
     const bad = want.filter(([re]) => !rows.some((l) => re.test(l))).map(([, w]) => w);
     check(!bad.length, `écran du trajet, rangées attendues absentes :\n        ${bad.join('\n        ')}\n      vu : ${JSON.stringify(s.lines)}`);
-    // dernière marche : jamais de « → » (la destination n'est pas un arrêt)
-    check(!rows.some((l) => /à pied 9 min.*→/.test(l)), `la dernière marche ne nomme pas d’arrêt (§ 4 : inchangée) : ${JSON.stringify(s.lines)}`);
+    // dernière marche (après le tram) : jamais de « → » (la destination n'est pas un arrêt)
+    const last = s.lines.find((l) => /^~?08:4\d à pied \d+ min/.test(N(l)))!;
+    check(last && !/→/.test(last), `la dernière marche ne nomme pas d’arrêt (§ 4 : inchangée) : ${JSON.stringify(s.lines)}`);
     // B14 (U1) : l'heure d'arrivée de la dernière marche, pâle (niveau 2)
-    const last = s.lines.find((l) => /à pied 9 min/.test(N(l)))!;
     await sleep(300);
     const png = await sim.rawShot();
     const a = alphaIn(png, s, last, 576 - 90, 576);
@@ -553,40 +554,44 @@ function stopsActionIssues(s: Screen, actionable: boolean): string[] {
 
 async function s131arrets(ctx: Ctx131): Promise<void> {
   const sim = ctx.sim();
-  // bus, tram, métro : le tram 3 à la Gare du Nord, 12:10 (scénario 2 des fixtures)
+  // bus, tram, métro : le tram 3 à la Gare du Nord, 12:10 (scénario 2 des fixtures : ses départs s'ouvrent seuls, l'arrêt
+  // repère des lignes suivies ; sinon par « Autour de moi »)
   await sim.launch(ctx.pageUrl({ mockLat: '50.86', mockLon: '4.359', mockNow: '2026-11-10T12:10:00+01:00', ...ctx.preset('p/1210.json') }, false));
-  let first!: Screen;
-  await ctx.step('tram-montee-sans-action', async () => {
-    const h = await simHome(sim);
-    await simSelectHome(sim, /^Autour de moi {3}/);
-    await sim.input('click');
-    const near = await sim.waitScreen((x) => x.screen === 'nearby' && loaded(x), 15_000, '« Autour de moi »');
-    const k = near.lines.findIndex((l) => /^Gare du Nord, tram/.test(l));
-    check(k >= 0, `« Gare du Nord, tram » absent d’« Autour de moi » : ${show(near)} (accueil : ${JSON.stringify(h.lines)})`);
-    await sim.select(k);
-    await sim.input('click');
-    const b = await sim.waitScreen((x) => x.screen === 'board' && loaded(x) && x.lines.some((l) => /^T3 {3}Churchill/.test(l)), 15_000, 'tableau de la Gare du Nord (tram)');
+  await ctx.step('tram-ligne-d-action', async () => {
+    const isBoard = (x: Screen) => x.screen === 'board' && loaded(x) && x.lines.some((l) => /^T3 {3}Churchill/.test(l));
+    let b = await lastOrWait(sim, (x) => isBoard(x) || homeLoaded(x), 30_000, 'tableau de la Gare du Nord ou accueil');
+    if (!isBoard(b)) {
+      await simSelectHome(sim, /^Autour de moi {3}/);
+      await sim.input('click');
+      const near = await sim.waitScreen((x) => x.screen === 'nearby' && loaded(x), 15_000, '« Autour de moi »');
+      const k = near.lines.findIndex((l) => /^Gare du Nord, tram/.test(l));
+      check(k >= 0, `« Gare du Nord, tram » absent d’« Autour de moi » : ${show(near)}`);
+      await sim.select(k);
+      await sim.input('click');
+      b = await sim.waitScreen(isBoard, 15_000, 'tableau de la Gare du Nord (tram)');
+    }
     const t3 = b.lines.findIndex((l) => /^T3 {3}Churchill/.test(l));
     await sim.select(t3);
     await sim.input('click');
-    first = await sim.waitScreen((x) => x.screen === 'stops' && loaded(x), 15_000, 'arrêts du tram 3');
-    // le curseur sur l'arrêt de la montée (Gare du Nord) : le toucher ne lance rien, pas de ligne d'action
-    check(first.sel === 0 && /Gare du Nord$/.test(N(first.lines[0] ?? '')), `curseur sur l’arrêt de la montée : ${show(first)}`);
-    const bad = stopsActionIssues(first, false);
-    check(!bad.length, bad.join(' ; '));
-    return { screen: first };
-  });
-  await ctx.step('tram-ligne-d-action', async () => {
-    await sim.select(1);
-    const s = await sim.waitScreen((x) => x.screen === 'stops' && x.sel === 1, 8_000, '▼ : Rogier');
+    // l'arrêt de la montée (Gare du Nord) est la ligne du haut, jamais sous le curseur : le curseur sur le premier arrêt
+    // après la montée (Rogier), où le toucher lance « j'y descends » : la ligne d'action, au plus clair (§ 6)
+    const s = await sim.waitScreen((x) => x.screen === 'stops' && loaded(x), 15_000, 'arrêts du tram 3');
+    check(/Gare du Nord$/.test(N(s.lines[0] ?? '')) && /Rogier$/.test(N(cursorRowText(s) ?? '')), `arrêts du tram 3 : Gare du Nord en haut, curseur sur Rogier : ${show(s)}`);
     const bad = stopsActionIssues(s, true);
     check(!bad.length, bad.join(' ; '));
-    // la ligne prend une rangée à la liste (§ 6) : une rangée de moins qu'avant, rien ne déborde (contrôle au pixel)
-    const rowsWith = s.lines.length - 2;
-    const rowsWithout = first.lines.length - 1;
-    check(rowsWith <= rowsWithout, `la ligne d’action prend une rangée à la liste : ${rowsWith} arrêts montrés avec elle, ${rowsWithout} sans`);
     const a = await bandAlpha(sim, s, 'ligne d’action');
     check(a === 255, `ligne d’action au niveau ${a} (alpha) au lieu du plus clair (255) (§ 6 : comme « ▶ Y aller »)`);
+    return { screen: s };
+  });
+  await ctx.step('tram-une-rangee-de-moins', async () => {
+    // la ligne prend une rangée à la liste (§ 6) : au bas de la page, ▼ passe à la page suivante ; la ligne suit le curseur
+    const first = sim.last!;
+    const rows = first.lines.length - 3;
+    await sim.select(rows - 1);
+    const s = await sim.waitScreen((x) => x.screen === 'stops' && x.sel === rows - 1, 8_000, '▼ : dernier arrêt de la page');
+    const name = N(cursorRowText(s) ?? '').split('   ').pop() ?? '';
+    check(name && O.matches(actionOf(s), `▶ Me guider jusqu’à ${name}`) || O.matches(actionOf(s), TXT.stopsAction), `la ligne d’action suit le curseur (« ▶ Me guider jusqu’à ${name} ») : ${show(s)}`);
+    check(s.lines.length === first.lines.length, `même nombre de rangées quelle que soit la rangée du curseur : ${s.lines.length} au lieu de ${first.lines.length}`);
     return { screen: s };
   });
   await ctx.step('train-arrets', async () => {
@@ -623,11 +628,14 @@ async function s131arrets(ctx: Ctx131): Promise<void> {
   });
   await ctx.step('train-me-guider', async () => {
     // le toucher lance « j'y descends » (inchangé) : l'écran du guidage
-    const cur = sim.last!;
-    const k = cur.lines.findIndex((l) => /Bruxelles-Central/.test(l));
-    check(k >= 0, `Bruxelles-Central absent : ${show(cur)}`);
-    await sim.select((field<number>(cur, 'top') ?? 0) + k);
-    const s = await lastOrWait(sim, (x) => x.screen === cur.screen && /Bruxelles-Central/.test(x.lines[(x.sel ?? 0) - (field<number>(x, 'top') ?? 0)] ?? ''), 8_000, 'curseur sur Bruxelles-Central');
+    // ▼ jusqu'à Bruxelles-Central (la ligne d'action prend une rangée : l'arrêt peut être sur la page suivante)
+    for (let i = 0; i < 12 && !/Bruxelles-Central/.test(cursorRowText(sim.last!) ?? ''); i++) {
+      await sim.input('down');
+      await sleep(250);
+      await sim.drain();
+    }
+    const s = sim.last!;
+    check(/Bruxelles-Central/.test(cursorRowText(s) ?? ''), `curseur jamais sur Bruxelles-Central : ${show(s)}`);
     const bad = stopsActionIssues(s, true);
     check(!bad.length, `Bruxelles-Central : ${bad.join(' ; ')}`);
     await sim.input('click');
@@ -969,12 +977,9 @@ async function s131memo(ctx: Ctx131): Promise<void> {
       return { screen: st, shot: 'layout' };
     }, { critical: true });
     await wstep(r, 'jy-descends-bruxelles-central', async () => {
-      const st = r.page.lastScreen()!;
-      const top = field<number>(st, 'top') ?? 0;
-      const k = st.lines.findIndex((l) => /Bruxelles-Central/.test(l));
-      check(k >= 0, `Bruxelles-Central absent : ${show(st)}`);
-      await webSelectRow(r, top + k);
+      for (let i = 0; i < 12 && !/Bruxelles-Central/.test(cursorRowText(r.page.lastScreen()!) ?? ''); i++) await gesture(r, 'down');
       const s = r.page.lastScreen()!;
+      check(/Bruxelles-Central/.test(cursorRowText(s) ?? ''), `curseur jamais sur Bruxelles-Central : ${show(s)}`);
       const bad = stopsActionIssues(s as unknown as Screen, true);
       check(!bad.length, bad.join(' ; '));
       await gesture(r, 'tap');
@@ -994,8 +999,7 @@ async function s131memo(ctx: Ctx131): Promise<void> {
       // B11 (I2) : la liste s'ouvre sur l'arrêt retenu (le plus récent choisi avec « j'y descends » pour cette ligne), et la
       // ligne d'action dit son nom : « ▶ Me guider jusqu’à Bruxelles-Central »
       const st = await openIcStops();
-      const top = field<number>(st, 'top') ?? 0;
-      const at = st.lines[(st.sel ?? 0) - top] ?? '';
+      const at = cursorRowText(st) ?? '';
       check(/Bruxelles-Central/.test(at), `B11 : la liste ne s’ouvre pas sur l’arrêt retenu (Bruxelles-Central) : curseur sur « ${at} » (${show(st)})`);
       check(O.matches(actionOf(st), '▶ Me guider jusqu’à Bruxelles-Central'), `B11 : ligne d’action « ${actionOf(st) ?? '(aucune)'} » au lieu de « ▶ Me guider jusqu’à Bruxelles-Central »`);
       check(O.matches(hint(st), TXT.stopsHints), `aides « ${N(hint(st))} » au lieu de « ${TXT.stopsHints} » (§ 6)`);

@@ -62,6 +62,9 @@ const MENU: Record<string, keyof typeof LAYOUTS> = { favorites: 'favorites', sta
 const CHECKED = new Set(['home', 'steps', 'others', 'lines', 'follows', 'lineRun', 'trainRun', 'line', 'board', 'stops', 'train', ...Object.keys(MENU)]);
 /** Écrans avec une ligne d'action « ▶ … » juste au-dessus des aides : trajet (1.3.0), arrêts d'un départ (1.3.1, § 6). */
 const ACTION_SCREENS = new Set(['steps', 'stops', 'trainRun']);
+/** 1.3.1 (§ 6) : écrans dont la ligne d'action suit le curseur (rangée réservée même vide), et leur aide sans « toucher ». */
+const CURSOR_ACTION_SCREENS = new Set(['stops', 'trainRun']);
+const CURSOR_ACTION_HINT = /^△▽ arrêts {3}double : retour$/;
 /** Écrans en accordéon : « Favoris » (1.3.0, § 7) et « Gares de train » (1.3.1, B21). */
 const ACCORDION_SCREENS = new Set(['favorites', 'stations']);
 /** 1.2.3 : ligne du haut d'un tableau (message de l'opérateur, « Départs de demain ») ; sa note, jamais une ligne de liste. */
@@ -457,6 +460,8 @@ function bands(s: LoggedScreen): Band[] | null {
   let hint: string | undefined;
   let note: string | undefined;
   let action: string | undefined;
+  /** la rangée de la ligne d'action est réservée (texte journalisé, ou vide sur une rangée sans action, 1.3.1) */
+  let actionRow = false;
   let footLines: number;
   if (home) {
     // pied compact (1.2.1) : l'aide seulement les 7 premiers jours ; sous le jour férié, pas de ligne d'aide vide
@@ -476,13 +481,17 @@ function bands(s: LoggedScreen): Band[] | null {
     else note = lines.length && (board ? NOTE_BOARD : NOTE).test(lines[lines.length - 1]) ? lines.pop() : undefined;
     // ligne de note réservée (layout.ts, reserveNote) : partout sauf « Autres trajets », les menus et « Dans le train »
     const reserve = !['others', 'keepLine', 'followed', 'train', 'follows'].includes(s.screen);
-    footLines = (reserve || note ? 1 : 0) + (action !== undefined ? 1 : 0) + 1;
+    // 1.3.1 (PRD-1.3.1 § 6) : arrêts d'un départ et trajet d'un train, la ligne d'action suit le curseur et garde sa rangée,
+    // même vide (sur l'arrêt de la montée, une gare quittée) : l'aide sans « toucher » (« △▽ arrêts   double : retour ») le dit
+    if (action === undefined && CURSOR_ACTION_SCREENS.has(s.screen) && CURSOR_ACTION_HINT.test((hint ?? '').replace(/[\u00a0\u202f]/g, ' '))) actionRow = true;
+    if (action !== undefined) actionRow = true;
+    footLines = (reserve || note ? 1 : 0) + (actionRow ? 1 : 0) + 1;
   }
   const footY = SCREEN_H - GEO.BOTTOM_MARGIN - footLines * LINE_H;
   const listY = GEO.TITLE_Y + LINE_H + (hasTop ? LINE_H : 0) + 3;
   // 1.3.0 (PRD-1.3.0 § 1, layout.ts geometry) : avec la ligne d'action, la liste finit là où commence le pied (elle
   // descend du reste de la division, 9 px), la ligne d'action prolongeant la colonne a sur la grille du pied
-  const rowsY = action !== undefined ? Math.max(listY, footY - Math.max(1, Math.floor((footY - listY) / LINE_H)) * LINE_H) : listY;
+  const rowsY = actionRow ? Math.max(listY, footY - Math.max(1, Math.floor((footY - listY) / LINE_H)) * LINE_H) : listY;
 
   const out: Band[] = [];
   // l'heure du titre, calée à droite de son conteneur par les mêmes espaces que layout.ts
@@ -635,3 +644,18 @@ export function truncatedLines(s: LoggedScreen): string[] {
 }
 
 export { HOME_INDENT };
+
+/**
+ * Texte de la rangée du curseur d'une liste journalisée (`sel`, `top` des listes par page) : sans la ligne du haut (l'arrêt
+ * de la montée des arrêts d'un départ, « ● : … » de tout le trajet d'un train), la note, la ligne d'action (« ▶ … ») ni
+ * l'aide. Liste par page (1.3.1, PRD-1.3.1 § 6 : la ligne d'action prend une rangée), un arrêt peut être sur la page
+ * suivante : le chercher par ▼ avec cette rangée.
+ */
+export function cursorRowText(s: LoggedScreen & { top?: number }): string | undefined {
+  const rows = s.lines.slice(0, -1);
+  if (rows.length && /^▶ /.test(rows[rows.length - 1])) rows.pop();
+  if (rows.length && (NOTE.test(rows[rows.length - 1]) || NOTE_BOARD.test(rows[rows.length - 1]))) rows.pop();
+  if (s.screen === 'stops' || (s.screen === 'trainRun' && /^[●◇]\s: /.test(rows[0] ?? ''))) rows.shift();
+  const k = (s.sel ?? 0) - (s.top ?? 0);
+  return k >= 0 ? rows[k] : undefined;
+}
