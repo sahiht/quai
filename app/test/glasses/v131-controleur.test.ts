@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../src/core/guide', async () => (await import('./controller-guide-doubles')).guideModule);
 vi.mock('../../src/glasses/guide-views', async () => (await import('./controller-guide-doubles')).viewsModule);
 
-import type { Favorite, FavoriteAnswer, Journey } from '../../src/core/api';
+import type { Board, Departure, Favorite, FavoriteAnswer, Journey, LineFilter } from '../../src/core/api';
 import type { GuideState, Moment } from '../../src/core/guide-types';
 import { GlassesController, TAP_MASK_AFTER_MS, nextOfFirst } from '../../src/glasses/controller';
 import { createKV, memoryBackend } from '../../src/platform/kv';
@@ -298,6 +298,49 @@ describe('1.3.1, B16 (U4) et A3 (I1) : le départ suivant donné au moteur (Guid
     expect(calls.filter((c) => c === 'board:stib:1180')).toHaveLength(1);
     const input = engine.last().input;
     expect(input.nextByLeg?.[3]).toEqual({ vehicle: { op: 'stib', mode: 'tram', line: '3' }, depAt: NOW + 31 * MIN, rt: false });
+  });
+
+  /**
+   * Contrôle qualité (B16, remarque 3) : un arrêt chargé, comme le tableau du cœur : seulement les départs du filtre
+   * demandé (ligne, et destination par son nom français ou néerlandais), puis les `limit` premiers.
+   */
+  const norm = (x: string) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[’']/g, ' ').replace(/\s+/g, ' ').trim();
+  function busyBoard(id: string, name: string, all: Departure[], asked: (LineFilter[] | undefined)[]) {
+    return (areaId: string, _now: number, opts?: { limit?: number; horizonMin?: number }): Board | undefined => {
+      if (areaId !== id) return undefined;
+      const filter = (opts as { filter?: LineFilter[] } | undefined)?.filter;
+      asked.push(filter);
+      const ok = (d: Departure) => !filter?.length || filter.some((f) => f.line === d.line && [d.head.fr, d.head.nl].some((h) => norm(h) === norm(f.head)));
+      return boardOf(id, name, all.filter(ok).sort((a, b) => a.est - b.est).slice(0, opts?.limit ?? 40));
+    };
+  }
+  /** 70 départs d'autres lignes dans les 14 premières minutes, avant la correspondance et la suivante. */
+  const crowd = (op: Departure['op'], mode: Departure['mode']): Departure[] =>
+    Array.from({ length: 70 }, (_, i) => dep(NOW, 1 + Math.floor(i / 5), { op, mode, line: String(90 + (i % 5)), head: N(`Terminus ${i % 5}`) }));
+
+  it('arrêt chargé (plus de 40 départs avant le suivant) : le tableau est lu pour la seule ligne de la correspondance, le suivant trouvé', async () => {
+    plan = [tight()];
+    engine.tight = [3];
+    const asked: (LineFilter[] | undefined)[] = [];
+    const all = [...crowd('stib', 'bus'), dep(NOW, 22, { op: 'stib', mode: 'tram', line: '3', head: N('Churchill') }), dep(NOW, 29, { op: 'stib', mode: 'tram', line: '3', head: N('Esplanade') }), dep(NOW, 34, { op: 'stib', mode: 'tram', line: '3', head: N('Churchill') })];
+    await guided({ stub: { board: busyBoard('stib:1180', 'Gare Centrale', all, asked) } });
+    expect(asked).toEqual([[{ line: '3', head: 'Churchill' }]]);
+    expect(engine.last().input.nextByLeg?.[3]).toEqual({ vehicle: { op: 'stib', mode: 'tram', line: '3' }, depAt: NOW + 34 * MIN, rt: true });
+  });
+
+  it('De Lijn : la destination demandée sous ses deux noms (« Gare d’Alost », « Aalst Station ») ; trouvée même écrite en néerlandais seul', async () => {
+    const j = tight();
+    const l = j.legs[3];
+    Object.assign(l, { op: 'delijn', mode: 'bus', line: '58', head: { fr: 'Gare d’Alost', nl: 'Aalst Station' } });
+    l.from.areaId = 'delijn:200001';
+    plan = [j];
+    engine.tight = [3];
+    const asked: (LineFilter[] | undefined)[] = [];
+    const aalst = { fr: 'Aalst Station', nl: 'Aalst Station' };
+    const all = [...crowd('delijn', 'bus'), dep(NOW, 22, { op: 'delijn', mode: 'bus', line: '58', head: aalst }), dep(NOW, 52, { op: 'delijn', mode: 'bus', line: '58', head: aalst, rt: false })];
+    await guided({ stub: { board: busyBoard('delijn:200001', 'Gare Centrale', all, asked) } });
+    expect(asked).toEqual([[{ line: '58', head: 'Gare d’Alost' }, { line: '58', head: 'Aalst Station' }]]);
+    expect(engine.last().input.nextByLeg?.[3]).toEqual({ vehicle: { op: 'delijn', mode: 'bus', line: '58' }, depAt: NOW + 52 * MIN, rt: false });
   });
 
   it('pas très juste : aucune requête de plus ; très juste mais dans plus d’une heure : pas encore', async () => {
