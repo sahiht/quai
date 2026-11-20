@@ -165,3 +165,38 @@ describe('PRD-1.3.1 § 4 : accordéon des favoris', () => {
     expect(layoutPage(v, { sel: 0, top: 0 }).lines.map(nb)[2]).toBe('IC 16:50 voie 1, direct');
   });
 });
+
+/* ------------------------------ Contrôle qualité du sujet ------------------------------ */
+
+describe('PRD-1.3.1 § 4 et § 7 : contrôle qualité de l’écran du trajet et de l’accordéon', () => {
+  it('une apostrophe droite des données s’affiche « ’ » dans le nom de l’arrêt où l’on marche (écran du trajet, accordéon)', () => {
+    const ic = { ride: 'IC', mode: 'train' as const, dep: T(16, 46), arr: T(17, 20), from: "Braine-l'Alleud", to: 'Bruxelles-Central', platform: '3' };
+    const walking = journey('q', [{ walk: 6, to: "Braine-l'Alleud" }, ic, { walk: 3 }]);
+    expect(rows(walking)[0]).toBe('16:40 à pied 6 min → Braine-l’Alleud');
+    expect(texts(ok(PLACES.bureau, walking))[0]).toBe('à pied 6 min → Braine-l’Alleud');
+    // un trajet qui part de la gare, et une gare hors de portée à pied (règle de la 1.3.0) : le nom aussi
+    const there = journey('d', [ic]);
+    expect(texts(ok(PLACES.bureau, there))[0]).toBe('depuis Braine-l’Alleud');
+    expect(texts(ok(PLACES.bureau, there, { fromStation: true }))[0]).toBe('IC voie 3 à 16:46, à Braine-l’Alleud');
+  });
+
+  it('balayage au pixel : la mise en page ne recoupe jamais une marche (nom coupé au mot par la vue, « , pluie » entier)', () => {
+    const words = 'Bruxelles-Schuman Rond-Point Robert Schuman Quartier Européen Berlaymont Loi'.split(' ');
+    let cut = 0;
+    for (let k = 1; k <= words.length; k++) {
+      for (let min = 5; min <= 29; min++) {
+        const stop = words.slice(0, k).join(' ');
+        const j = rain(journey('b', [{ walk: min, to: stop }, { ride: '71', mode: 'bus', dep: T(17, 5), arr: T(17, 20), from: stop, to: 'Gare Centrale' }, { walk: 2 }]), 0);
+        const said = nb(stepsPage(route, { journeys: [j], index: 0, fresh: true }, ctx()).items[0].segs![1].t);
+        const row = rows(j)[0];
+        // ce que la vue a coupé au mot est exactement ce que l'écran montre (une marge trop large d'un pixel : la mise
+        // en page recoupe la rangée et « , pluie » disparaît)
+        expect(row, `${min} min, « ${stop} »`).toBe(`${row.slice(0, 5)} ${said}`);
+        expect(said.endsWith(', pluie'), said).toBe(true);
+        if (said.includes('…')) cut++;
+      }
+    }
+    // le balayage passe bien par des noms coupés
+    expect(cut).toBeGreaterThan(20);
+  });
+});
