@@ -10,14 +10,14 @@
  * Lieux publics seulement.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Core, Settings } from '../../src/core/api';
+import type { Core, Journey, Settings } from '../../src/core/api';
 import type { GuideStatus } from '../../src/core/guide-types';
 import { rankSearch } from '../../src/core/search';
 import { placeField } from '../../src/phone/field';
 import { alertsScreen } from '../../src/phone/screens/alerts';
 import { dataScreen } from '../../src/phone/screens/data';
 import { displayScreen, openingScreen } from '../../src/phone/screens/display';
-import { favoriteEditScreen, fixedTripScreen, newFavoriteScreen } from '../../src/phone/screens/favorite-edit';
+import { departuresLink, favoriteEditScreen, fixedTripScreen, newFavoriteScreen } from '../../src/phone/screens/favorite-edit';
 import { favoriteRowTitle, favoritesScreen } from '../../src/phone/screens/favorites';
 import { homeScreen, resetAnswers } from '../../src/phone/screens/home';
 import { onboardingScreen, yourFavoritesScreen } from '../../src/phone/screens/onboarding';
@@ -25,8 +25,11 @@ import { picksScreen, resetKnownLines } from '../../src/phone/screens/picks';
 import { searchScreen, shownLabel } from '../../src/phone/screens/search';
 import { settingsScreen } from '../../src/phone/screens/settings';
 import { tripsScreen } from '../../src/phone/screens/trips';
-import { endpointText } from '../../src/phone/text';
-import { at, defaults, harness, mount, options, plain, SCENARIO, settle, sleep, textOf, type, until, withGuide, type Harness } from './helpers';
+import { emptyState, endpointText, linePickTitle } from '../../src/phone/text';
+import { favoritesView } from '../../src/glasses/views';
+import { glassesPreview } from '../../src/phone/ui';
+import { at, button, defaults, harness, mount, options, plain, SCENARIO, settle, sleep, textOf, type, until, withGuide, type Harness } from './helpers';
+import { rideLeg, walkLeg } from './trips';
 
 beforeEach(() => {
   resetAnswers();
@@ -191,6 +194,48 @@ describe('§ 7 : un lieu gardé en favori s’affiche comme sur l’accueil et d
     expect(edit.querySelector<HTMLInputElement>('#pl-nom')!.value).toBe("Gare de Braine-l'Alleud");
     expect(edit.querySelector<HTMLInputElement>('#pl-lieu')!.value).toBe('Braine-l’Alleud');
     expect(hz.settings.get()).toEqual(before);
+  });
+});
+
+describe('§ 7 : les endroits que le balayage n’atteint pas', () => {
+  it('arrêt d’une ligne choisie avant la 1.2.6, « Pas de trajet complet », nom lu d’un aperçu', () => {
+    expect(linePickTitle({ op: 'stib', name: N("Porte d'Anderlecht"), line: '51', mode: 'tram' }, 'fr')).toBe('Tram 51 · Porte d’Anderlecht');
+    const station = { areaId: 'sncb:8814258', name: N("Braine-l'Alleud"), lat: 50.6848, lon: 4.3757 };
+    const empty = emptyState({ journeys: [], empty: 'noTrip', station }, { type: 'here' }, defaults());
+    expect(empty).toMatchObject({ kind: 'station', text: 'Pas de trajet complet. Essaie Braine-l’Alleud, puis le tram.', button: 'Chercher vers Braine-l’Alleud' });
+    // la gare rendue pour la recherche garde le nom des données
+    expect(empty.kind === 'station' ? empty.station.name.fr : '').toBe("Braine-l'Alleud");
+    const s = straightSettings();
+    const view = favoritesView({}, { now: SCENARIO.s1.now, settings: s });
+    const preview = glassesPreview('Aperçu', view);
+    const label = (preview.matches('[role="img"]') ? preview : preview.querySelector('[role="img"]'))?.getAttribute('aria-label') ?? '';
+    expect(label).toContain('Gare de Braine-l’Alleud');
+    expect(label).not.toContain("'");
+  });
+
+  it('lieu placé à une gare : « Ses prochains départs : ajouter … à tes gares », son message ; la gare gardée a le nom des données', async () => {
+    const hz = harness({ settings: defaults() });
+    const el = mount(departuresLink(hz.ctx, { id: 'sncb:8814258', op: 'sncb', n: N("Braine-l'Alleud"), modes: ['train'], lat: 50.6848, lon: 4.3757, kindLabel: 'gare' }));
+    button(el, 'Ses prochains départs : ajouter Braine-l’Alleud à tes gares').click();
+    await until(() => hz.settings.get().stations.length === 1);
+    await until(() => textOf(el).includes('Braine-l’Alleud ajoutée à tes gares.'));
+    expect(hz.settings.get().stations[0].name.fr).toBe("Braine-l'Alleud");
+    expect(straight()).toEqual([]);
+  });
+
+  it('§ 4 : la carte d’un trajet nomme l’arrêt dans la langue des noms choisie', async () => {
+    const t0 = at(16, 40);
+    const ride = rideLeg(t0 + 7 * 60_000, t0 + 40 * 60_000, 'IC', 'x', 'Bruxelles-Midi');
+    ride.from.name = N("Braine-l'Alleud", 'Eigenbrakel');
+    const legs = [walkLeg(t0, 7), ride, walkLeg(t0 + 40 * 60_000, 4)];
+    const j: Journey = { id: 'j', legs, dep: t0, arr: t0 + 44 * 60_000, leaveAt: t0, transfers: 0, rt: false, alerts: [], label: 'short' };
+    for (const [lang, name] of [['fr', 'Braine-l’Alleud'], ['nl', 'Eigenbrakel']] as const) {
+      const hz = harness({ now: t0 - 5 * 60_000, settings: defaults({ lang }), params: 'de=sncb:8863008&vers=sncb:8813003', core: (c) => ({ ...c, route: async () => ({ journeys: [j] }) }) });
+      const el = mount(searchScreen(hz.ctx));
+      await until(() => el.querySelectorAll('.result').length === 1);
+      expect(textOf(el.querySelector('.result .means')), lang).toBe(`IC, à pied 7 min → ${name}, puis 4 min`);
+      await settle();
+    }
   });
 });
 
