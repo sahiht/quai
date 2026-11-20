@@ -199,7 +199,9 @@ function favoritesCard(ctx: PhoneCtx): HTMLElement {
     }, { compact: go });
     // « Lunettes » d'abord, « Y aller » au bout de la rangée : même message, à côté d'eux
     const actions = h('span', { class: 'fav-actions' }, button, go ? goButton(hub, message, typo(`${T.goThere} : ${title}`), () => goFavorite(ctx, f.id)) : null);
-    return h('li', { class: 'fav-row' }, h('span', { class: 'txt' }, name, answer), actions, message);
+    // 1.3.1 (R2) : Quai Web, « Essayer en accéléré » sous « Y aller »
+    const tryIt = go && ctx.tryButton ? ctx.tryButton(f.id, title, hub, message) : null;
+    return h('li', { class: 'fav-row' }, h('span', { class: 'txt' }, name, answer), actions, tryIt, message);
   };
   for (const f of shown) list.appendChild(favRow(f));
   if (rest.length) {

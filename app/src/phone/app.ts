@@ -33,6 +33,7 @@ import { searchScreen } from './screens/search';
 import { settingsScreen } from './screens/settings';
 import { tripsScreen } from './screens/trips';
 import { newsLines, T } from './text';
+import type { MessageHub } from './ui';
 
 export interface PhoneCtx {
   settings: SettingsStore;
@@ -63,6 +64,11 @@ export interface PhoneCtx {
   news?: NewsState;
   /** 1.3.0 (PRD-1.3.0 § 6.4) : journal des trajets guidés (Réglages, Données, « Journal des trajets »). */
   journal?(): TripJournal | null;
+  /**
+   * 1.3.1 (PRD-1.3.1 § 14, R2) : Quai Web seulement (web/essai.ts) : bouton « Essayer en accéléré » placé sous « Y aller »
+   * du favori `favoriteId`, son message dans `slot` (celui de la rangée, par `hub`). Absent (appli Even) : pas de bouton.
+   */
+  tryButton?(favoriteId: string, title: string, hub: MessageHub, slot: HTMLElement): HTMLElement;
 }
 
 export type Screen = (ctx: PhoneCtx, sub: string[]) => HTMLElement | Promise<HTMLElement>;
