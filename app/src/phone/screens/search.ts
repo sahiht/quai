@@ -6,7 +6,7 @@
  * résultats (§ 5), « Garder en favori » (un lieu depuis « Ma position », sinon un trajet fixe, PRD-1.2 § 2.2), issue
  * proposée quand il n'y a pas de trajet complet (M5).
  */
-import type { Endpoint, Favorite, FavoriteTrip, Journey, Leg, Mode, PlanResult, Settings } from '../../core/api';
+import type { Core, Endpoint, Favorite, FavoriteTrip, Journey, Leg, Mode, PlanResult, Settings } from '../../core/api';
 import { placeOf, placesOf } from '../../core/favorites';
 import { LIMITS, newId } from '../../settings';
 import { apos } from '../../core/typo';
@@ -371,6 +371,28 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
     paintBelow();
   }
 
+  // 1.3.1 (vrai chemin partout) : ces résultats ne sont pas rafraîchis ; quand le vrai chemin d'une première marche est
+  // connu après coup, les cartes reprennent une fois l'heure de partir du cœur (la même que sur les lunettes), sans
+  // nouveau calcul ni réseau, dans le même ordre
+  let offWalk: (() => void) | undefined;
+  function watchWalk(c: Core): void {
+    if (offWalk || !c.onFirstWalk || !c.firstWalk) return;
+    const fw = c.firstWalk.bind(c);
+    offWalk = c.onFirstWalk(() => {
+      if (!resultsBox.isConnected) {
+        offWalk?.();
+        offWalk = undefined;
+        return;
+      }
+      if (!result || busy) return;
+      const st = ctx.settings.get();
+      const journeys = result.journeys.map((j) => fw(j, st));
+      if (journeys.every((j, i) => j === result?.journeys[i])) return;
+      result = { ...result, journeys };
+      paint();
+    });
+  }
+
   async function run(): Promise<void> {
     if (!from || !to) {
       result = null;
@@ -392,6 +414,7 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
       if (my !== runSeq) return;
       result = r;
       selected = 0;
+      watchWalk(c);
     } catch (e) {
       if (my !== runSeq) return;
       failure = e instanceof Error && e.message ? e.message : 'Recherche impossible pour l’instant.';

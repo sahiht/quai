@@ -35,6 +35,12 @@ export interface RefreshEnv {
    * bus, tram ou métro. Absente : pas de marque d'après l'horaire pour ces étapes.
    */
   cachedArea?: (id: string) => Promise<PreparedArea | null>;
+  /**
+   * 1.3.1 (vrai chemin partout, core/firstwalk.ts) : pose sur les étapes copiées d'un trajet les minutes du vrai chemin
+   * de sa première marche, s'il est connu (rend les minutes ajoutées). Absent : marches estimées, comme en 1.3.0 (le
+   * calcul des trajets classe toujours sur les estimations).
+   */
+  firstWalk?: (legs: Leg[], settings: Settings) => number;
 }
 
 /** Passages STIB acceptés autour de l'horaire prévu d'une étape. */
@@ -611,6 +617,8 @@ export async function refreshJourneys(js: readonly Journey[], settings: Settings
   await applyRealtime(legs.flat(), env, followed);
   await markLast(legs.flat(), env);
   const now = env.now();
+  // 1.3.1 : la première marche à la longueur de son vrai chemin, avant le calcul de l'heure de partir et des alertes
+  if (env.firstWalk) for (const l of legs) env.firstWalk(l, settings);
   return Promise.all(
     js.map(async (j, i) => {
       const out = recompute(j, legs[i], settings, now, fresh);
@@ -619,6 +627,24 @@ export async function refreshJourneys(js: readonly Journey[], settings: Settings
       return out;
     }),
   );
+}
+
+/**
+ * 1.3.1 (vrai chemin partout) : le trajet déjà calculé, avec la première marche que `firstWalk` allonge ; le même objet
+ * si rien ne change. Sans réseau : l'heure de partir et le début de la marche sont recalculés (recompute), l'alerte
+ * « partir » aussi ; les autres alertes (voie, retard, suppression, travaux, trajet recalculé) restent à leur place.
+ */
+export function withFirstWalk(j: Journey, settings: Settings, now: number, firstWalk: (legs: Leg[], settings: Settings) => number): Journey {
+  const legs = j.legs.map(cloneLeg);
+  if (!(firstWalk(legs, settings) > 0)) return j;
+  const started = Number.isFinite(j.legs[0]?.dep) && now >= j.legs[0].dep;
+  const out = recompute(j, legs, settings, now, !started);
+  const leave = buildAlerts(out, settings, now, []).find((a) => a.kind === 'leave');
+  const rest = j.alerts.filter((a) => a.kind !== 'leave');
+  const k = rest.findIndex((a) => a.kind === 'works');
+  const at = k < 0 ? rest.length : k;
+  out.alerts = leave ? [...rest.slice(0, at), leave, ...rest.slice(at)] : rest;
+  return out;
 }
 
 /** Applique le temps réel à un trajet et recalcule heure de départ conseillée et alertes (`followed` : trajet suivi). */

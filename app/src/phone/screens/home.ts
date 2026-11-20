@@ -260,9 +260,24 @@ function favoritesCard(ctx: PhoneCtx): HTMLElement {
     }
   };
   queueMicrotask(() => void refresh());
+  // 1.3.1 (vrai chemin partout) : le vrai chemin d'une première marche vient d'être connu : les réponses tout de suite
+  // (la même heure de partir que sur les lunettes), sans attendre les 30 s ; arrêté avec la liste
+  let offWalk: (() => void) | undefined;
+  void ctx
+    .core()
+    .then((c) => {
+      offWalk = c.onFirstWalk?.(() => {
+        if (!first && !list.isConnected) offWalk?.();
+        else if (busy) again = true;
+        else void refresh();
+      });
+    })
+    .catch(() => undefined);
   const timer = setInterval(() => {
-    if (!list.isConnected) clearInterval(timer);
-    else void refresh();
+    if (!list.isConnected) {
+      clearInterval(timer);
+      offWalk?.();
+    } else void refresh();
   }, ANSWER_REFRESH_MS);
   return list;
 }

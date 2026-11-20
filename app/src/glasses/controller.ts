@@ -573,6 +573,8 @@ export class GlassesController implements GlassesApi {
   private unsubscribe: (() => void) | null = null;
   /** 1.2.10 (mode test) : abonnement à l'horloge simulée réglée par window.__quaiClock.set. */
   private offClock: (() => void) | null = null;
+  /** 1.3.1 : désabonnement de Core.onFirstWalk */
+  private offFirstWalk: (() => void) | null = null;
   private pendingRestore: NavState | null = null;
   private pendingShow: NavState | null = null;
   private seq = 0;
@@ -748,6 +750,10 @@ export class GlassesController implements GlassesApi {
     this.unsubscribe = this.d.platform.glasses.onSignal((s) => this.onSignal(s));
     this.listenClock();
     this.d.core.onGeneration?.(() => this.generationChanged());
+    // 1.3.1 (vrai chemin partout, core/firstwalk.ts) : le vrai chemin d'une première marche vient d'être connu et il est
+    // plus long : un rafraîchissement tout de suite, celui des 30 s (trajet suivi, favoris de l'écran, écran affiché),
+    // pour que la même heure de partir soit partout ; rien d'autre ne change (même file de calcul des favoris)
+    this.offFirstWalk = this.d.core.onFirstWalk?.(() => void this.refreshCurrent()) ?? null;
     await this.render(true);
     if (!this.d.configured) {
       this.nav = initNav(this.notConfiguredRoute());
@@ -1004,6 +1010,8 @@ export class GlassesController implements GlassesApi {
     this.unsubscribe = null;
     this.offClock?.();
     this.offClock = null;
+    this.offFirstWalk?.();
+    this.offFirstWalk = null;
     // 1.2.10 : positions continues et minuterie du guidage arrêtées ; un enregistrement différé est fait tout de suite
     this.stopWatch();
     clearTimeout(this.guideTimer);

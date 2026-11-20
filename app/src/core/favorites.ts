@@ -155,6 +155,11 @@ export interface AnswerEnv {
   generation?(): Promise<string | undefined>;
   /** Plans mémorisés des trajets favoris (un jeu par cœur). */
   plans?: Map<string, PlanMemo>;
+  /**
+   * 1.3.1 (vrai chemin partout, core/firstwalk.ts) : minutes que le vrai chemin connu ajoute à une marche estimée à
+   * `est` minutes entre ces deux points (0 : inconnu ou pas plus long).
+   */
+  walkExtra?(from: LatLon, to: LatLon, est: number, settings: Settings): number;
 }
 
 /** Plan mémorisé d'un trajet favori. */
@@ -319,11 +324,19 @@ async function computeTrip(fav: FavoriteTrip, here: LatLon | null, settings: Set
     const d = here ? distanceM(here, fav.from) : Infinity;
     const walk = d < AT_STATION_M ? 0 : walkMinutes(d);
     if (here && walk <= settings.maxWalkMin) {
-      plan = await env.route(fav.from, fav.to, t + walk * 60_000, settings, here);
-      if (walk > 0) {
-        plan = withAccessWalk(plan, here, settings, t);
-        // heure de départ conseillée et alertes d'après la nouvelle marche
-        if (env.refresh && plan.journeys.length) plan = { ...plan, journeys: await env.refresh(plan.journeys, settings) };
+      // 1.3.1 (vrai chemin partout) : la marche jusqu'à la gare avec son vrai chemin, s'il est connu et plus long (les
+      // trains proposés partent après elle) ; connu pendant ce calcul : refait une fois avec lui
+      const station = { lat: fav.from.lat, lon: fav.from.lon };
+      const extraOf = (): number => (walk > 0 ? Math.max(0, env.walkExtra?.(here, station, walk, settings) ?? 0) : 0);
+      for (let attempt = 0; ; attempt++) {
+        const extra = extraOf();
+        plan = await env.route(fav.from, fav.to, t + (walk + extra) * 60_000, settings, here);
+        if (walk > 0) {
+          plan = withAccessWalk(plan, here, settings, t);
+          // heure de départ conseillée et alertes d'après la nouvelle marche
+          if (env.refresh && plan.journeys.length) plan = { ...plan, journeys: await env.refresh(plan.journeys, settings) };
+        }
+        if (attempt > 0 || extraOf() === extra) break;
       }
     } else {
       plan = await env.route(fav.from, fav.to, t, settings, here);
