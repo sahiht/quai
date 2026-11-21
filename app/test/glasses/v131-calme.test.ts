@@ -18,7 +18,7 @@ import { NOW, SPOTS, busStops, cleanupKit, door, guideSetup, type Kit, type KitO
 import { MIN, PLACES, dep, journey, nb, settingsWith } from './helpers';
 
 const N = (fr: string) => ({ fr, nl: fr });
-const settings = (gestureHints = true) => settingsWith([PLACES.bureau], { seenVersion: '1.3.0', display: { ...settingsWith([]).display, gestureHints } });
+const settings = (gestureHints = true) => settingsWith([PLACES.bureau], { seenVersion: '1.3.1', display: { ...settingsWith([]).display, gestureHints } });
 const homeReady = (s: { screen: string; lines: string[] }) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l));
 
 /** Trajet guidé : 5 min à pied jusqu'à Merbraine, bus W avec ses six arrêts connus, 4 min à pied. */

@@ -171,7 +171,7 @@ describe('§ 9 : les nouveautés de la 1.2.10 encore montrées restent vraies (B
   /** Toutes les lignes que la bannière peut montrer, téléphone et Quai Web, quelle que soit la version d'avant. */
   const all = (): string[] => {
     const out = new Set<string>();
-    for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3', '1.2.4', '1.2.5', '1.2.6', '1.2.7', '1.2.8', '1.2.9', '1.2.10']) for (const web of [false, true]) for (const l of newsLines(seen, web)) out.add(l);
+    for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3', '1.2.4', '1.2.5', '1.2.6', '1.2.7', '1.2.8', '1.2.9', '1.2.10', '1.3.0']) for (const web of [false, true]) for (const l of newsLines(seen, web)) out.add(l);
     return [...out];
   };
 

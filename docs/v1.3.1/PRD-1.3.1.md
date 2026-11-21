@@ -83,6 +83,14 @@ personnelle nulle part.
 - 1.3.1 (app.json, package.json, nouveautés de la boutique). Pas de message des nouveautés pour qui vient de la
   1.3.0 (version de clarté, comme la 1.2.7) : NEWS_SINCE reste 1.3.0 ; qui vient d'avant voit le message 1.3.0, dont
   chaque ligne reste vraie.
+- Décision du 21/11 : la 1.3.1 a un message de nouveautés, car elle contient de vraies nouveautés (§ 12, § 14, § 15).
+  NEWS_SINCE passe à 1.3.1. Lunettes, « Quai 1.3.1 », une fois pour qui vient de la 1.3.0 : « Guidage : trois points,
+  Quai te suit, rien à faire. », « Métro : la sortie à prendre après la descente. », « « dernier » : plus rien à prendre
+  après celui-ci. », « Heure de partir : calculée sur le vrai chemin à pied. ». Qui vient d'avant voit ensuite les lignes
+  de la 1.3.0 (une version entière ou rien, 8 lignes au plus). Téléphone : bannière « Nouveau dans Quai 1.3.1 », quatre
+  lignes, puis celles des versions sautées ; Quai Web : l'onglet Réglages et « Essayer en accéléré » dans la dernière
+  ligne, jamais dans l'appli des lunettes. Les lignes d'avant qui citaient « j’y descends » citent « ▶ Me guider
+  jusqu’à … », ce que la liste des arrêts écrit en 1.3.1.
 
 ## 10. Barrières de publication
 

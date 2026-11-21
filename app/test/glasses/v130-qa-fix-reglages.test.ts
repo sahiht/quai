@@ -62,7 +62,7 @@ describe('point 3 : réglages illisibles au lancement', () => {
   it('deux lectures sans réponse : réglages par défaut, rien n’est écrit tant que la personne ne change rien ; les favoris restent enregistrés', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     // sans la correction : la lecture sans réponse donnait les réglages par défaut, et les lunettes écrivaient aussitôt
-    // { favorites: [], seenVersion: '1.3.0' } à la place des réglages enregistrés (markSeen)
+    // { favorites: [], seenVersion: '1.3.1' } à la place des réglages enregistrés (markSeen)
     const p = phoneStorage({ [SETTINGS_KEY]: JSON.stringify(SAVED), [FIRST_USE_KEY]: String(NOW - 30 * 86_400_000) }, (k) => k === SETTINGS_KEY);
     const settings = await readAtLaunch(p.kv);
     expect(settings.favorites).toEqual([]);

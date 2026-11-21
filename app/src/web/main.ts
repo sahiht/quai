@@ -23,7 +23,7 @@ import { createKV } from '../platform/kv';
 import type { Platform } from '../platform/types';
 import { loadSettings, SettingsStore } from '../settings';
 import { describeContainers, GlassesCanvas, withCanvasImages } from './display';
-import { createEssai, gatedPort, placeBanner, type Essai } from './essai';
+import { createEssai, ESSAI_TEXT, gatedPort, placeBanner, type Essai } from './essai';
 import { attachKeyboard, attachScreenGestures, GESTURES } from './gestures';
 import { createWebLocation, type WebLocationState } from './location';
 import { createWebGlassesPort } from './port';
@@ -150,6 +150,8 @@ async function main(): Promise<void> {
     positionPicker: () => picker(`w-pos-${Math.random().toString(36).slice(2, 7)}`),
     journal: () => journal,
     tryButton: (id, title, hub, slot) => trial.button(id, title, hub, slot),
+    // 1.3.1 (§ 9) : la bannière « Nouveau dans Quai 1.3.1 » cite l'essai par le nom de son bouton
+    newsTrial: ESSAI_TEXT.button,
   });
 
   // Gestes : boutons (1.2.10 : « Appui long » compris), écran (glisser, toucher, double toucher, molette, doigt gardé),

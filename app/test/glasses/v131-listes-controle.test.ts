@@ -100,7 +100,7 @@ describe('contrôle B21 : le curseur qui bouge, les envois et les requêtes', ()
       const k = stations.findIndex((s) => s.areaId === id);
       return boardOf(id, 'Gare', [trainAt(NOW, 11 + k, { head: N('Bruxelles-Midi') }), trainAt(NOW, 26 + k, { line: 'S1', head: N('Nivelles'), platform: '3', rt: !(planned && k === 2) }), trainAt(NOW, 41 + k)]);
     };
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', stations }), core: (now) => stubCore(now, { board: boards, calls }) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1', stations }), core: (now) => stubCore(now, { board: boards, calls }) });
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'stations' });
     await h.until((x) => x.screen === 'stations' && x.lines.length > 2 && !x.lines.some((l) => / …$/.test(l)));

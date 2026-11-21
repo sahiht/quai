@@ -204,7 +204,19 @@ export function firstRunView(ctx: ViewCtx): GlassesView {
 }
 
 /** Titre du message de nouveautés (une fois, après la mise à jour depuis une version antérieure). */
-export const NEWS_TITLE = 'Quai 1.3.0';
+export const NEWS_TITLE = 'Quai 1.3.1';
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 9, décision du 21/11) : lignes du message « Quai 1.3.1 » ; chacune tient sur une ligne des lunettes :
+ * les trois points de l'écran calme (§ 1), la sortie du métro (R1), « dernier » (R3, § 15), l'heure de partir d'après
+ * le vrai chemin (§ 15). Rien n'y renvoie au téléphone : mêmes lignes sur Quai Web.
+ */
+export const NEWS_LINES_131: readonly string[] = [
+  `Guidage${NB}: trois points, Quai te suit, rien à faire.`,
+  `Métro${NB}: la sortie à prendre après la descente.`,
+  `«${NB}dernier${NB}»${NB}: plus rien à prendre après celui-ci.`,
+  `Heure de partir${NB}: calculée sur le vrai chemin à pied.`,
+];
 
 /**
  * 1.3.0 : lignes du message « Quai 1.3.0 » (PRD-1.3.0 § 9) ; chacune tient sur une ligne des lunettes : la ligne « ▶ Y
@@ -237,9 +249,11 @@ export const NEWS_LINES_1210: readonly string[] = [
 
 /**
  * 1.3.0 : les nouveautés de la 1.2.10 encore vraies, pour qui vient d'avant la 1.2.10 : « le détail en bas » des
- * favoris ne l'est plus (accordéon, PRD-1.3.0 § 7 ; la 2e ligne de la 1.3.0 le dit), comme NEWS_LINES_125.
+ * favoris ne l'est plus (accordéon, PRD-1.3.0 § 7 ; la 2e ligne de la 1.3.0 le dit), comme NEWS_LINES_125. 1.3.1
+ * (PRD-1.3.1 § 6) : la liste des arrêts n'écrit plus « j’y descends » mais « ▶ Me guider jusqu’à … » : la 2e ligne
+ * cite ce qui est écrit.
  */
-export const NEWS_LINES_1210_KEPT: readonly string[] = NEWS_LINES_1210.slice(0, 2);
+export const NEWS_LINES_1210_KEPT: readonly string[] = [NEWS_LINES_1210[0], `Train ou bus déjà pris${NB}: «${NB}▶ Me guider jusqu’à …${NB}».`];
 
 /** 1.2.9 : lignes du message « Quai 1.2.9 » (PRD-1.2.9 § 4) ; chacune tient sur une ligne des lunettes. */
 export const NEWS_LINES_129: readonly string[] = [
@@ -277,13 +291,14 @@ export const NEWS_LINES_125: readonly string[] = [
 ];
 
 /**
- * Lignes du message « Quai 1.3.0 », une seule fois : celles de la 1.3.0 ; à qui vient d'avant la 1.2.10, aussi celles
- * de la 1.2.10 encore vraies, puis d'avant la 1.2.9, celles de la 1.2.9, d'avant la 1.2.8, celles de la 1.2.8, d'avant
+ * Lignes du message « Quai 1.3.1 », une seule fois : celles de la 1.3.1 ; à qui vient d'avant la 1.3.0, aussi celles de
+ * la 1.3.0 ; d'avant la 1.2.10, celles de la 1.2.10 encore vraies, puis d'avant la 1.2.9, celles de la 1.2.9, d'avant la 1.2.8, celles de la 1.2.8, d'avant
  * la 1.2.6, celles de la 1.2.6, d'avant la 1.2.5, celles de la 1.2.5 : les plus récentes d'abord, une version entière
  * ou rien, NEWS_MAX lignes au plus (un écran). Quai Web : « onglet Réglages » là où le téléphone est nommé.
  */
 export function newsLines(seen = '', web = false): string[] {
-  const blocks: (readonly string[])[] = [web ? NEWS_LINES_130_WEB : NEWS_LINES_130];
+  const blocks: (readonly string[])[] = [NEWS_LINES_131];
+  if (seen && compareVersions(seen, '1.3.0') < 0) blocks.push(web ? NEWS_LINES_130_WEB : NEWS_LINES_130);
   if (seen && compareVersions(seen, '1.2.10') < 0) blocks.push(NEWS_LINES_1210_KEPT);
   if (seen && compareVersions(seen, '1.2.9') < 0) blocks.push(web ? NEWS_LINES_129_WEB : NEWS_LINES_129);
   if (seen && compareVersions(seen, '1.2.8') < 0) blocks.push(NEWS_LINES_128);
@@ -294,7 +309,7 @@ export function newsLines(seen = '', web = false): string[] {
   return out;
 }
 
-/** Message des nouveautés (« Quai 1.3.0 ») : toucher mène à l'accueil. `lines` : celles calculées à l'ouverture (route du message). */
+/** Message des nouveautés (« Quai 1.3.1 ») : toucher mène à l'accueil. `lines` : celles calculées à l'ouverture (route du message). */
 export function newsView(ctx: ViewCtx, lines: string[] = newsLines('', !!ctx.web)): GlassesView {
   return messageView(NEWS_TITLE, lines.length ? lines : newsLines('', !!ctx.web), ctx, { hints: HINTS.news, tap: { kind: 'continue' } });
 }

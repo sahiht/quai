@@ -29,6 +29,8 @@ import {
   NEWS_129_WEB,
   NEWS_130,
   NEWS_130_WEB,
+  NEWS_131,
+  news131Web,
   newsTitle,
   secondsLeft,
   T,
@@ -818,19 +820,19 @@ describe('1.3.0 : carte « Journal des trajets » de l’écran Données (PRD-1.
 
 /* ------------------------------ § 9 : bannière « Nouveau » ------------------------------ */
 
-describe('1.3.0 : bannière « Nouveau dans Quai 1.3.0 » du téléphone (PRD-1.3.0 § 9)', () => {
-  it('NEWS_SINCE 1.3.0 : une fois depuis la 1.2.10 ou avant, jamais après une installation neuve ni depuis la 1.3.0', () => {
-    expect(NEWS_SINCE).toBe('1.3.0');
-    expect(newsTitle(NEWS_SINCE)).toBe('Nouveau dans Quai 1.3.0');
-    for (const seen of ['1.1.0', '1.2.0', '1.2.5', '1.2.9', '1.2.10']) expect(newsState(seen, NEWS_SINCE, '1.3.0').visible(), seen).toBe(true);
-    for (const seen of ['', '1.3.0', '1.3.1']) expect(newsState(seen, NEWS_SINCE, '1.3.0').visible(), seen || 'installation neuve').toBe(false);
-    // une appli encore en 1.2.10 n'annonce pas les nouveautés de la 1.3.0
-    expect(newsState('1.2.9', NEWS_SINCE, '1.2.10').visible()).toBe(false);
+describe('1.3.0 : les nouveautés de la 1.3.0 dans la bannière du téléphone (PRD-1.3.0 § 9), sous celles de la 1.3.1 (PRD-1.3.1 § 9)', () => {
+  it('NEWS_SINCE 1.3.1 : une fois depuis la 1.3.0 ou avant, jamais après une installation neuve ni depuis la 1.3.1 ; depuis la 1.2.10 : les lignes de la 1.3.0 après celles de la 1.3.1', () => {
+    expect(NEWS_SINCE).toBe('1.3.1');
+    expect(newsTitle(NEWS_SINCE)).toBe('Nouveau dans Quai 1.3.1');
+    for (const seen of ['1.1.0', '1.2.0', '1.2.5', '1.2.9', '1.2.10', '1.3.0']) expect(newsState(seen, NEWS_SINCE, '1.3.1').visible(), seen).toBe(true);
+    for (const seen of ['', '1.3.1']) expect(newsState(seen, NEWS_SINCE, '1.3.1').visible(), seen || 'installation neuve').toBe(false);
+    // une appli encore en 1.3.0 n'annonce pas les nouveautés de la 1.3.1
+    expect(newsState('1.2.9', NEWS_SINCE, '1.3.0').visible()).toBe(false);
     const hz = harness({ settings: defaults() });
-    hz.ctx.news = newsState('1.2.10', NEWS_SINCE, '1.3.0');
+    hz.ctx.news = newsState('1.2.10', NEWS_SINCE, '1.3.1');
     const el = mount(homeScreen(hz.ctx));
-    expect(textOf(el.querySelector('.news-title'))).toBe('Nouveau dans Quai 1.3.0');
-    expect([...el.querySelectorAll('.news-lines p')].map((p) => textOf(p))).toEqual(NEWS_130.map(plain));
+    expect(textOf(el.querySelector('.news-title'))).toBe('Nouveau dans Quai 1.3.1');
+    expect([...el.querySelectorAll('.news-lines p')].map((p) => textOf(p))).toEqual([...NEWS_131, ...NEWS_130].map(plain));
   });
 
   it('les idées du message des lunettes (« ▶ Y aller » et ▲, favoris en accordéon, test de l’écran et rappel), puis le journal', () => {
@@ -844,30 +846,31 @@ describe('1.3.0 : bannière « Nouveau dans Quai 1.3.0 » du téléphone (PRD-1.
   });
 
   it('Quai Web : ni test de l’écran (pas de lunettes) ni rappel des messages (décision), « l’onglet Réglages » là où le téléphone dit « Réglages »', () => {
-    const web = newsState('1.2.10', NEWS_SINCE, '1.3.0', true).lines;
-    expect(web).toEqual([...NEWS_130_WEB]);
+    const all = newsState('1.2.10', NEWS_SINCE, '1.3.1', true).lines;
+    expect(all).toEqual([...news131Web(), ...NEWS_130_WEB]);
+    const web = all.slice(4);
     expect(web).toHaveLength(3);
     expect(web[0]).toBe(NEWS_130[0]);
     expect(web[1]).toBe(NEWS_130[1]);
     expect(web.some((l) => /Tester l’écran|téléphone/.test(l))).toBe(false);
     expect(web.some((l) => /message important|revient, deux fois/.test(l))).toBe(false);
     expect(web[2]).toMatch(/^Dans l’onglet Réglages, bouton « Réglages », puis Données : le journal/);
-    expect(newsState('1.2.10', NEWS_SINCE, '1.3.0').lines).toEqual([...NEWS_130]);
+    expect(newsState('1.2.10', NEWS_SINCE, '1.3.1').lines).toEqual([...NEWS_131, ...NEWS_130]);
   });
 
   it('depuis la 1.2.9 ou avant : les nouveautés sautées suivent, sans le détail des favoris « en bas de l’écran » (plus vrai)', () => {
     const gone = NEWS_1210[2];
     expect(gone).toMatch(/en bas de l’écran/);
-    expect(newsState('1.2.9', NEWS_SINCE, '1.3.0').lines).toEqual([...NEWS_130, ...NEWS_1210.filter((l) => l !== gone)]);
-    expect(newsState('1.2.8', NEWS_SINCE, '1.3.0').lines).toEqual([...NEWS_130, ...NEWS_1210.filter((l) => l !== gone), ...NEWS_129]);
-    expect(newsState('1.2.9', NEWS_SINCE, '1.3.0', true).lines).toEqual([...NEWS_130_WEB, ...NEWS_1210_WEB.filter((l) => l !== gone)]);
-    expect(newsState('1.2.8', NEWS_SINCE, '1.3.0', true).lines).toEqual([...NEWS_130_WEB, ...NEWS_1210_WEB.filter((l) => l !== gone), ...NEWS_129_WEB]);
-    for (const seen of ['1.2.9', '1.2.0', '1.1.0']) expect(newsState(seen, NEWS_SINCE, '1.3.0').lines.some((l) => /en bas de l’écran/.test(l)), seen).toBe(false);
+    expect(newsState('1.2.9', NEWS_SINCE, '1.3.1').lines).toEqual([...NEWS_131, ...NEWS_130, ...NEWS_1210.filter((l) => l !== gone)]);
+    expect(newsState('1.2.8', NEWS_SINCE, '1.3.1').lines).toEqual([...NEWS_131, ...NEWS_130, ...NEWS_1210.filter((l) => l !== gone), ...NEWS_129]);
+    expect(newsState('1.2.9', NEWS_SINCE, '1.3.1', true).lines).toEqual([...news131Web(), ...NEWS_130_WEB, ...NEWS_1210_WEB.filter((l) => l !== gone)]);
+    expect(newsState('1.2.8', NEWS_SINCE, '1.3.1', true).lines).toEqual([...news131Web(), ...NEWS_130_WEB, ...NEWS_1210_WEB.filter((l) => l !== gone), ...NEWS_129_WEB]);
+    for (const seen of ['1.2.9', '1.2.0', '1.1.0']) expect(newsState(seen, NEWS_SINCE, '1.3.1').lines.some((l) => /en bas de l’écran/.test(l)), seen).toBe(false);
   });
 
   it('typographie des nouveautés : insécables (dans le texte affiché), jamais de tiret long ni moyen, ni « vous »', () => {
     const hz = harness({ settings: defaults() });
-    hz.ctx.news = newsState('1.2.10', NEWS_SINCE, '1.3.0');
+    hz.ctx.news = newsState('1.2.10', NEWS_SINCE, '1.3.1');
     const el = mount(homeScreen(hz.ctx));
     for (const p of el.querySelectorAll('.news-lines p')) typoOk(p.textContent!);
     for (const l of [...NEWS_130, ...NEWS_130_WEB]) expect(l).not.toMatch(/[\u2013\u2014]|vous\b/);

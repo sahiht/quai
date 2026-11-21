@@ -32,6 +32,7 @@ import {
   loadingView,
   nearbyView,
   NEWS_LINES_130,
+  NEWS_LINES_131,
   NEWS_LINES_1210_KEPT,
   NEWS_LINES_129,
   NEWS_LINES_128,
@@ -772,23 +773,26 @@ describe('trajet à pied, déjà sur place, états vides et messages', () => {
       'toucher : continuer   double : quitter',
     ]);
     expect(check(firstRunView({ ...ctx, web: true })).at(-2)).toBe('position, langue et tes favoris, en une minute.');
-    // PRD-1.3.0 § 9 : un seul message ; depuis la 1.2.10, les lignes de la 1.3.0 ; d'avant, aussi celles de la 1.2.10
-    // encore vraies (« le détail en bas » des favoris ne l'est plus), puis celles de la 1.2.9 (une version entière ou
-    // rien : les plus anciennes ne tiennent plus) ; espaces insécables
-    const news = newsView(ctx, newsLines('1.2.10'));
-    expect(news.title).toBe('Quai 1.3.0');
-    expect(check(news)).toEqual(['Trajet : ligne « ▶ Y aller », ▲ revient des autres trajets.', 'Favoris : le détail s’ouvre sous le favori choisi.', 'Test de l’écran sur le téléphone ; message pas vu rappelé.', 'toucher : continuer']);
-    expect(check(newsView(ctx, newsLines('1.2.5'))).slice(3, 9)).toEqual([
-      'Y aller : guidé de porte à porte, écran calme.',
-      'Train ou bus déjà pris : « j’y descends ».',
-      '« imminent » : seulement d’après le temps réel.',
-      'Téléphone : l’accueil reprend celui des lunettes.',
-      'Réglages : tout derrière un seul bouton.',
+    // PRD-1.3.1 § 9 (décision du 21/11) : un seul message ; depuis la 1.3.0, les lignes de la 1.3.1 ; d'avant, aussi
+    // celles de la 1.3.0 (une version entière ou rien, huit lignes au plus : les plus anciennes ne tiennent plus) ;
+    // espaces insécables
+    const NEWS_131 = ['Guidage : trois points, Quai te suit, rien à faire.', 'Métro : la sortie à prendre après la descente.', '« dernier » : plus rien à prendre après celui-ci.', 'Heure de partir : calculée sur le vrai chemin à pied.'];
+    const news = newsView(ctx, newsLines('1.3.0'));
+    expect(news.title).toBe('Quai 1.3.1');
+    expect(check(news)).toEqual([...NEWS_131, 'toucher : continuer']);
+    expect(check(newsView(ctx, newsLines('1.2.5')))).toEqual([
+      ...NEWS_131,
+      'Trajet : ligne « ▶ Y aller », ▲ revient des autres trajets.',
+      'Favoris : le détail s’ouvre sous le favori choisi.',
+      'Test de l’écran sur le téléphone ; message pas vu rappelé.',
       'toucher : continuer',
     ]);
     expect(newsLines('1.1.0')).toEqual(newsLines('1.2.4'));
-    expect(newsLines('1.2.4')).toEqual(newsLines('1.2.8'));
-    expect(newsLines('1.2.7')).toEqual([...NEWS_LINES_130, ...NEWS_LINES_1210_KEPT, ...NEWS_LINES_129]);
+    expect(newsLines('1.2.4')).toEqual(newsLines('1.2.10'));
+    expect(newsLines('1.2.7')).toEqual([...NEWS_LINES_131, ...NEWS_LINES_130]);
+    // les lignes d'avant gardées pour mémoire (plus montrées : elles ne tiennent plus), encore vraies
+    expect(NEWS_LINES_1210_KEPT.map((l) => l.replace(/\u00a0/g, ' '))).toEqual(['Y aller : guidé de porte à porte, écran calme.', 'Train ou bus déjà pris : « ▶ Me guider jusqu’à … ».']);
+    expect(NEWS_LINES_129).toHaveLength(3);
     expect(NEWS_LINES_128).toHaveLength(3);
     expect(news.tap).toEqual({ kind: 'continue' });
     expect(newsView({ ...ctx, web: true }, newsLines('1.2.0')).items).toEqual(newsView(ctx, newsLines('1.2.0')).items);

@@ -377,7 +377,7 @@ describe('R4 : le guidage demande son chemin à pied avec le réglage (contrôle
   /** Options reçues par Core.walkRoute quand le guidage du trajet d'essai est lancé 5 min avant de partir. */
   async function asked(avoidSteps?: boolean): Promise<unknown[]> {
     const seen: unknown[] = [];
-    const base = settingsWith([], { seenVersion: '1.3.0' });
+    const base = settingsWith([], { seenVersion: '1.3.1' });
     const settings: Settings = avoidSteps === undefined ? base : { ...base, avoidSteps };
     const h = await guideSetup({
       settings,
@@ -422,7 +422,7 @@ describe('R4 : réglage enregistré (settings.ts)', () => {
       ...DEFAULT_SETTINGS,
       onboarded: true,
       maxWalkMin: 14,
-      seenVersion: '1.3.0',
+      seenVersion: '1.3.1',
       favorites: [{ kind: 'place', id: 'fav-gare', label: 'Gare', lat: 50.8455, lon: 4.3571, src: 'stop', propose: 'morning' }],
       display: { ...DEFAULT_SETTINGS.display, guide: false, alert: 'headUp', headUp: { axis: 'y', sign: 1, delta: 0.4, rest: 0.1 } },
       alerts: { ...DEFAULT_SETTINGS.alerts, leaveBeforeMin: 5 },

@@ -192,7 +192,7 @@ describe('PRD-1.3.1 § 6 et B11 : contrôleur', () => {
   }
 
   it('toucher sur « ▶ Me guider jusqu’à Gare Centrale » le guide ; la ligne est retenue ; la liste se rouvre sur lui', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0' }), core });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1' }), core });
     await h.until((x) => x.screen === 'home');
     let s = await open(h);
     expect(s.title).toBe('Bus 71 vers De Brouckère');
@@ -225,7 +225,7 @@ describe('PRD-1.3.1 § 6 et B11 : contrôleur', () => {
     const stored = JSON.stringify(noteAlight(emptyAlights(), 'stib|bus|71', { areaId: 'stib:FernandCocq', name: N('Fernand Cocq') }));
     const kv = createKV(memoryBackend());
     await kv.set(ALIGHTS_KEY, stored);
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0' }), core, kv });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1' }), core, kv });
     await h.until((x) => x.screen === 'home');
     const s = await open(h);
     expect(s.sel).toBe(1);
@@ -236,7 +236,7 @@ describe('PRD-1.3.1 § 6 et B11 : contrôleur', () => {
     const slow = createKV(memoryBackend());
     await slow.set(ALIGHTS_KEY, stored);
     const failing: KV = { get: (k) => slow.get(k), set: (k, v) => slow.set(k, v), getStrict: async (k) => (k === ALIGHTS_KEY ? Promise.reject(new Error('pas de réponse')) : slow.get(k)) };
-    const b = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0' }), core, kv: failing as ReturnType<typeof createKV> });
+    const b = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1' }), core, kv: failing as ReturnType<typeof createKV> });
     await b.until((x) => x.screen === 'home');
     await open(b);
     await b.gesture('down', 'down', 'tap');

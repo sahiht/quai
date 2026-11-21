@@ -70,7 +70,7 @@ const titleOf = (i: { a?: string; segs?: { t: string }[] }) => i.a || (i.segs ??
 
 describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () => {
   it('« Autour de moi », « Favoris   4 », 3 favoris en retrait, ligne vide, « Gares », « Lignes » et « Arrêts » ; « Aller à… » n’existe plus', async () => {
-    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.3.0' }), core: (now) => stubCore(now, { answers, ...sections() }) });
+    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.3.1' }), core: (now) => stubCore(now, { answers, ...sections() }) });
     const s = await h.until((x) => ready(x) && x.shown?.length === 3 && x.lines.at(-1) === 'Arrêts de bus, tram, métro   à choisir');
     expect(s.title).toBe('Quai');
     // Quai déjà utilisé (mise à jour) : pas d'aide des gestes, pas de pied du tout (9 lignes sous le titre)
@@ -89,7 +89,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
   });
 
   it('relief de la 1.2.1 : titres et textes de droite au plus clair, favoris en retrait au niveau 2', async () => {
-    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.3.0' }), core: (now) => stubCore(now, { answers, ...sections() }) });
+    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.3.1' }), core: (now) => stubCore(now, { answers, ...sections() }) });
     await h.until((x) => ready(x) && x.shown?.length === 3 && x.lines.at(-1) === 'Arrêts de bus, tram, métro   à choisir');
     const cs = h.sent();
     const by = (n: string) => cs.find((c) => c.name === n)!;
@@ -113,7 +113,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
   });
 
   it('toucher « Gares de train », « Lignes… » et « Arrêts… » ouvre leur écran ; la ligne vide ne se sélectionne pas', async () => {
-    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.3.0', lines: [LINES.w, LINES.gdnAll] }), core: (now) => stubCore(now, { answers, ...sections() }) });
+    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.3.1', lines: [LINES.w, LINES.gdnAll] }), core: (now) => stubCore(now, { answers, ...sections() }) });
     await h.until((x) => ready(x) && x.shown?.length === 3);
     // 1.3.1 : de « Autour de moi », « Favoris » et les 3 favoris jusqu'à École, puis « Gares de train » (la ligne vide est
     // sautée), « Lignes… », « Arrêts… »
@@ -140,7 +140,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
     // aide des gestes passée : l'accueil n'a pas de ligne de pied ; une ligne ajoutée ferait sortir la dernière (revue)
     const kv = createKV(memoryBackend());
     await kv.set(FIRST_USE_KEY, String(NOW - 8 * 86_400_000));
-    const h = await setup({ now: NOW, kv, settings: settingsWith(FOUR, { seenVersion: '1.3.0' }), core: (now) => stubCore(now, { answers }) });
+    const h = await setup({ now: NOW, kv, settings: settingsWith(FOUR, { seenVersion: '1.3.1' }), core: (now) => stubCore(now, { answers }) });
     const s = await h.until((x) => ready(x) && x.shown?.length === 3);
     expect(s.lines.slice(-3)).toEqual(['Gares de train   à choisir', 'Lignes de bus, tram, métro   à choisir', 'Arrêts de bus, tram, métro   à choisir']);
     expect(s.title).toBe('Quai');
@@ -164,7 +164,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
 
   it('§ 1.3, Quai Web : le toucher ouvre directement l’ajout dans l’onglet Réglages (#/gares/ajouter, #/lignes/ajouter)', async () => {
     const opened: string[] = [];
-    const h = await setup({ now: NOW, web: true, opened, settings: settingsWith(FOUR, { seenVersion: '1.3.0' }), core: (now) => stubCore(now, { answers }) });
+    const h = await setup({ now: NOW, web: true, opened, settings: settingsWith(FOUR, { seenVersion: '1.3.1' }), core: (now) => stubCore(now, { answers }) });
     const s = await h.until((x) => ready(x) && x.shown?.length === 3);
     expect(s.lines.slice(-3)).toEqual(['Gares de train   à choisir', 'Lignes de bus, tram, métro   à choisir', 'Arrêts de bus, tram, métro   à choisir']);
     await h.gesture('down', 'down', 'down', 'down', 'down', 'tap', 'down', 'tap', 'down', 'tap');
@@ -175,7 +175,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
 
   it('PRD-1.2.4 § 3 : à droite, le contenu des rubriques ; l’accueil ne demande aucun départ de gare ni de ligne', async () => {
     const calls: string[] = [];
-    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.3.0', stations: [STATIONS.namur, STATIONS.braine] }), core: (now) => stubCore(now, { answers, ...sections(calls) }) });
+    const h = await setup({ now: NOW, settings: full({ seenVersion: '1.3.1', stations: [STATIONS.namur, STATIONS.braine] }), core: (now) => stubCore(now, { answers, ...sections(calls) }) });
     const s = await h.until((x) => ready(x) && x.shown?.length === 3);
     expect(s.lines.slice(-3)).toEqual(['Gares de train   2 gares', 'Lignes de bus, tram, métro   1 ligne', 'Arrêts de bus, tram, métro   à choisir']);
     h.advance(30_000);
@@ -184,7 +184,7 @@ describe('CA-122.1 : l’accueil dans l’ordre du § 1.1, 3 favoris tenus', () 
     expect(calls.filter((c) => c.startsWith('board:') || c.startsWith('lineBoard:'))).toEqual([]);
     h.c.stop();
     // sans position : le même contenu, rien à calculer
-    const n = await setup({ now: NOW, pos: null, settings: full({ seenVersion: '1.3.0', stations: [STATIONS.namur, STATIONS.braine] }), core: (now) => stubCore(now, { answers, ...sections() }) });
+    const n = await setup({ now: NOW, pos: null, settings: full({ seenVersion: '1.3.1', stations: [STATIONS.namur, STATIONS.braine] }), core: (now) => stubCore(now, { answers, ...sections() }) });
     const ns = await n.until((x) => x.screen === 'home' && x.lines.includes('Autour de moi   sans position'));
     expect(ns.lines.slice(-3)).toEqual(['Gares de train   2 gares', 'Lignes de bus, tram, métro   1 ligne', 'Arrêts de bus, tram, métro   à choisir']);
     n.c.stop();

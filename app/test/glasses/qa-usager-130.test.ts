@@ -52,12 +52,12 @@ describe('contrôle usager 1.3.0 : vérification au départ sur Quai Web (PRD-1.
   });
 });
 
-describe('contrôle usager 1.3.0 : message « Quai 1.3.0 » des lunettes (PRD-1.3.0 § 9)', () => {
+describe('contrôle usager 1.3.0 : les lignes de la 1.3.0 du message des lunettes (PRD-1.3.0 § 9 ; 1.3.1 : sous celles de la 1.3.1)', () => {
   it('la 3e ligne dit quels messages sont rappelés : un message pas vu ; au pixel, avec ses insécables', () => {
     const l = lines(newsView(ctx(), newsLines('1.2.10')));
-    expect(l[2]).toBe('Test de l’écran sur le téléphone ; message pas vu rappelé.');
-    expect(newsLines('1.2.10')[2]).toMatch(/téléphone ; message pas vu rappelé\.$/);
+    expect(l[6]).toBe('Test de l’écran sur le téléphone ; message pas vu rappelé.');
+    expect(newsLines('1.2.10')[6]).toMatch(/téléphone ; message pas vu rappelé\.$/);
     // Quai Web : ni test de l'écran ni rappel, sa 3e ligne ne change pas
-    expect(newsLines('1.2.10', true)[2]).not.toMatch(/rappel/);
+    expect(newsLines('1.2.10', true)[6]).not.toMatch(/rappel/);
   });
 });
