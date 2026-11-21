@@ -4,7 +4,7 @@
 import type { Mode, Names, Op } from '../../../shared/types';
 import { normalizeForSearch, prettyName } from '../../../shared/names';
 import { normalizeId } from '../../../shared/types';
-import type { Board, Departure, Leg, LineFilter } from './api';
+import type { Board, Departure, Journey, Leg, LineFilter } from './api';
 import { lowerBound, type PreparedArea } from './areas';
 import { addDays } from './freshness';
 import { isSncbBus } from './means';
@@ -434,6 +434,36 @@ export function lastLineKey(op: Op, mode: Mode, line: string): string {
 export function tomorrowAt(t: number): number {
   const p = brusselsParts(t);
   return gtfsTime(p.h < DAY_START_HOUR ? p.date : addDays(p.date, 1), DAY_START_HOUR * 60);
+}
+
+/**
+ * 1.3.1 (R3, règle du propriétaire du 20/11 : « dernier » veut dire « après celui-ci, plus rien que la personne puisse
+ * prendre pour ce déplacement ») : parmi les trajets déjà calculés pour la même destination (autres trajets, « Le
+ * suivant », « Plus tard », celui de « Si tu le rates » ; sur le téléphone : les cartes de la même recherche), un autre
+ * part après ce véhicule et avant demain (04:00 qui suit, journée de service), quels que soient sa ligne, son réseau et
+ * ses changements : son premier véhicule part plus tard, aucun de ses véhicules n'est supprimé. Aucun calcul ni réseau
+ * de plus ; sans autre trajet calculé, faux. (Écrite pour l'écran du trajet des lunettes, glasses/views.ts, qui
+ * l'exporte toujours ; ici pour servir aussi au téléphone.)
+ */
+export function laterJourney(leg: Pick<Leg, 'dep'>, j: Journey, journeys: readonly Journey[]): boolean {
+  const end = tomorrowAt(leg.dep);
+  return journeys.some((x) => {
+    if (x === j || x.id === j.id) return false;
+    const rides = x.legs.filter((r) => r.kind === 'ride');
+    if (!rides.length || rides.some((r) => r.cancelled)) return false;
+    return rides[0].dep > leg.dep && rides[0].dep < end;
+  });
+}
+
+/**
+ * 1.3.1 (R3, PRD-1.3.1 § 15) : l'étape en véhicule `leg` du trajet `j` porte-t-elle « dernier » là où le trajet est
+ * montré avec les autres trajets de la même réponse (`journeys`) ? La marque du cœur (`leg.last`), jamais sur un
+ * véhicule supprimé, et pas quand un autre de ces trajets part plus tard avant demain (laterJourney) : la personne
+ * peut encore le prendre. Une seule règle pour l'écran du trajet des lunettes (stepRows) et les cartes de la
+ * recherche du téléphone (rideDetail) ; elle ne fait que retirer la marque.
+ */
+export function tripLegLast(leg: Pick<Leg, 'dep' | 'last' | 'cancelled'>, j: Journey, journeys: readonly Journey[]): boolean {
+  return !!leg.last && !leg.cancelled && !laterJourney(leg, j, journeys);
 }
 
 /** Fenêtre des départs connus : de `from` à `to` ; `ends` : les 04:00 (débuts de « demain ») des jours, dans l'ordre. */

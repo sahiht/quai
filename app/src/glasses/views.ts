@@ -14,7 +14,7 @@ import type { Board, CoreStatus, Departure, DepartureStops, Favorite, FavoriteAn
 import { labelOf } from '../core/api';
 import { favoriteTitle, placesOf } from '../core/favorites';
 import { displayLabel, HOLIDAY_TEXT, holidayName, longestWalk, walksMore } from '../core/means';
-import { tomorrowAt } from '../core/boards';
+import { laterJourney, tripLegLast } from '../core/boards';
 import { shortAddress } from '../core/text';
 import { areaLabel, displayName, distanceM, hhmm, lineLabel, minutesUntil } from '../core/util';
 import type { Mode, Names } from '../../../shared/types';
@@ -1468,8 +1468,9 @@ function stepRows(j: Journey, leave: number, ctx: ViewCtx, journeys: readonly Jo
     const tight = margin !== undefined && margin <= MARGIN_SHOWN_MAX && ctx.now < leg.dep;
     const right = leg.cancelled ? 'SUPPRIMÉ' : tight ? marginText(margin!) : hhmm(leg.arr);
     // l'arrêt de descente coupé au mot avant la colonne de droite (jamais au milieu d'un mot, jamais l'heure)
-    // 1.3.1 (R3) : pas de « , dernier » quand un autre trajet déjà calculé part plus tard avant demain (laterJourney)
-    const tail = (laterJourney(leg, j, journeys) ? undefined : lastMark(leg)) ?? '';
+    // 1.3.1 (R3) : pas de « , dernier » quand un autre trajet déjà calculé part plus tard avant demain (tripLegLast,
+    // la règle commune avec les cartes du téléphone)
+    const tail = tripLegLast(leg, j, journeys) ? LAST_MARK : '';
     const room = STEP_ROW_PX - textWidth(vehicle) - textWidth(right);
     const to = `→ ${fitName('', displayName(leg.to.name, l), tail, room - textWidth('→ '))}`;
     const item: Item = {
@@ -1624,23 +1625,9 @@ export function inMissWindow(j: Journey, now: number, leave = j.leaveAt): boolea
   return go - now <= MISS_WINDOW_MIN * 60_000;
 }
 
-/**
- * 1.3.1 (R3, règle du propriétaire du 20/11 : « dernier » veut dire « après celui-ci, plus rien que la personne puisse
- * prendre pour ce déplacement ») : parmi les trajets déjà calculés pour la même destination (autres trajets, « Le
- * suivant », « Plus tard », celui de « Si tu le rates »), un autre part après ce véhicule et avant demain (04:00 qui
- * suit, journée de service), quels que soient sa ligne, son réseau et ses changements : son premier véhicule part plus
- * tard, aucun de ses véhicules n'est supprimé. L'écran du trajet ne dit alors pas « , dernier » sur cette étape. Aucun
- * calcul ni réseau de plus ; sans autre trajet calculé, faux : la marque du cœur reste. Ne fait que retirer la marque.
- */
-export function laterJourney(leg: Pick<Leg, 'dep'>, j: Journey, journeys: readonly Journey[]): boolean {
-  const end = tomorrowAt(leg.dep);
-  return journeys.some((x) => {
-    if (x === j || x.id === j.id) return false;
-    const rides = x.legs.filter((r) => r.kind === 'ride');
-    if (!rides.length || rides.some((r) => r.cancelled)) return false;
-    return rides[0].dep > leg.dep && rides[0].dep < end;
-  });
-}
+// 1.3.1 (R3) : laterJourney vit dans le cœur (core/boards.ts), avec la règle commune tripLegLast : la même pour
+// l'écran du trajet des lunettes et les cartes de la recherche du téléphone. Toujours exportée d'ici.
+export { laterJourney };
 
 /**
  * 1.2.5 (PRD-1.2.5 § 1) : « Si tu le rates : arrivée 09:57, 59 min plus tard ». Qui rate son départ est à l'arrêt ou à
