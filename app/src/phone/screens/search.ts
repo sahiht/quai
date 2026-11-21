@@ -7,13 +7,14 @@
  * proposée quand il n'y a pas de trajet complet (M5).
  */
 import type { Core, Endpoint, Favorite, FavoriteTrip, Journey, Leg, Mode, PlanResult, Settings } from '../../core/api';
+import { tripLegLast } from '../../core/boards';
 import { placeOf, placesOf } from '../../core/favorites';
 import { LIMITS, newId } from '../../settings';
 import { apos } from '../../core/typo';
 import { displayName, distanceM, hhmm, mainMode } from '../../core/util';
 import type { AreaSummary, Op } from '../../../../shared/types';
 import type { AreaRef } from '../../glasses/types';
-import { vehicleOf } from '../../glasses/format';
+import { LAST_MARK, vehicleOf } from '../../glasses/format';
 import { header, type PhoneCtx } from '../app';
 import { h, ICON } from '../dom';
 import { placeField, privacyNote, withRecent, type FieldChoice } from '../field';
@@ -111,8 +112,14 @@ export function keepFavorite(s: Settings, from: End, to: End, now = Date.now()):
 
 const rides = (j: Journey): Leg[] => j.legs.filter((l) => l.kind === 'ride');
 
-/** Détail sous les étiquettes : « Voie 9 à Bruxelles-Nord, à l’heure » (1.0, inchangé). */
-export function rideDetail(j: Journey, lang: 'fr' | 'nl' | 'local'): string {
+/**
+ * Détail sous les étiquettes : « Voie 9 à Bruxelles-Nord, à l’heure », « Tram 81 à Flagey, à l’heure, dernier ».
+ * 1.3.1 (R3, PRD-1.3.1 § 15, contrôle usager final) : « dernier », le mot des lunettes (plus « dernier passage »), avec
+ * la règle de leur écran du trajet, par la même fonction (tripLegLast) : pas de marque quand un autre trajet de la même
+ * liste (`journeys`, les cartes de la recherche) part plus tard avant demain ; un train avec une voie la porte comme
+ * les autres véhicules.
+ */
+export function rideDetail(j: Journey, lang: 'fr' | 'nl' | 'local', journeys: readonly Journey[] = [j]): string {
   const first = rides(j)[0];
   if (!first) return 'À pied, sans transport';
   const p = first.newPlatform || first.platform;
@@ -120,8 +127,9 @@ export function rideDetail(j: Journey, lang: 'fr' | 'nl' | 'local'): string {
   const where = apos(displayName(first.from.name, lang));
   const delay = first.delayMin ?? 0;
   const status = first.cancelled ? 'supprimé' : delay > 0 ? `retard de ${delay} min annoncé` : first.rt ? 'à l’heure' : 'horaire prévu, sans temps réel';
-  if (first.mode === 'train' && p) return `Voie ${p} à ${where}, ${status}`;
-  return `${vehicleOf(first)} à ${where}, ${status}${first.last && !first.cancelled ? ', dernier passage' : ''}`;
+  const last = tripLegLast(first, j, journeys) ? LAST_MARK : '';
+  const what = first.mode === 'train' && p ? `Voie ${p}` : vehicleOf(first);
+  return `${what} à ${where}, ${status}${last}`;
 }
 
 export function searchScreen(ctx: PhoneCtx): HTMLElement {
@@ -290,7 +298,7 @@ export function searchScreen(ctx: PhoneCtx): HTMLElement {
       h('span', { class: 'tagrow' }, label ? h('span', { class: 'tag' }, label) : null),
       h('span', { class: 'r1' }, h('span', { class: 'time' }, timesText(j, now)), h('span', { class: 'dur' }, typo(summaryText(j)))),
       means ? h('span', { class: 'means' }, typo(means)) : null,
-      h('span', { class: 'det' }, typo(rideDetail(j, lang()))),
+      h('span', { class: 'det' }, typo(rideDetail(j, lang(), r.journeys))),
       phrase ? h('span', { class: 'why' }, typo(phrase)) : null,
     );
     radio.addEventListener('click', () => select(i));

@@ -105,7 +105,7 @@ describe('1.3.1 : contrat, heure prévue d’un train en retard dans les autres 
     r.j = journeyOf([walkLeg(S.avroy, S.guillemins, at('08:15'), 13), ic2, walkLeg(S.central, S.gareCentrale, ic2.arr, 3, ic2.schedArr)], 'jic2', at('08:15'));
     const s2 = step(r, at('07:16:10'), fix(toward(P.avroy, P.guillemins, 70), at('07:16:10'), { speed: 1.3 }));
     const re = m(s2.moment, 'replan');
-    expect(re).toMatchObject({ reason: 'cancelled', next: { depAt: at('08:33'), sched: at('08:30'), platform: '3' } });
+    expect(re).toMatchObject({ reason: 'cancelled', next: { depAt: at('08:33'), sched: at('08:30'), platform: '3', rt: true } });
     expect(re).not.toHaveProperty('planned');
   });
 });

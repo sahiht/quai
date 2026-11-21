@@ -405,7 +405,9 @@ function alightMoment(m: Extract<Moment, { kind: 'alight' }>, ctx: ViewCtx): Mom
 
 /**
  * Imprévu : ce qui est perdu, puis le nouveau trajet (1.3.1, B12, L4 : « Nouveau trajet : IC à 08:42, voie 5 » ; B13 : « IC
- * 08:42 +3 » pour un train en retard) et son arrivée. 1.3.1 (A3, I1, `planned`) : véhicule raté sans temps réel, resté à
+ * 08:42 +3 » pour un train en retard) et son arrivée. Correctif du 21/11 : l'heure du nouveau véhicule s'écrit comme
+ * dans les autres messages (vehicleAtText, une seule règle) : « ~08:42 » quand elle est prévue sans temps réel
+ * (`next.rt` absent ou faux), « 08:42 » quand elle vient du temps réel. 1.3.1 (A3, I1, `planned`) : véhicule raté sans temps réel, resté à
  * l'arrêt : rien ne dit qu'il est passé, pas de « est parti » : le nouveau trajet d'abord.
  */
 function replanMoment(m: Extract<Moment, { kind: 'replan' }>, ride: boolean, ctx: ViewCtx): MomentView {
@@ -424,9 +426,9 @@ function replanMoment(m: Extract<Moment, { kind: 'replan' }>, ride: boolean, ctx
     }
   } else if (ride) {
     // « J'y descends » : le prochain passage du même véhicule, si le tableau de l'arrêt le donne (§ 3.6)
-    lines.push(news(`Prochain${NB}: ${vehicleAtText(m.next.vehicle, m.next.depAt, true, ctx, m.next.sched)}`));
+    lines.push(news(`Prochain${NB}: ${vehicleAtText(m.next.vehicle, m.next.depAt, m.next.rt ?? false, ctx, m.next.sched)}`));
   } else {
-    lines.push(news(`Nouveau trajet${NB}: ${vehicleAtText(m.next.vehicle, m.next.depAt, true, ctx, m.next.sched)}${m.next.platform ? `, voie ${m.next.platform}` : ''}`));
+    lines.push(news(`Nouveau trajet${NB}: ${vehicleAtText(m.next.vehicle, m.next.depAt, m.next.rt ?? false, ctx, m.next.sched)}${m.next.platform ? `, voie ${m.next.platform}` : ''}`));
     if (m.arr !== undefined) lines.push(arr());
   }
   return { lines, hints: HINTS.guide };

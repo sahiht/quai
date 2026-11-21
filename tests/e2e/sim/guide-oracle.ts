@@ -231,8 +231,9 @@ export function replanMissedLines(lost: OLeg, next: OJourney | null, oldArr: num
   const p = r?.newPlatform ?? r?.platform;
   if (SPEC.v131) {
     // 1.3.1 (B12, L4) : « Nouveau trajet : IC à 08:42, voie 5 » ; B13 : un train en retard « IC 08:42 +3, voie 5 »
-    // (« ~ » devant une heure sans temps réel : le PRD écrit « IC à 08:42 » et ne tranche pas, les deux formes admises)
-    const when = !r ? '' : trainLate(r) ? esc(vehicleWhen(r)) : `${esc(vehicle(r))} à ~?${esc(hm(r.dep))}`;
+    // correctif du 21/11 (tranché) : « ~ » devant une heure prévue sans temps réel, comme dans les autres messages
+    // (`time`) : « IC à ~08:42 » ; jamais devant une heure du temps réel. Une seule forme admise.
+    const when = !r ? '' : trainLate(r) ? esc(vehicleWhen(r)) : `${esc(vehicle(r))} à ${esc(time(r.dep, r.rt))}`;
     const first = r ? new RegExp(`^Nouveau trajet : ${when}${isTrain(r) && p ? `, voie ${esc(p)}` : ''}$`) : /^Nouveau trajet : /;
     return [lostRe, first, `arrivée ${hm(next.arr)}, ${Math.round((next.arr - oldArr) / 60_000)} min plus tard`];
   }

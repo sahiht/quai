@@ -449,7 +449,9 @@ export function assemble(g: RoutingGraph, from: LatLon, to: LatLon, s: Snap, t: 
   for (let i = 0; i < n; i++) coords.push({ lat: round7(lat[i] * WALK_UNIT), lon: round7(lon[i] * WALK_UNIT) });
   coords[0] = { lat: from.lat, lon: from.lon };
   if (n > 1) coords[n - 1] = { lat: to.lat, lon: to.lon };
-  return { from, to, coords, lengthM: Math.round(lengthM * 10) / 10, maneuvers: cleanManeuvers(raw, lengthM), source: 'osm', builtAt };
+  // 1.3.1 (A6, correctif du 21/11) : le raccord de départ (du point demandé à la voie) est signalé au guidage
+  const joinAt = joinFrom && sIdx > 0 && sIdx < n ? { joinAt: sIdx } : {};
+  return { from, to, coords, lengthM: Math.round(lengthM * 10) / 10, maneuvers: cleanManeuvers(raw, lengthM), source: 'osm', ...joinAt, builtAt };
 }
 
 export type RouteFail = 'nosnap' | 'nopath';
