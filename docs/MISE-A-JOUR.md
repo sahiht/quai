@@ -12,7 +12,7 @@ Pas de nouvel écran à apprendre : Quai dit plus clairement ce qu'il fait.
 - Dans la liste des arrêts d'un bus, d'un tram, d'un métro ou d'un train : « ▶ Me guider jusqu'à … », avec le nom de l'arrêt choisi.
 - Accueil, dans les lunettes et sur le téléphone : Autour de moi, Favoris, Gares, Lignes, Arrêts.
 - En descendant du métro à Bruxelles : la sortie à prendre (« Sortie : Boulevard Anspach »). Les sorties arrivent avec les données de la première nuit après la mise à jour.
-- « dernier » à côté du dernier départ avant demain, sur tous les réseaux.
+- « dernier » à côté du dernier départ que tu peux encore prendre avant demain, sur tous les réseaux.
 - Sur le téléphone, dans « Réglages » : « Éviter les escaliers » et, dans « Affichage », « Plein soleil ». Sur la carte « En cours » : « Copier mon heure d'arrivée ».
 - Dans Quai Web : « Essayer en accéléré », sous « Y aller » d'un favori, pour voir tout un guidage en quelques minutes.
 
