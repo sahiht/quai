@@ -123,10 +123,41 @@ describe('textes du magasin (app/store)', () => {
     expect(desc).toMatch(/[Uu]sage personnel et non commercial/);
     const version = JSON.parse(read('app.json')).version;
     const notes = read(`store/changelog/${version}.txt`);
-    expect(codePoints(notes)).toBeLessThanOrEqual(500);
-    const lines = notes.trim().split('\n').filter(Boolean);
+    // 1.3.1 (finitions du 21/11) : les notes sont celles de la release GitHub. Une première partie, les nouveautés
+    // (1 à 8 lignes courtes, dans la limite du magasin : c'est elle qui irait sur la fiche), puis, après une ligne
+    // vide, une partie facultative « Limites connues » (4 lignes au plus), pour la release seulement.
+    const [news, limits, ...rest] = notes.replace(/\r\n/g, '\n').trim().split(/\n\s*\n/);
+    expect(rest).toEqual([]);
+    expect(codePoints(news)).toBeLessThanOrEqual(500);
+    const lines = news.split('\n').filter(Boolean);
     expect(lines.length).toBeGreaterThanOrEqual(1);
-    expect(lines.length).toBeLessThanOrEqual(3);
+    expect(lines.length).toBeLessThanOrEqual(8);
+    for (const l of lines) expect(codePoints(l), l).toBeLessThanOrEqual(100);
+    if (limits !== undefined) {
+      const [title, ...known] = limits.split('\n').filter(Boolean);
+      expect(title).toBe('Limites connues :');
+      expect(known.length).toBeGreaterThanOrEqual(1);
+      expect(known.length).toBeLessThanOrEqual(4);
+      for (const l of known) expect(codePoints(l), l).toBeLessThanOrEqual(100);
+    }
+    // ni tiret long ni tiret moyen, apostrophe typographique, tutoiement
+    expect(notes).not.toMatch(/[\u2014\u2013']/);
+    expect(notes).not.toMatch(/\b(vous|votre|vos)\b/i);
+  });
+
+  it('notes de la 1.3.1 : les vraies nouveautés et les limites connues (finitions du 21/11)', () => {
+    const notes = read('store/changelog/1.3.1.txt');
+    const [news, limits] = notes.trim().split(/\n\s*\n/);
+    for (const word of ['trois points', '« masquer »', '« Où tu en es »', 'Le nom de l’arrêt où tu marches', 'diminutif', 'L’heure de partir', 'vrai chemin à pied', '« ▶ Me guider jusqu’à … »', 'Accueil : Autour de moi, Favoris, Gares, Lignes, Arrêts.', 'la sortie', '« dernier » sur tous les réseaux', '« Éviter les escaliers »', '« Plein soleil »', '« Copier mon heure d’arrivée »', 'Quai Web', 'en accéléré']) {
+      expect(news, word).toContain(word);
+    }
+    expect(limits.split('\n')).toEqual([
+      'Limites connues :',
+      'Un chemin sans marches est manqué dans environ 6 % des cas.',
+      'Pas de « Sortie » vers un tram ou un métro de la même station.',
+      'L’heure de partir avance de 5 min au plus.',
+      'Les sorties du métro arrivent avec les données de la première nuit.',
+    ]);
   });
 
   it('confidentialité : position, tuiles, relais, ni compte ni suivi, domaines', () => {
