@@ -23,9 +23,9 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-// Message des nouveautés (PRD-1.3.0 § 9) : la version de l'appli est fixée à 1.3.0 (celle de la publication) ; son titre
+// Message des nouveautés (PRD-1.3.1 § 9, décision du 21/11) : la version de l'appli est fixée à 1.3.1 (celle de la publication) ; son titre
 // et ses lignes viennent des écrans (NEWS_TITLE, newsLines), le contrôleur décide quand le montrer (NEWS_SINCE).
-vi.mock('../../src/version', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../src/version')>()), APP_VERSION: '1.3.0' }));
+vi.mock('../../src/version', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../src/version')>()), APP_VERSION: '1.3.1' }));
 import type { Core, Journey, JourneyLabel, Leg } from '../../src/core/api';
 import { textWidth } from '../../src/glasses/font';
 import { layoutPage, geometry, WIDTHS } from '../../src/glasses/layout';
@@ -1136,7 +1136,7 @@ describe('« Moins de marche » (1.1.1, CA-MW.6, CA-MW.12) avec « Le plus court
 });
 
 describe('S2 : message des nouveautés, GlassesApi', () => {
-  it('PRD-1.3.0 § 9 (et CA-126.7, CA-3.2, CA-S2.2, CA-M7.1) : les nouveautés une seule fois après la mise à jour depuis la 1.0 ; T mène à l’accueil', async () => {
+  it('PRD-1.3.1 § 9 (et PRD-1.3.0 § 9, CA-126.7, CA-3.2, CA-S2.2, CA-M7.1) : les nouveautés une seule fois après la mise à jour depuis la 1.0 ; T mène à l’accueil', async () => {
     const a = await setupController({ settings: preset(), keepSeen: true });
     expect(a.last()).toMatchObject({ screen: 'message', title: NEWS_TITLE });
     expect(a.last().lines).toEqual([...newsLines(preset().seenVersion).map(nb), 'toucher : continuer']);
@@ -1152,9 +1152,9 @@ describe('S2 : message des nouveautés, GlassesApi', () => {
     b.c.stop();
   });
 
-  it('nouveautés depuis la 1.1 à la 1.2.10 (lignes selon la version vue) ; une seule fois ; jamais avec la version vue 1.3.0', async () => {
+  it('nouveautés depuis la 1.1 à la 1.3.0 (lignes selon la version vue) ; une seule fois ; jamais avec la version vue 1.3.1', async () => {
     expect(preset11().seenVersion).toBe('1.1.0');
-    for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3', '1.2.4', '1.2.5', '1.2.6', '1.2.7', '1.2.8', '1.2.9', '1.2.10']) {
+    for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3', '1.2.4', '1.2.5', '1.2.6', '1.2.7', '1.2.8', '1.2.9', '1.2.10', '1.3.0']) {
       const a = await setupController({ settings: { ...preset11(), seenVersion: seen }, keepSeen: true });
       expect(a.last()).toMatchObject({ screen: 'message', title: NEWS_TITLE });
       expect(a.last().lines).toEqual([...newsLines(seen).map(nb), 'toucher : continuer']);
@@ -1167,7 +1167,7 @@ describe('S2 : message des nouveautés, GlassesApi', () => {
       expect(b.screens().some((s) => s.title === NEWS_TITLE)).toBe(false);
       b.c.stop();
     }
-    const d = await setupController({ settings: { ...preset11(), seenVersion: '1.3.0' }, keepSeen: true });
+    const d = await setupController({ settings: { ...preset11(), seenVersion: '1.3.1' }, keepSeen: true });
     await d.until(homeReady);
     expect(d.screens().some((s) => s.title === NEWS_TITLE)).toBe(false);
     d.c.stop();

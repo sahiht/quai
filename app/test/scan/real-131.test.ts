@@ -116,7 +116,7 @@ describe.skipIf(!DIR)('1.3.1 : balayage des noms ajoutés aux rangées des lunet
     if (LIMIT > 0) list = list.slice(0, LIMIT);
 
     const now = gtfsTime(meta.serviceDates[0], 8 * 60);
-    const ctx: ViewCtx = { now, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }) };
+    const ctx: ViewCtx = { now, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }) };
     const N = (s: string): Names => ({ fr: s, nl: s });
     const errors: string[] = [];
     const err = (msg: string): void => {

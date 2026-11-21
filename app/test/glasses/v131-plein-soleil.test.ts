@@ -161,7 +161,7 @@ describe('R5 : réglage enregistré (settings.ts)', () => {
 
 describe('R5 : les lunettes suivent le réglage (contrôleur)', () => {
   it('allumé sur le téléphone : les niveaux de la page changent aussitôt ; éteint : ceux d’avant', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0' }) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1' }) });
     await h.until((s) => s.screen === 'home');
     const before = h.sent().map((c) => [c.name, c.level] as const);
     expect(before.some(([, l]) => l === 2)).toBe(true);

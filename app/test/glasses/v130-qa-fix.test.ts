@@ -216,7 +216,7 @@ interface GuidedOpts {
 
 /** Guidage lancé par le bouton « Y aller » (Bureau), « Où tu en es » laissé s'effacer. */
 async function guided(o: GuidedOpts = {}) {
-  const h = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { answers }, ...o.kit });
+  const h = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { answers }, ...o.kit });
   const imu = plug(h, o);
   await h.until(homeReady);
   await h.c.goFavorite('fav-bureau');
@@ -245,7 +245,7 @@ async function reopen(h: Kit, o: GuidedOpts = {}, state: typeof out = out) {
   const kv = h.kv;
   const now = h.clock.now();
   out = state;
-  const h2 = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { answers }, kv, now: now + 10 * SEC });
+  const h2 = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { answers }, kv, now: now + 10 * SEC });
   const imu = plug(h2, o);
   await h2.settle();
   return { h2, imu };
@@ -317,11 +317,11 @@ describe('point 1 : le journal arrive après le démarrage (attachJournal)', () 
   it('le premier journal reçu reste ; contrôleur arrêté : plus rien n’est reçu', async () => {
     const a = memoryJournal();
     const b = memoryJournal();
-    const h = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { answers } });
+    const h = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { answers } });
     h.c.attachJournal(a.journal);
     h.c.attachJournal(b.journal);
     expect(depsOf(h).journal).toBe(a.journal);
-    const h2 = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { answers } });
+    const h2 = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { answers } });
     h2.c.stop();
     h2.c.attachJournal(b.journal);
     expect(depsOf(h2).journal).toBeUndefined();
@@ -399,7 +399,7 @@ describe('point 4 : rappels après une réouverture de Quai', () => {
     expect(reminds(h)).toEqual(['QUAI_REMIND board 1']);
     // instantané pris tout de suite (avant l'enregistrement différé) ; nouvelle WebView au stockage vide
     const snap = JSON.stringify(h.c.snapshot());
-    const h2 = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { answers }, now: h.clock.now() + 5 * SEC });
+    const h2 = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { answers }, now: h.clock.now() + 5 * SEC });
     h2.c.restore(snap);
     await h2.settle();
     expect(h2.c.followed?.guide?.remind).toEqual([{ id: 'board:j-bureau:1', n: 1 }]);

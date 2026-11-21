@@ -43,7 +43,7 @@ const listReady = (s: Screen) => s.screen === 'favorites' && !s.lines.some((l) =
 
 describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »', () => {
   it('titre « Favoris » ; une ligne par favori comme l’accueil ; 1.3.0 : plus de ligne du détail en bas (accordéon, PRD-1.3.0 § 7)', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith(FAVS, { seenVersion: '1.3.0' }), core: (now) => stubCore(now, { answers }) });
+    const h = await setup({ now: NOW, settings: settingsWith(FAVS, { seenVersion: '1.3.1' }), core: (now) => stubCore(now, { answers }) });
     await h.until((x) => x.screen === 'home' && x.shown?.length === 2);
     // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi » (curseur à l'ouverture), « Favoris » juste dessous
     await h.gesture('down', 'tap');
@@ -89,7 +89,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
 
   it('adresses récentes : la ligne pâle « Adresses récentes », 3 au plus, réponse au format de l’accueil, jamais sélectionnée', async () => {
     const plan = (now: number) => [door('j-r', now + 9 * MIN, now + 80 * MIN)];
-    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0', recent: RECENT }), core: (now) => stubCore(now, { answers, plan }) });
+    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1', recent: RECENT }), core: (now) => stubCore(now, { answers, plan }) });
     await h.until((x) => x.screen === 'home' && x.shown?.length === 1);
     // 1.3.1 (§ 8) : de « Autour de moi », « Favoris » juste dessous
     await h.gesture('down', 'tap');
@@ -130,7 +130,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
     expect(planHomeText(undefined, NOW)).toBe('…');
     const here = { lat: RECENT[0].lat, lon: RECENT[0].lon };
     const opened: string[] = [];
-    const h = await setup({ now: NOW, pos: here, web: true, opened, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0', recent: RECENT.slice(0, 1) }), core: (now) => stubCore(now, { answers }) });
+    const h = await setup({ now: NOW, pos: here, web: true, opened, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1', recent: RECENT.slice(0, 1) }), core: (now) => stubCore(now, { answers }) });
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'favorites' });
     const s = await h.until((x) => listReady(x) && x.lines.some((l) => l.startsWith('Rue Neuve 1')));
@@ -142,7 +142,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
   });
 
   it('sans favori : « Ajouter un favori » en premier ; toucher : comment en ajouter (REVUE-USAGE n° 2)', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0' }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1' }), core: (now) => stubCore(now) });
     const home = await h.until((x) => x.screen === 'home' && x.lines.includes('Autour de moi   9 arrêts'));
     // 1.3.1 (§ 8) : « Autour de moi » en tête, « Ajouter un favori » juste dessous
     expect(home.lines.slice(0, 3)).toEqual(['Près de Arrêt 1', 'Autour de moi   9 arrêts', 'Ajouter un favori']);
@@ -160,7 +160,7 @@ describe('CA-122.2 : favoris, puis adresses récentes, puis « Autre adresse »'
   it('« Aller à… » n’existe plus : ni sur l’accueil, ni comme écran ; un état de la 1.2.1 sur « Aller à… » ouvre « Favoris »', async () => {
     const snap = { stack: [{ route: { screen: 'home' }, sel: 0, top: 0 }, { route: { screen: 'places' }, sel: 2, top: 0 }] };
     expect(parseNav(snap)?.stack.map((f) => f.route)).toEqual([{ screen: 'home' }, { screen: 'favorites' }]);
-    const h = await setup({ now: NOW, settings: settingsWith(FAVS, { seenVersion: '1.3.0' }), core: (now) => stubCore(now, { answers }) });
+    const h = await setup({ now: NOW, settings: settingsWith(FAVS, { seenVersion: '1.3.1' }), core: (now) => stubCore(now, { answers }) });
     await h.until((x) => x.screen === 'home');
     expect(h.screens().every((x) => !x.lines.some((l) => l.startsWith('Aller à')))).toBe(true);
     h.c.restore(JSON.stringify({ v: 2, nav: snap }));

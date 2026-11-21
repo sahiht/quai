@@ -19,7 +19,7 @@ import { NOW, cleanupKit, door, guideSetup, type Kit, type KitOptions } from './
 import { MIN, PLACES, boardOf, dep, journey, settingsWith } from './helpers';
 
 const N = (fr: string) => ({ fr, nl: fr });
-const settings = (guide = true) => settingsWith([PLACES.bureau], { seenVersion: '1.3.0', display: { ...settingsWith([]).display, guide } });
+const settings = (guide = true) => settingsWith([PLACES.bureau], { seenVersion: '1.3.1', display: { ...settingsWith([]).display, guide } });
 const homeReady = (s: { screen: string; lines: string[] }) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l));
 const screensOf = (h: Kit) => h.c.state.nav.stack.map((f) => f.route.screen);
 

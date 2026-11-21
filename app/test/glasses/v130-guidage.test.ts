@@ -403,7 +403,7 @@ interface GuidedOpts {
 
 /** Guidage lancé par le bouton « Y aller » (Bureau), « Où tu en es » laissé s'effacer. */
 async function guided(o: GuidedOpts = {}) {
-  const h = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { answers }, ...o.kit });
+  const h = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { answers }, ...o.kit });
   if (o.display) withDisplay(h, o.display);
   const imu: { on: boolean; pace?: number }[] = [];
   const port = depsOf(h).platform.glasses;
@@ -613,7 +613,7 @@ describe('PRD-1.3.0 § 6.2 : « vu » par le capteur de mouvement', () => {
   }
 
   it('hors d’un guidage : aucun appel au capteur, quels que soient les écrans rendus', async () => {
-    const h = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { answers } });
+    const h = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { answers } });
     withDisplay(h, { headUp: HEAD });
     const imu: boolean[] = [];
     depsOf(h).platform.glasses.imu = async (on) => {
@@ -897,7 +897,7 @@ describe('PRD-1.3.0 § 6.4 : journal du trajet', () => {
     const kv = h.kv;
     const now = h.clock.now();
     h.c.stop();
-    const h2 = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { answers }, kv, now: now + 10 * SEC });
+    const h2 = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { answers }, kv, now: now + 10 * SEC });
     depsOf(h2).journal = jr.journal;
     expect(h2.c.followed?.guide?.journal).toBe('t1');
     await says(h2, { moment: boardM() });
@@ -919,7 +919,7 @@ describe('PRD-1.3.0 § 6.4 : journal du trajet', () => {
 
   it('trajet vers une adresse : le journal ne garde pas l’adresse dans le titre', async () => {
     const jr = memoryJournal();
-    const h = await guideSetup({ settings: settingsWith([], { seenVersion: '1.3.0' }), stub: { plan: (now) => [door('j-adr', now + 2 * MIN, now + 40 * MIN)] } });
+    const h = await guideSetup({ settings: settingsWith([], { seenVersion: '1.3.1' }), stub: { plan: (now) => [door('j-adr', now + 2 * MIN, now + 40 * MIN)] } });
     depsOf(h).journal = jr.journal;
     await h.until((s) => s.screen === 'home');
     const to: Endpoint = { type: 'address', label: 'Place Flagey 18, 1050 Ixelles', lat: SPOTS.flagey.lat, lon: SPOTS.flagey.lon };

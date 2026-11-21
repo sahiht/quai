@@ -59,7 +59,7 @@ export interface PhoneCtx {
   /**
    * Bannière de l'accueil après la mise à jour (T1), une fois : visible si les réglages lus au lancement venaient
    * d'une version antérieure à NEWS_SINCE (seenVersion non vide), jusqu'à « OK ». Le téléphone n'écrit pas
-   * seenVersion pour elle : les lunettes s’en servent pour leur message « Quai 1.3.0 ».
+   * seenVersion pour elle : les lunettes s’en servent pour leur message « Quai 1.3.1 ».
    */
   news?: NewsState;
   /** 1.3.0 (PRD-1.3.0 § 6.4) : journal des trajets guidés (Réglages, Données, « Journal des trajets »). */
@@ -136,6 +136,11 @@ export interface PhoneDeps extends Omit<PhoneCtx, 'go' | 'params'> {
   root: HTMLElement;
   /** Élément qui reçoit la classe « grey » des écrans à fond gris (défaut : body). */
   themeTarget?: HTMLElement;
+  /**
+   * 1.3.1 (PRD-1.3.1 § 9, décision du 21/11) : Quai Web seulement : le nom de l'essai du guidage (web/essai.ts), cité
+   * par la 4e ligne de la bannière « Nouveau dans Quai 1.3.1 ». Absent (appli Even) : la bannière n'en parle pas.
+   */
+  newsTrial?: string;
 }
 
 export function parseHash(hash: string): { name: string; sub: string[]; params: URLSearchParams } {
@@ -145,8 +150,8 @@ export function parseHash(hash: string): { name: string; sub: string[]; params: 
   return { name: parts[0] ?? '', sub: parts.slice(1), params: new URLSearchParams(query) };
 }
 
-/** Version qui a apporté les nouveautés de la bannière (PRD-1.3.0 § 9) : la 1.3.0. */
-export const NEWS_SINCE = '1.3.0';
+/** Version qui a apporté les nouveautés de la bannière (PRD-1.3.1 § 9, décision du 21/11) : la 1.3.1. */
+export const NEWS_SINCE = '1.3.1';
 
 /** Bannière « Nouveau » de l'accueil : visible ou non, « OK », et ses lignes (newsLines). */
 export interface NewsState {
@@ -157,24 +162,25 @@ export interface NewsState {
 
 /**
  * Bannière « Nouveau » : une fois, au passage d’une version antérieure à NEWS_SINCE (réglages vus avant elle au
- * lancement), jusqu’à « OK », comme le message « Quai 1.3.0 » des lunettes ; jamais après une installation neuve, ni
- * tant que l'appli (`app`) n'est pas elle-même dans cette version.
+ * lancement), jusqu’à « OK », comme le message « Quai 1.3.1 » des lunettes ; jamais après une installation neuve, ni
+ * tant que l'appli (`app`) n'est pas elle-même dans cette version. `trial` : Quai Web, le nom de l'essai du guidage
+ * (4e ligne de la 1.3.1, news131Web).
  */
-export function newsState(seenAtStart: string, since = NEWS_SINCE, app = APP_VERSION, web = false): NewsState {
+export function newsState(seenAtStart: string, since = NEWS_SINCE, app = APP_VERSION, web = false, trial = ''): NewsState {
   let shown = !!seenAtStart && compareVersions(seenAtStart, since) < 0 && compareVersions(app, since) >= 0;
   return {
     visible: () => shown,
     dismiss: () => {
       shown = false;
     },
-    lines: newsLines(seenAtStart, web),
+    lines: newsLines(seenAtStart, web, trial),
   };
 }
 
 export function mountPhone(deps: PhoneDeps): { refresh(): void } {
   let seq = 0;
   // Lu avant que les lunettes n'écrivent la version courante (message « Quai 1.2.1 »).
-  const news = deps.news ?? newsState(deps.settings.get().seenVersion, NEWS_SINCE, APP_VERSION, !!deps.web);
+  const news = deps.news ?? newsState(deps.settings.get().seenVersion, NEWS_SINCE, APP_VERSION, !!deps.web, deps.newsTrial);
   const render = async (): Promise<void> => {
     const my = ++seq;
     // « Mes lieux » de la 1.1 : l'ancre est remplacée par celle de « Mes favoris » (sans entrée d'historique).

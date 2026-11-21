@@ -19,7 +19,7 @@ import { MIN, PLACES, dep, nb, settingsWith } from './helpers';
 const answers = (fav: Favorite, now: number): FavoriteAnswer | undefined =>
   fav.id === 'fav-bureau' ? { favoriteId: fav.id, kind: 'trip', state: 'ok', plan: { journeys: [door('j-bureau', NOW + 2 * MIN, NOW + 75 * MIN), door('j-bureau-2', NOW + 12 * MIN, NOW + 85 * MIN)] }, updatedAt: now } : undefined;
 
-const settings = (patch: Record<string, unknown> = {}) => settingsWith([PLACES.bureau, PLACES.ecole], { seenVersion: '1.3.0', ...patch });
+const settings = (patch: Record<string, unknown> = {}) => settingsWith([PLACES.bureau, PLACES.ecole], { seenVersion: '1.3.1', ...patch });
 const off = () => settings({ display: { ...settingsWith([]).display, guide: false } });
 
 /** L'intention telle que l'écran la donne (toucher sur l'écran du trajet, sur un arrêt). */
@@ -308,7 +308,7 @@ describe('PRD-1.2.10 § 4.2 : bouton « Y aller » du téléphone (goFavorite)',
       if (mode === 'down') throw new Error('Pas de réseau');
       return { favoriteId: fav.id, kind: 'trip', state: mode === 'none' ? 'none' : mode, plan: { journeys: [] }, updatedAt: now };
     };
-    const h = await guideSetup({ settings: settingsWith([PLACES.bureau, stop], { seenVersion: '1.3.0' }), stub: { answers: ans }, pos: null });
+    const h = await guideSetup({ settings: settingsWith([PLACES.bureau, stop], { seenVersion: '1.3.1' }), stub: { answers: ans }, pos: null });
     expect(await h.c.goFavorite('nope')).toBe(GUIDE_TEXT.noFavorite);
     // un arrêt favori d'avant la 1.2.2 est rangé dans « Gares » par les réglages : il n'est plus un favori
     expect(await h.c.goFavorite('fav-arret')).toBe(GUIDE_TEXT.noFavorite);

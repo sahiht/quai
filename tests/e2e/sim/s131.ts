@@ -26,6 +26,7 @@ import { NAMUR_FONTAINAS, PLACES, WALK_NAMUR, toFix } from '../traces/traces';
 import type { GlassesScreen, Page } from './cdp';
 import * as O from './guide-oracle';
 import { canvasToShot, checkCalmPixels, checkGuidePixels, litCount, type GuideShot } from './guide-pixels';
+import { NEWS_131, NEWS_131_TITLE } from './s1210';
 import { accordionLines, alphaIn, checkPixels, cursorRowText, HOME_INDENT, levels, truncatedLines } from './pixels';
 import type { Ctx130 } from './s130';
 
@@ -65,7 +66,7 @@ const S2_GDN = { mockLat: String(GDN.lat), mockLon: String(GDN.lon), mockNow: '2
 export function presets131(base: { p1210: Record<string, unknown> }): Record<string, unknown> {
   const p = base.p1210 as { favorites: { kind: string; id: string }[]; places: unknown[] };
   return {
-    // § 9 : qui vient de la 1.3.0 ne voit aucun message des nouveautés (NEWS_SINCE reste 1.3.0)
+    // § 9 (décision du 21/11) : qui vient de la 1.3.0 voit une fois le message « Quai 1.3.1 » (NEWS_SINCE 1.3.1)
     '131from130.json': { ...base.p1210, seenVersion: '1.3.0' },
     // U3 (c) : un trajet qui commence à pied vers un arrêt de métro (Rogier), vers le boulevard du Centenaire (Heysel)
     '131centenaire.json': {
@@ -422,13 +423,27 @@ async function homeRelief(sim: Sim, s: Screen, favs: string[]): Promise<void> {
 
 async function s131accueil(ctx: Ctx131): Promise<void> {
   const sim = ctx.sim();
-  // § 9 : qui vient de la 1.3.0 n'a aucun message des nouveautés (NEWS_SINCE reste 1.3.0) : l'accueil directement
+  // § 9 (décision du 21/11 : la 1.3.1 contient de vraies nouveautés) : qui vient de la 1.3.0 voit une fois le message
+  // « Quai 1.3.1 », ses quatre lignes seules ; un toucher mène à l'accueil
   await sim.launch(ctx.pageUrl({ ...START, ...ctx.preset('p/131from130.json') }, false));
+  await ctx.step('message-quai-1-3-1', async () => {
+    const s = await sim.waitScreen((x) => x.screen === 'message' && x.title === NEWS_131_TITLE, 25_000, `message « ${NEWS_131_TITLE} » pour qui vient de la 1.3.0`);
+    const body = s.lines.slice(0, -1).map(N);
+    check(JSON.stringify(body) === JSON.stringify(NEWS_131), `lignes du message « ${NEWS_131_TITLE} » depuis la 1.3.0 (PRD-1.3.1 § 9) : ${JSON.stringify(body)} au lieu de ${JSON.stringify(NEWS_131)}`);
+    check(N(s.lines.at(-1) ?? '') === 'toucher : continuer', `aide du message : « ${s.lines.at(-1)} » au lieu de « toucher : continuer »`);
+    // jamais l'essai en accéléré (Quai Web seulement) dans l'appli des lunettes
+    check(!s.lines.some((l) => /accéléré/i.test(l)), `« accéléré » dans le message des lunettes : ${JSON.stringify(s.lines)}`);
+    const typo = O.typographyIssues([s.title, ...s.lines]);
+    check(!typo.length, typo.join(' ; '));
+    return { screen: s };
+  });
   await ctx.step('accueil', async () => {
-    const s = await simHome(sim);
-    // la page « Chargement… » du lancement est aussi un écran `message` : ce n'est pas un message des nouveautés
-    const news = sim.screens.filter((x) => x.screen === 'message' && !(x.lines.length === 1 && /^Chargement/.test(x.lines[0])));
-    check(!news.length, `message à l’ouverture pour qui vient de la 1.3.0 (PRD-1.3.1 § 9 : pas de message des nouveautés) : ${news.map(show).join(' | ')}`);
+    await sim.input('click');
+    const s = await sim.waitScreen(homeLoaded, 25_000, 'accueil après « toucher : continuer »');
+    // une seule fois : le message ne revient pas pendant la session
+    const homeAt = sim.screens.findIndex((x) => x.screen === 'home');
+    const again = sim.screens.slice(homeAt).filter((x) => x.screen === 'message' && x.title === NEWS_131_TITLE);
+    check(!again.length, `« ${NEWS_131_TITLE} » revenu après l’accueil : ${again.map(show).join(' | ')}`);
     const { bad, at, favs } = homeOrderIssues(s);
     check(!bad.length, `accueil (PRD-1.3.1 § 8) :\n        ${bad.join('\n        ')}\n      vu : ${JSON.stringify(s.lines)}`);
     check(s.sel === at[0], `curseur sur « Autour de moi » à l’ouverture de Quai (sel ${s.sel}, « Autour de moi » au rang ${at[0]} ; PRD-1.3.1 § 8)`);
@@ -1520,7 +1535,7 @@ async function s131tel(ctx: Ctx131): Promise<void> {
 
 export function scenarios131(ctx: Ctx131): [string, string, () => Promise<void>][] {
   return [
-    ['s131accueil', '1.3.1 (simulateur Even Hub) : accueil dans l’ordre (Autour de moi, Favoris, Gares, Lignes, Arrêts), curseur sur « Autour de moi », « ! » d’un favori, pas de message depuis la 1.3.0, aides des listes, Gares en accordéon, « En cours »', () => s131accueil(ctx)],
+    ['s131accueil', '1.3.1 (simulateur Even Hub) : accueil dans l’ordre (Autour de moi, Favoris, Gares, Lignes, Arrêts), curseur sur « Autour de moi », « ! » d’un favori, message « Quai 1.3.1 » une fois depuis la 1.3.0, aides des listes, Gares en accordéon, « En cours »', () => s131accueil(ctx)],
     ['s131trajet', '1.3.1 (simulateur Even Hub) : « à pied 9 min → Namur » dans les favoris et l’écran du trajet, la correspondance nommée, l’arrivée sur la dernière marche', () => s131trajet(ctx)],
     ['s131arrets', '1.3.1 (simulateur Even Hub) : « ▶ Me guider jusqu’à cet arrêt » au plus clair sur un arrêt après la montée (tram, train), aucune sur l’arrêt de la montée, aides « △▽ arrêts   double : retour »', () => s131arrets(ctx)],
     ['s131soir', '1.3.1 (simulateur Even Hub) : le soir, l’accueil montre les favoris avec « demain »', () => s131soir(ctx)],

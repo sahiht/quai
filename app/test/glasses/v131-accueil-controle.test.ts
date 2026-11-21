@@ -99,7 +99,7 @@ const selected = (s: Screen): string => s.lines.filter((l) => l !== '' && !l.sta
 describe('contrôle 1.3.1, § 8 : le curseur d’un accueil pas encore touché quand « En cours » paraît puis disparaît', () => {
   it('« En cours » paraît en tête : le curseur dessus (un toucher reprend le trajet) ; à la fin du trajet : « Autour de moi »', async () => {
     const answers = (fav: Favorite, now: number): FavoriteAnswer | undefined => (fav.id === 'fav-bureau' ? ok(fav, door('j-bureau', NOW + 4 * MIN, NOW + 52 * MIN), now) : fav.id === 'fav-ecole' ? ok(fav, door('j-ecole', now + 10 * MIN, now + 71 * MIN), now) : undefined);
-    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau, PLACES.ecole], { seenVersion: '1.3.0' }), core: (now) => stubCore(now, { answers }) });
+    const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau, PLACES.ecole], { seenVersion: '1.3.1' }), core: (now) => stubCore(now, { answers }) });
     await h.until((s) => ready(s) && s.shown?.length === 2);
     // suivi par le bouton « Lunettes » du téléphone, puis retour à l'accueil sans y toucher : le trajet part dans 4 min
     await h.c.showTrip({ title: 'Vers le bureau', from: { type: 'here' }, to: { type: 'place', placeId: 'fav-bureau' }, favoriteId: 'fav-bureau', result: { journeys: [door('j-bureau', NOW + 4 * MIN, NOW + 52 * MIN)] }, index: 0 });
@@ -127,7 +127,7 @@ describe('contrôle 1.3.1, B20 : les favoris du soir pendant le chargement et su
   const toNamur: Favorite = { kind: 'trip', id: 'fav-namur', from: area(STATIONS.braine), to: area(STATIONS.namur), propose: 'never' };
   const toNord: Favorite = { kind: 'trip', id: 'fav-nord', from: area(STATIONS.namur), to: area(STATIONS.nord), propose: 'never' };
   const FAVS = [PLACES.bureau, PLACES.parc, PLACES.ecole, toNamur, toNord, PLACES.maison];
-  const S = settingsWith(FAVS, { seenVersion: '1.3.0', stations: [STATIONS.braine], lines: [LINES.w] });
+  const S = settingsWith(FAVS, { seenVersion: '1.3.1', stations: [STATIONS.braine], lines: [LINES.w] });
   const tomorrow = (fav: Favorite, now: number): FavoriteAnswer => ok(fav, door(`j-${fav.id}`, at(TOMORROW, 5, 52), at(TOMORROW, 6, 46)), now);
   /** À 22:40 : Maison « tu y es », Bureau « aucun trajet », les autres demain ; `soon` part encore ce soir (23:10). */
   const night = (soon?: string) => (fav: Favorite, now: number): FavoriteAnswer =>

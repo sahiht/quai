@@ -93,6 +93,13 @@ export const NEWS_1210 = ['Y aller : guidé de porte à porte, écran calme.', '
  * qui vient d'avant la 1.2.10, ensuite les deux premières lignes de la 1.2.10 (« le détail en bas » n'est plus vrai).
  */
 export const NEWS_130_TITLE = 'Quai 1.3.0';
+/**
+ * 1.3.1 (PRD-1.3.1 § 9, décision du 21/11 ; app/src/glasses/views.ts NEWS_LINES_131) : la 1.3.1 a son message : les
+ * trois points, la sortie du métro, « dernier », l'heure de partir. Pour qui vient d'avant la 1.3.0, ensuite les trois
+ * lignes de la 1.3.0 ; celles de la 1.2.10 ne tiennent plus (une version entière ou rien, 8 lignes au plus).
+ */
+export const NEWS_131_TITLE = 'Quai 1.3.1';
+export const NEWS_131 = ['Guidage : trois points, Quai te suit, rien à faire.', 'Métro : la sortie à prendre après la descente.', '« dernier » : plus rien à prendre après celui-ci.', 'Heure de partir : calculée sur le vrai chemin à pied.'];
 export const NEWS_130 = ['Trajet : ligne « ▶ Y aller », ▲ revient des autres trajets.', 'Favoris : le détail s’ouvre sous le favori choisi.', 'Test de l’écran sur le téléphone ; message pas vu rappelé.'];
 /** Rangée de « Favoris » au format de l'accueil (PRD-1.2.10 § 2), « ! » après le nom d'un trajet qui a un souci. */
 const FAV_ROW = /^\S.*?( !)? {3}(dans \d+ min → \d\d:\d\d|maintenant → \d\d:\d\d|\d\d:\d\d → \d\d:\d\d|tu y es|aucun trajet|sur le téléphone|…)$/;
@@ -1028,11 +1035,13 @@ async function s1210news(ctx: Ctx): Promise<void> {
   await ctx.step('nouveautes', async () => {
     if (ctx.v130) {
       // 1.3.0 (PRD-1.3.0 § 9) : depuis la 1.2.9, « Quai 1.3.0 » : ses trois lignes, puis celles de la 1.2.10 (une version
-      // entière ou rien, 8 lignes au plus)
-      const s = await sim.waitScreen((x) => x.screen === 'message' && x.title === NEWS_130_TITLE, 20_000, `message « ${NEWS_130_TITLE} »`);
+      // entière ou rien, 8 lignes au plus). 1.3.1 (PRD-1.3.1 § 9, décision du 21/11) : « Quai 1.3.1 » : ses quatre
+      // lignes, puis les trois de la 1.3.0 ; les deux de la 1.2.10 ne tiennent plus
+      const title = ctx.v131 ? NEWS_131_TITLE : NEWS_130_TITLE;
+      const s = await sim.waitScreen((x) => x.screen === 'message' && x.title === title, 20_000, `message « ${title} »`);
       const body = s.lines.slice(0, -1).map(O.norm);
-      const want = [...NEWS_130, ...NEWS_1210.slice(0, 2)];
-      check(JSON.stringify(body) === JSON.stringify(want), `lignes du message « ${NEWS_130_TITLE} » depuis la 1.2.9 : ${JSON.stringify(body)} au lieu de ${JSON.stringify(want)}`);
+      const want = ctx.v131 ? [...NEWS_131, ...NEWS_130] : [...NEWS_130, ...NEWS_1210.slice(0, 2)];
+      check(JSON.stringify(body) === JSON.stringify(want), `lignes du message « ${title} » depuis la 1.2.9 : ${JSON.stringify(body)} au lieu de ${JSON.stringify(want)}`);
       const typo = O.typographyIssues([s.title, ...s.lines]);
       check(!typo.length, typo.join(' ; '));
       return { screen: s };
@@ -1060,7 +1069,7 @@ export function scenarios1210(ctx: Ctx): [string, string, () => Promise<void>][]
     ['s1210ride', '1.2.10 (Quai Web) : « j’y descends » depuis les arrêts d’un départ', () => s1210ride(ctx)],
     ['s1210off', '1.2.10 (Quai Web) : « Me guider pendant un trajet » éteint', () => s1210off(ctx)],
     ['s1210fg', '1.2.10 (Quai Web) : premier plan quitté puis revenu', () => s1210fg(ctx)],
-    ['s1210news', `1.2.10 (simulateur Even Hub) : message « ${ctx.v130 ? NEWS_130_TITLE : NEWS_1210_TITLE} » depuis la 1.2.9`, () => s1210news(ctx)],
+    ['s1210news', `1.2.10 (simulateur Even Hub) : message « ${ctx.v131 ? NEWS_131_TITLE : ctx.v130 ? NEWS_130_TITLE : NEWS_1210_TITLE} » depuis la 1.2.9`, () => s1210news(ctx)],
   ];
 }
 

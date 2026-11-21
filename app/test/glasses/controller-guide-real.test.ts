@@ -21,7 +21,7 @@ import { busStops, cleanupKit, guideSetup, type Kit, type KitOptions } from './c
 import { MIN, dep, settingsWith } from './helpers';
 
 const intent = (h: Kit, i: Intent) => (h.c as unknown as { runIntent(i: Intent): Promise<void> }).runIntent(i);
-const settings = (guide = true) => settingsWith([], { seenVersion: '1.3.0', display: { ...settingsWith([]).display, guide } });
+const settings = (guide = true) => settingsWith([], { seenVersion: '1.3.1', display: { ...settingsWith([]).display, guide } });
 const ETANGS: Endpoint = { type: 'address', label: 'Étangs d’Ixelles', lat: P.etangs.lat, lon: P.etangs.lon };
 
 /** Le moment montré (genre), d'après le journal de l'écran du guidage. */

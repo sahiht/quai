@@ -106,7 +106,7 @@ describe('PRD-1.3.1 § 12, B21 : « Gares de train » en accordéon', () => {
     const calls: string[] = [];
     const boards = (id: string, now: number): Board | undefined =>
       id === STATIONS.braine.areaId ? boardOf(id, 'Braine-l’Alleud', [trainAt(now, 11, { head: N('Bruxelles-Midi') }), trainAt(now, 26, { line: 'S1', head: N('Nivelles'), platform: '3' }), trainAt(now, 41)]) : undefined;
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', stations: [STATIONS.braine] }), core: (now) => stubCore(now, { board: boards, calls }) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1', stations: [STATIONS.braine] }), core: (now) => stubCore(now, { board: boards, calls }) });
     await h.until((x) => x.screen === 'home');
     calls.length = 0;
     await h.c.replaceRoute({ screen: 'stations' });

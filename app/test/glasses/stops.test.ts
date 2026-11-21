@@ -344,7 +344,7 @@ describe('CA-123.2 : les arrêts d’un départ', () => {
 
   it('du tableau à tout le trajet de l’IC et retour : le curseur sur la première gare où descendre ; double toucher revient, curseur gardé', async () => {
     const { core: c } = core(() => NOW);
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', stations: [STATIONS.namur] }), core: () => c });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1', stations: [STATIONS.namur] }), core: () => c });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: STATIONS.namur.areaId, name: STATIONS.namur.name });
     await h.until(boardReady);

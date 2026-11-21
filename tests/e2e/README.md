@@ -172,7 +172,7 @@ du PRD et celui de l'écran.
 
 | Scénario | Où | Ce qui est vérifié (PRD-1.3.1) |
 | --- | --- | --- |
-| `s131accueil` | simulateur Even Hub | Ordre « Autour de moi », « Favoris » et ses favoris, « Gares », « Lignes », « Arrêts », curseur sur « Autour de moi » (§ 8), aucun message pour qui vient de la 1.3.0 (§ 9), « ! » d'un favori (B15), relief mesuré ; aides des listes (L6) ; « Gares de train » en accordéon (B21) ; tableau de Namur avec « IC   Bruxelles-Midi, dernier   ~08:42  voie 5 », jamais la marque quand un départ suit (§ 14, R3 ; motif `LAST_ROW` de `sim/s131.ts`) ; « En cours » en tête, curseur dessus (§ 8) |
+| `s131accueil` | simulateur Even Hub | Ordre « Autour de moi », « Favoris » et ses favoris, « Gares », « Lignes », « Arrêts », curseur sur « Autour de moi » (§ 8), message « Quai 1.3.1 », quatre lignes, une fois pour qui vient de la 1.3.0, puis l'accueil (§ 9, décision du 21/11), « ! » d'un favori (B15), relief mesuré ; aides des listes (L6) ; « Gares de train » en accordéon (B21) ; tableau de Namur avec « IC   Bruxelles-Midi, dernier   ~08:42  voie 5 », jamais la marque quand un départ suit (§ 14, R3 ; motif `LAST_ROW` de `sim/s131.ts`) ; « En cours » en tête, curseur dessus (§ 8) |
 | `s131trajet` | simulateur Even Hub | « à pied 9 min → Namur » dans l'accordéon et l'écran du trajet, la correspondance « → Gare du Nord », dernière marche sans nom, son arrivée pâle mesurée (§ 4, B14) |
 | `s131arrets` | simulateur Even Hub | « ▶ Me guider jusqu'à … » au plus clair (alpha 255) au-dessus de « △▽ arrêts   double : retour », qui suit le curseur, une rangée de moins (tram 3) ; rien sur la gare de la montée, puis Gembloux, Bruxelles-Central et le guidage (IC, § 6) |
 | `s131soir` | simulateur Even Hub | 23:30 : favoris avec « demain HH:MM → HH:MM » (B20) |
@@ -201,6 +201,12 @@ Avec les attentes 1.3.1 (défaut), les scénarios existants attendent les textes
   calme (contrôle au pixel `checkCalmPixels`), « Où tu en es » de la 1.3.1 (`where131`), virage avec une majuscule,
   « Tram 3 dans ~1 min », menu à trois choix ;
 - listes (`s1`, `s2`, `reopen`) : « toucher : départs » (Arrêts, Autour de moi), « toucher : parcours » (Lignes) (L6).
+- message et bannière (`news`, `phone`, `web`, `reopen`, `s129`, `s126`, `s1210news`, `s131accueil`) : depuis la
+  décision du 21/11 (PRD-1.3.1 § 9), « Quai 1.3.1 » et ses quatre lignes, puis les trois de la 1.3.0 pour qui vient
+  d'avant elle (les plus anciennes ne tiennent plus : une version entière ou rien, 8 lignes au plus) ; bannière
+  « Nouveau dans Quai 1.3.1 », quatre lignes puis les versions sautées ; Quai Web : « l'onglet Réglages » et, dans la
+  dernière ligne, « Essayer en accéléré » ; la ligne de la 1.2.10 cite « ▶ Me guider jusqu’à … » (`NEWS_131`,
+  `BANNER_131`, `BANNER_131_WEB`, `newsFor`, `bannerFor` de `sim/run-sim.ts`).
 
 Contrôle au pixel : la rangée de la ligne d'action qui suit le curseur reste réservée même vide (§ 6) : `pixels.ts`
 la déduit de l'aide sans « toucher » (« △▽ arrêts   double : retour ») ; sur l'accueil, les rubriques « Gares de train »,

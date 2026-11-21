@@ -352,7 +352,7 @@ export function dataScreen(ctx: PhoneCtx): HTMLElement {
       'section',
       { class: 'box', style: 'padding:14px 16px;display:flex;flex-direction:column;gap:8px' },
       h('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;gap:12px' }, h('h2', null, 'Portail des opérateurs'), status),
-      h('p', { class: 'small' }, 'Belgian Mobility Company : SNCB, STIB, De Lijn et TEC. Clé enregistrée à l’installation, dans ton relais.'),
+      h('p', { class: 'small' }, typo('Belgian Mobility Company : SNCB, STIB, De Lijn et TEC. Clé enregistrée à l’installation, dans ton relais.')),
       test,
       live.el,
     ),

@@ -25,7 +25,7 @@ async function kit(o: KitOptions) {
   return { ...k, imuCalls, states };
 }
 
-const settings = (): Settings => settingsWith([PLACES.bureau], { seenVersion: '1.3.0' });
+const settings = (): Settings => settingsWith([PLACES.bureau], { seenVersion: '1.3.1' });
 
 describe('test de l’écran : Quai quitté ou lunettes déconnectées pendant le test', () => {
   it('arrière-plan pendant l’attente ou la page envoyée : test arrêté, rien n’est envoyé aux lunettes avant le retour', async () => {
@@ -94,7 +94,7 @@ describe('favoris : un calcul qui ne répond jamais ne bloque pas les autres (PR
     const calls: string[] = [];
     const lineOf = (lines: string[], name: string) => nb(lines.find((l) => nb(l).startsWith(`${name}   `)) ?? '');
     const k = await kit({
-      settings: settingsWith([PLACES.bureau, PLACES.ecole, PLACES.parc, PLACES.maison], { seenVersion: '1.3.0' }),
+      settings: settingsWith([PLACES.bureau, PLACES.ecole, PLACES.parc, PLACES.maison], { seenVersion: '1.3.1' }),
       pos: { lat: 50.8454, lon: 4.3571 },
       coreExtra: (now) => ({
         answer: (fav: Favorite): Promise<FavoriteAnswer> => {

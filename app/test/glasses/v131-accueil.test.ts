@@ -170,7 +170,7 @@ function answersDay(fav: Favorite, now: number): FavoriteAnswer | undefined {
 }
 /** La gare de Braine-l'Alleud : IC dans 20 et 50 min. */
 const board = (id: string, n: number) => (id === STATIONS.braine.areaId ? boardOf(id, 'Braine-l’Alleud', [trainAt(n, 20), trainAt(n, 50)]) : undefined);
-const full = (patch: Partial<ViewCtx['settings']> = {}) => settingsWith(FOUR, { seenVersion: '1.3.0', stations: [STATIONS.braine], lines: [LINES.w], ...patch });
+const full = (patch: Partial<ViewCtx['settings']> = {}) => settingsWith(FOUR, { seenVersion: '1.3.1', stations: [STATIONS.braine], lines: [LINES.w], ...patch });
 const HOME_TAIL = ['Gares de train   1 gare', 'Lignes de bus, tram, métro   1 ligne', 'Arrêts de bus, tram, métro   à choisir'];
 const ready = (s: Screen) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l)) && s.lines.includes('Autour de moi   9 arrêts');
 /** Ligne de l'élément sous le curseur (accueil sans ligne du haut : sans la ligne vide ni l'aide des gestes). */
@@ -320,7 +320,7 @@ describe('B15 (U2) : le « ! » d’un favori à souci sur l’accueil, la même
 describe('B20 (U8) : le soir, les favoris avec « demain » plutôt que « Favoris » vide', () => {
   const toNamur: Favorite = { kind: 'trip', id: 'fav-namur', from: area(STATIONS.braine), to: area(STATIONS.namur), propose: 'never' };
   const toNord: Favorite = { kind: 'trip', id: 'fav-nord', from: area(STATIONS.namur), to: area(STATIONS.nord), propose: 'never' };
-  const S = settingsWith([PLACES.bureau, PLACES.parc, PLACES.ecole, toNamur, toNord, PLACES.maison], { seenVersion: '1.3.0', stations: [STATIONS.braine], lines: [LINES.w] });
+  const S = settingsWith([PLACES.bureau, PLACES.parc, PLACES.ecole, toNamur, toNord, PLACES.maison], { seenVersion: '1.3.1', stations: [STATIONS.braine], lines: [LINES.w] });
   /**
    * Réponses à 22:40 : Maison « tu y es », Bureau « aucun trajet », les autres demain 05:52 → 06:46 ; `soon` : ce favori
    * part encore ce soir (23:10 → 23:58).
@@ -379,7 +379,7 @@ describe('B20 (U8) : le soir, les favoris avec « demain » plutôt que « Favor
 
 describe('L7 : les messages ★ des lunettes disent « tes », comme le téléphone', () => {
   it('« garder une ligne » depuis les départs d’un arrêt : « ★ Ajoutée à tes lignes »', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', lines: [LINES.t3] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1', lines: [LINES.t3] }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: 'stib:6357F', name: { fr: 'Gare du Nord', nl: 'Noordstation' } });
     await h.until((x) => x.screen === 'board' && x.lines.length > 1);

@@ -136,7 +136,7 @@ describe('contrôle qualité : B11, lecture ratée puis réussie', () => {
         return mem.get(k);
       },
     };
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0' }), core, kv: kv as ReturnType<typeof createKV> });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1' }), core, kv: kv as ReturnType<typeof createKV> });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'board', areaId: 'stib:Flagey', name: N('Flagey') });
     await h.until((x) => x.screen === 'board' && x.lines.length > 2);
@@ -200,7 +200,7 @@ describe('contrôle qualité, remarque 3 : la liste des arrêts n’attend jamai
         return mem.get(k);
       },
     };
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0' }), core, kv: kv as ReturnType<typeof createKV> });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1' }), core, kv: kv as ReturnType<typeof createKV> });
     await h.until((x) => x.screen === 'home');
     // lue tôt, en arrière-plan : dès le démarrage, sans rien retarder
     expect(reads).toBe(1);
@@ -243,7 +243,7 @@ describe('contrôle qualité, remarque 3 : la liste des arrêts n’attend jamai
         throw new Error('pas de réponse');
       },
     };
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0' }), core, kv: kv as ReturnType<typeof createKV> });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1' }), core, kv: kv as ReturnType<typeof createKV> });
     await h.until((x) => x.screen === 'home');
     expect(reads).toBe(1);
     await openBoard(h);

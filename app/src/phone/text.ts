@@ -419,11 +419,12 @@ export const NEWS_129_WEB: readonly string[] = [
  * 1.2.10 (PRD-1.2.10 § 7) : nouveautés de la bannière, comme le message « Quai 1.2.10 » des lunettes (« Y aller »,
  * « j'y descends », favoris sur une ligne), puis ce qui change sur le téléphone. Montrées à qui vient d'avant la
  * 1.2.10 : chacune reste vraie (PRD-1.3.1 § 9). 1.3.1 : l'écran du guidage n'est plus vide (§ 1, trois petits points) :
- * la 1re ligne le dit avec les mots de l'aide de « Me guider pendant un trajet » (§ 12, L2).
+ * la 1re ligne le dit avec les mots de l'aide de « Me guider pendant un trajet » (§ 12, L2) ; la liste des arrêts
+ * n'écrit plus « j’y descends » mais « ▶ Me guider jusqu’à … » (§ 6) : la 2e ligne cite ce qui est écrit.
  */
 export const NEWS_1210: readonly string[] = [
   '« Y aller » : Quai te guide de porte à porte. Les lunettes ne montrent que trois petits points et t’écrivent seulement quand tu dois agir : partir, tourner, monter, descendre.',
-  'Train ou bus déjà pris : dans la liste de ses arrêts, touche celui où tu descends, « j’y descends », et Quai te dit quand descendre.',
+  'Train ou bus déjà pris : dans la liste de ses arrêts, touche celui où tu descends, « ▶ Me guider jusqu’à … », et Quai te dit quand descendre.',
   'Favoris des lunettes : une ligne chacun, le détail du favori choisi en bas de l’écran.',
   'Sur l’accueil du téléphone : « Y aller » sur chaque favori et, pendant le trajet, la carte « En cours ». Le réglage « Me guider pendant un trajet » est derrière le bouton « Réglages ».',
 ];
@@ -463,6 +464,32 @@ export const NEWS_130_WEB: readonly string[] = [
   'Dans l’onglet Réglages, bouton « Réglages », puis Données : le journal de tes 10 derniers trajets guidés, à lire et à copier.',
 ];
 
+/**
+ * 1.3.1 (PRD-1.3.1 § 9, décision du 21/11) : nouveautés de la bannière « Nouveau dans Quai 1.3.1 », les idées du message
+ * « Quai 1.3.1 » des lunettes (les trois points et « masquer » ; la sortie du métro et « dernier » ; l'heure de partir
+ * d'après le vrai chemin), puis ce qui change sur le téléphone (R4, R5, R6).
+ */
+export const NEWS_131: readonly string[] = [
+  'Pendant un guidage, trois petits points : Quai te suit, rien à faire. Un toucher masque un message, le guidage continue.',
+  'Après le métro, Quai écrit la sortie à prendre. Le soir, « dernier » marque le dernier départ que tu peux encore prendre.',
+  'L’heure de partir compte le vrai chemin à pied : la même sur le téléphone et dans les lunettes.',
+  'Dans Réglages : « Éviter les escaliers » et, dans Affichage, « Plein soleil ». Sur la carte « En cours » : « Copier mon heure d’arrivée ».',
+];
+
+/**
+ * 1.3.1 : les mêmes sur Quai Web, où la page du téléphone est l'onglet Réglages. La dernière ligne y cite l'essai du
+ * guidage (R2) : son nom, `trial`, est donné par Quai Web (web/essai.ts), jamais écrit ici, car ce fichier est aussi
+ * dans l'appli des lunettes, où l'essai n'existe pas. Sans lui : les deux réglages seulement.
+ */
+export function news131Web(trial = ''): string[] {
+  return [
+    NEWS_131[0],
+    NEWS_131[1],
+    'L’heure de partir compte le vrai chemin à pied : la même dans l’onglet Réglages et dans les lunettes.',
+    trial ? `Dans l’onglet Réglages : « Éviter les escaliers », « Plein soleil » et, sous « Y aller », « ${trial} ».` : 'Dans l’onglet Réglages : « Éviter les escaliers » et « Plein soleil ».',
+  ];
+}
+
 /** 1.2.8 : nouveautés de la bannière (comme le message « Quai 1.2.8 » des lunettes). */
 export const NEWS_128: readonly string[] = [
   'Dans les lunettes, touche un train au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.',
@@ -477,12 +504,14 @@ const NO_LONGER_TRUE: ReadonlySet<string> = new Set([NEWS_1210[2]]);
 const stillTrue = (l: string): boolean => !/^Bus, tram, métro\b/.test(l) && !NO_LONGER_TRUE.has(l);
 
 /**
- * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.3.0 ; depuis une version
+ * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.3.1 ; depuis une version
  * antérieure (`seen` : la version vue avant la mise à jour), celles des versions sautées ensuite, de la plus récente à
- * la plus ancienne, sans celles qui ne sont plus vraies. Quai Web (`web`) : ses propres lignes (onglet Réglages).
+ * la plus ancienne, sans celles qui ne sont plus vraies. Quai Web (`web`) : ses propres lignes (onglet Réglages) ;
+ * `trial` : le nom de l'essai du guidage, donné par Quai Web (news131Web).
  */
-export function newsLines(seen = '', web = false): string[] {
-  const out = [...(web ? NEWS_130_WEB : NEWS_130)];
+export function newsLines(seen = '', web = false, trial = ''): string[] {
+  const out = [...(web ? news131Web(trial) : NEWS_131)];
+  if (seen && compareVersions(seen, '1.3.0') < 0) out.push(...(web ? NEWS_130_WEB : NEWS_130));
   if (seen && compareVersions(seen, '1.2.10') < 0) out.push(...(web ? NEWS_1210_WEB : NEWS_1210).filter(stillTrue));
   if (seen && compareVersions(seen, '1.2.9') < 0) out.push(...(web ? NEWS_129_WEB : NEWS_129));
   if (seen && compareVersions(seen, '1.2.8') < 0) out.push(...NEWS_128);

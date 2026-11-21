@@ -930,14 +930,19 @@ describe('« Ajouter un arrêt », sous la liste (PRD-1.2.3 § 3, PRD-1.2.6 § 5
   });
 });
 
-describe('bannière « Nouveau » depuis un préréglage 1.1 (accueil de la 1.3.0)', () => {
-  it('préréglage 1.1 migré, mis à jour : la bannière « Quai 1.3.0 » une fois, sans les nouveautés qui ne sont plus vraies (« Bus, tram, métro », détail des favoris en bas)', () => {
+describe('bannière « Nouveau » depuis un préréglage 1.1 (accueil de la 1.3.1)', () => {
+  it('préréglage 1.1 migré, mis à jour : la bannière « Quai 1.3.1 » une fois, sans les nouveautés qui ne sont plus vraies (« Bus, tram, métro », détail des favoris en bas)', () => {
     const s = preset11();
     expect(s.seenVersion).toBe('1.1.0');
     const hz = harness({ settings: s });
-    hz.ctx.news = newsState(s.seenVersion, NEWS_SINCE, '1.3.0');
+    hz.ctx.news = newsState(s.seenVersion, NEWS_SINCE, '1.3.1');
     const el = mount(homeScreen(hz.ctx));
-    const shown = [...el.querySelectorAll('.news p')].map((p) => plain(p.textContent));
+    const whole = [...el.querySelectorAll('.news p')].map((p) => plain(p.textContent));
+    // 1.3.1 (PRD-1.3.1 § 9, décision du 21/11) : ses 4 lignes d'abord
+    expect(plain(el.querySelector('.news-title')!.textContent)).toBe('Nouveau dans Quai 1.3.1');
+    expect(whole[0]).toBe('Pendant un guidage, trois petits points : Quai te suit, rien à faire. Un toucher masque un message, le guidage continue.');
+    expect(whole[3]).toBe('Dans Réglages : « Éviter les escaliers » et, dans Affichage, « Plein soleil ». Sur la carte « En cours » : « Copier mon heure d’arrivée ».');
+    const shown = whole.slice(4);
     // 1.3.0 (4 lignes), 1.2.10 (3 : le détail des favoris en bas de l'écran n'est plus vrai), 1.2.9 (3), 1.2.8 (2), 1.2.6 (4)…
     expect(shown[0]).toBe('Écran d’un trajet dans les lunettes : une ligne « ▶ Y aller » dit ce que fait un toucher. Dans « Autres trajets », ▲ sur la première ligne ramène au trajet proposé.');
     // 1.3.1 (PRD-1.3.1 § 1, § 9 et § 12, L2) : l'écran du guidage montre trois petits points, la ligne reste vraie
@@ -946,6 +951,9 @@ describe('bannière « Nouveau » depuis un préréglage 1.1 (accueil de la 1.3.
     expect(shown[10]).toBe('Dans les lunettes, touche un train au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.');
     expect(shown[12]).toBe('Gares de train, arrêts et lignes de bus, tram, métro : trois rubriques séparées.');
     expect(shown[15]).toBe('Tes lignes gardées à un arrêt sont déjà dans Lignes.');
+    // 1.3.1 (PRD-1.3.1 § 6) : la liste des arrêts écrit « ▶ Me guider jusqu’à … », plus « j’y descends »
+    expect(shown[5]).toBe('Train ou bus déjà pris : dans la liste de ses arrêts, touche celui où tu descends, « ▶ Me guider jusqu’à … », et Quai te dit quand descendre.');
+    expect(whole.some((l) => /j’y descends/.test(l))).toBe(false);
     expect(shown.some((l) => l.startsWith('Bus, tram, métro'))).toBe(false);
     expect(shown.some((l) => /en bas de l’écran/.test(l))).toBe(false);
     button(el, 'OK').click();

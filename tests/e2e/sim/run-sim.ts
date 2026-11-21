@@ -208,7 +208,12 @@ const NEXT_S1 = /^Le suivant {3}08:33 → (09:5\d|10:0\d)$/;
  * version antérieure, aussi les trois lignes de la 1.2.8 (6 lignes ; celles de la 1.2.6 et de la 1.2.5 ne tiennent
  * plus : une version entière ou rien, 8 lignes au plus).
  */
-const NEWS_TITLE = V130 ? 'Quai 1.3.0' : 'Quai 1.2.10';
+const NEWS_TITLE = V131 ? 'Quai 1.3.1' : V130 ? 'Quai 1.3.0' : 'Quai 1.2.10';
+/**
+ * 1.3.1 (PRD-1.3.1 § 9, décision du 21/11 : la 1.3.1 contient de vraies nouveautés) : les quatre lignes du message
+ * « Quai 1.3.1 », les mêmes sur Quai Web : les trois points, la sortie du métro, « dernier », l'heure de partir.
+ */
+const NEWS_131 = ['Guidage : trois points, Quai te suit, rien à faire.', 'Métro : la sortie à prendre après la descente.', '« dernier » : plus rien à prendre après celui-ci.', 'Heure de partir : calculée sur le vrai chemin à pied.'];
 /** 1.2.10 (PRD-1.2.10 § 7) : les trois lignes du message « Quai 1.2.10 », les mêmes sur Quai Web. */
 const NEWS_1210 = ['Y aller : guidé de porte à porte, écran calme.', 'Train ou bus déjà pris : « j’y descends ».', 'Favoris : une ligne chacun, le détail en bas.'];
 /**
@@ -220,7 +225,8 @@ const NEWS_1210 = ['Y aller : guidé de porte à porte, écran calme.', 'Train o
  */
 const NEWS_130 = ['Trajet : ligne « ▶ Y aller », ▲ revient des autres trajets.', 'Favoris : le détail s’ouvre sous le favori choisi.', 'Test de l’écran sur le téléphone ; message pas vu rappelé.'];
 const NEWS_130_WEB = [NEWS_130[0], NEWS_130[1], 'Journal de tes trajets guidés : onglet Réglages, Données.'];
-const NEWS_1210_KEPT = NEWS_1210.slice(0, 2);
+/** 1.3.1 (§ 6, § 9) : la liste des arrêts écrit « ▶ Me guider jusqu’à … », plus « j’y descends » (ces deux lignes ne tiennent plus dans le message). */
+const NEWS_1210_KEPT = V131 ? [NEWS_1210[0], 'Train ou bus déjà pris : « ▶ Me guider jusqu’à … ».'] : NEWS_1210.slice(0, 2);
 const NEWS_129 = ['« imminent » : seulement d’après le temps réel.', 'Téléphone : l’accueil reprend celui des lunettes.', 'Réglages : tout derrière un seul bouton.'];
 /** Quai Web (PRD-1.2.9 § 4) : la page du téléphone y est l'onglet Réglages. */
 const NEWS_129_WEB = [NEWS_129[0], 'Onglet Réglages : il reprend l’accueil des lunettes.', NEWS_129[2]];
@@ -237,9 +243,10 @@ const NEWS_125 = ['Étapes : l’heure d’arrivée si tu rates ton départ.', '
  * à la plus ancienne, une version entière ou rien, 8 lignes au plus (un écran).
  */
 const newsFor = (seen: string, web = false): (string | RegExp)[] => {
-  // 1.3.0 : la 1.3.0 d'abord, puis la 1.2.10 pour qui vient d'avant elle (même règle : une version entière ou rien)
-  const out: (string | RegExp)[] = V130 ? [...(web ? NEWS_130_WEB : NEWS_130)] : [...NEWS_1210];
-  const older = [...(V130 ? ([['1.2.10', NEWS_1210_KEPT]] as const) : []), ['1.2.9', web ? NEWS_129_WEB : NEWS_129], ['1.2.8', NEWS_128], ['1.2.6', NEWS_126], ['1.2.5', NEWS_125]] as const;
+  // 1.3.0 : la 1.3.0 d'abord, puis la 1.2.10 pour qui vient d'avant elle (même règle : une version entière ou rien) ;
+  // 1.3.1 : la 1.3.1 d'abord, puis la 1.3.0 pour qui vient d'avant elle (4 + 3 lignes : plus rien d'autre ne tient)
+  const out: (string | RegExp)[] = V131 ? [...NEWS_131] : V130 ? [...(web ? NEWS_130_WEB : NEWS_130)] : [...NEWS_1210];
+  const older = [...(V131 ? ([['1.3.0', web ? NEWS_130_WEB : NEWS_130]] as const) : []), ...(V130 ? ([['1.2.10', NEWS_1210_KEPT]] as const) : []), ['1.2.9', web ? NEWS_129_WEB : NEWS_129], ['1.2.8', NEWS_128], ['1.2.6', NEWS_126], ['1.2.5', NEWS_125]] as const;
   for (const [since, lines] of older) if (cmpVersion(seen, since) < 0 && out.length + lines.length <= 8) out.push(...lines);
   return out;
 };
@@ -252,7 +259,23 @@ const newsFor = (seen: string, web = false): (string | RegExp)[] => {
 const FAV_ROW = V131 ? 1 : 0;
 /** En-tête de « Réglages » : les rubriques dans l'ordre de l'accueil (1.3.1 : gares, lignes, arrêts). */
 const SETTINGS_LEAD = V131 ? 'Favoris, gares, lignes et arrêts se règlent sur l’accueil, dans l’ordre des lunettes.' : 'Favoris, gares, arrêts et lignes se règlent sur l’accueil, dans l’ordre des lunettes.';
-const BANNER_TITLE = V130 ? 'Nouveau dans Quai 1.3.0' : 'Nouveau dans Quai 1.2.10';
+const BANNER_TITLE = V131 ? 'Nouveau dans Quai 1.3.1' : V130 ? 'Nouveau dans Quai 1.3.0' : 'Nouveau dans Quai 1.2.10';
+/**
+ * 1.3.1 (PRD-1.3.1 § 9, décision du 21/11 ; app/src/phone/text.ts NEWS_131 et news131Web) : bandeau du téléphone, et
+ * celui de l'onglet Réglages de Quai Web, dont la dernière ligne cite « Essayer en accéléré » (jamais dans l'appli Even).
+ */
+const BANNER_131 = [
+  'Pendant un guidage, trois petits points : Quai te suit, rien à faire. Un toucher masque un message, le guidage continue.',
+  'Après le métro, Quai écrit la sortie à prendre. Le soir, « dernier » marque le dernier départ que tu peux encore prendre.',
+  'L’heure de partir compte le vrai chemin à pied : la même sur le téléphone et dans les lunettes.',
+  'Dans Réglages : « Éviter les escaliers » et, dans Affichage, « Plein soleil ». Sur la carte « En cours » : « Copier mon heure d’arrivée ».',
+];
+const BANNER_131_WEB = [
+  BANNER_131[0],
+  BANNER_131[1],
+  'L’heure de partir compte le vrai chemin à pied : la même dans l’onglet Réglages et dans les lunettes.',
+  'Dans l’onglet Réglages : « Éviter les escaliers », « Plein soleil » et, sous « Y aller », « Essayer en accéléré ».',
+];
 /**
  * 1.3.0 (PRD-1.3.0 § 9 ; app/src/phone/text.ts NEWS_130 et NEWS_130_WEB, formulations finales de l'équipe du
  * téléphone) : bandeau du téléphone et de l'onglet Réglages de Quai Web (pas de test de l'écran).
@@ -275,7 +298,10 @@ const BANNER_1210 = [
   V131
     ? '« Y aller » : Quai te guide de porte à porte. Les lunettes ne montrent que trois petits points et t’écrivent seulement quand tu dois agir : partir, tourner, monter, descendre.'
     : '« Y aller » : Quai te guide de porte à porte. L’écran des lunettes reste vide et t’écrit seulement quand tu dois agir : partir, tourner, monter, descendre.',
-  'Train ou bus déjà pris : dans la liste de ses arrêts, touche celui où tu descends, « j’y descends », et Quai te dit quand descendre.',
+  // 1.3.1 (§ 6, § 9) : la liste des arrêts écrit « ▶ Me guider jusqu’à … »
+  V131
+    ? 'Train ou bus déjà pris : dans la liste de ses arrêts, touche celui où tu descends, « ▶ Me guider jusqu’à … », et Quai te dit quand descendre.'
+    : 'Train ou bus déjà pris : dans la liste de ses arrêts, touche celui où tu descends, « j’y descends », et Quai te dit quand descendre.',
   'Favoris des lunettes : une ligne chacun, le détail du favori choisi en bas de l’écran.',
   'Sur l’accueil du téléphone : « Y aller » sur chaque favori et, pendant le trajet, la carte « En cours ». Le réglage « Me guider pendant un trajet » est derrière le bouton « Réglages ».',
 ];
@@ -328,7 +354,9 @@ const BANNER_124 = [
 const BANNER_123 = ['Tableaux complets dans les lunettes : tous les départs des 2 prochaines heures.', 'Touche un départ : ses arrêts jusqu’au terminus, avec l’heure et la voie.'];
 const BANNER_122 = ['Nouveau : tes gares et tes lignes de bus, tram et métro sur l’accueil des lunettes.', 'Tes arrêts favoris y sont rangés, rien n’est perdu.', 'Dans les lunettes, Aller à… a rejoint Favoris.', 'Un trajet n’est suivi que si tu le demandes.'];
 const bannerFor = (seen: string): ListWant[] => [
-  ...(V130 ? [...BANNER_130, ...(cmpVersion(seen, '1.2.10') < 0 ? BANNER_1210_130 : [])] : BANNER_1210),
+  // 1.3.1 : ses quatre lignes d'abord ; celles de la 1.3.0 pour qui vient d'avant elle
+  ...(V131 ? BANNER_131 : []),
+  ...(V130 ? [...(!V131 || cmpVersion(seen, '1.3.0') < 0 ? BANNER_130 : []), ...(cmpVersion(seen, '1.2.10') < 0 ? BANNER_1210_130 : [])] : BANNER_1210),
   ...(cmpVersion(seen, '1.2.9') < 0 ? BANNER_129 : []),
   ...(cmpVersion(seen, '1.2.8') < 0 ? BANNER_128 : []),
   ...(cmpVersion(seen, '1.2.6') < 0 ? BANNER_126 : []),
@@ -3506,7 +3534,7 @@ async function webPosition(): Promise<void> {
       await page.waitFor(`!!document.querySelector('.news')`, 15_000, 'bannière « Nouveau » de l’onglet Réglages');
       await checkBannerFolded(page);
       const lines = await bannerLines(page);
-      check(sameList(lines, V130 ? [...BANNER_130_WEB, ...BANNER_1210_WEB_130, ...BANNER_129_WEB] : [...BANNER_1210_WEB, ...BANNER_129_WEB]), `bannière de Quai Web : ${JSON.stringify(lines)}`);
+      check(sameList(lines, V130 ? [...(V131 ? BANNER_131_WEB : []), ...BANNER_130_WEB, ...BANNER_1210_WEB_130, ...BANNER_129_WEB] : [...BANNER_1210_WEB, ...BANNER_129_WEB]), `bannière de Quai Web : ${JSON.stringify(lines)}`);
       return { glasses: g };
     });
   });
@@ -4071,7 +4099,7 @@ async function s129(): Promise<void> {
       // depuis la 1.2.8 : les seules nouveautés de la 1.2.9, cachées tant que la bannière est repliée
       await checkBannerFolded(page);
       const lines = await bannerLines(page);
-      check(sameList(lines, bannerFor('1.2.8')) && sameList(lines, V130 ? [...BANNER_130, ...BANNER_1210_130, ...BANNER_129] : [...BANNER_1210, ...BANNER_129]), `bannière depuis la 1.2.8 : ${JSON.stringify(lines)}`);
+      check(sameList(lines, bannerFor('1.2.8')) && sameList(lines, V130 ? [...(V131 ? BANNER_131 : []), ...BANNER_130, ...BANNER_1210_130, ...BANNER_129] : [...BANNER_1210, ...BANNER_129]), `bannière depuis la 1.2.8 : ${JSON.stringify(lines)}`);
       check(!(await page.text('main')).includes('reprend celui des lunettes'), 'nouveautés cachées, bannière repliée');
       const sec = await page.eval<string>(`(() => { ${NORM} const s = document.querySelector('.mirror-sec'); const a = s?.querySelector('.sec-link'); return [n(s?.querySelector('h2')?.textContent), n(s?.querySelector('.sec-lead')?.textContent), n(a?.textContent), a?.getAttribute('href')].join(' | '); })()`);
       check(sec === `Dans tes lunettes | Mêmes rubriques, même ordre. | Aperçu | ${AFFICHAGE_FROM_HOME}`, `section « Dans tes lunettes » : ${sec}`);
