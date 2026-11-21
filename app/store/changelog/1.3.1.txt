@@ -1,3 +1,14 @@
-Guidage plus clair : « Guidage en cours » et l’heure du prochain geste, trois petits points quand il n’y a rien à faire, « toucher : masquer ».
-Le nom de l’arrêt où tu marches est écrit partout ; « ▶ Me guider jusqu’à cet arrêt » dans la liste des arrêts.
-Accueil : Autour de moi d’abord, puis Favoris, Gares, Lignes et Arrêts.
+Guidage plus clair : trois points s’il n’y a rien à faire, « masquer », « Où tu en es ».
+Le nom de l’arrêt où tu marches, en diminutif s’il est trop long.
+L’heure de partir suit le vrai chemin à pied.
+Liste des arrêts : « ▶ Me guider jusqu’à … ».
+Accueil : Autour de moi, Favoris, Gares, Lignes, Arrêts.
+Métro : la sortie à prendre. « dernier » sur tous les réseaux.
+Réglages « Éviter les escaliers » et « Plein soleil ». « Copier mon heure d’arrivée ».
+Quai Web : essaie un guidage en accéléré.
+
+Limites connues :
+Un chemin sans marches est manqué dans environ 6 % des cas.
+Pas de « Sortie » vers un tram ou un métro de la même station.
+L’heure de partir avance de 5 min au plus.
+Les sorties du métro arrivent avec les données de la première nuit.

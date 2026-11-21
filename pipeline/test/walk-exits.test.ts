@@ -7,7 +7,7 @@
  * l'avenue (gardée). 1.3.1 (R1, construction) : fichier publié data/exits.json (writeExits, semaine, publication).
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { EXITS_FILE, isExitsFile, type ExitsFile } from '../../app/src/core/walk/exits-format.ts';
@@ -15,7 +15,7 @@ import { buildWalk } from '../src/walk/build.ts';
 import { main } from '../src/walk/cli.ts';
 import { byCode, exitReport, exitsFile, featureOf, isStreetName, isUnderStop, joinPublished, loadExitGraph, measureFeature, publishedRailStops, publishedStibStops, readStibFeatures, sameStationMissing, stibCode, writeExits, type FeatureResult, type StibFeature } from '../src/walk/exits.ts';
 import { readKeyedNodes, PbfFile } from '../src/walk/pbf.ts';
-import { publishExits, publishWalk, weeklyWalk } from '../src/walk/weekly.ts';
+import { EXITS_FORMAT, EXITS_TRY_FILE, exitsGap, publishExits, publishWalk, readTiles, weeklyWalk, type ExitsTry } from '../src/walk/weekly.ts';
 import { cleanupTempDirs, tempDir } from './helpers.ts';
 import { ll, writePbf, type PbfNode, type PbfWay } from './walk-helpers.ts';
 
@@ -396,5 +396,201 @@ describe('1.3.1 : sorties du métro (mesure de vérification R1)', () => {
     writeFileSync(join(cache, EXITS_FILE), '{ illisible');
     expect((await publishWalk({ cacheDir: cache, dataDir: data, now: () => new Date('2026-11-16T02:00:00Z'), log: () => undefined })).published).toBe(true);
     expect(existsSync(join(data, EXITS_FILE))).toBe(false);
+  });
+});
+
+/**
+ * 1.3.1 (finitions du 21/11, contrôle de R1, remarque 4) : les sorties dès la première nuit après la publication.
+ * Le cache des nuits a des tuiles de la semaine faites par la 1.3.0 (ni exits.json ni exits-try.json) : la nuit refait
+ * tuiles et sorties une fois, puis plus jamais pour les mêmes tuiles, que l'essai ait réussi ou non.
+ */
+describe('1.3.1 : sorties du métro dès la première nuit (rattrapage, une seule fois)', () => {
+  const URL = 'https://download.example/belgium-latest.osm.pbf';
+
+  /** Faux portail : l'extrait des sorties (ou un autre corps), compte des téléchargements, panne à la demande. */
+  function portal(fx: { pbf: string }) {
+    const st = { downloads: 0, status: 200, body: readFileSync(fx.pbf) as Buffer };
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('.md5')) return new Response(`${createHash('md5').update(st.body).digest('hex')}  belgium-latest.osm.pbf\n`, { status: 200 });
+      st.downloads++;
+      if (st.status !== 200) return new Response('indisponible', { status: st.status });
+      return new Response(st.body, { status: 200 });
+    }) as typeof fetch;
+    return { st, fetchImpl };
+  }
+
+  /** Une nuit (01:30 UTC) : résultat et journal. */
+  async function night(cache: string, fetchImpl: typeof fetch, date: string, extra: { force?: boolean } = {}) {
+    const logs: string[] = [];
+    const r = await weeklyWalk({ cacheDir: cache, url: URL, fetchImpl, now: () => new Date(`${date}T01:30:00Z`), log: (m) => logs.push(m), retries: 0, backoffMs: [0], ...extra });
+    return { r, logs };
+  }
+
+  /** Cache comme la 1.3.0 le laisse : tuiles de la semaine (lundi 16/11), sans sorties ni fiche d'essai. */
+  async function cacheOf130(): Promise<{ cache: string; p: ReturnType<typeof portal>; builtAt: string }> {
+    const fx = fixture();
+    const p = portal(fx);
+    const cache = join(fx.dir, 'cache');
+    expect((await night(cache, p.fetchImpl, '2026-11-16')).r.state).toBe('built');
+    rmSync(join(cache, EXITS_FILE));
+    rmSync(join(cache, EXITS_TRY_FILE));
+    expect(existsSync(join(cache, 'extract.osm.pbf'))).toBe(false);
+    return { cache, p, builtAt: (await readTiles(join(cache, 'tiles')))!.builtAt };
+  }
+
+  const tilesOf = (cache: string) => readdirSync(join(cache, 'tiles')).sort().map((f) => readFileSync(join(cache, 'tiles', f), 'utf8'));
+  const tried = (cache: string) => JSON.parse(readFileSync(join(cache, EXITS_TRY_FILE), 'utf8')) as ExitsTry;
+
+  it('première nuit : tuiles de la semaine sans sorties → tuiles et sorties refaites, un téléchargement de plus, publiées', async () => {
+    const { cache, p, builtAt } = await cacheOf130();
+    expect(p.st.downloads).toBe(1);
+    const { r, logs } = await night(cache, p.fetchImpl, '2026-11-21');
+    expect(r).toMatchObject({ state: 'built', catchUp: true, message: expect.stringContaining('tuiles et sorties du métro refaites (rattrapage, une seule fois)') });
+    // l'extrait de la semaine n'était plus dans le cache : téléchargé une fois de plus, cette nuit seulement
+    expect(p.st.downloads).toBe(2);
+    expect(logs).toContain('Chemins à pied : tuiles de la semaine sans sorties du métro (fichier des sorties absent) : tuiles et sorties refaites une fois, cette nuit seulement');
+    expect(logs).toContain('Chemins à pied : sorties du métro : 3 arrêts STIB sous terre sur 8 avec une sortie');
+    const idx = (await readTiles(join(cache, 'tiles')))!;
+    expect(idx.builtAt).toBe('2026-11-21T01:30:00.000Z');
+    expect(idx.builtAt).not.toBe(builtAt);
+    const file = JSON.parse(readFileSync(join(cache, EXITS_FILE), 'utf8')) as ExitsFile;
+    expect(isExitsFile(file)).toBe(true);
+    expect(file.version).toBe(idx.version);
+    expect(await exitsGap(cache, idx)).toBeNull();
+    expect(tried(cache)).toEqual({ v: 1, format: EXITS_FORMAT, builtAt: idx.builtAt, date: '2026-11-21', ok: true });
+    // rien ne traîne dans le cache
+    for (const f of ['extract.osm.pbf', 'extract.osm.pbf.part', 'extract.osm.pbf.part.json', 'next', 'tiles.old']) expect(existsSync(join(cache, f))).toBe(false);
+    // la publication de la même nuit donne les sorties
+    const data = tempDir('quai-exits-data-');
+    const plog: string[] = [];
+    expect((await publishWalk({ cacheDir: cache, dataDir: data, now: () => new Date('2026-11-21T02:00:00Z'), log: (m) => plog.push(m) })).published).toBe(true);
+    expect(plog).toContain(`Chemins à pied : sorties du métro publiées : 3 arrêts STIB sous terre (${EXITS_FILE})`);
+    expect(isExitsFile(JSON.parse(readFileSync(join(data, EXITS_FILE), 'utf8')))).toBe(true);
+    // nuits suivantes de la semaine : plus rien (aucun téléchargement) ; semaine suivante : la construction ordinaire
+    const next = await night(cache, p.fetchImpl, '2026-11-22');
+    expect(next.r).toMatchObject({ state: 'fresh', message: `tuiles de la semaine déjà prêtes (données OSM du ${idx.version})` });
+    expect(next.r.catchUp).toBeUndefined();
+    expect(p.st.downloads).toBe(2);
+    const monday = await night(cache, p.fetchImpl, '2026-11-23');
+    expect(monday.r.state).toBe('built');
+    expect(monday.r.catchUp).toBeUndefined();
+    expect(monday.r.message).toMatch(/^tuiles construites en /);
+    expect(p.st.downloads).toBe(3);
+  });
+
+  it('portail en panne pendant le rattrapage : la nuit continue, tuiles intactes, et les nuits suivantes ne recommencent pas', async () => {
+    const { cache, p, builtAt } = await cacheOf130();
+    const before = tilesOf(cache);
+    p.st.status = 503;
+    const { r } = await night(cache, p.fetchImpl, '2026-11-18');
+    expect(r).toMatchObject({ state: 'failed', catchUp: true });
+    expect(r.message).toContain('rattrapage des sorties du métro raté (');
+    expect(r.message).toContain('HTTP 503');
+    expect(r.message).toContain('tuiles de la semaine gardées');
+    expect(p.st.downloads).toBe(2);
+    expect(tilesOf(cache)).toEqual(before);
+    expect(tried(cache)).toEqual({ v: 1, format: EXITS_FORMAT, builtAt, date: '2026-11-18' });
+    for (const f of ['extract.osm.pbf', 'extract.osm.pbf.part', 'extract.osm.pbf.part.json', 'next']) expect(existsSync(join(cache, f))).toBe(false);
+    // le portail répond de nouveau : aucune des nuits suivantes de la semaine ne télécharge ni ne refait quoi que ce soit
+    p.st.status = 200;
+    for (const date of ['2026-11-19', '2026-11-20', '2026-11-21', '2026-11-22']) {
+      const again = await night(cache, p.fetchImpl, date);
+      expect(again.r.state).toBe('fresh');
+      expect(again.r.message).toContain('sorties du métro déjà essayées pour ces tuiles (fichier des sorties absent)');
+    }
+    expect(p.st.downloads).toBe(2);
+    expect(tilesOf(cache)).toEqual(before);
+    // les tuiles de la semaine restent publiées, sans sorties ; puis la semaine suivante fait les deux
+    const data = tempDir('quai-exits-data-');
+    expect((await publishWalk({ cacheDir: cache, dataDir: data, now: () => new Date('2026-11-22T02:00:00Z'), log: () => undefined })).published).toBe(true);
+    expect(existsSync(join(data, EXITS_FILE))).toBe(false);
+    expect((await night(cache, p.fetchImpl, '2026-11-23')).r.state).toBe('built');
+    expect(existsSync(join(cache, EXITS_FILE))).toBe(true);
+  });
+
+  it('extrait reçu illisible pendant le rattrapage : tuiles intactes, extrait retiré du cache, jamais rejoué', async () => {
+    const { cache, p } = await cacheOf130();
+    const before = tilesOf(cache);
+    const good = p.st.body;
+    p.st.body = Buffer.from('pas un fichier PBF');
+    const { r } = await night(cache, p.fetchImpl, '2026-11-18');
+    expect(r).toMatchObject({ state: 'failed', catchUp: true });
+    expect(tilesOf(cache)).toEqual(before);
+    expect(existsSync(join(cache, 'extract.osm.pbf'))).toBe(false);
+    expect(existsSync(join(cache, 'next'))).toBe(false);
+    p.st.body = good;
+    expect((await night(cache, p.fetchImpl, '2026-11-19')).r.state).toBe('fresh');
+    expect(p.st.downloads).toBe(2);
+    // semaine suivante : construction ordinaire, avec un extrait neuf
+    expect((await night(cache, p.fetchImpl, '2026-11-23')).r).toMatchObject({ state: 'built' });
+    expect(p.st.downloads).toBe(3);
+  });
+
+  it('sorties déjà essayées pour ces tuiles (réussies puis abîmées, ou ratées) : jamais refaites la même semaine', async () => {
+    const fx = fixture();
+    const p = portal(fx);
+    const cache = join(fx.dir, 'cache');
+    await night(cache, p.fetchImpl, '2026-11-16');
+    const idx = (await readTiles(join(cache, 'tiles')))!;
+    expect(tried(cache)).toEqual({ v: 1, format: EXITS_FORMAT, builtAt: idx.builtAt, date: '2026-11-16', ok: true });
+    const good = readFileSync(join(cache, EXITS_FILE), 'utf8');
+    const cases: [string | null, string][] = [
+      [null, 'fichier des sorties absent'],
+      ['{ illisible', 'fichier des sorties absent'],
+      [JSON.stringify({ ...JSON.parse(good), v: 2 }), 'fichier des sorties d’une autre forme'],
+      [JSON.stringify({ ...JSON.parse(good), version: '2020-01-01' }), `sorties du 2020-01-01, tuiles du ${idx.version}`],
+    ];
+    for (const [body, why] of cases) {
+      if (body === null) rmSync(join(cache, EXITS_FILE));
+      else writeFileSync(join(cache, EXITS_FILE), body);
+      expect(await exitsGap(cache, idx)).toBe(why);
+      const again = await night(cache, p.fetchImpl, '2026-11-17');
+      expect(again.r.state).toBe('fresh');
+      expect(again.r.message).toContain(`sorties du métro déjà essayées pour ces tuiles (${why})`);
+    }
+    expect(p.st.downloads).toBe(1);
+    expect((await readTiles(join(cache, 'tiles')))!.builtAt).toBe(idx.builtAt);
+  });
+
+  it('fiche d’essai d’autres tuiles, d’une autre forme de fichier ou illisible : le rattrapage a lieu, une fois', async () => {
+    for (const marker of [
+      JSON.stringify({ v: 1, format: EXITS_FORMAT, builtAt: '2026-11-09T01:30:00.000Z', date: '2026-11-09', ok: true }),
+      (builtAt: string) => JSON.stringify({ v: 1, format: EXITS_FORMAT - 1, builtAt, date: '2026-11-16' }),
+      '{ illisible',
+    ]) {
+      const { cache, p, builtAt } = await cacheOf130();
+      writeFileSync(join(cache, EXITS_TRY_FILE), typeof marker === 'string' ? marker : marker(builtAt));
+      // sorties d'une forme que cette version ne lit pas (comme après un changement de forme)
+      writeFileSync(join(cache, EXITS_FILE), JSON.stringify({ v: 0, stops: {} }));
+      const first = await night(cache, p.fetchImpl, '2026-11-17');
+      expect(first.r).toMatchObject({ state: 'built', catchUp: true });
+      expect(first.logs.join('\n')).toContain('(fichier des sorties d’une autre forme)');
+      expect(isExitsFile(JSON.parse(readFileSync(join(cache, EXITS_FILE), 'utf8')))).toBe(true);
+      expect((await night(cache, p.fetchImpl, '2026-11-18')).r.state).toBe('fresh');
+      expect(p.st.downloads).toBe(2);
+    }
+  });
+
+  it('la forme notée dans la fiche est celle que isExitsFile accepte (à augmenter ensemble)', () => {
+    const file = { v: EXITS_FORMAT, version: '2026-11-16', stops: {} };
+    expect(isExitsFile(file)).toBe(true);
+    expect(isExitsFile({ ...file, v: EXITS_FORMAT + 1 })).toBe(false);
+  });
+
+  it('semaine nouvelle, vérification forcée : comme avant, sans rattrapage (la fiche est quand même tenue à jour)', async () => {
+    const { cache, p } = await cacheOf130();
+    // lundi suivant : la construction ordinaire de la semaine, pas un rattrapage
+    const monday = await night(cache, p.fetchImpl, '2026-11-23');
+    expect(monday.r.state).toBe('built');
+    expect(monday.r.catchUp).toBeUndefined();
+    expect(monday.logs.join('\n')).not.toContain('refaites une fois');
+    expect(tried(cache)).toMatchObject({ builtAt: '2026-11-23T01:30:00.000Z', ok: true });
+    // vérification d'une branche : toujours refait, jamais compté comme un rattrapage
+    const forced = await night(cache, p.fetchImpl, '2026-11-24', { force: true });
+    expect(forced.r.state).toBe('built');
+    expect(forced.r.catchUp).toBeUndefined();
+    expect(tried(cache)).toMatchObject({ builtAt: '2026-11-24T01:30:00.000Z', ok: true });
+    expect((await night(cache, p.fetchImpl, '2026-11-25')).r.state).toBe('fresh');
   });
 });
