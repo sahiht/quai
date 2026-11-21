@@ -201,6 +201,12 @@ Avec les attentes 1.3.1 (défaut), les scénarios existants attendent les textes
   calme (contrôle au pixel `checkCalmPixels`), « Où tu en es » de la 1.3.1 (`where131`), virage avec une majuscule,
   « Tram 3 dans ~1 min », menu à trois choix ;
 - listes (`s1`, `s2`, `reopen`) : « toucher : départs » (Arrêts, Autour de moi), « toucher : parcours » (Lignes) (L6).
+- message et bannière (`news`, `phone`, `web`, `reopen`, `s129`, `s126`, `s1210news`, `s131accueil`) : depuis la
+  décision du 21/11 (PRD-1.3.1 § 9), « Quai 1.3.1 » et ses quatre lignes, puis les trois de la 1.3.0 pour qui vient
+  d'avant elle (les plus anciennes ne tiennent plus : une version entière ou rien, 8 lignes au plus) ; bannière
+  « Nouveau dans Quai 1.3.1 », quatre lignes puis les versions sautées ; Quai Web : « l'onglet Réglages » et, dans la
+  dernière ligne, « Essayer en accéléré » ; la ligne de la 1.2.10 cite « ▶ Me guider jusqu’à … » (`NEWS_131`,
+  `BANNER_131`, `BANNER_131_WEB`, `newsFor`, `bannerFor` de `sim/run-sim.ts`).
 
 Contrôle au pixel : la rangée de la ligne d'action qui suit le curseur reste réservée même vide (§ 6) : `pixels.ts`
 la déduit de l'aide sans « toucher » (« △▽ arrêts   double : retour ») ; sur l'accueil, les rubriques « Gares de train »,
