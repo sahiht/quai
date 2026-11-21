@@ -202,8 +202,11 @@ export type Moment =
       reason: 'missed' | 'cancelled' | 'late';
       /** ce qui est perdu (« l'IC de 07:30 ») */
       lost: { vehicle: VehicleRef; depAt: number };
-      /** premier véhicule du nouveau trajet (1.3.1, B13 : `sched`, heure prévue d'un train en retard) */
-      next?: { vehicle: VehicleRef; depAt: number; platform?: string; sched?: number };
+      /**
+       * premier véhicule du nouveau trajet (1.3.1, B13 : `sched`, heure prévue d'un train en retard ; correctif du
+       * 21/11 : `rt`, son heure vient du temps réel ; absent ou faux : heure prévue, écrite avec « ~ » comme partout)
+       */
+      next?: { vehicle: VehicleRef; depAt: number; platform?: string; sched?: number; rt?: boolean };
       arr?: number;
       laterMin?: number;
       /** aucun autre trajet trouvé */

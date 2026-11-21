@@ -434,12 +434,67 @@ describe('A4 (P4), B12 (E5, L4), B13 (U6) : les mots des moments', () => {
     expect(t.lines[0]).toBe('À gauche dans 30 m');
     expect(levels(t.p).hi[0]).toBe('À gauche dans 30 m');
     expect(moment(turn({ turn: 'straight', distM: 60 })).lines[0]).toBe('Tout droit dans 60 m');
-    const rp: Moment = { ...base, id: 'replan:j131', kind: 'replan', reason: 'missed', lost: { vehicle: IC, depAt: T(7, 42) }, next: { vehicle: IC, depAt: T(8, 42), platform: '5' }, arr: T(9, 57), laterMin: 59 };
+    // l'heure du nouveau train vient du temps réel : sans « ~ » (le texte du PRD)
+    const rp: Extract<Moment, { kind: 'replan' }> = { ...base, id: 'replan:j131', kind: 'replan', reason: 'missed', lost: { vehicle: IC, depAt: T(7, 42) }, next: { vehicle: IC, depAt: T(8, 42), platform: '5', rt: true }, arr: T(9, 57), laterMin: 59 };
     expect(moment(rp).lines).toEqual(['Ton IC de 07:42 est parti', 'Nouveau trajet : IC à 08:42, voie 5', 'arrivée 09:57, 59 min plus tard', HINT]);
     // A3 (I1) : sans temps réel, resté sur le quai, rien ne dit que le train est passé : le nouveau trajet d'abord
     const planned = moment({ ...rp, planned: true });
     expect(planned.lines).toEqual(['Nouveau trajet : IC à 08:42, voie 5', 'arrivée 09:57, 59 min plus tard', HINT]);
     expect(levels(planned.p).hi[0]).toBe('Nouveau trajet : IC à 08:42, voie 5');
+  });
+
+  it('correctif du 21/11 : « Nouveau trajet : IC à ~08:42, voie 5 » quand l’heure est prévue sans temps réel, comme « Tram 3 à ~07:12 » ; sans « ~ » quand elle vient du temps réel', () => {
+    const rp = (rt: boolean | undefined, p: Partial<Extract<Moment, { kind: 'replan' }>> = {}): Moment => ({
+      ...base, id: 'replan:j131', kind: 'replan', reason: 'missed', lost: { vehicle: IC, depAt: T(7, 42) }, next: { vehicle: IC, depAt: T(8, 42), platform: '5', ...(rt === undefined ? {} : { rt }) }, arr: T(9, 57), laterMin: 59, ...p,
+    });
+    // prévu sans temps réel (le cas du simulateur : l'IC de 08:42 n'a pas de temps réel)
+    expect(moment(rp(false)).lines).toEqual(['Ton IC de 07:42 est parti', 'Nouveau trajet : IC à ~08:42, voie 5', 'arrivée 09:57, 59 min plus tard', HINT]);
+    const planned = moment(rp(false, { planned: true }));
+    expect(planned.lines).toEqual(['Nouveau trajet : IC à ~08:42, voie 5', 'arrivée 09:57, 59 min plus tard', HINT]);
+    expect(levels(planned.p).hi[0]).toBe('Nouveau trajet : IC à ~08:42, voie 5');
+    // temps réel : sans « ~ »
+    expect(moment(rp(true)).lines[1]).toBe('Nouveau trajet : IC à 08:42, voie 5');
+    // inconnu (moment d'une version d'avant) : pas du temps réel, donc « ~ » (la règle des autres messages : `rt ?? false`)
+    expect(moment(rp(undefined)).lines[1]).toBe('Nouveau trajet : IC à ~08:42, voie 5');
+    // la même fonction que « monter » et « Si tu le rates » (vehicleAtText) : le réglage « ~ devant une heure prévue » éteint l'enlève partout
+    const off = ctx({ settings: { ...ctx().settings, display: { ...ctx().settings.display, markPlanned: false } } });
+    expect(moment(rp(false), {}, J, off).lines[1]).toBe('Nouveau trajet : IC à 08:42, voie 5');
+    expect(moment(board({ depAt: T(7, 12) }), {}, J, off).lines[0]).toBe('Tram 3 à 07:12');
+    // un train en retard d'une minute ou plus (temps réel par nature) : l'heure prévue et le retard, jamais de « ~ »
+    expect(moment(rp(true, { next: { vehicle: IC, depAt: T(8, 45), sched: T(8, 42), platform: '5', rt: true } })).lines[1]).toBe('Nouveau trajet : IC 08:42 +3, voie 5');
+    // « j'y descends » : le prochain passage, la même règle
+    const ride = (rt: boolean) => moment({ ...base, id: 'replan:jr', kind: 'replan', reason: 'missed', lost: { vehicle: BUS71, depAt: T(8, 34) }, next: { vehicle: BUS71, depAt: T(8, 49), rt } }, { kind: 'ride' });
+    expect(ride(false).lines[1]).toBe('Prochain : bus 71 à ~08:49');
+    expect(ride(true).lines[1]).toBe('Prochain : bus 71 à 08:49');
+  });
+
+  it('correctif du 21/11, au pixel : la ligne la plus longue tient avec « ~ » (jamais coupée, rien ne dépasse)', () => {
+    // les véhicules les plus longs à écrire, la voie la plus longue des vraies données (« 12a »), l'heure la plus large
+    const vehicles: VehicleRef[] = [LONG_BUS, IC, { op: 'sncb', mode: 'train', line: 'EXTRA', cat: 'EXTRA' }, { op: 'sncb', mode: 'bus', line: 'BUS' }, METRO2, TRAM3];
+    let widest = { text: '', px: 0 };
+    for (const vehicle of vehicles) {
+      for (const planned of [false, true]) {
+        const train = vehicle.op === 'sncb' && vehicle.mode === 'train';
+        const m: Moment = { ...base, id: 'replan:jl', kind: 'replan', reason: 'missed', lost: { vehicle: LONG_BUS, depAt: T(23, 34) }, next: { vehicle, depAt: T(23, 48), rt: false, ...(train ? { platform: '12a' } : {}) }, arr: T(23, 59), laterMin: 452, ...(planned ? { planned: true } : {}) };
+        const { p, lines } = moment(m);
+        const line = lines.find((l) => l.startsWith('Nouveau trajet'))!;
+        expect(line, line).toMatch(train ? /à ~23:48, voie 12a$/ : /à ~23:48$/);
+        expect(line).not.toMatch(/…/);
+        // la rangée telle qu'elle est envoyée aux lunettes (espaces insécables comprises)
+        for (const c of ['colA', 'colB', 'colC']) {
+          for (const row of container(p, c).content.split('\n')) {
+            expect(textWidth(row), row).toBeLessThanOrEqual(GUIDE.FULL_W);
+            if (nb(row).startsWith('Nouveau trajet') && textWidth(row) > widest.px) widest = { text: nb(row), px: textWidth(row) };
+          }
+        }
+        const r = moment({ ...m, planned: undefined, next: { vehicle, depAt: T(23, 48), rt: false } } as Moment, { kind: 'ride' });
+        expect(r.lines[1]).toMatch(/^Prochain : .* à ~23:48$/);
+      }
+    }
+    // la plus longue : 369 px avec « ~ » (354 sans) pour 542 ; elle tiendrait même à côté d'une image (374)
+    expect(widest.text).toBe('Nouveau trajet : EXTRA à ~23:48, voie 12a');
+    expect(widest.px).toBe(369);
+    expect(widest.px).toBeLessThanOrEqual(GUIDE.TEXT_W);
   });
 
   it('B13 : un train en retard s’écrit « IC 07:42 +2 » partout dans le guidage ; un bus, jamais', () => {

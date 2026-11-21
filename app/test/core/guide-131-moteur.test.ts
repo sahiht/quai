@@ -323,8 +323,24 @@ describe('A3 (I1) : sans temps réel, le véhicule gardé jusqu’à 15 min avan
     });
     r.j = journeyOf([ic2, walkLeg(S.central, S.gareCentrale, ic2.arr, 3)], 'jic842', at('08:42'));
     const s2 = step(r, at('08:27:08'), fix(P.guillemins, at('08:27:08'), { speed: 0 }));
-    expect(m(s2.moment, 'replan')).toMatchObject({ reason: 'missed', planned: true, lost: { vehicle: IC, depAt: at('07:42') }, next: { vehicle: IC, depAt: at('08:42'), platform: '3' }, arr: at('09:42'), laterMin: 60 });
+    // correctif du 21/11 : l'IC de 08:42 n'a pas de temps réel : `rt` faux (l'écran écrit « IC à ~08:42 »)
+    expect(m(s2.moment, 'replan')).toMatchObject({ reason: 'missed', planned: true, lost: { vehicle: IC, depAt: at('07:42') }, next: { vehicle: IC, depAt: at('08:42'), platform: '3', rt: false }, arr: at('09:42'), laterMin: 60 });
     expect(s2.replan).toBeUndefined();
+  });
+
+  it('correctif du 21/11 : le moment « Nouveau trajet » dit si l’heure de son premier véhicule vient du temps réel (`next.rt`)', () => {
+    for (const rt of [true, false]) {
+      const r = guide(icTrip(), { nextByLeg: next842, missed, startedAt: at('07:20') });
+      stay(r, P.guillemins, at('07:38'), at('08:26:30'), 60);
+      step(r, at('08:27'), fix(P.guillemins, at('08:27'), { speed: 0 }));
+      const ic2 = rideLeg({
+        op: 'sncb', mode: 'train', line: 'IC', cat: 'IC', head: 'Ostende', rt, platform: '3',
+        stops: [{ p: S.guillemins, t: at('08:42'), platform: '3' }, { p: S.ans, t: at('08:49') }, { p: S.central, t: at('09:39') }],
+      });
+      r.j = journeyOf([ic2, walkLeg(S.central, S.gareCentrale, ic2.arr, 3)], `jrt${rt}`, at('08:42'));
+      const s = step(r, at('08:27:08'), fix(P.guillemins, at('08:27:08'), { speed: 0 }));
+      expect(m(s.moment, 'replan').next, String(rt)).toEqual({ vehicle: IC, depAt: at('08:42'), platform: '3', rt });
+    }
   });
 
   it('resté sur le quai, aucun autre trajet trouvé : le message de la 1.3.0, jamais `planned` sans nouveau trajet', () => {

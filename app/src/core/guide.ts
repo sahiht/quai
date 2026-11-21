@@ -1460,7 +1460,7 @@ function candidates(c: Ctx, loc: Loc): Cand[] {
         id: `${base}:${jid}`, kind: 'replan', trig: now < swapAt + GUIDE.replanMs, end: now >= swapAt + GUIDE.replanMs,
         make: (since) => ({
           kind: 'replan', id: `${base}:${jid}`, since, until: swapAt + GUIDE.replanMs, leg: Math.max(0, k), reason, lost,
-          ...(r ? { next: { vehicle: vehicleRef(r), depAt: r.dep, ...(isTrain(r) && platformOf(r) ? { platform: platformOf(r) } : {}), ...(trainSched(r) !== undefined ? { sched: trainSched(r) } : {}) } } : {}),
+          ...(r ? { next: { vehicle: vehicleRef(r), depAt: r.dep, rt: !!r.rt, ...(isTrain(r) && platformOf(r) ? { platform: platformOf(r) } : {}), ...(trainSched(r) !== undefined ? { sched: trainSched(r) } : {}) } } : {}),
           arr: j.arr, laterMin: roundMin(j.arr - re.oldArr), ...planned,
         }),
       });

@@ -252,12 +252,15 @@ describe('PRD § 3.2 : les moments', () => {
   it('replan : parti, supprimé, correspondance ratée ; nouveau trajet et son arrivée ; sans solution', () => {
     const rp = (p: Partial<Extract<Moment, { kind: 'replan' }>>, kind: GuideState['kind'] = 'trip') =>
       shown({ ...base, id: 'replan:j1', kind: 'replan', reason: 'missed', lost: { vehicle: IC, depAt: T(7, 30) }, ...p }, 'moment', { kind });
-    const missed = rp({ next: { vehicle: IC, depAt: T(8, 2), platform: '3' }, arr: T(9, 27), laterMin: 33 });
-    // 1.3.1 (B12, L4) : « Nouveau trajet : IC à 08:02, voie 3 »
+    const missed = rp({ next: { vehicle: IC, depAt: T(8, 2), platform: '3', rt: true }, arr: T(9, 27), laterMin: 33 });
+    // 1.3.1 (B12, L4) : « Nouveau trajet : IC à 08:02, voie 3 » (heure du temps réel)
     expect(missed.lines).toEqual(['Ton IC de 07:30 est parti', 'Nouveau trajet : IC à 08:02, voie 3', 'arrivée 09:27, 33 min plus tard', HINT]);
+    // correctif du 21/11 : heure prévue sans temps réel (`rt` faux ou absent) : « ~ », comme partout
+    expect(rp({ next: { vehicle: IC, depAt: T(8, 2), platform: '3', rt: false }, arr: T(9, 27), laterMin: 33 }).lines[1]).toBe('Nouveau trajet : IC à ~08:02, voie 3');
+    expect(rp({ next: { vehicle: IC, depAt: T(8, 2), platform: '3' }, arr: T(9, 27), laterMin: 33 }).lines[1]).toBe('Nouveau trajet : IC à ~08:02, voie 3');
     expect(levels(missed.p).pale[2]).toBe('arrivée 09:27, 33 min plus tard');
     expect(rp({ reason: 'cancelled', none: true }).lines).toEqual(['Ton IC de 07:30 est supprimé', 'Pas d’autre trajet trouvé', HINT]);
-    expect(rp({ reason: 'late', lost: { vehicle: BUS71, depAt: T(8, 34) }, next: { vehicle: BUS71, depAt: T(8, 49) }, arr: T(9, 14), laterMin: 15 }).lines.slice(0, 3)).toEqual([
+    expect(rp({ reason: 'late', lost: { vehicle: BUS71, depAt: T(8, 34) }, next: { vehicle: BUS71, depAt: T(8, 49), rt: true }, arr: T(9, 14), laterMin: 15 }).lines.slice(0, 3)).toEqual([
       'Correspondance ratée : bus 71 de 08:34',
       'Nouveau trajet : bus 71 à 08:49',
       'arrivée 09:14, 15 min plus tard',
@@ -269,7 +272,9 @@ describe('PRD § 3.2 : les moments', () => {
     expect(levels(onFoot.p).pale[2]).toBe('arrivée 08:58, 6 min plus tard');
     expect(rp({}).lines).toEqual(['Ton IC de 07:30 est parti', HINT]);
     // « J'y descends » : le prochain du même véhicule, s'il est connu (§ 3.6)
-    expect(rp({ lost: { vehicle: BUS6, depAt: T(7, 12) }, next: { vehicle: BUS6, depAt: T(7, 24) } }, 'ride').lines).toEqual(['Ton bus 6 de 07:12 est parti', 'Prochain : bus 6 à 07:24', HINT]);
+    expect(rp({ lost: { vehicle: BUS6, depAt: T(7, 12) }, next: { vehicle: BUS6, depAt: T(7, 24), rt: true } }, 'ride').lines).toEqual(['Ton bus 6 de 07:12 est parti', 'Prochain : bus 6 à 07:24', HINT]);
+    // correctif du 21/11 : la même règle pour le prochain passage (heure prévue : « ~ »)
+    expect(rp({ lost: { vehicle: BUS6, depAt: T(7, 12) }, next: { vehicle: BUS6, depAt: T(7, 24), rt: false } }, 'ride').lines[1]).toBe('Prochain : bus 6 à ~07:24');
     expect(rp({ lost: { vehicle: BUS6, depAt: T(7, 12) } }, 'ride').lines).toEqual(['Ton bus 6 de 07:12 est parti', HINT]);
   });
 

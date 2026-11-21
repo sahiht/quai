@@ -1110,8 +1110,9 @@ async function s131rate(ctx: Ctx131): Promise<void> {
       }
       const alone = r.page.screens().slice(r.mark).find(gone);
       check(alone, `A2 : « Ton IC … est parti » jamais affiché après le départ de l’IC : ${show(r.page.lastScreen())}`);
-      check(s, `« Nouveau trajet : IC à 08:42, voie 5 » jamais venu sous « Ton IC … est parti » (A2, B12) : ${show(alone)}`);
-      check(s.lines.some((l) => /^Nouveau trajet : IC à ~?08:42(, voie 5)?$/.test(N(l))), `« Nouveau trajet : IC à 08:42, voie 5 » attendu (A2, B12) : ${show(s)}`);
+      check(s, `« Nouveau trajet : IC à ~08:42, voie 5 » jamais venu sous « Ton IC … est parti » (A2, B12) : ${show(alone)}`);
+      // correctif du 21/11 : l'IC de 08:42 n'a pas de temps réel dans cette scène : « ~ », comme partout (une seule forme)
+      check(s.lines.some((l) => /^Nouveau trajet : IC à ~08:42(, voie 5)?$/.test(N(l))), `« Nouveau trajet : IC à ~08:42, voie 5 » attendu (A2, B12 ; heure prévue sans temps réel) : ${show(s)}`);
       momentCommon(s, title);
       return { screen: s, shot: 'guide' };
     });
