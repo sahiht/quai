@@ -84,7 +84,7 @@ proposition « ▲▼ étapes   toucher : suivre ce trajet   double : retour » 
 
 ## 4. Accueil des lunettes (et Quai Web, onglet Lunettes)
 
-Jugé trop chargé : on ne comprenait pas pourquoi Bureau et Mama étaient là.
+Jugé trop chargé : on ne comprenait pas pourquoi Bureau et École étaient là.
 
 4.1 Ordre des lignes : titre « Quai » et heure ; ligne « En cours : … » si un trajet est suivi (inchangée) ;
 « Favoris » avec le nombre de favoris à droite (« 4 »), sélectionnable : toucher ouvre la liste de tous les favoris ;
@@ -97,7 +97,7 @@ Maquette :
     Quai                       20:47
     Favoris                        4
       Bureau    maintenant → 21:34
-      Mama      maintenant → 21:58
+      École     maintenant → 21:58
 
     Autour de moi           9 arrêts
     Aller à…
@@ -159,7 +159,7 @@ trajets qui ne marchent pas plus ; plus de marche seulement s'il n'y a pas mieux
 - CA-121.4 : lunettes, trajet de 9 étapes : ▼ fait défiler jusqu'à « Fin du trajet. ▼ 2 autres trajets » sans jamais
   changer de trajet ; ▼ ouvre « Autres trajets » ; toucher ouvre le trajet ; double toucher revient à la liste.
 - CA-121.5 : accueil avec 4 favoris dont Maison (tu y es) : « Favoris   4 » (ouvre les 4), dessous en retrait et
-  plus pâles Bureau et Mama sur une ligne chacun, ligne vide, « Autour de moi » et « Aller à… » au niveau de
+  plus pâles Bureau et École sur une ligne chacun, ligne vide, « Autour de moi » et « Aller à… » au niveau de
   « Favoris » ; aucun pied ; aide des gestes seulement les 7 premiers jours.
 - CA-121.6 : « Nouveau favori » : deux choix de même taille ; le lien du bas a disparu.
 - CA-121.7 : 11/11/2026 : « Jour férié : horaires du dimanche » ; 12/11 : rien.

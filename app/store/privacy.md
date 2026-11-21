@@ -13,7 +13,7 @@ La position du téléphone sert uniquement, sur le téléphone, à trouver les a
 
 ## Horaires
 
-Les horaires sont des fichiers statiques préparés chaque nuit et publiés sur GitHub Pages. L’appli les télécharge par zones d’environ 2 km : le serveur voit seulement les fichiers demandés (la zone, les arrêts consultés, les deux premières lettres des mots recherchés), jamais la position exacte.
+Les horaires sont des fichiers statiques préparés chaque nuit et publiés sur GitHub Pages. L’appli les télécharge par zones d’environ 2 km : le serveur voit seulement les fichiers demandés (la zone, les arrêts consultés, les deux premières lettres des mots recherchés), jamais la position exacte. Les chemins à pied se téléchargent de la même façon, par zones d’environ 2 km, dès l’accueil.
 
 ## Temps réel
 
