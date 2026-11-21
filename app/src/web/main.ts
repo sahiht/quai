@@ -23,6 +23,7 @@ import { createKV } from '../platform/kv';
 import type { Platform } from '../platform/types';
 import { loadSettings, SettingsStore } from '../settings';
 import { describeContainers, GlassesCanvas, withCanvasImages } from './display';
+import { createEssai, ESSAI_TEXT, gatedPort, placeBanner, type Essai } from './essai';
 import { attachKeyboard, attachScreenGestures, GESTURES } from './gestures';
 import { createWebLocation, type WebLocationState } from './location';
 import { createWebGlassesPort } from './port';
@@ -46,8 +47,11 @@ async function main(): Promise<void> {
   const shell = mountShell(document.getElementById('w-root')!, initial);
 
   const screen = new GlassesCanvas(shell.canvas, (cs, images) => shell.canvas.setAttribute('aria-label', `Écran des lunettes. ${describeContainers(cs, images)}`));
+  // 1.3.1 (PRD-1.3.1 § 14, R2) : essai en accéléré (web/essai.ts), créé avec le contrôleur ; pendant un essai, les envois
+  // des vraies lunettes à l'écran sont retenus (elles sont en arrière-plan)
+  let essai: Essai | null = null;
   // 1.2.10 : images du guidage dessinées dans le canvas (pixels mêmes des lunettes)
-  const port = withCanvasImages(createWebGlassesPort(screen), screen);
+  const port = gatedPort(withCanvasImages(createWebGlassesPort(screen), screen), () => !essai?.active());
   const loc = createWebLocation(clock.now);
   if (env.mockLat !== undefined && env.mockLon !== undefined) loc.useMock(env.mockLat, env.mockLon);
   const platform: Platform = { kind: 'web', glasses: port, kv, location: loc, closeWebView() {} };
@@ -102,6 +106,28 @@ async function main(): Promise<void> {
   });
   const coreReady = () => controller.ensureInit().then(() => core);
   const picker = (id: string) => positionCard({ location: loc, core: coreReady, settings, changed: () => void controller.relocate(), id, now: clock.now });
+  // 1.3.1 (R2) : « Essayer en accéléré » sous « Y aller » ; son bandeau au-dessus de l'écran des lunettes
+  const trial = createEssai({
+    controller,
+    realSignal: (s) => port.emit(s),
+    port: () => withCanvasImages(createWebGlassesPort(screen), screen),
+    core: coreReady,
+    freshness: mod.dataFreshness,
+    settings,
+    kv,
+    location: loc,
+    clock,
+    showGlasses: () => shell.show('lunettes'),
+    visible: () => document.visibilityState !== 'hidden',
+    // après « Arrêter l'essai » : l'écran des lunettes s'il se voit, sinon l'onglet de la vue ouverte (écran étroit)
+    focusAfter: () => (shell.glassesVisible() ? shell.canvas : shell.root.querySelector<HTMLElement>(`#w-tab-${shell.panel()}`))?.focus({ preventScroll: true }),
+    e2e: env.e2e,
+  });
+  essai = trial;
+  // grand écran : au-dessus de l'écran des lunettes ; écran étroit : sous la barre du haut, visible dans les deux vues
+  const banner = (): void => placeBanner(trial.banner, { wide: shell.wide(), stage: shell.canvas.closest('.w-stage'), main: shell.root.querySelector('.w-main') });
+  banner();
+  shell.onChange(banner);
 
   shell.extra.append(h('section', { class: 'box pad w-pos-box', 'aria-labelledby': 'w-pos-title' }, h('h2', { id: 'w-pos-title' }, 'Position'), picker('w-pos')));
 
@@ -113,7 +139,8 @@ async function main(): Promise<void> {
     coreNow: () => core,
     location: loc,
     clock,
-    glasses: () => controller,
+    // 1.3.1 (R2) : « Lunettes » et « Y aller » arrêtent d'abord un essai en cours
+    glasses: () => trial.glasses(controller),
     meta: () => controller.currentMeta,
     freshness: () => controller.freshness,
     coreError: () => controller.error,
@@ -122,11 +149,14 @@ async function main(): Promise<void> {
     showGlasses: () => shell.show('lunettes'),
     positionPicker: () => picker(`w-pos-${Math.random().toString(36).slice(2, 7)}`),
     journal: () => journal,
+    tryButton: (id, title, hub, slot) => trial.button(id, title, hub, slot),
+    // 1.3.1 (§ 9) : la bannière « Nouveau dans Quai 1.3.1 » cite l'essai par le nom de son bouton
+    newsTrial: ESSAI_TEXT.button,
   });
 
   // Gestes : boutons (1.2.10 : « Appui long » compris), écran (glisser, toucher, double toucher, molette, doigt gardé),
-  // clavier.
-  const emit = (g: Gesture): void => port.emit({ kind: 'gesture', gesture: g });
+  // clavier. 1.3.1 (R2) : pendant un essai, à l'essai.
+  const emit = (g: Gesture): void => trial.gesture(g);
   shell.gestures.querySelectorAll<HTMLButtonElement>('button[data-g]').forEach((b) => {
     const g = b.dataset.g as Gesture;
     if (GESTURES.includes(g)) b.addEventListener('click', () => emit(g));
@@ -134,10 +164,11 @@ async function main(): Promise<void> {
   attachScreenGestures(shell.canvas, emit);
   attachKeyboard(window, emit, () => shell.glassesVisible());
 
-  // Page cachée : comme les lunettes en arrière-plan (plus de temps réel ni de position) ; visible : reprise.
-  document.addEventListener('visibilitychange', () => port.emit({ kind: document.visibilityState === 'hidden' ? 'background' : 'foreground' }));
+  // Page cachée : comme les lunettes en arrière-plan (plus de temps réel ni de position) ; visible : reprise. 1.3.1 (R2) :
+  // pendant un essai, à l'essai (les vraies lunettes restent en arrière-plan jusqu'à sa fin).
+  document.addEventListener('visibilitychange', () => trial.signal({ kind: document.visibilityState === 'hidden' ? 'background' : 'foreground' }));
   window.addEventListener('pageshow', (e) => {
-    if (e.persisted) port.emit({ kind: 'foreground' });
+    if (e.persisted) trial.signal({ kind: 'foreground' });
   });
 
   // Position obtenue plus tard (permission accordée, signal retrouvé) ou perdue : les lunettes suivent.

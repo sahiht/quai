@@ -19,7 +19,7 @@ import { MIN, PLACES, nb, settingsWith } from './helpers';
 
 const answers = (fav: Favorite, now: number): FavoriteAnswer | undefined =>
   fav.id === 'fav-bureau' ? { favoriteId: fav.id, kind: 'trip', state: 'ok', plan: { journeys: [door('j-bureau', NOW + 2 * MIN, NOW + 75 * MIN)] }, updatedAt: now } : undefined;
-const settings = () => settingsWith([PLACES.bureau], { seenVersion: '1.3.0' });
+const settings = () => settingsWith([PLACES.bureau], { seenVersion: '1.3.1' });
 const homeReady = (s: { screen: string; lines: string[] }) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l));
 const intent = (h: Kit, i: Intent) => (h.c as unknown as { runIntent(i: Intent): Promise<void> }).runIntent(i);
 const screensOf = (h: Kit) => h.c.state.nav.stack.map((f) => f.route.screen);
@@ -74,6 +74,8 @@ describe('PRD-1.2.10 § 3.2, § 3.3 : ce que montre l’écran du guidage', () =
     expect(h.last().show).toBe('where');
     await show(h, moment('board', 'board:j-bureau:1', NOW, NOW + 30 * MIN, { vehicle: { line: 'W' } }));
     expect(h.last()).toMatchObject({ show: 'moment', moment: 'board:j-bureau:1' });
+    // 1.3.1 (A7) : masqué seulement s'il est affiché depuis au moins 1,5 s
+    await h.settle(1_500);
     await h.gesture('tap');
     expect(engine.dismissed).toEqual(['board:j-bureau:1']);
     expect(h.c.followed!.guide!.mem.dismissed).toEqual(['board:j-bureau:1']);
@@ -102,6 +104,8 @@ describe('PRD-1.2.10 § 3.2, § 3.3 : ce que montre l’écran du guidage', () =
     expect(w).toBeDefined();
     await show(h, moment('arrived', 'arrived:j-bureau', NOW, NOW + 2 * MIN, { title: 'Vers le bureau', at: NOW, diffMin: 0 }));
     expect(h.last()).toMatchObject({ show: 'moment', moment: 'arrived:j-bureau' });
+    // 1.3.1 (A7) : terminé d'un toucher seulement s'il est affiché depuis au moins 1,5 s
+    await h.settle(1_500);
     await h.gesture('tap');
     expect(h.c.followed).toBeNull();
     expect(engine.dismissed).toEqual([]);
@@ -125,12 +129,14 @@ describe('PRD-1.2.10 § 3.2, § 3.3 : ce que montre l’écran du guidage', () =
 });
 
 describe('PRD-1.2.10 § 3.2, § 3.9 : rendu de l’écran du guidage', () => {
-  it('appli Even : chaque page du guidage porte le menu système (deux choix) ; l’accueil, non', async () => {
+  it('appli Even : chaque page du guidage porte le menu système (trois choix, « Arrêter le guidage » en dernier) ; l’accueil, non', async () => {
     const h = await guided();
     const b = h.lastBuild()!;
+    // 1.3.1 (B10, E4)
     expect(b.extra?.menu).toEqual([
-      { id: 1, label: 'Arrêter le guidage' },
       { id: 2, label: 'Voir tout le trajet' },
+      { id: 3, label: 'Voir les arrêts' },
+      { id: 1, label: 'Arrêter le guidage' },
     ]);
     await h.gesture('double');
     expect(h.last().screen).toBe('home');
@@ -196,12 +202,14 @@ describe('PRD-1.2.10 § 3.2, § 3.9 : rendu de l’écran du guidage', () => {
     expect(b.last().show).toBe('moment');
   });
 
-  it('le guidage ne rend rien quand un autre écran est affiché', async () => {
+  it('le guidage ne rend rien quand un autre écran est affiché, sauf un message important (1.3.1, A1)', async () => {
     const h = await guided();
     await h.gesture('double');
     expect(h.last().screen).toBe('home');
     const n = views.calls.length;
-    await show(h, moment('board', 'board:j-bureau:1', NOW, NOW + 30 * MIN));
+    // 1.3.1 (A1, E2) : un virage, un prochain arrêt ne ramènent pas l'écran du guidage
+    await show(h, moment('turn', 'turn:j-bureau:0:1', NOW, NOW + 30 * MIN, { turn: 'left', distM: 40 }));
+    await show(h, moment('nextStop', 'nextStop:j-bureau:1:2', NOW, NOW + 30 * MIN));
     expect(views.calls.length).toBe(n);
     expect(h.last().screen).toBe('home');
   });
@@ -250,7 +258,8 @@ describe('PRD-1.2.10 § 3.4 : gestes et menu', () => {
     const h = await guided({ web: true });
     await h.gesture('long');
     expect(screensOf(h)).toEqual(['home', 'guide', 'menu']);
-    expect(h.last()).toMatchObject({ screen: 'menu', lines: ['Arrêter le guidage', 'Voir tout le trajet', '△▽ choisir   toucher : choisir   double : retour'] });
+    // 1.3.1 (B10, E4) : « Arrêter le guidage » en dernier, le curseur s'ouvre sur « Voir tout le trajet »
+    expect(h.last()).toMatchObject({ screen: 'menu', lines: ['Voir tout le trajet', 'Voir les arrêts', 'Arrêter le guidage', '△▽ choisir   toucher : choisir   double : retour'] });
     await h.gesture('double');
     expect(screensOf(h)).toEqual(['home', 'guide']);
     await h.gesture('double');
@@ -263,7 +272,8 @@ describe('PRD-1.2.10 § 3.4 : gestes et menu', () => {
     engine.script = () => ({ location: 'high', moment: current });
     const h = await guided({ web: true });
     const w = h.watching()!;
-    await h.gesture('long', 'tap');
+    // 1.3.1 (B10) : le dernier choix
+    await h.gesture('long', 'down', 'down', 'tap');
     expect(h.c.followed).toBeNull();
     expect(w.stopped).toBe(true);
     expect(screensOf(h)).toEqual(['home']);
@@ -274,7 +284,8 @@ describe('PRD-1.2.10 § 3.4 : gestes et menu', () => {
 
   it('Quai Web, choix 2 : « Voir tout le trajet » : l’écran du trajet guidé (sans « y aller ») ; double toucher : le guidage', async () => {
     const h = await guided({ web: true });
-    await h.gesture('long', 'down', 'tap');
+    // 1.3.1 (B10) : le premier choix, curseur à l'ouverture
+    await h.gesture('long', 'tap');
     expect(screensOf(h)).toEqual(['home', 'guide', 'steps']);
     const s = await h.until((x) => x.screen === 'steps' && x.page !== undefined);
     expect(s.followed).toBe(true);

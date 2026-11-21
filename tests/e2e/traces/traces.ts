@@ -44,8 +44,23 @@ export const PLACES = {
   placeFontainas: { lat: 50.8443, lon: 4.3466 },
 } as const satisfies Record<string, LatLon>;
 
-/** Rues réelles entre la place de l'Ange et la gare de Namur (rue de Fer, place de la Station). */
-const WALK_NAMUR: LatLon[] = [PLACES.placeAnge, { lat: 50.4655, lon: 4.8642 }, { lat: 50.4672, lon: 4.8631 }, { lat: 50.4683, lon: 4.8627 }, PLACES.namurVoie6];
+/**
+ * De la place de l'Ange à la gare de Namur par les rues de l'extrait des fixtures (fixtures/pipeline/osm/namur-bruxelles.osm :
+ * rue de Fer, à gauche rue Godefroid, à droite place de la Station), 700 m. 1.3.1 : la trace suit le chemin à pied que le
+ * routeur rend sur ces rues. Avant, elle coupait en biais à travers les pâtés de maisons de l'extrait : à 45 m de toute
+ * rue, le chemin recalculé repartait de la rue de derrière et l'écran disait « Fais demi-tour » (A6) à quelqu'un qui
+ * marchait vers la gare.
+ */
+export const WALK_NAMUR: LatLon[] = [
+  PLACES.placeAnge,
+  { lat: 50.46407, lon: 4.86527 },
+  { lat: 50.4645, lon: 4.86518 },
+  { lat: 50.4658, lon: 4.8649 },
+  { lat: 50.46796, lon: 4.86462 },
+  { lat: 50.46796, lon: 4.8625 },
+  PLACES.namur,
+  PLACES.namurVoie6,
+];
 /** Bruxelles-Nord, du quai à l'arrêt du tram (Gare du Nord, souterrain). */
 const WALK_NORD: LatLon[] = [PLACES.bruxellesNord, { lat: 50.8602, lon: 4.3607 }, PLACES.gareDuNordTram];
 /** De la Bourse à la place Fontainas par le boulevard Anspach. */
@@ -77,7 +92,7 @@ const T3_0844 = [
 
 /**
  * De bout en bout, tout se passe bien : à 07:20 sur la place de l'Ange, « Partir maintenant » à l'heure de partir
- * (07:33 : l'IC de 07:44 moins 9 min de marche et 2 min de marge), départ à 07:34, 7 min 20 à pied jusqu'à la voie 6,
+ * (07:33 : l'IC de 07:44 moins 9 min de marche et 2 min de marge), départ à 07:34, 9 min à pied jusqu'à la voie 6,
  * l'IC de 07:44 (voie modifiée), descente à Bruxelles-Nord à 08:42,
  * 1 min 20 à pied jusqu'au tram 3 (très juste), tram 3 de 08:44, descente à la Bourse à 08:49, 6 min 30 à pied
  * jusqu'à la place Fontainas.
@@ -89,7 +104,7 @@ export const NAMUR_FONTAINAS: Trace = {
   points: joinTrace(
     stay(PLACES.placeAnge, T('07:20'), T('07:33:50'), { phase: 'stay', accuracy: 6, mark: 'place de l’Ange' }),
     walk(WALK_NAMUR, T('07:34'), { mark: 'départ à pied' }),
-    stay(PLACES.namurVoie6, T('07:41:30'), T('07:43:50'), { mark: 'voie 6' }),
+    stay(PLACES.namurVoie6, T('07:43:10'), T('07:43:50'), { mark: 'voie 6' }),
     ride(IC_TO_NORD),
     walk(WALK_NORD, T('08:42:10'), { mark: 'correspondance' }),
     stay(PLACES.gareDuNordTram, T('08:43:30'), T('08:43:50'), { mark: 'arrêt du tram 3' }),
@@ -107,7 +122,7 @@ export const NAMUR_MISSED: Trace = {
   points: joinTrace(
     stay(PLACES.placeAnge, T('07:20'), T('07:33:50'), { phase: 'stay', accuracy: 6 }),
     walk(WALK_NAMUR, T('07:34')),
-    stay(PLACES.namurVoie6, T('07:41:30'), T('07:52'), { mark: 'voie 6, IC parti à 07:44' }),
+    stay(PLACES.namurVoie6, T('07:43:10'), T('07:52'), { mark: 'voie 6, IC parti à 07:44' }),
   ),
 };
 
@@ -119,7 +134,7 @@ export const NAMUR_PASSED: Trace = {
   points: joinTrace(
     stay(PLACES.placeAnge, T('07:20'), T('07:33:50'), { phase: 'stay', accuracy: 6 }),
     walk(WALK_NAMUR, T('07:34')),
-    stay(PLACES.namurVoie6, T('07:41:30'), T('07:43:50')),
+    stay(PLACES.namurVoie6, T('07:43:10'), T('07:43:50')),
     ride(IC_2112),
     walk(WALK_CENTRAL_FONTAINAS, T('08:49'), { mark: 'à pied depuis Bruxelles-Central' }),
   ),

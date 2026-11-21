@@ -155,7 +155,8 @@ describe('PRD-1.3.0 § 1 : l’écran d’un trajet de 9 étapes, vues de l’é
       const { v, g, p } = shown(s);
       // les textes se suivent, séparés par « . » (la note de la fin en contient un : « Fin du trajet. ▽ … »)
       const said = nb(describeContainers(p.containers));
-      const last = k ? '08:47, à pied 3 min' : '08:24, à pied 2 min';
+      // 1.3.1 (PRD-1.3.1 § 4, B14) : la marche nomme l'arrêt où monter ; la dernière porte l'heure d'arrivée
+      const last = k ? '08:47, à pied 3 min 08:50' : '08:24, à pied 2 min → Gare Centrale';
       expect(said.endsWith(`. ${last}. ${nb(v.note ?? '')}. ▶ Y aller. △▽ étapes double : retour`), said).toBe(true);
       s = handleGesture(s, 'down', v, g.capacity).state;
     }
@@ -214,7 +215,8 @@ describe('PRD-1.3.0 § 7 : l’accordéon des favoris, contenu de l’équipe A,
     const v = favoritesView({ entries }, { ...c, settings: settingsWith([PLACES.bureau], { recent }) });
     expect(v.accordion).toBe(true);
     const ex = (v.items[0] as DetailItem).expand!.map((l) => nb(l.text));
-    expect(ex).toEqual(['à pied 7 min, puis bus W ~11:49', '1 changement : métro 2']);
+    // 1.3.1 (PRD-1.3.1 § 4) : l'arrêt où monter, puis le premier véhicule, son heure et les changements
+    expect(ex).toEqual(['à pied 7 min → Merbraine', 'bus W ~11:49, 1 changement : métro 2']);
     const g = geometry(v);
     const p = layoutPage(v, effectiveFrame(initNav({ screen: 'favorites' }).stack[0], v, g.capacity));
     hardware(p);

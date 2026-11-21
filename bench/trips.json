@@ -47,10 +47,10 @@
     "lon": 4.37553
    },
    "to": {
-    "area": "stib:1508",
-    "name": "Madou",
-    "lat": 50.84969,
-    "lon": 4.36949
+    "area": "stib:52",
+    "name": "Louise",
+    "lat": 50.83518,
+    "lon": 4.35462
    },
    "tags": [
     "train",
@@ -67,10 +67,10 @@
     "lon": 4.38912
    },
    "to": {
-    "area": "stib:1508",
-    "name": "Madou",
-    "lat": 50.84969,
-    "lon": 4.36949
+    "area": "stib:52",
+    "name": "Louise",
+    "lat": 50.83518,
+    "lon": 4.35462
    },
    "tags": [
     "bus",
@@ -159,10 +159,10 @@
   {
    "id": "t08",
    "from": {
-    "area": "stib:1508",
-    "name": "Madou",
-    "lat": 50.84969,
-    "lon": 4.36949
+    "area": "stib:52",
+    "name": "Louise",
+    "lat": 50.83518,
+    "lon": 4.35462
    },
    "to": {
     "area": "sncb:8814258",
@@ -179,10 +179,10 @@
   {
    "id": "t09",
    "from": {
-    "area": "stib:1508",
-    "name": "Madou",
-    "lat": 50.84969,
-    "lon": 4.36949
+    "area": "stib:52",
+    "name": "Louise",
+    "lat": 50.83518,
+    "lon": 4.35462
    },
    "to": {
     "area": "sncb:8814266",
@@ -225,10 +225,10 @@
     "lon": 4.37587
    },
    "to": {
-    "area": "stib:1508",
-    "name": "Madou",
-    "lat": 50.84969,
-    "lon": 4.36949
+    "area": "stib:52",
+    "name": "Louise",
+    "lat": 50.83518,
+    "lon": 4.35462
    },
    "tags": [
     "tram",
@@ -239,10 +239,10 @@
   {
    "id": "t12",
    "from": {
-    "area": "stib:1508",
-    "name": "Madou",
-    "lat": 50.84969,
-    "lon": 4.36949
+    "area": "stib:52",
+    "name": "Louise",
+    "lat": 50.83518,
+    "lon": 4.35462
    },
    "to": {
     "area": "stib:24",
@@ -303,10 +303,10 @@
     "lon": 4.86222
    },
    "to": {
-    "area": "stib:1508",
-    "name": "Madou",
-    "lat": 50.84969,
-    "lon": 4.36949
+    "area": "stib:52",
+    "name": "Louise",
+    "lat": 50.83518,
+    "lon": 4.35462
    },
    "tags": [
     "train",
@@ -317,10 +317,10 @@
   {
    "id": "t16",
    "from": {
-    "area": "stib:1508",
-    "name": "Madou",
-    "lat": 50.84969,
-    "lon": 4.36949
+    "area": "stib:52",
+    "name": "Louise",
+    "lat": 50.83518,
+    "lon": 4.35462
    },
    "to": {
     "area": "sncb:8863008",

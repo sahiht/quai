@@ -5,6 +5,7 @@
  * Jamais de coordonnées à l'écran. Lieux de la 1.0 à adresse libre : « Adresse à vérifier » et « Vérifier l’adresse ».
  */
 import type { AreaSummary, Favorite, FavoritePlace, Mode, NameLang, NearbyItem, Place, Propose } from '../../core/api';
+import { apos } from '../../core/typo';
 import { displayName, mainMode, modeWord } from '../../core/util';
 import { LIMITS, newId } from '../../settings';
 import { normalizeForSearch } from '../../../../shared/names';
@@ -19,9 +20,10 @@ const MODE_ORDER: Mode[] = ['train', 'metro', 'tram', 'bus'];
 /** « Gare de Namur », « gare d’Ottignies » (élision devant une voyelle). */
 const stationName = (name: string, capital: boolean): string => `${capital ? 'Gare' : 'gare'} ${/^[aeiouyàâäéèêëîïôöûüœ]/i.test(name) ? `d’${name}` : `de ${name}`}`;
 
-/** « Métro Madou », « Bus TEC Namur Omalius », « Tram De Lijn Korenmarkt », « Gare de Namur » (mots de l'appli). */
+/** « Métro Louise », « Bus TEC Namur Omalius », « Tram De Lijn Korenmarkt », « Gare de Namur » (mots de l'appli). */
 function stopName(a: AreaSummary, lang: NameLang, capital: boolean): string {
-  const name = displayName(a.n, lang);
+  // 1.3.1 (§ 7) : apostrophe typographique, à l'affichage seulement
+  const name = apos(displayName(a.n, lang));
   const mode = mainMode(a.modes);
   if (mode === 'train') return stationName(name, capital);
   const word = modeWord(mode, a.op);
@@ -29,7 +31,7 @@ function stopName(a: AreaSummary, lang: NameLang, capital: boolean): string {
 }
 
 /**
- * Accès d'un lieu (PRD-1.2 § 2.5) : l'arrêt le plus proche d'abord, nommé (« Métro Madou à 2 min à pied »,
+ * Accès d'un lieu (PRD-1.2 § 2.5) : l'arrêt le plus proche d'abord, nommé (« Métro Louise à 2 min à pied »,
  * « Gare de Namur à 7 min à pied ») ; le plus proche : le moins de minutes, puis train, métro, tram, bus, puis la
  * distance. Ensuite la gare, seulement si elle est utile : desservie par des IC, à la marche maximale ou moins et
  * pas déjà citée (« ; gare de Namur à 8 min »). Rien à 800 m : « Aucun arrêt à moins de 800 m ».
@@ -172,7 +174,7 @@ export function placeForm(ctx: PhoneCtx, o: PlaceFormOptions): HTMLElement {
     field = placeField(ctx, {
       id: 'pl-lieu',
       label: T.favField,
-      value: legacy ? undefined : existing.src === 'stop' ? legacyQuery(existing) : existing.src === 'address' ? existing.address : undefined,
+      value: legacy ? undefined : existing.src === 'stop' ? apos(legacyQuery(existing)) : existing.src === 'address' ? (existing.address === undefined ? undefined : apos(existing.address)) : undefined,
       here: { label: T.hereOption, type: T.hereSub },
       recent: true,
       // Texte changé après un choix (« 25 » corrigé en « 52 ») : le choix ne vaut plus, il faut en refaire un.
@@ -224,7 +226,7 @@ export function placeForm(ctx: PhoneCtx, o: PlaceFormOptions): HTMLElement {
         'div',
         { class: 'box pad verify' },
         h('strong', null, T.toVerify),
-        h('span', null, typo(`Texte enregistré avec la version précédente : « ${existing.address} ».`)),
+        h('span', null, typo(`Texte enregistré avec la version précédente : « ${apos(existing.address ?? '')} ».`)),
         h('button', { type: 'button', class: 'btn btn-secondary', onclick: () => field?.search(legacyQuery(existing)) }, T.verify),
       )
     : null;
@@ -256,7 +258,7 @@ function deletePlace(ctx: PhoneCtx, place: FavoritePlace): HTMLElement {
   const used = tripsUsing(ctx.settings.get().favorites, place.id).length > 0;
   return confirmInPage({
     trigger: T.removeFavButton,
-    question: typo(used ? removeUsedPlaceText(place.label) : T.removeFav),
+    question: typo(used ? removeUsedPlaceText(apos(place.label)) : T.removeFav),
     confirm: T.remove,
     cancel: T.cancel,
     onConfirm: async () => {

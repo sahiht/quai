@@ -13,7 +13,7 @@ import { prettyName } from '../../../shared/names';
 import { namesOf, scopeTexts, stibMessageText, TRIP_BUDGET, type AlertScope, type ScopeStop } from './alerts';
 import type { Alert, Journey, Leg, Settings } from './api';
 import type { PreparedArea } from './areas';
-import { stibPassages, type StibPassage } from './boards';
+import { legLast, stibPassages, trainLegLast, type StibPassage } from './boards';
 import type { RealtimeClient, RtTrip, StibEntry } from './realtime';
 import { stibPoint } from './realtime';
 import { delayMinutes, headKey, headScore, platformOfStopId, RT_MAX_SHIFT_MS, rtAtStop, rtAtStopShown, rtOccurrence, sameStop, type TripContext } from './rtmerge';
@@ -30,6 +30,17 @@ export interface RefreshEnv {
   now: () => number;
   trainDays: () => Promise<DayIndex[]>;
   area: (id: string) => Promise<PreparedArea | null>;
+  /**
+   * 1.3.1 (R3) : zone déjà connue (mémoire, cache persistant), jamais demandée au réseau : « , dernier » d'une étape en
+   * bus, tram ou métro. Absente : pas de marque d'après l'horaire pour ces étapes.
+   */
+  cachedArea?: (id: string) => Promise<PreparedArea | null>;
+  /**
+   * 1.3.1 (vrai chemin partout, core/firstwalk.ts) : pose sur les étapes copiées d'un trajet les minutes du vrai chemin
+   * de sa première marche, s'il est connu (rend les minutes ajoutées). Absent : marches estimées, comme en 1.3.0 (le
+   * calcul des trajets classe toujours sur les estimations).
+   */
+  firstWalk?: (legs: Leg[], settings: Settings) => number;
 }
 
 /** Passages STIB acceptés autour de l'horaire prévu d'une étape. */
@@ -392,6 +403,35 @@ export async function applyRealtime(legs: Leg[], env: RefreshEnv, followed = fal
   }
 }
 
+/**
+ * 1.3.1 (R3, PRD-1.3.1 § 14) : « , dernier » d'après l'horaire sur les étapes en véhicule (après applyRealtime), sans
+ * rien demander au réseau : un train d'après les trains des jours déjà chargés (trainLegLast) ; un bus, un tram, un
+ * métro d'après le fichier de sa zone de montée s'il est déjà connu (env.cachedArea, legLast). Décision du 20/11 à
+ * 21:58 : « dernier » quand aucun départ plus tard, avant demain, ne va de l'arrêt de montée à l'arrêt de descente.
+ * Une étape STIB suivie en direct garde la seule parole de la STIB (« Dernier passage », applyStib) : jamais deux marques.
+ */
+export async function markLast(legs: Leg[], env: RefreshEnv): Promise<void> {
+  const rides = legs.filter((l) => l.kind === 'ride' && !(l.op === 'stib' && (l.last || l.rt)));
+  if (!rides.length) return;
+  const days = rides.some((l) => l.op === 'sncb') ? await env.trainDays().catch(() => [] as DayIndex[]) : [];
+  const ids = [...new Set(rides.filter((l) => l.op !== 'sncb' && l.from.areaId).map((l) => l.from.areaId!))];
+  const preps = new Map<string, PreparedArea | null>();
+  if (env.cachedArea) {
+    const load = env.cachedArea;
+    await Promise.all(ids.map(async (id) => preps.set(id, await load(id).catch(() => null))));
+  }
+  for (const l of rides) {
+    let last = false;
+    if (l.op === 'sncb') last = trainLegLast(days, l);
+    else {
+      const prep = l.from.areaId ? preps.get(l.from.areaId) : null;
+      last = !!prep && legLast(prep, l);
+    }
+    if (last) l.last = true;
+    else delete l.last;
+  }
+}
+
 /** Recalcule les marches, l'heure de départ conseillée et les champs du trajet. */
 export function recompute(j: Journey, legs: Leg[], settings: Settings, now: number, fresh: boolean): Journey {
   const margin = Math.max(0, settings.alerts.leaveBeforeMin) * 60_000;
@@ -575,7 +615,10 @@ async function worksFor(j: Journey, env: RefreshEnv): Promise<string[]> {
 export async function refreshJourneys(js: readonly Journey[], settings: Settings, env: RefreshEnv, fresh = false, followed = false): Promise<Journey[]> {
   const legs = js.map((j) => j.legs.map(cloneLeg));
   await applyRealtime(legs.flat(), env, followed);
+  await markLast(legs.flat(), env);
   const now = env.now();
+  // 1.3.1 : la première marche à la longueur de son vrai chemin, avant le calcul de l'heure de partir et des alertes
+  if (env.firstWalk) for (const l of legs) env.firstWalk(l, settings);
   return Promise.all(
     js.map(async (j, i) => {
       const out = recompute(j, legs[i], settings, now, fresh);
@@ -584,6 +627,24 @@ export async function refreshJourneys(js: readonly Journey[], settings: Settings
       return out;
     }),
   );
+}
+
+/**
+ * 1.3.1 (vrai chemin partout) : le trajet déjà calculé, avec la première marche que `firstWalk` allonge ; le même objet
+ * si rien ne change. Sans réseau : l'heure de partir et le début de la marche sont recalculés (recompute), l'alerte
+ * « partir » aussi ; les autres alertes (voie, retard, suppression, travaux, trajet recalculé) restent à leur place.
+ */
+export function withFirstWalk(j: Journey, settings: Settings, now: number, firstWalk: (legs: Leg[], settings: Settings) => number): Journey {
+  const legs = j.legs.map(cloneLeg);
+  if (!(firstWalk(legs, settings) > 0)) return j;
+  const started = Number.isFinite(j.legs[0]?.dep) && now >= j.legs[0].dep;
+  const out = recompute(j, legs, settings, now, !started);
+  const leave = buildAlerts(out, settings, now, []).find((a) => a.kind === 'leave');
+  const rest = j.alerts.filter((a) => a.kind !== 'leave');
+  const k = rest.findIndex((a) => a.kind === 'works');
+  const at = k < 0 ? rest.length : k;
+  out.alerts = leave ? [...rest.slice(0, at), leave, ...rest.slice(at)] : rest;
+  return out;
 }
 
 /** Applique le temps réel à un trajet et recalcule heure de départ conseillée et alertes (`followed` : trajet suivi). */

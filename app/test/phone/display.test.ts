@@ -5,6 +5,7 @@
  * 1.2.10 (PRD-1.2.10 § 4.4) : sur un seul écran : « Ordre des favoris » en deux choix côte à côte, l'ouverture sur son
  * écran (#/affichage/ouverture), qui revient à Affichage (et, depuis l'accueil, à l'Affichage de l'accueil).
  */
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { textWidth } from '../../src/glasses/font';
 import { geometry, layoutPage } from '../../src/glasses/layout';
@@ -70,10 +71,10 @@ describe('Affichage', () => {
     expect(el.querySelector('label.choice')).toBeNull();
     // l'ouverture : une ligne (un vrai lien) qui ouvre son écran, sa valeur dessous
     const row = el.querySelector<HTMLAnchorElement>('.opening-link a.nav-row')!;
-    expect([textOf(row.querySelector('.t1')), textOf(row.querySelector('.t2')), row.getAttribute('href')]).toEqual(['À l’ouverture de Quai', 'L’accueil, avec mes favoris en tête', '#/affichage/ouverture']);
+    expect([textOf(row.querySelector('.t1')), textOf(row.querySelector('.t2')), row.getAttribute('href')]).toEqual(['À l’ouverture de Quai', 'L’accueil, avec mes favoris', '#/affichage/ouverture']);
     const opening = mount(openingScreen(harness({ settings: defaults() }).ctx));
     expect([...opening.querySelectorAll('label.choice')].map((l) => [l.querySelector('input')!.value, textOf(l)])).toEqual([
-      ['suggest', 'L’accueil, avec mes favoris en tête'],
+      ['suggest', 'L’accueil, avec mes favoris'],
       ['firstFavorite', 'Directement mon premier favori'],
       ['home', 'L’accueil, sans favoris'],
     ]);
@@ -101,9 +102,11 @@ describe('Affichage', () => {
       ['Aides de gestes', true],
       ['Signaler les horaires prévus', true],
       ['Pluie pendant la marche', true],
+      // 1.3.1 (PRD-1.3.1 § 14, R5) : « Plein soleil », éteint par défaut, après la pluie
+      ['Plein soleil', false],
     ]);
     // un seul trait entre deux interrupteurs
-    expect(groups[1].querySelectorAll('.box > .bordered')).toHaveLength(2);
+    expect(groups[1].querySelectorAll('.box > .bordered')).toHaveLength(3);
     expect(groups[1].querySelector('.box > :first-child')!.classList.contains('bordered')).toBe(false);
   });
 
@@ -141,11 +144,14 @@ describe('Affichage', () => {
   });
 
   it('aperçu : l’accueil 1.2.2 (PRD-1.2.2 § 1.1), 3 favoris, puis les trois rubriques (1.2.6) et leur nombre à droite', () => {
-    // l'aide des gestes prend la place de la ligne vide (PRD-1.2.6 § 1)
-    const tail = ['Autour de moi | 3 arrêts', 'Gares de train | 1 gare', 'Arrêts de bus, tram, métro | 1 arrêt', 'Lignes de bus, tram, métro | 1 ligne'];
-    const favs = ['Favoris | 3', 'Bureau | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04', 'Vers Gand-Saint-Pierre | 08:58 → 09:30'];
-    expect(lines(homePreview(defaults()))).toEqual([...favs, ...tail]);
-    expect(lines(homePreview(defaults({ display: { ...defaults().display, gestureHints: false } })))).toEqual([...favs, '', ...tail]);
+    // l'aide des gestes prend la place de la ligne vide (PRD-1.2.6 § 1) ; 1.3.1 (PRD-1.3.1 § 8) : l'aperçu est l'accueil
+    // des lunettes : « Autour de moi » en tête, « Favoris » et ses favoris, puis les rubriques, « Lignes » avant « Arrêts » ;
+    // le bureau (voie modifiée dans l'exemple) porte son « ! » (B15)
+    const head = ['Autour de moi | 3 arrêts'];
+    const tail = ['Gares de train | 1 gare', 'Lignes de bus, tram, métro | 1 ligne', 'Arrêts de bus, tram, métro | 1 arrêt'];
+    const favs = ['Favoris | 3', 'Bureau ! | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04', 'Vers Gand-Saint-Pierre | 08:58 → 09:30'];
+    expect(lines(homePreview(defaults()))).toEqual([...head, ...favs, ...tail]);
+    expect(lines(homePreview(defaults({ display: { ...defaults().display, gestureHints: false } })))).toEqual([...head, ...favs, '', ...tail]);
   });
 
   it('aperçu : selon l’ouverture, l’ordre et le rayon (T5, PRD-1.2.1 § 4)', () => {
@@ -154,14 +160,15 @@ describe('Affichage', () => {
     const favs = (v: ReturnType<typeof homePreview>) => v.items.filter((i) => i.action?.kind === 'openFavorite').map((i) => lines({ ...v, items: [i] })[0]);
     const around = (v: ReturnType<typeof homePreview>) => lines(v).find((l) => l.startsWith('Autour de moi'));
     const v = homePreview(defaults());
-    expect(lines(v)[0]).toBe('Favoris | 3');
-    expect(favs(v)).toEqual(['Bureau | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04', 'Vers Gand-Saint-Pierre | 08:58 → 09:30']);
+    // 1.3.1 (PRD-1.3.1 § 8) : « Autour de moi » en tête, « Favoris » dessous ; le « ! » du bureau (B15)
+    expect(lines(v).slice(0, 2)).toEqual(['Autour de moi | 3 arrêts', 'Favoris | 3']);
+    expect(favs(v)).toEqual(['Bureau ! | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04', 'Vers Gand-Saint-Pierre | 08:58 → 09:30']);
     expect(around(v)).toBe('Autour de moi | 3 arrêts');
     // « Dans mon ordre » : l'ordre du téléphone, le trajet vers Gand en tête
-    expect(favs(homePreview(defaults({ display: { ...d, favOrder: 'mine' } })))).toEqual(['Vers Gand-Saint-Pierre | 08:58 → 09:30', 'Bureau | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04']);
+    expect(favs(homePreview(defaults({ display: { ...d, favOrder: 'mine' } })))).toEqual(['Vers Gand-Saint-Pierre | 08:58 → 09:30', 'Bureau ! | dans 4 min → 09:00', 'Vers Mons | dans 14 min → 09:04']);
     // « L’accueil, sans favoris », rayon de 800 m : « Favoris » sans favori dessous, 4 arrêts ; 300 m : 2 arrêts
     const bare = homePreview(defaults({ display: { ...d, opening: 'home', radiusM: 800 } }));
-    expect(lines(bare)[0]).toBe('Favoris | 3');
+    expect(lines(bare)[1]).toBe('Favoris | 3');
     expect(favs(bare)).toEqual([]);
     expect(around(bare)).toBe('Autour de moi | 4 arrêts');
     expect(around(homePreview(defaults({ display: { ...d, radiusM: 300 } })))).toBe('Autour de moi | 2 arrêts');
@@ -176,7 +183,8 @@ describe('Affichage', () => {
     }
     const el = mount(displayScreen(harness({ settings: defaults() }).ctx));
     const label = el.querySelector('.preview')!.getAttribute('aria-label')!.replace(/\u00a0/g, ' ');
-    expect(label).toBe('Aperçu dans les lunettes : Quai, Favoris 3, Bureau dans 4 min → 09:00, Vers Mons dans 14 min → 09:04, Vers Gand-Saint-Pierre 08:58 → 09:30, Autour de moi 3 arrêts, Gares de train 1 gare, Arrêts de bus, tram, métro 1 arrêt, Lignes de bus, tram, métro 1 ligne');
+    // 1.3.1 (PRD-1.3.1 § 8, B15) : l'ordre des lunettes, le « ! » du bureau
+    expect(label).toBe('Aperçu dans les lunettes : Quai, Autour de moi 3 arrêts, Favoris 3, Bureau ! dans 4 min → 09:00, Vers Mons dans 14 min → 09:04, Vers Gand-Saint-Pierre 08:58 → 09:30, Gares de train 1 gare, Lignes de bus, tram, métro 1 ligne, Arrêts de bus, tram, métro 1 arrêt');
   });
 });
 
@@ -189,11 +197,12 @@ describe('1.2.10 : Affichage sur un seul écran, l’ouverture sur son écran (P
     const legend = el.querySelector('legend')!;
     expect([textOf(legend), legend.className]).toEqual(['À l’ouverture de Quai', 'sr-only']);
     const label = () => el.querySelector('.preview')!.getAttribute('aria-label')!.replace(/ /g, ' ');
-    expect(label()).toMatch(/^Aperçu dans les lunettes : Quai, Favoris 3, Bureau /);
+    // 1.3.1 (PRD-1.3.1 § 8) : « Autour de moi » en tête de l'accueil des lunettes
+    expect(label()).toMatch(/^Aperçu dans les lunettes : Quai, Autour de moi 3 arrêts, Favoris 3, Bureau /);
     expect(el.querySelector<HTMLInputElement>('input[value="suggest"]')!.checked).toBe(true);
     el.querySelector<HTMLInputElement>('input[value="home"]')!.click();
     // « L’accueil, sans favoris » : plus aucun favori sous « Favoris » dans l'aperçu
-    await until(() => hz.settings.get().display.opening === 'home' && /Favoris 3, Autour de moi/.test(label()));
+    await until(() => hz.settings.get().display.opening === 'home' && /Favoris 3, Gares de train/.test(label()));
     el.querySelector<HTMLInputElement>('input[value="firstFavorite"]')!.click();
     await until(() => hz.settings.get().display.opening === 'firstFavorite');
     // retour à Affichage, qui montre la valeur choisie
@@ -216,7 +225,7 @@ describe('1.2.10 : Affichage sur un seul écran, l’ouverture sur son écran (P
     expect(textOf(again.querySelector('.back'))).toBe('Accueil');
   });
 
-  it('tient dans 390 × 844 (calcul des sections, hauteurs mesurées dans Chrome) : rien de plus que l’en-tête, l’aperçu, deux choix segmentés, une ligne et trois interrupteurs', () => {
+  it('tient dans 390 × 844 avec « Plein soleil » (1.3.1, R5), sans rien retirer : en-tête, aperçu, deux choix segmentés, une ligne et quatre interrupteurs ; hauteurs mesurées dans Chrome', () => {
     const el = mount(displayScreen(harness({ settings: defaults() }).ctx));
     // les blocs de l'écran, dans l'ordre : en-tête, aperçu sans titre écrit, deux groupes
     expect([...el.children].map((c) => c.tagName.toLowerCase() + (c.className ? `.${c.className.split(' ')[0]}` : ''))).toEqual(['header.head', 'div.preview-top', 'section.group', 'section.group']);
@@ -225,17 +234,31 @@ describe('1.2.10 : Affichage sur un seul écran, l’ouverture sur son écran (P
     const [home, all] = [...el.querySelectorAll<HTMLElement>('section.group')];
     expect([...home.querySelectorAll('.box > *')].map((c) => c.className)).toEqual(['pad-row', 'pad-row bordered', 'list bordered opening-link']);
     expect(home.querySelectorAll('.seg')).toHaveLength(2);
-    expect(all.querySelectorAll('.switch-row')).toHaveLength(3);
-    // sous-titres des interrupteurs : deux sur une ligne (36 caractères au plus à 13 px), la pluie sur deux
-    const subs = [...all.querySelectorAll('.switch-row .c2')].map((c) => plainText(c));
-    expect(subs.map((t) => t.length <= 36)).toEqual([true, true, false]);
-    // hauteurs (px) mesurées à 390 × 844 dans Chrome (Inter) : marges de la page 24 + 32, espaces de 12, en-tête 80,
-    // aperçu 175 (350 × 175), titre de groupe 18 + 6, choix segmenté 96, ligne de l'ouverture 57, interrupteur 56 (69
-    // sur deux lignes), traits de 1 px
-    const groupHome = 18 + 6 + (96 + 1 + 96 + 1 + 57 + 2);
-    const groupAll = 18 + 6 + (56 + 1 + 56 + 1 + 68 + 2);
-    const total = 24 + 80 + 12 + 175 + 12 + groupHome + 12 + groupAll + 32;
+    // rien n'est retiré : les trois interrupteurs de la 1.2.10, puis « Plein soleil » (PRD-1.3.1 § 14, R5)
+    const switches = [...all.querySelectorAll('.switch-row')];
+    expect(switches.map((r) => textOf(r.querySelector('.c1')))).toEqual(['Aides de gestes', 'Signaler les horaires prévus', 'Pluie pendant la marche', 'Plein soleil']);
+    // sous-titres : trois sur une ligne (36 caractères au plus à 13 px), la pluie sur deux
+    const subs = switches.map((c) => plainText(c.querySelector('.c2')!));
+    expect(subs).toEqual(['rappel discret en bas de l’écran', 'un ~ devant l’heure sans temps réel', 'sur les marches de 5 min ou plus, d’après Open-Meteo', 'Le texte pâle devient plus clair.']);
+    expect(subs.map((t) => t.length <= 36)).toEqual([true, true, false, true]);
+    // les espaces resserrés de la 1.3.1 (styles.css), dont dépendent les hauteurs ci-dessous
+    const css = readFileSync('src/phone/styles.css', 'utf8');
+    for (const rule of ['.screen.display { gap: 8px; }', '.display .group { gap: 4px; }', '.display .pad-row { padding: 7px 16px; }', '.display .seg { padding: 3px; }', '.display .switch-row { min-height: 50px; padding: 4px 16px; }', '.opening-link .row { min-height: 50px; padding: 5px 4px 5px 16px; }']) {
+      expect(css, rule).toContain(rule);
+    }
+    // toute cible tactile garde 44 px ou plus : choix segmentés 44, interrupteurs 50, ligne de l'ouverture 51
+    expect(css).toContain('.seg label { position: relative; min-height: 44px;');
+    // hauteurs (px) mesurées à 390 de large dans Chrome le 20/11/2026 (page réelle, styles.css) : marges de la page
+    // 24 + 32, espaces de 8, en-tête 80, aperçu 175 (350 × 175), titre de groupe 18 + 4, choix segmenté 90, ligne de
+    // l'ouverture 51, interrupteur 50 (64 sur deux lignes), traits de 1 px. Avant ce resserrement, avec « Plein
+    // soleil » : 889 px, le bas de l'interrupteur à 856 px, coupé de 12 px (contrôle de R5).
+    const groupHome = 18 + 4 + (90 + 1 + 90 + 1 + 51 + 2);
+    const groupAll = 18 + 4 + (50 + 1 + 50 + 1 + 64 + 1 + 50 + 2);
+    const total = 24 + 80 + 8 + 175 + 8 + groupHome + 8 + groupAll + 32;
+    expect([groupHome, groupAll, total]).toEqual([257, 241, 833]);
     expect(total).toBeLessThanOrEqual(844 - 10);
+    // le bas de « Plein soleil » : 800 px, entier à l'écran sans défiler
+    expect(total - 32 - 1).toBe(800);
   });
 });
 

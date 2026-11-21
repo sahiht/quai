@@ -56,6 +56,13 @@ export interface EngineEnv {
   legacy?(O: PlanPoint, D: PlanPoint, after: number, maxWalk: number): Promise<Leg[][]>;
   /** Réglages de calcul (tests, contrôle « réseau complet »). */
   tune?: Partial<Tune>;
+  /**
+   * 1.3.1 (vrai chemin partout, core/firstwalk.ts) : minutes que le vrai chemin connu de la première marche ajoute à
+   * la marche estimée de ce trajet (0 : inconnu ou pas plus long). Sert à une seule chose : un trajet dont le premier
+   * véhicule ne peut plus être attrapé par le vrai chemin n'est pas un candidat, comme un véhicule déjà parti. Le
+   * classement, lui, compare toujours les marches estimées (l'ordre des propositions ne dépend pas des chemins connus).
+   */
+  firstWalkExtra?: (j: Journey) => number;
 }
 
 export interface Tune {
@@ -236,6 +243,13 @@ export async function computeRoute(
   }
   const directWalk = walkMinutes(dist);
   const now = env.now();
+  // 1.3.1 (vrai chemin partout) : minutes de plus du vrai chemin connu de la première marche (0 le plus souvent)
+  const walkExtra = (j: Journey): number => Math.max(0, env.firstWalkExtra?.(j) ?? 0);
+  /** Parti à l'heure demandée au plus tôt d'après l'estimation, mais trop tard d'après le vrai chemin connu. */
+  const outOfReach = (j: Journey): boolean => {
+    const x = walkExtra(j);
+    return x > 0 && itemOf(j).dep - x < after / MIN;
+  };
   const recomputed = (legs: Leg[]) => recompute(skeleton(legs), legs, settings, now, true);
   const walkJourney = () => recomputed(walkOnlyLegs(endName(O), endName(D), directWalk, after));
   /** Aucun arrêt autour d'une extrémité : la marche seule si elle dure 30 min au plus. */
@@ -369,6 +383,15 @@ export async function computeRoute(
       const legs = candLegs(n0, c, endName(O), endName(D));
       if (!legs) return;
       const j = recomputed(legs);
+      // 1.3.1 : premier véhicule impossible à attraper par le vrai chemin connu : pas un candidat, comme un véhicule
+      // parti à l'heure prévue ; comme lui, il revient si le temps réel le dit en retard et encore attrapable (late)
+      if (outOfReach(j)) {
+        if (!lateById.has(j.id) && lateById.size < 2 * P.lateMax) {
+          lateById.set(j.id, j);
+          late.push(j);
+        }
+        return;
+      }
       const cur = byKey.get(j.id);
       if (!cur || c.dep > cur.c.dep) byKey.set(j.id, { c, j });
     };
@@ -425,7 +448,8 @@ export async function computeRoute(
   const refreshed = new Set<string>();
   const cancelled = (j: Journey) => j.legs.some((l) => l.kind === 'ride' && l.cancelled);
   // encore attrapable sur l'heure estimée : départ du premier véhicule moins la marche, au plus tôt l'heure demandée
-  const catchable = (j: Journey) => itemOf(j).dep >= T;
+  // 1.3.1 : avec le vrai chemin connu de la première marche, s'il est plus long (walkExtra)
+  const catchable = (j: Journey) => itemOf(j).dep - walkExtra(j) >= T;
   const update = async (list: Journey[]): Promise<void> => {
     const todo = list.filter((j) => !refreshed.has(j.id));
     if (!todo.length) return;

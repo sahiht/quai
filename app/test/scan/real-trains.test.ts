@@ -112,7 +112,7 @@ describe.skipIf(!DIR)('1.2.8 : balayage des trains (QUAI_SCAN_DATA)', () => {
           for (const p of pagesOf(v)) {
             const bad = overflowing(p);
             if (bad.length) err(`${label} : ${bad[0]}`);
-            tally(words, pageCuts(v, p), label);
+            tally(words, pageCuts(v, p), label, p);
             const list = p.lines.filter((l) => /^[○●] /.test(l));
             for (const l of list) if (/ v(oie|\.)\S*…/.test(l.replace(/ /g, ' '))) platformCut++;
             rows += list.length;
@@ -161,6 +161,7 @@ describe.skipIf(!DIR)('1.2.8 : balayage des trains (QUAI_SCAN_DATA)', () => {
       `Gares par voyage : de ${Math.min(...lengths)} à ${Math.max(...lengths)} (médiane ${median(lengths)}) ; trajets avec des gares d'avant : ${withBefore} sur ${views} ; voies connues : ${pct(platforms, calls)} des arrêts.`,
       `Rangées coupées (« … ») : ${cut}/${rows} (${pct(cut, rows)}).${cutEx.length ? ` Ex. : ${cutEx.join(' | ')}` : ''}`,
       `Rangées coupées au milieu d'un mot (1.3.0, 0 exigé) : ${words.mid} sur ${words.cut} rangées coupées ; premier mot seul trop long (coupé au caractère) : ${words.first} ; coupes introuvables : ${words.unknown} ; voies coupées : ${platformCut}.${words.samples.length ? ` Ex. : ${words.samples.join(' | ')}` : ''}`,
+      `Rangées à apostrophe droite (1.3.1, 0 exigé) : ${words.straight}.${words.straightSamples.length ? ` Ex. : ${words.straightSamples.join(' | ')}` : ''}`,
       `Noms les plus longs : ${longest.map((x) => `${x.name} (${x.w} px)`).join(', ')}.`,
       `Temps réel simulé (+3 min, le train entre deux gares, vu de 3 gares plus loin) : ${live} voyages, un seul ●, sur la gare où il arrive, à l'écran avec le curseur.`,
       errors.length ? `Erreurs :\n  ${errors.join('\n  ')}` : 'Aucune erreur.',
@@ -172,5 +173,7 @@ describe.skipIf(!DIR)('1.2.8 : balayage des trains (QUAI_SCAN_DATA)', () => {
     expect(words.mid).toBe(0);
     expect(words.unknown).toBe(0);
     expect(platformCut).toBe(0);
+    // 1.3.1 (PRD-1.3.1 § 7) : aucune apostrophe droite affichée
+    expect(words.straight).toBe(0);
   }, 600_000);
 });

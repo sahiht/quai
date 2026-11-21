@@ -20,6 +20,7 @@ import type { AreaFile, AreaSummary, LineFile, LineIndex, LineTile, Meta, Mode, 
 import { normalizeId, tileKey } from '../../shared/types';
 import { ACRONYMS, prettyName, searchKey, searchWords } from '../../shared/names';
 import { decodeTile, isTileKey, isWalkIndex, isWalkTile, WALK_TILE, WALK_UNIT, type WalkIndex } from '../../app/src/core/walk/format';
+import { EXITS_FILE, isExitsFile } from '../../app/src/core/walk/exits-format';
 
 export const OPS: Op[] = ['sncb', 'stib', 'delijn', 'tec'];
 export const MODES: Mode[] = ['train', 'metro', 'tram', 'bus'];
@@ -225,7 +226,7 @@ export function validateData(dirArg: string): ValidationReport {
   }
   if (!existsSync(join(dir, 'LICENSE-DATA.txt'))) err('LICENSE-DATA.txt absent');
   for (const name of readdirSync(dir)) {
-    if (!['meta.json', 'LICENSE-DATA.txt', 'tiles', 'areas', 'search', 'trains', 'lines', 'linetiles', 'walk'].includes(name)) warn(`fichier inattendu à la racine : ${name}`);
+    if (!['meta.json', 'LICENSE-DATA.txt', 'tiles', 'areas', 'search', 'trains', 'lines', 'linetiles', 'walk', EXITS_FILE].includes(name)) warn(`fichier inattendu à la racine : ${name}`);
   }
 
   /* ------------------------------ zones ------------------------------ */
@@ -753,6 +754,7 @@ export function validateData(dirArg: string): ValidationReport {
 
   /* ------------------------------ 1.2.10 : chemins à pied ------------------------------ */
   validateWalk(dir, readJson, err, stats);
+  validateExits(dir, readJson, err);
 
   return report();
 }
@@ -824,6 +826,22 @@ function validateWalk(dir: string, readJson: (rel: string) => unknown, err: (m: 
   if (isInt(idx.bytes) && Math.abs(idx.bytes - total) > count) err(`walk/index.json : ${idx.bytes} octets annoncés, ${total} trouvés`);
   if (isInt(idx.maxTileBytes) && Math.abs(idx.maxTileBytes - biggest) > 1) err(`walk/index.json : plus grosse tuile annoncée ${idx.maxTileBytes} octets, ${biggest} trouvée`);
   if (total > WALK_MAX_TOTAL) err(`walk : ${(total / 1048576).toFixed(1)} Mo au total, au-delà des 80 Mo du budget`);
+}
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 14, R1) : exits.json (facultatif : sans lui, aucune sortie du métro n'est montrée), au format de
+ * app/src/core/walk/exits-format.ts, de la même version que les tuiles piétonnes.
+ */
+function validateExits(dir: string, readJson: (rel: string) => unknown, err: (m: string) => void): void {
+  if (!existsSync(join(dir, EXITS_FILE))) return;
+  const raw = readJson(EXITS_FILE);
+  if (!isExitsFile(raw)) {
+    err(`${EXITS_FILE} : invalide (v 1, version AAAA-MM-JJ, stops : 1 à 3 sorties [nom, lat, lon, mètres] par arrêt)`);
+    return;
+  }
+  const idx = existsSync(join(dir, 'walk', 'index.json')) ? readJson('walk/index.json') : null;
+  if (isWalkIndex(idx) && idx.version !== raw.version) err(`${EXITS_FILE} : version « ${raw.version} » au lieu de celle des tuiles piétonnes « ${idx.version} »`);
+  if (!/ODbL/.test(raw.licence) || !/OpenStreetMap/.test(raw.attribution)) err(`${EXITS_FILE} : licence ODbL ou attribution OpenStreetMap absente`);
 }
 
 /** Grille simple pour chercher les zones à moins de 400 m (cellules de 0,005° × 0,0075°). */

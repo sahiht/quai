@@ -1,12 +1,30 @@
 # Passer Quai à une nouvelle version (bêta)
 
-Ce guide sert à chaque nouvelle version de Quai. La dernière est la 1.3.0. Il faut environ 10 minutes, un ordinateur (ou le téléphone) pour le portail Even Hub, puis le téléphone.
+Ce guide sert à chaque nouvelle version de Quai. La dernière est la 1.3.1. Il faut environ 10 minutes, un ordinateur (ou le téléphone) pour le portail Even Hub, puis le téléphone.
+
+## Ce qui change avec la 1.3.1
+
+Pas de nouvel écran à apprendre : Quai dit plus clairement ce qu'il fait.
+
+- Guidage plus clair : trois petits points (« · · · ») quand Quai te suit et qu'il n'y a rien à faire (à bord, la ligne des arrêts jusqu'à ta descente). Un toucher masque un message, il n'efface rien. « Où tu en es » dit « Guidage en cours », jusqu'où tu vas et ce qui vient, avec son heure (« Ensuite : bus W à 17:49 »).
+- Le nom de l'arrêt où tu marches est écrit partout (« à pied 7 min → Flagey »). Trop long, il est raccourci (« Bxl-Central »).
+- L'heure de partir suit le vrai chemin à pied, rue par rue. Elle est la même sur tous les écrans.
+- Dans la liste des arrêts d'un bus, d'un tram, d'un métro ou d'un train : « ▶ Me guider jusqu'à … », avec le nom de l'arrêt choisi.
+- Accueil, dans les lunettes et sur le téléphone : Autour de moi, Favoris, Gares, Lignes, Arrêts.
+- En descendant du métro à Bruxelles : la sortie à prendre (« Sortie : Boulevard Anspach »). Les sorties arrivent avec les données de la première nuit après la mise à jour.
+- « dernier » à côté du dernier départ que tu peux encore prendre avant demain, sur tous les réseaux.
+- Sur le téléphone, dans « Réglages » : « Éviter les escaliers » et, dans « Affichage », « Plein soleil ». Sur la carte « En cours » : « Copier mon heure d'arrivée ».
+- Dans Quai Web : « Essayer en accéléré », sous « Y aller » d'un favori, pour voir tout un guidage en quelques minutes.
+
+Ce qu'il faut faire : rien de plus que d'habitude. Suis « Les étapes » plus bas ; tes favoris et tes réglages sont gardés. Si tu n'as pas encore fait le test de l'écran : sur le téléphone, « Réglages », « Pendant un trajet », « Tester l'écran des lunettes » (une minute, lunettes sur le nez).
+
+Si tu passes directement de la 1.2.10 (ou d'avant) à la 1.3.1, voici aussi ce qu'apportaient les versions précédentes.
 
 ## Ce qui change avec la 1.3.0
 
 - Écran d'un trajet : une ligne « ▶ Y aller » dit ce que fait un toucher (« ▶ Retour au guidage » quand le trajet est déjà guidé). Le toucher marche comme avant.
 - « Autres trajets » : ▲ sur la première ligne te ramène au trajet proposé.
-- Favoris : le détail du favori choisi s'ouvre juste dessous, sur deux lignes (par exemple « à pied 7 min, puis bus W ~11:49 » et « 1 changement : métro 2 »), et se referme quand tu passes au suivant. Les « … » ne restent plus figés.
+- Favoris : le détail du favori choisi s'ouvre juste dessous, sur deux lignes (par exemple « à pied 7 min → Flagey » et « bus W ~11:49, 1 changement : métro 2 »), et se referme quand tu passes au suivant. Les « … » ne restent plus figés.
 - Tableau d'une gare ou d'un arrêt : « toucher : où descendre ». Le toucher ouvre les arrêts du départ, où tu choisis « j'y descends ».
 - Hors de Belgique (Maastricht, Luxembourg…) : Quai le dit (« Hors de Belgique »), puis montre seulement les minutes et la direction, sans faux virages.
 - Les noms trop longs sont coupés entre deux mots, jamais au milieu d'un mot.
@@ -18,13 +36,13 @@ Ce guide sert à chaque nouvelle version de Quai. La dernière est la 1.3.0. Il 
 
 Pour bien démarrer avec la 1.3.0 : fais le test de l'écran une fois, puis garde les conseils de la 1.2.10 ci-dessous (position « Toujours » pour l'appli Even, Quai ouvert sur les lunettes pendant le trajet).
 
-Si tu passes directement de la 1.2.9 (ou d'avant) à la 1.3.0, voici aussi ce qu'apportaient les versions précédentes.
+Si tu passes directement de la 1.2.9 (ou d'avant) à la 1.3.1, voici aussi ce qu'apportaient les versions précédentes.
 
 ## Ce qui change avec la 1.2.10
 
-- « Y aller » : ouvre un favori, puis touche « y aller » (ou le bouton « Y aller » du favori sur le téléphone). Quai te guide de ta porte jusqu'à destination : à pied, puis en bus, tram, métro ou train, avec les correspondances. L'écran reste vide tant qu'il n'y a rien à faire. Un message paraît seulement quand il faut agir : partir, tourner, monter (la ligne, ou la voie en grand), descendre (1 minute avant ton arrêt), un imprévu (correspondance ratée ou train supprimé : le trajet suivant ; arrêt dépassé : où descendre), l'arrivée.
+- « Y aller » : ouvre un favori, puis touche « y aller » (ou le bouton « Y aller » du favori sur le téléphone). Quai te guide de ta porte jusqu'à destination : à pied, puis en bus, tram, métro ou train, avec les correspondances. Tant qu'il n'y a rien à faire, l'écran montre seulement trois petits points (« · · · ») ou, à bord, la ligne des arrêts jusqu'à ta descente. Un message paraît seulement quand il faut agir : partir, tourner, monter (la ligne, ou la voie en grand), descendre (1 minute avant ton arrêt), un imprévu (correspondance ratée ou train supprimé : le trajet suivant ; arrêt dépassé : où descendre), l'arrivée.
 - Déjà dans le train, le bus, le tram ou le métro ? Dans Gares, Arrêts, Lignes ou Autour de moi, ouvre le départ, puis touche la gare ou l'arrêt où tu descends : « j'y descends ». Quai te prévient 1 minute avant.
-- Pendant le guidage : touche une fois pour voir où tu en es, ou pour effacer le message. Appui long : le menu, avec « Arrêter le guidage » et « Voir tout le trajet ».
+- Pendant le guidage : touche une fois pour voir où tu en es, ou pour masquer le message. Appui long : le menu, avec « Voir tout le trajet », « Voir les arrêts » et « Arrêter le guidage ».
 - À pied, le vrai chemin, rue par rue, d'après OpenStreetMap (toute la Belgique). Il est calculé sur le téléphone : ta position ne le quitte pas. Hors de Belgique, la marche est indiquée en ligne droite.
 - Un seul réglage, sur le téléphone, dans « Réglages » (« Pendant un trajet ») : « Me guider pendant un trajet », allumé au départ. Éteint, Quai montre le trajet comme avant, sans guidage.
 - Favoris : une ligne chacun, le détail du favori choisi en bas. Les étapes d'un trajet : une ligne par étape.
@@ -35,11 +53,11 @@ Pour que le guidage marche bien :
 
 - Laisse l'appli Even se servir de ta position tout le temps. Sur iPhone : Réglages > Even Realities > Position > « Toujours ». Sur Android : Paramètres > Applications > Even Realities > Autorisations > Position > « Toujours autoriser ». Sinon, le guidage s'arrête quand le téléphone se verrouille.
 - Garde Quai ouvert sur les lunettes pendant le trajet.
-- Dans l'appli Even, règle l'angle d'affichage au plus bas : un petit mouvement de tête suffit pour voir le message.
+- Pour voir les messages sans bouger la tête : dans l'appli Even, règle l'angle de l'affichage Head-Up à 0, en regardant un peu vers le bas pendant le réglage. L'écran reste allumé quand tu regardes devant toi ; la batterie des lunettes s'use un peu plus vite.
 
 ## Ce qui change avec la 1.2.9
 
-- Sur le téléphone, l'accueil reprend celui des lunettes : « Où vas-tu ? », tes favoris avec leur heure et le bouton « Lunettes », puis « Autour de moi », « Gares de train », « Arrêts de bus, tram, métro » et « Lignes de bus, tram, métro », une ligne chacune avec leur nombre. Plus besoin de descendre jusqu'en bas de la page. Au-delà de 3 favoris, « Voir les autres favoris » les montre aussi.
+- Sur le téléphone, l'accueil reprend celui des lunettes : « Où vas-tu ? », tes favoris avec leur heure et le bouton « Lunettes », puis « Autour de moi », « Gares de train », « Arrêts de bus, tram, métro » et « Lignes de bus, tram, métro », une ligne chacune avec leur nombre (depuis la 1.3.1, « Autour de moi » passe avant les favoris, et les lignes avant les arrêts). Plus besoin de descendre jusqu'en bas de la page. Au-delà de 3 favoris, « Voir les autres favoris » les montre aussi.
 - Un seul bouton « Réglages », en haut à droite : Affichage, Alertes, la marche maximale et la marge avant de partir (réglables sur place avec − et +), Position et langue, Données.
 - Gares, arrêts et lignes ont chacun leur écran. Touche un élément pour l'ouvrir d'office, changer son ordre (↑ ↓) ou le retirer. « Près de toi » est sur le même écran, avec un bouton « Ajouter » pour chacun, puis la recherche.
 - Dans les lunettes, « imminent » ne s'affiche plus qu'avec le temps réel. Sans temps réel, un départ à moins d'une minute s'écrit « dans ~1 min » (« ~1 min » ou « ~1 » dans les tableaux).
@@ -86,7 +104,7 @@ Pour que le guidage marche bien :
 - Tableaux complets : une gare ou un arrêt montre tous ses départs des 2 prochaines heures, page par page avec ▲▼. Le réglage « Départs par arrêt » disparaît.
 - Touche un départ : ses arrêts jusqu'au terminus, avec l'heure, la voie et le retard pour un train. Touche un arrêt de la liste pour voir ses départs.
 
-Si tu passes directement de la 1.2.1 à la 1.3.0, voici aussi ce qu'apportait la 1.2.2.
+Si tu passes directement de la 1.2.1 à la 1.3.1, voici aussi ce qu'apportait la 1.2.2.
 
 ## Ce qui change avec la 1.2.2
 
@@ -115,7 +133,7 @@ Quand une nouvelle version est publiée sur GitHub (page « Releases » du dép�
 
 ### 1. Télécharger le paquet
 
-Ouvre https://github.com/sahiht/quai/releases/latest. La page s'appelle « Quai v1.3.0 ». Dans « Assets » (fichiers joints), touche `quai.ehpk` pour le télécharger. L'icône ne change pas : inutile de la reprendre.
+Ouvre https://github.com/sahiht/quai/releases/latest. La page s'appelle « Quai v1.3.1 ». Dans « Assets » (fichiers joints), touche `quai.ehpk` pour le télécharger. L'icône ne change pas : inutile de la reprendre.
 
 ![Télécharger quai.ehpk](img/maj/maj-1-release.png)
 
@@ -127,13 +145,13 @@ Va sur https://hub.evenrealities.com et connecte-toi avec le même compte que da
 
 ### 3. Déposer le nouveau paquet
 
-Onglet « Builds » (paquets). Touche le bouton « + » en haut à droite et choisis le fichier `quai.ehpk` téléchargé. Une ligne « v1.3.0 » apparaît sous « Private builds » (paquets privés), avec une étiquette grise « Private » (privé).
+Onglet « Builds » (paquets). Touche le bouton « + » en haut à droite et choisis le fichier `quai.ehpk` téléchargé. Une ligne « v1.3.1 » apparaît sous « Private builds » (paquets privés), avec une étiquette grise « Private » (privé).
 
 ![Déposer le paquet](img/maj/maj-3-evenhub-builds.png)
 
 ### 4. Passer la version en bêta
 
-Sur la ligne « v1.3.0 », touche l'étiquette grise « Private ». Choisis « Beta » (bêta), puis confirme avec « Promote to Beta » (passer en bêta).
+Sur la ligne « v1.3.1 », touche l'étiquette grise « Private ». Choisis « Beta » (bêta), puis confirme avec « Promote to Beta » (passer en bêta).
 
 ![Passer en bêta](img/maj/maj-4-promote.png)
 
@@ -147,11 +165,11 @@ Dans l'appli Even Realities : onglet « Me » (moi), puis « Beta tester » (tes
 
 ### 6. Ouvrir Quai sur les lunettes
 
-À la première ouverture, les lunettes affichent une fois le message « Quai 1.3.0 » avec les nouveautés (depuis la 1.2.9 ou d'avant, aussi celles des versions sautées). Touche pour continuer.
+Quai s'ouvre sur son accueil, « Autour de moi » en premier. Si les lunettes affichent d'abord un message avec les nouveautés (une seule fois, toujours quand tu viens de la 1.2.10 ou d'avant), touche pour continuer.
 
 ### 7. Vérifier
 
-Sur le téléphone, ouvre Quai : l'accueil montre « Dans tes lunettes » et, en haut à droite, le bouton « Réglages ». Dans « Réglages », puis « Données », la ligne « Version de Quai » doit dire « 1.3.0 ». Puis, dans « Réglages », touche « Tester l'écran des lunettes » et suis les consignes (une minute, lunettes sur le nez). Pour essayer le guidage : ouvre un favori dans les lunettes, touche « ▶ Y aller », puis touche une fois pour voir où tu en es.
+Sur le téléphone, ouvre Quai : l'accueil montre « Dans tes lunettes » et, en haut à droite, le bouton « Réglages ». Dans « Réglages », puis « Données », la ligne « Version de Quai » doit dire « 1.3.1 ». Si tu ne l'as pas encore fait : dans « Réglages », touche « Tester l'écran des lunettes » et suis les consignes (une minute, lunettes sur le nez). Pour essayer le guidage : ouvre un favori dans les lunettes et touche « ▶ Y aller ». L'écran « Guidage en cours » dit ce qui vient ; ensuite, trois petits points, et un toucher pour revoir où tu en es.
 
 ## En cas de souci
 
@@ -159,13 +177,13 @@ Sur le téléphone, ouvre Quai : l'accueil montre « Dans tes lunettes » et, en
 |---|---|
 | Even Hub refuse le fichier | Ce numéro de version est déjà déposé. Vérifie que tu as bien pris le paquet de la dernière release. |
 | « test version expired » sur le téléphone | La version n'est pas en « Beta », ou ton invitation n'est plus « Active » dans « Testing group ». |
-| Les lunettes montrent encore l'ancienne version | Quitte Quai (double toucher à l'accueil), puis rouvre-le. Sur le téléphone, vérifie dans « Beta tester » que la version 1.3.0 est installée. |
+| Les lunettes montrent encore l'ancienne version | Quitte Quai (double toucher à l'accueil), puis rouvre-le. Sur le téléphone, vérifie dans « Beta tester » que la version 1.3.1 est installée. |
 | Un trajet propose plus de marche que ton réglage | Aucun trajet qui marche moins n'arrive assez tôt : au-delà de ta marche maximale, chaque minute à pied compte triple. Au bout des étapes, ▼ ouvre les autres trajets. Tu peux changer « Marche maximale » dans « Réglages », sur le téléphone. |
 | « Gares de train », « Arrêts » ou « Lignes » disent « à choisir » | Ajoute tes gares, tes arrêts et tes lignes sur le téléphone, dans Quai : touche la rubrique du même nom sous « Dans tes lunettes ». |
 | Une ligne dit « introuvable » | Elle n'est plus dans les horaires du jour (ligne renumérotée ou supprimée) : retire-la et ajoute la nouvelle sur le téléphone, rubrique « Lignes de bus, tram, métro ». |
 | Pas de ● sur le trajet d'un train | Le temps réel de ce train manque (ses heures ont un « ~ ») : le ● ne s'affiche que d'après le temps réel, jamais deviné. |
 | Une ligne sans couleur sur le téléphone | Son réseau ne publie pas de couleur pour elle : sa pastille reste neutre, rien d'autre ne change. |
-| Le guidage ne montre rien | C'est voulu : l'écran reste vide tant qu'il n'y a rien à faire. Touche une fois pour voir où tu en es. S'il ne se passe rien du tout, vérifie sur le téléphone, dans « Réglages », que « Me guider pendant un trajet » est allumé. |
+| Le guidage ne montre que trois petits points | C'est voulu : « · · · » veut dire que Quai te suit et qu'il n'y a rien à faire (à bord, la ligne des arrêts les remplace). Touche une fois pour voir où tu en es. Si l'écran reste tout à fait vide, vérifie sur le téléphone, dans « Réglages », que « Me guider pendant un trajet » est allumé. |
 | Le guidage s'arrête quand le téléphone est verrouillé | La position de l'appli Even n'est pas sur « Toujours » (voir plus haut, « Pour que le guidage marche bien »). |
 | Pas de virages à pied | Pas de vrai chemin pour cette marche (hors de Belgique, ou les chemins à pied de la semaine pas encore prêts) : Quai montre le temps restant et la direction de l'arrêt. Sur le téléphone, « Réglages », puis « Données » : la carte « Chemins à pied » dit la date des données OpenStreetMap. |
 | Jamais de « pluie » sur les marches | Il ne pleut pas assez (0,3 mm sur un quart d'heure, probabilité de 60 % ou plus), ou la marche dure moins de 5 minutes. Sur le téléphone, « Réglages » puis « Données » : la carte « Météo » doit dire « Disponible » ; « Coupée dans Affichage » : rallume « Pluie pendant la marche ». |

@@ -21,7 +21,7 @@ import { MIN, PLACES, settingsWith } from './helpers';
 
 const answers = (fav: Favorite, now: number): FavoriteAnswer | undefined =>
   fav.id === 'fav-bureau' ? { favoriteId: fav.id, kind: 'trip', state: 'ok', plan: { journeys: [door('j-bureau', NOW + 2 * MIN, NOW + 75 * MIN)] }, updatedAt: now } : undefined;
-const settings = (patch: Record<string, unknown> = {}) => settingsWith([PLACES.bureau], { seenVersion: '1.3.0', ...patch });
+const settings = (patch: Record<string, unknown> = {}) => settingsWith([PLACES.bureau], { seenVersion: '1.3.1', ...patch });
 const homeReady = (s: { screen: string; lines: string[] }) => s.screen === 'home' && !s.lines.some((l) => / …$/.test(l));
 const intent = (h: Kit, i: Intent) => (h.c as unknown as { runIntent(i: Intent): Promise<void> }).runIntent(i);
 const screensOf = (h: Kit) => h.c.state.nav.stack.map((f) => f.route.screen);
@@ -226,8 +226,9 @@ describe('PRD-1.2.10 § 3.7 : persistance et reprise', () => {
     const h = await guided({ kv });
     cur = moment('board', 'board:j-bureau:1', NOW, NOW + 60 * MIN);
     await h.c.refreshCurrent();
-    await h.settle(100);
-    // effacé d'un toucher : la mémoire change, son enregistrement attend (au plus toutes les 5 s)
+    // 1.3.1 (A7) : affiché depuis au moins 1,5 s
+    await h.settle(1_500);
+    // masqué d'un toucher : la mémoire change, son enregistrement attend (au plus toutes les 5 s)
     await h.gesture('tap');
     await h.settle(100);
     const k = kv.tripWrites.length;

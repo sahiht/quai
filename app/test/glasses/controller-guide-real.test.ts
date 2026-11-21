@@ -21,7 +21,7 @@ import { busStops, cleanupKit, guideSetup, type Kit, type KitOptions } from './c
 import { MIN, dep, settingsWith } from './helpers';
 
 const intent = (h: Kit, i: Intent) => (h.c as unknown as { runIntent(i: Intent): Promise<void> }).runIntent(i);
-const settings = (guide = true) => settingsWith([], { seenVersion: '1.3.0', display: { ...settingsWith([]).display, guide } });
+const settings = (guide = true) => settingsWith([], { seenVersion: '1.3.1', display: { ...settingsWith([]).display, guide } });
 const ETANGS: Endpoint = { type: 'address', label: 'Étangs d’Ixelles', lat: P.etangs.lat, lon: P.etangs.lon };
 
 /** Le moment montré (genre), d'après le journal de l'écran du guidage. */
@@ -46,10 +46,10 @@ beforeEach(() => views.reset());
 afterEach(() => cleanupKit());
 
 describe('vrai moteur : de l’heure de partir au premier virage', () => {
-  it('position moyenne 10 min avant de partir, chemin demandé ; « Partir maintenant » à 07:05, effacé d’un toucher ; ligne « Maintenant » du téléphone', async () => {
+  it('position moyenne 10 min avant de partir, chemin demandé ; « Partir maintenant » à l’heure de partir du trajet (07:05), effacé d’un toucher ; ligne « Maintenant » du téléphone', async () => {
     const asks: [LatLon, LatLon][] = [];
     const h = await launched({
-      now: at('07:00'),
+      now: at('06:55'),
       walkRoute: async (from, to) => {
         asks.push([from, to]);
         return firstWalkRoute();
@@ -60,12 +60,20 @@ describe('vrai moteur : de l’heure de partir au premier virage', () => {
     expect(asks).toHaveLength(1);
     expect(asks[0][1]).toEqual({ lat: P.gramme.lat, lon: P.gramme.lon });
     expect(h.c.followed!.guide!.walk).toMatchObject({ leg: 0, journeyId: 'jprd', route: { source: 'osm' } });
-    expect(h.c.guideStatus()).toMatchObject({ kind: 'trip', title: 'Bureau', now: 'partir à 07:05', guided: true });
+    // 1.3.1 (« 7h12 partout ») : l'heure de partir est celle que porte le trajet. Le cœur de ce banc est un double : il
+    // ne pose pas les minutes du vrai chemin sur le trajet (le vrai cœur le fait : v131-vrai-chemin.test.ts, partie B),
+    // et le guidage ne corrige plus rien lui-même, même avec ce chemin de 803 m sous la main : 07:05, partout
+    expect(h.c.guideStatus()).toMatchObject({ kind: 'trip', title: 'Bureau', now: 'partir à 07:05', guided: true, then: true });
     expect(h.last()).toMatchObject({ screen: 'guide', show: 'where' });
+    // pas avant 07:05
+    await h.settle(9 * MIN);
+    expect(h.screens().some((s) => s.show === 'moment')).toBe(false);
     // 07:05 : « Partir maintenant »
-    await h.settle(5 * MIN + 1_000);
+    await h.settle(MIN + 1_000);
     expect(shown(h)).toBe('leave');
     const id = h.last().moment;
+    // 1.3.1 (A7) : masqué d'un toucher, affiché depuis au moins 1,5 s
+    await h.settle(1_000);
     await h.gesture('tap');
     expect(h.last().show).not.toBe('moment');
     expect(h.c.followed!.guide!.mem.dismissed).toContain(id);
@@ -91,7 +99,8 @@ describe('vrai moteur : de l’heure de partir au premier virage', () => {
     const built = h.since(n);
     expect(built.find((x) => x.op === 'rebuild')?.extra?.images?.[0].image).toEqual({ kind: 'turn', turn: 'right' });
     expect((built.find((x) => x.op === 'paint')?.arg as ImageSpec).image).toEqual({ kind: 'turn', turn: 'right' });
-    expect(built.find((x) => x.op === 'rebuild')?.extra?.menu?.map((m) => m.id)).toEqual([1, 2]);
+    // 1.3.1 (B10) : « Voir tout le trajet », « Voir les arrêts », « Arrêter le guidage »
+    expect(built.find((x) => x.op === 'rebuild')?.extra?.menu?.map((m) => m.id)).toEqual([2, 3, 1]);
   });
 });
 

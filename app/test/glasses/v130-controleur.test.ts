@@ -75,9 +75,10 @@ function longTrip(id: string, start: number): Journey {
 describe('§ 2 : ▲ sur la première rangée de « Autres trajets »', () => {
   it('revient au trajet proposé, là où il était : sa dernière page, « Fin du trajet »', async () => {
     const plan = (now: number) => [longTrip('j1', now + 5 * MIN), door('j2', now + 9 * MIN, now + 80 * MIN), door('j3', now + 20 * MIN, now + 95 * MIN)];
-    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { plan } });
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { plan } });
     await k.until((s) => s.screen === 'home' && s.lines.some((l) => nb(l).startsWith('Bureau')));
-    await k.gesture('tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi », « Favoris », puis le favori
+    await k.gesture('down', 'down', 'tap');
     await k.until((s) => s.screen === 'steps' && s.page === 1);
     // ▼ jusqu'au bout des étapes, puis « Autres trajets »
     let end = k.last();
@@ -98,7 +99,7 @@ describe('§ 2 : ▲ sur la première rangée de « Autres trajets »', () => {
   });
 
   it('pas de trajet proposé dessous (écran repris) : ▲ ne fait rien', async () => {
-    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }) });
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }) });
     await k.until((s) => s.screen === 'home');
     const journeys = [door('j1', NOW + 4 * MIN, NOW + 70 * MIN), door('j2', NOW + 9 * MIN, NOW + 80 * MIN), door('j3', NOW + 20 * MIN, NOW + 95 * MIN)];
     k.c.restore({ v: 2, nav: { stack: [{ route: { screen: 'home' }, sel: 0, top: 0 }, { route: { screen: 'others', title: 'Bureau', journeys, index: 0 }, sel: 0, top: 0, fresh: true }] } });
@@ -143,7 +144,7 @@ function slowCore(ms: number) {
 describe('§ 8 : chaque favori reçoit sa réponse, « … » seulement pendant le calcul', () => {
   it('constat du 15/11 (Quai Web, position choisie sur le lieu « Maison », cœur lent) : plus aucun « … » figé', async () => {
     const core = slowCore(12_000);
-    const k = await kit({ web: true, pos: SPOTS.central, settings: settingsWith([PLACES.maison, PLACES.bureau, PLACES.ecole, PLACES.parc], { seenVersion: '1.3.0' }), coreExtra: core.coreExtra });
+    const k = await kit({ web: true, pos: SPOTS.central, settings: settingsWith([PLACES.maison, PLACES.bureau, PLACES.ecole, PLACES.parc], { seenVersion: '1.3.1' }), coreExtra: core.coreExtra });
     await k.until((s) => s.screen === 'home');
     await k.settle(60_000);
     // la position choisie à la main : le lieu du favori « Maison » ; puis « Favoris »
@@ -178,7 +179,7 @@ describe('§ 8 : chaque favori reçoit sa réponse, « … » seulement pendant 
     let max = 0;
     const gates: (() => void)[] = [];
     const k = await kit({
-      settings: settingsWith(favs, { seenVersion: '1.3.0', display: { ...settingsWith([]).display, opening: 'home' } }),
+      settings: settingsWith(favs, { seenVersion: '1.3.1', display: { ...settingsWith([]).display, opening: 'home' } }),
       coreExtra: (now) => ({
         answer: (fav: Favorite) => {
           calls.push(fav.id);
@@ -211,7 +212,7 @@ describe('§ 8 : chaque favori reçoit sa réponse, « … » seulement pendant 
   it('erreur du calcul, même sans promesse : nouvel essai quelques secondes après, jamais un « … » oublié', async () => {
     let n = 0;
     const k = await kit({
-      settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }),
+      settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }),
       coreExtra: (now) => ({
         answer: (fav: Favorite): Promise<FavoriteAnswer> => {
           n++;
@@ -239,7 +240,7 @@ describe('§ 8 : chaque favori reçoit sa réponse, « … » seulement pendant 
     const leave = NOW + 95_000;
     let n = 0;
     const k = await kit({
-      settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }),
+      settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }),
       coreExtra: (now) => ({
         answer: async (fav: Favorite): Promise<FavoriteAnswer> => {
           n++;
@@ -282,7 +283,7 @@ const askLines = (k: { clock: { now(): number }; settings: { get(): Settings } }
 
 describe('§ 6.1 : test de l’écran des lunettes', () => {
   it('visible : attente sans rien envoyer (pas même l’heure), page entière, un toucher, résultat enregistré, écran d’avant', async () => {
-    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }) });
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }) });
     await k.until((s) => s.screen === 'home');
     // 07:31:30 : la minute change pendant l'attente
     await k.settle(30_000);
@@ -320,7 +321,7 @@ describe('§ 6.1 : test de l’écran des lunettes', () => {
   });
 
   it('question, « Le test de Quai » : headUp, et le mouvement « lever la tête » appris (axe, sens, écart)', async () => {
-    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }) });
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }) });
     await k.until((s) => s.screen === 'home');
     await k.c.displayTest({ kind: 'start' });
     await k.settle(10);
@@ -348,7 +349,7 @@ describe('§ 6.1 : test de l’écran des lunettes', () => {
   });
 
   it('« Le Dashboard » sans mouvement net : dashboard, headUp laissé tel quel ; « Rien » : aucun résultat', async () => {
-    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }) });
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }) });
     await k.until((s) => s.screen === 'home');
     const headUp0 = k.settings.get().display.headUp;
     await k.c.displayTest({ kind: 'start' });
@@ -370,7 +371,7 @@ describe('§ 6.1 : test de l’écran des lunettes', () => {
   });
 
   it('arrêter à tout moment ; question sans réponse : fin au bout de 2 min ; capteur toujours refermé', async () => {
-    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }) });
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }) });
     await k.until((s) => s.screen === 'home');
     const home = k.last();
     await k.c.displayTest({ kind: 'start' });
@@ -392,7 +393,7 @@ describe('§ 6.1 : test de l’écran des lunettes', () => {
   });
 
   it('Quai fermé sur les lunettes, arrière-plan ou lunettes déconnectées : « closed », capteur refermé ; Quai Web : pas de test', async () => {
-    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }) });
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }) });
     await k.until((s) => s.screen === 'home');
     // arrière-plan pendant l'attente : arrêté
     await k.c.displayTest({ kind: 'start' });
@@ -412,7 +413,7 @@ describe('§ 6.1 : test de l’écran des lunettes', () => {
     expect(await k.c.displayTest({ kind: 'start' })).toEqual({ step: 'idle', error: 'closed' });
     expect(k.imuCalls.filter(([on]) => on).length).toBe(k.imuCalls.filter(([on]) => !on).length);
     // Quai Web
-    const w = await kit({ web: true, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }) });
+    const w = await kit({ web: true, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }) });
     await w.until((s) => s.screen === 'home');
     expect(await w.c.displayTest({ kind: 'start' })).toEqual({ step: 'idle' });
     await w.settle(1_000);
@@ -421,13 +422,13 @@ describe('§ 6.1 : test de l’écran des lunettes', () => {
   });
 
   it('hôte sans capteur ou qui le refuse : le test se fait, sans apprendre le mouvement', async () => {
-    const k = await kit({ imu: false, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }) });
+    const k = await kit({ imu: false, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }) });
     await k.until((s) => s.screen === 'home');
     await k.c.displayTest({ kind: 'start' });
     await k.settle(TEST_WAIT_MS + TEST_SENT_MS + 10);
     expect(await k.c.displayTest({ kind: 'answer', answer: 'quai' })).toEqual({ step: 'done', result: 'headUp', learned: false });
     expect(k.saved.at(-1)?.alert).toBe('headUp');
-    const n = await kit({ imu: null, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }) });
+    const n = await kit({ imu: null, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }) });
     await n.until((s) => s.screen === 'home');
     await n.c.displayTest({ kind: 'start' });
     await n.settle(TEST_WAIT_MS + 10);
@@ -440,9 +441,10 @@ describe('§ 6.1 : le test de l’écran et le guidage ne vont jamais ensemble ;
   const plan = (now: number) => [door('j1', now + 4 * MIN, now + 70 * MIN)];
 
   it('pendant un guidage, le test ne démarre pas (« guiding ») et le capteur n’est pas touché', async () => {
-    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { plan } });
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { plan } });
     await k.until((s) => s.screen === 'home' && s.lines.some((l) => nb(l).startsWith('Bureau')));
-    await k.gesture('tap');
+    // 1.3.1 (§ 8) : de « Autour de moi », « Favoris », puis le favori
+    await k.gesture('down', 'down', 'tap');
     await k.until((s) => s.screen === 'steps' && s.page === 1);
     await k.gesture('tap');
     expect(k.c.followed?.guide).toBeDefined();
@@ -452,7 +454,7 @@ describe('§ 6.1 : le test de l’écran et le guidage ne vont jamais ensemble ;
   });
 
   it('« Y aller » du téléphone pendant le test : le test s’arrête d’abord (capteur refermé), puis le guidage commence', async () => {
-    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { plan } });
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { plan } });
     await k.until((s) => s.screen === 'home' && s.lines.some((l) => nb(l).startsWith('Bureau')));
     await k.c.displayTest({ kind: 'start' });
     await k.settle(5_000);
@@ -470,7 +472,7 @@ describe('§ 6.1 : le test de l’écran et le guidage ne vont jamais ensemble ;
   });
 
   it('lunettes déconnectées pendant la question : capteur refermé, la question reste ; reconnectées : capteur rouvert', async () => {
-    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }) });
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }) });
     await k.until((s) => s.screen === 'home');
     await k.c.displayTest({ kind: 'start' });
     await k.settle(10);
@@ -496,7 +498,7 @@ describe('§ 6.1 : le test de l’écran et le guidage ne vont jamais ensemble ;
   });
 
   it('signal des lunettes avec seulement la batterie : le test continue, rien n’est envoyé pendant l’attente', async () => {
-    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }) });
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }) });
     await k.until((s) => s.screen === 'home');
     await k.c.displayTest({ kind: 'start' });
     await k.settle(10);
@@ -576,12 +578,13 @@ describe('§ 1 : le toucher de l’écran du trajet fait ce que dit sa ligne d�
   const plan = (now: number) => [door('j1', now + 4 * MIN, now + 70 * MIN), door('j2', now + 9 * MIN, now + 80 * MIN)];
   const open = async (k: Awaited<ReturnType<typeof kit>>) => {
     await k.until((s) => s.screen === 'home' && s.lines.some((l) => nb(l).startsWith('Bureau')));
-    await k.gesture('tap');
+    // 1.3.1 (PRD-1.3.1 § 8) : de « Autour de moi », « Favoris », puis le favori
+    await k.gesture('down', 'down', 'tap');
     return k.until((s) => s.screen === 'steps' && s.page === 1);
   };
 
   it('« ▶ Y aller » (pas encore guidé) : le guidage ; « ▶ Retour au guidage » (guidé) : l’écran du guidage', async () => {
-    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { plan } });
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { plan } });
     expect((await open(k)).lines.map(nb)).toContain('▶ Y aller');
     await k.gesture('tap');
     expect(k.last().screen).toBe('guide');
@@ -594,7 +597,7 @@ describe('§ 1 : le toucher de l’écran du trajet fait ce que dit sa ligne d�
   });
 
   it('trajet suivi pas encore guidé (bouton « Lunettes »), réglage allumé : « ▶ Y aller » le guide', async () => {
-    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { plan } });
+    const k = await kit({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { plan } });
     await open(k);
     const r = current(k.c.state.nav).route as StepsRoute;
     await k.c.showTrip({ title: r.title!, from: r.from!, to: r.to!, favoriteId: 'fav-bureau', result: { journeys: r.journeys! }, index: 0 });
@@ -609,7 +612,7 @@ describe('§ 1 : le toucher de l’écran du trajet fait ce que dit sa ligne d�
   });
 
   it('réglage éteint : « ▶ Suivre ce trajet » le fait suivre, puis « ▶ Trajet suivi » ouvre son écran', async () => {
-    const off = settingsWith([PLACES.bureau], { seenVersion: '1.3.0' });
+    const off = settingsWith([PLACES.bureau], { seenVersion: '1.3.1' });
     off.display.guide = false;
     const k = await kit({ settings: off, stub: { plan } });
     expect((await open(k)).lines.map(nb)).toContain('▶ Suivre ce trajet');

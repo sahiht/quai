@@ -10,6 +10,7 @@
  * départ du flux) et window.__quaiPushFix.
  */
 import { browserWatch, isE2E, lazyPushTarget, pushedFix, singleFlux, watchOptions, type GeoWatch } from '../platform/location';
+import { apos } from '../core/typo';
 import type { Fix, LocationPort } from '../platform/types';
 
 export type WebLocationState =
@@ -352,7 +353,9 @@ export function locationText(s: WebLocationState): string {
     case 'unsupported':
       return 'Ce navigateur ne donne pas la position. Choisis une adresse ou un arrêt ci-dessous.';
     case 'manual':
-      return `Position choisie : ${s.label}. Gardée dans ce navigateur.`;
+      // 1.3.1 (PRD-1.3.1 § 7) : un nom des données (« Braine-l'Alleud (gare SNCB) ») s'affiche avec « ’ » ; le libellé
+      // enregistré (ManualPosition.label) ne change pas
+      return `Position choisie : ${apos(s.label)}. Gardée dans ce navigateur.`;
     case 'mock':
       return 'Position simulée (mode test).';
   }

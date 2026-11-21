@@ -186,7 +186,8 @@ describe('s1210 : arrêt dépassé à Bruxelles-Nord (l’IC repart vers Bruxell
     t = g.at(T('08:49:30'), [[T('08:49:30'), lerp(P.central, P.fontainas, 0.12), 1.3]]);
     expect(t.phase).toEqual({ kind: 'walk', leg: 2 });
     expect(g.seen).not.toContain('leave');
-    expect(g.seen.slice(-2)).toEqual(['passed', 'alight']);
+    // 1.3.1 (B17, P7) : après la descente, la marche jusqu'à la place Fontainas (« 13 min à pied », l'arrivée)
+    expect(g.seen.slice(-3)).toEqual(['passed', 'alight', 'walk']);
   });
 
   it('« j’y descends » (genre ride), Bruxelles-Nord dépassé, arrêts suivants connus : le même IC jusqu’à Bruxelles-Central, « Descends au prochain arrêt » la dernière minute, puis « Tu y es »', () => {

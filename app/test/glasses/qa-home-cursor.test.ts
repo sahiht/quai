@@ -8,6 +8,9 @@
  * curseur qui était sur ce favori passe sur « En cours », et y revient à la fin du trajet. 1.2.10 : « Suivre ce
  * trajet » devient « y aller » (le guidage, équipe C2) ; ici, le trajet est suivi par le bouton « Lunettes » du
  * téléphone, ouvert depuis l'accueil.
+ * 1.3.1 (PRD-1.3.1 § 8) : « Autour de moi » en tête (sous « En cours ») et le curseur sur lui à l'ouverture ; les règles
+ * de « En cours » ne changent pas. Tant que l'accueil n'est pas touché, son curseur suit la règle d'ouverture : les tests
+ * posent d'abord le curseur là où la règle de « En cours » le reprend (même intention qu'en 1.3.0).
  */
 import { describe, expect, it } from 'vitest';
 import type { Favorite, FavoriteAnswer, Journey } from '../../src/core/api';
@@ -46,12 +49,13 @@ describe('accueil : le curseur ne tombe jamais sur « Favoris » quand « En cou
   it('retour à l’accueil après avoir suivi un trajet : le curseur sur « En cours », un toucher reprend le trajet', async () => {
     const h = await setup({ now: NOW, settings: settingsWith([PLACES.bureau, PLACES.ecole]), core: (now) => stubCore(now, { answers: answers(0) }) });
     const home = await h.until((s) => ready(s) && s.shown?.length === 2);
-    expect(selected(home)).toMatch(/^Bureau {3}maintenant → /);
+    // 1.3.1 (§ 8) : à l'ouverture, le curseur sur « Autour de moi »
+    expect(selected(home)).toBe('Autour de moi   9 arrêts');
     await followBureau(h, 0);
     await h.gesture('double');
     const back = await h.until((s) => ready(s) && s.lines[0].startsWith('En cours'));
-    // « En cours » remplace la ligne du bureau : pas de « Bureau » dessous
-    expect(back.lines.slice(0, 3)).toEqual(['En cours : vers le bureau   W 20:52', 'Favoris   2', 'École   dans 10 min → 21:58']);
+    // « En cours » remplace la ligne du bureau : pas de « Bureau » dessous ; 1.3.1 : il reste en tête
+    expect(back.lines.slice(0, 4)).toEqual(['En cours : vers le bureau   W 20:52', 'Autour de moi   9 arrêts', 'Favoris   2', 'École   dans 10 min → 21:58']);
     expect(selected(back)).toBe('En cours : vers le bureau   W 20:52');
     // un toucher reprend le trajet, pas la liste de tous les favoris
     await h.gesture('tap');
@@ -64,24 +68,26 @@ describe('accueil : le curseur ne tombe jamais sur « Favoris » quand « En cou
     await h.until((s) => ready(s) && s.shown?.length === 2);
     await followBureau(h, 4);
     await h.gesture('double');
-    // le trajet suivi ne part que dans 4 min : pas encore « En cours » ; le curseur sur « Bureau »
+    // le trajet suivi ne part que dans 4 min : pas encore « En cours » ; 1.3.1 : le curseur posé sur « Bureau » (de
+    // « Autour de moi », la ligne d'ouverture : « Favoris », puis « Bureau »)
     const before = await h.until((s) => ready(s) && s.shown?.length === 2);
-    expect(before.lines[0]).toBe('Favoris   2');
-    expect(selected(before)).toMatch(/^Bureau {3}/);
+    expect(before.lines[0]).toBe('Autour de moi   9 arrêts');
+    await h.gesture('down', 'down');
+    expect(selected(h.last())).toMatch(/^Bureau {3}/);
     // le trajet commence : « En cours » paraît en tête et prend la place de « Bureau », le curseur avec
     h.advance(5 * MIN);
     await h.c.refreshCurrent();
     const running = await h.until((s) => ready(s) && s.lines[0].startsWith('En cours'));
     expect(selected(running)).toMatch(/^En cours : vers le bureau/);
     expect(running.lines.some((l) => l.startsWith('Bureau'))).toBe(false);
-    // le curseur descend sur « Lignes… » (1.2.6 : la dernière rubrique), puis le trajet prend fin (arrivée plus
-    // 5 min) : il y reste
-    for (let i = 0; i < 7 && !selected(h.last()).startsWith('Lignes de bus'); i++) await h.gesture('down');
-    expect(selected(h.last())).toMatch(/^Lignes de bus, tram, métro/);
+    // le curseur descend sur « Arrêts… » (1.3.1 : la dernière rubrique), puis le trajet prend fin (arrivée plus 5 min) :
+    // il y reste
+    for (let i = 0; i < 8 && !selected(h.last()).startsWith('Arrêts de bus'); i++) await h.gesture('down');
+    expect(selected(h.last())).toMatch(/^Arrêts de bus, tram, métro/);
     h.advance(60 * MIN);
     await h.c.refreshCurrent();
-    const ended = await h.until((s) => s.screen === 'home' && !s.lines[0].startsWith('En cours') && s.lines.some((l) => l.startsWith('Lignes de bus')));
-    expect(selected(ended)).toMatch(/^Lignes de bus, tram, métro/);
+    const ended = await h.until((s) => s.screen === 'home' && !s.lines[0].startsWith('En cours') && s.lines.some((l) => l.startsWith('Arrêts de bus')));
+    expect(selected(ended)).toMatch(/^Arrêts de bus, tram, métro/);
     h.c.stop();
   });
 
@@ -92,6 +98,10 @@ describe('accueil : le curseur ne tombe jamais sur « Favoris » quand « En cou
     await h.gesture('double');
     const running = await h.until((s) => ready(s) && s.lines[0].startsWith('En cours'));
     expect(selected(running)).toMatch(/^En cours/);
+    // 1.3.1 : le curseur posé sur « En cours » (▼ puis ▲) ; accueil pas touché, il suivrait la règle d'ouverture
+    // (« Autour de moi », v131-accueil.test.ts)
+    await h.gesture('down', 'up');
+    expect(selected(h.last())).toMatch(/^En cours/);
     h.advance(60 * MIN);
     await h.c.refreshCurrent();
     // (la réponse du bureau se recalcule : « … » le temps du calcul)

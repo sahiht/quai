@@ -5,11 +5,22 @@
  *   tiles/          tuiles prêtes à publier (index.json écrit en dernier)
  *   extract.json    fiche du dernier téléchargement de l'extrait (semaine ISO, octets, MD5)
  *   extract.osm.pbf extrait Geofabrik, gardé seulement tant que les tuiles de sa semaine n'ont pas été construites
+ *   exits.json      1.3.1 (R1) : sorties du métro faites avec le même extrait (exits.ts), publiées en data/exits.json
+ *   exits-try.json  1.3.1 (finitions) : pour quelles tuiles les sorties ont déjà été essayées (voir plus bas)
  *
  * Chaque nuit : tuiles de la semaine déjà là → rien ; sinon extrait de la semaine (téléchargé une seule fois par
  * semaine, contrôle MD5) → construction dans next/ → échange (tiles devient tiles.old, next devient tiles). Un échec
  * ne touche jamais aux tuiles de la semaine précédente. La publication (publishWalk) copie les tuiles dans les
  * données de la nuit ; sans tuiles, rien n'est publié et l'appli retombe sur le chemin droit.
+ *
+ * 1.3.1 (finitions du 21/11, contrôle de R1, remarque 4) : les sorties dès la première nuit. Des tuiles de la semaine
+ * sans sorties publiables (fichier absent, d'une autre forme ou d'une autre version : des tuiles faites par la 1.3.0,
+ * qui ne faisait pas de sorties) seraient restées sans sorties jusqu'à 7 jours. La nuit refait alors les tuiles et les
+ * sorties, par le même chemin que chaque semaine (l'extrait n'est plus dans le cache : il est téléchargé une fois de
+ * plus cette semaine-là). Une seule fois : avant de commencer, exits-try.json note les tuiles concernées, et chaque
+ * construction y note les siennes ; pour des tuiles déjà notées, la nuit ne refait rien, que l'essai ait réussi ou
+ * non. Un rattrapage raté garde les tuiles de la semaine et ne laisse aucun extrait dans le cache ; les sorties
+ * viennent alors avec les tuiles de la semaine suivante.
  */
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -18,13 +29,33 @@ import { once } from 'node:events';
 import { basename, join } from 'node:path';
 import { isWalkIndex, type WalkIndex } from '../../../app/src/core/walk/format.ts';
 import { addDays, brusselsDate } from '../dates.ts';
+import { EXITS_FILE, isExitsFile } from '../../../app/src/core/walk/exits-format.ts';
 import { buildWalk, sizeLine } from './build.ts';
+import { writeExits } from './exits.ts';
 import { PbfFile } from './pbf.ts';
 import { ATTRIBUTION, BUDGET_BYTES, MAX_TILE_BYTES } from './tiles.ts';
 
 export const GEOFABRIK_URL = 'https://download.geofabrik.de/europe/belgium-latest.osm.pbf';
 /** Tuiles plus vieilles que cela : plus publiées (le chemin droit vaut mieux que des rues d'il y a deux mois). */
 export const MAX_AGE_DAYS = 60;
+
+/** Fiche des sorties déjà essayées, dans le cache. */
+export const EXITS_TRY_FILE = 'exits-try.json';
+/**
+ * Forme de exits.json que cette version sait faire (le `v` accepté par isExitsFile). À augmenter avec lui : les
+ * tuiles déjà notées pour l'ancienne forme sont alors refaites une fois avec leurs sorties.
+ */
+export const EXITS_FORMAT = 1;
+
+/** Sorties déjà essayées pour les tuiles construites à `builtAt`, dans la forme `format`. */
+export interface ExitsTry {
+  v: 1;
+  format: number;
+  builtAt: string;
+  date: string;
+  /** vrai si les sorties ont été écrites ; absent tant que l'essai est en cours ou s'il a échoué */
+  ok?: boolean;
+}
 
 export interface ExtractInfo {
   v: 1;
@@ -252,6 +283,26 @@ export interface WeeklyResult {
   state: 'fresh' | 'built' | 'failed';
   message: string;
   index?: WalkIndex;
+  /** 1.3.1 : vrai quand la nuit a refait (ou voulu refaire) des tuiles de la semaine pour avoir leurs sorties */
+  catchUp?: boolean;
+}
+
+/**
+ * 1.3.1 (finitions) : pourquoi les tuiles `idx` du cache n'ont pas de sorties publiables (la même règle que
+ * publishExits) ; null si elles en ont. Ne lève jamais.
+ */
+export async function exitsGap(cacheDir: string, idx: WalkIndex): Promise<string | null> {
+  const raw = await readJson(join(cacheDir, EXITS_FILE));
+  if (!raw) return 'fichier des sorties absent';
+  if (!isExitsFile(raw)) return 'fichier des sorties d’une autre forme';
+  if (raw.version !== idx.version) return `sorties du ${raw.version}, tuiles du ${idx.version}`;
+  return null;
+}
+
+/** Les sorties ont-elles déjà été essayées pour ces tuiles, dans la forme d'aujourd'hui ? */
+async function exitsTried(cacheDir: string, idx: WalkIndex): Promise<boolean> {
+  const t = (await readJson(join(cacheDir, EXITS_TRY_FILE))) as ExitsTry | null;
+  return !!t && t.v === 1 && t.format === EXITS_FORMAT && t.builtAt === idx.builtAt;
 }
 
 /** Étape de nuit : tuiles de la semaine (voir l'en-tête). Ne lève jamais. */
@@ -263,11 +314,23 @@ export async function weeklyWalk(o: WeeklyOptions): Promise<WeeklyResult> {
   const tilesDir = join(o.cacheDir, 'tiles');
   const pbf = join(o.cacheDir, 'extract.osm.pbf');
   const info = join(o.cacheDir, 'extract.json');
+  const tryFile = join(o.cacheDir, EXITS_TRY_FILE);
+  let catchUp = false;
   try {
     await mkdir(o.cacheDir, { recursive: true });
     const current = (await readTiles(tilesDir)) ?? (await readTiles(join(o.cacheDir, 'tiles.old')));
     if (current && !o.force && isoWeek(brusselsDate(new Date(current.builtAt))) === week) {
-      return { state: 'fresh', message: `tuiles de la semaine déjà prêtes (données OSM du ${current.version})`, index: current };
+      const ready = `tuiles de la semaine déjà prêtes (données OSM du ${current.version})`;
+      const gap = await exitsGap(o.cacheDir, current);
+      if (!gap) return { state: 'fresh', message: ready, index: current };
+      if (await exitsTried(o.cacheDir, current)) {
+        return { state: 'fresh', message: `${ready} ; sorties du métro déjà essayées pour ces tuiles (${gap}) : prochain essai avec les tuiles de la semaine prochaine`, index: current };
+      }
+      // 1.3.1 : tuiles de la semaine sans sorties publiables → refaites une fois avec leurs sorties. La fiche est
+      // écrite avant tout le reste : quoi qu'il arrive ensuite, les nuits suivantes ne recommencent pas.
+      await writeFile(tryFile, JSON.stringify({ v: 1, format: EXITS_FORMAT, builtAt: current.builtAt, date: today } satisfies ExitsTry));
+      catchUp = true;
+      log(`Chemins à pied : tuiles de la semaine sans sorties du métro (${gap}) : tuiles et sorties refaites une fois, cette nuit seulement`);
     }
     // extrait de la semaine : téléchargé au plus une fois par semaine
     const known = (await readJson(info)) as ExtractInfo | null;
@@ -275,8 +338,9 @@ export async function weeklyWalk(o: WeeklyOptions): Promise<WeeklyResult> {
     if (known && known.v === 1 && known.week === week) {
       const s = await stat(pbf).catch(() => null);
       have = !!s && s.size === known.bytes;
-      // nuits ordinaires : jamais deux téléchargements la même semaine ; la vérification (lancée à la main) le peut
-      if (!have && !o.force) return { state: 'failed', message: `extrait déjà téléchargé cette semaine (${known.date}) mais absent du cache : nouvel essai la semaine prochaine` };
+      // nuits ordinaires : jamais deux téléchargements la même semaine ; la vérification (lancée à la main) le peut,
+      // et le rattrapage des sorties aussi, une fois (l'extrait de la semaine n'est plus gardé après la construction)
+      if (!have && !o.force && !catchUp) return { state: 'failed', message: `extrait déjà téléchargé cette semaine (${known.date}) mais absent du cache : nouvel essai la semaine prochaine` };
     }
     if (!have) {
       const url = o.url ?? GEOFABRIK_URL;
@@ -306,11 +370,24 @@ export async function weeklyWalk(o: WeeklyOptions): Promise<WeeklyResult> {
     }
     await rename(next, tilesDir);
     await rm(old, { recursive: true, force: true });
+    // 1.3.1 (R1) : sorties du métro avec le même extrait et les mêmes tuiles (exits.json, à côté des tuiles) ; un échec
+    // ne touche ni aux tuiles ni à la nuit : la publication garde alors les sorties de la même version, sinon aucune
+    const ex = await writeExits({ pbf, tilesDir, out: join(o.cacheDir, EXITS_FILE), version: r.built.index.version, builtAt: r.built.index.builtAt });
+    log(`Chemins à pied : ${ex.message}`);
+    // sorties essayées pour ces tuiles-ci (réussies ou non) : la nuit suivante ne les refait pas
+    const tried: ExitsTry = { v: 1, format: EXITS_FORMAT, builtAt: r.built.index.builtAt, date: today, ...(ex.ok ? { ok: true } : {}) };
+    await writeFile(tryFile, JSON.stringify(tried)).catch(() => undefined);
     await rm(pbf, { force: true });
-    return { state: 'built', message: `tuiles construites en ${Math.round(r.ms / 1000)} s : ${sizeLine(r.built)}`, index: r.built.index };
+    const what = catchUp ? 'tuiles et sorties du métro refaites (rattrapage, une seule fois)' : 'tuiles construites';
+    return { state: 'built', message: `${what} en ${Math.round(r.ms / 1000)} s : ${sizeLine(r.built)}`, index: r.built.index, ...(catchUp ? { catchUp } : {}) };
   } catch (e) {
     await rm(join(o.cacheDir, 'next'), { recursive: true, force: true }).catch(() => undefined);
-    return { state: 'failed', message: e instanceof Error ? e.message : String(e) };
+    const message = e instanceof Error ? e.message : String(e);
+    if (!catchUp) return { state: 'failed', message };
+    // rattrapage raté : il ne sera pas rejoué, son extrait (entier ou en morceau) ne sert donc plus à rien dans le cache
+    await rm(pbf, { force: true }).catch(() => undefined);
+    await dropPart(`${pbf}.part`);
+    return { state: 'failed', message: `rattrapage des sorties du métro raté (${message}) : tuiles de la semaine gardées, sorties avec les tuiles de la semaine prochaine`, catchUp };
   }
 }
 
@@ -363,6 +440,26 @@ export async function localWalk(o: { input: string; dataDir: string; log?: (m: s
   }
 }
 
+/**
+ * 1.3.1 (R1) : sorties du métro du cache (exits.json) copiées en data/exits.json, seulement si elles sont de la même
+ * version que les tuiles publiées ; sinon aucun fichier (l'appli ne montre alors aucune sortie). Ne lève jamais.
+ */
+export async function publishExits(cacheDir: string, dataDir: string, version: string): Promise<string> {
+  const dest = join(dataDir, EXITS_FILE);
+  try {
+    await rm(dest, { force: true });
+    const raw = (await readJson(join(cacheDir, EXITS_FILE))) as unknown;
+    if (!raw) return 'sorties du métro absentes du cache (faites avec les tuiles de la semaine)';
+    if (!isExitsFile(raw)) return 'sorties du métro illisibles : non publiées';
+    if (raw.version !== version) return `sorties du métro du ${raw.version}, tuiles du ${version} : non publiées`;
+    await writeFile(dest, JSON.stringify(raw), 'utf8');
+    return `sorties du métro publiées : ${Object.keys(raw.stops).length} arrêts STIB sous terre (${EXITS_FILE})`;
+  } catch (e) {
+    await rm(dest, { force: true }).catch(() => undefined);
+    return `sorties du métro non publiées (${e instanceof Error ? e.message : String(e)})`;
+  }
+}
+
 /** Copie les tuiles du cache dans les données de la nuit (dataDir/walk) et complète LICENSE-DATA.txt. Ne lève jamais. */
 export async function publishWalk(o: { cacheDir: string; dataDir: string; now?: () => Date; log?: (m: string) => void }): Promise<PublishResult> {
   const log = o.log ?? ((m: string) => console.log(m));
@@ -389,6 +486,7 @@ export async function publishWalk(o: { cacheDir: string; dataDir: string; now?: 
     const licence = join(o.dataDir, 'LICENSE-DATA.txt');
     const had = await readFile(licence, 'utf8').catch(() => '');
     if (!had.includes(LICENSE_MARK)) await appendFile(licence, licenseSection(idx), 'utf8');
+    log(`Chemins à pied : ${await publishExits(o.cacheDir, o.dataDir, idx.version)}`);
     const bytes = await dirBytes(out);
     const total = await dirBytes(o.dataDir);
     const mo = (b: number) => `${(b / 1e6).toFixed(1).replace('.', ',')} Mo`;

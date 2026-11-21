@@ -18,8 +18,10 @@ describe('police des lunettes', () => {
       ...emptyFavoritesLines(),
       ...emptyFavoritesLines(true),
       ...Object.values(LABEL_TEXT),
-      '★ Trajet ajouté aux favoris',
-      '★ Déjà dans les favoris',
+      // 1.3.1 (L7) : « tes », comme le téléphone
+      '★ Trajet ajouté à tes favoris',
+      '★ Déjà dans tes favoris',
+      '★ Ajoutée à tes lignes',
       '★ Ajouté aux favoris',
       '★ Retiré. Toucher encore : annuler',
       '★ Favori rétabli',

@@ -9,6 +9,7 @@ import { QuaiError, type QuaiErrorCode } from './errors';
 import { getText, HttpStatusError, safeJson, type FetchLike } from './net';
 import { localDate } from './util';
 import type { PersistentCache } from './persist';
+import { EXITS_FILE, isExitsFile, type ExitsFile } from './walk/exits-format';
 import { isTileKey, isWalkIndex, isWalkTile, type WalkIndex, type WalkTileFile } from './walk/format';
 
 const TIMEOUT_MS = 10_000;
@@ -131,6 +132,36 @@ export class DataClient {
     return f;
   }
 
+  /**
+   * 1.3.1 (R3) : fichier de zone de cette génération seulement s'il est déjà là (mémoire, puis cache persistant), sans
+   * rien demander au réseau ; null sinon. « , dernier » d'une étape en bus, tram ou métro : rien de nouveau sur le réseau.
+   */
+  async cachedArea(id: string): Promise<AreaFile | null> {
+    const path = areaPath(id);
+    const meta = this.meta;
+    if (!path || !meta) return null;
+    const key = `${meta.generatedAt}|${path}`;
+    const hit = this.mem.get(key);
+    if (hit) return (hit.p as Promise<AreaFile | null>).catch(() => null);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const text = await Promise.race([
+      this.persist.get(meta.generatedAt, path).catch(() => null),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), PERSIST_DEADLINE_MS);
+      }),
+    ]).finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    });
+    const parsed = text === null ? undefined : safeJson(text);
+    if (!isArea(parsed) || this.meta?.generatedAt !== meta.generatedAt) return null;
+    if (!this.mem.has(key)) {
+      this.mem.set(key, { p: Promise.resolve(parsed), size: text!.length });
+      this.memChars += text!.length;
+      this.trimMemory(key);
+    }
+    return parsed;
+  }
+
   search(key: string): Promise<SearchFile | null> {
     if (!/^[a-z0-9]{2}$/.test(key)) return Promise.resolve(null);
     return this.file(`search/${key}.json`, isSearch, null);
@@ -156,6 +187,15 @@ export class DataClient {
    */
   walkIndex(): Promise<WalkIndex | null> {
     return this.file('walk/index.json', isWalkIndex, null);
+  }
+
+  /**
+   * 1.3.1 (PRD-1.3.1 § 14, R1) : sorties du métro et du prémétro (exits.json), par le cache commun (petit fichier) ;
+   * null : pas de sorties dans cette publication (aucune ligne « Sortie : … »). Rien n'est envoyé : la sortie se
+   * choisit sur le téléphone.
+   */
+  walkExits(): Promise<ExitsFile | null> {
+    return this.file(EXITS_FILE, isExitsFile, null);
   }
 
   /**

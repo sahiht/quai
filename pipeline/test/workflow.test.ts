@@ -131,6 +131,45 @@ describe('nightly.yml', () => {
     expect(wf.jobs.deploy.if).toBe('${{ !inputs.verification }}');
   });
 
+  it('1.3.1 (R3, finitions) : « dernier », contrôle léger la nuit ordinaire, balayage complet en vérification seulement, rien d’autre de changé', () => {
+    const steps = wf.jobs.build.steps;
+    const scan = steps.find((s) => s.name === 'Balayer les lignes de bus, tram et métro')!;
+    // la même étape, la même commande, le même délai : seule une variable choisit le balayage complet
+    expect(scan.env).toEqual({ QUAI_SCAN_DATA: '../site/data', QUAI_SCAN_DETAIL: '${{ inputs.lignes }}', QUAI_SCAN_DERNIER: "${{ inputs.verification && 'complet' || '' }}" });
+    expect(scan.run).toBe('npx vitest run test/scan');
+    expect((scan as { 'timeout-minutes'?: number })['timeout-minutes']).toBe(20);
+    expect(scan['continue-on-error']).toBe(true);
+    // la variable n'est donnée nulle part ailleurs : nuit planifiée et republication après un push restent légères
+    expect(text.match(/QUAI_SCAN_DERNIER:/g)).toHaveLength(1);
+    expect(steps.filter((s) => s.env && 'QUAI_SCAN_DERNIER' in s.env)).toEqual([scan]);
+    // le balayage lit bien cette variable, dit lequel a tourné, et reste léger sans elle
+    const dernier = readFileSync(join(ROOT_DIR, 'app', 'test', 'scan', 'real-dernier.test.ts'), 'utf8');
+    expect(dernier).toContain('scanComplet(process.env.QUAI_SCAN_DERNIER)');
+    expect(dernier).toContain('Balayage complet de « , dernier »');
+    expect(dernier).toContain('Contrôle léger de « , dernier »');
+    const sample = readFileSync(join(ROOT_DIR, 'app', 'test', 'scan', 'sample.ts'), 'utf8');
+    expect(sample).toMatch(/\/\^\(complet\|/);
+  });
+
+  it('1.3.1 (R1) : mesure des sorties du métro seulement en vérification, sans bloquer, extrait hors du cache des nuits', () => {
+    const steps = wf.jobs.build.steps;
+    const i = (pred: (s: Step) => boolean) => steps.findIndex(pred);
+    const k = i((s) => s.name === 'Mesurer les sorties du métro (vérification)');
+    expect(steps[k]).toMatchObject({
+      if: "${{ inputs.verification && !cancelled() && steps.data.outcome == 'success' }}",
+      'continue-on-error': true,
+      'working-directory': 'pipeline',
+      run: 'node --experimental-strip-types src/walk/cli.ts exits --tiles ../site/data/walk --stops ../site/data --input "$RUNNER_TEMP/belgium-latest.osm.pbf"',
+    });
+    // après la publication des chemins à pied de la nuit (les tuiles mesurées) et après les balayages (leurs bilans
+    // ne l'attendent jamais), avant l'envoi du site (sauté en vérification)
+    expect(k).toBeGreaterThan(i((s) => s.name === 'Publier les chemins à pied (site/data/walk)'));
+    expect(k).toBeGreaterThan(i((s) => s.name === 'Balayer les chemins à pied'));
+    expect(k).toBeGreaterThan(i((s) => s.name === 'Balayer les lignes de bus, tram et métro'));
+    expect(k).toBeLessThan(i((s) => s.uses === 'actions/upload-pages-artifact@v5'));
+    expect(steps[k].run).not.toContain('gtfs-cache');
+  });
+
   it('job deploy : environnement github-pages, deploy-pages avec délai de 30 min et un nouvel essai', () => {
     const d = wf.jobs.deploy;
     expect(d.needs).toBe('build');

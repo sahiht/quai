@@ -403,7 +403,7 @@ interface GuidedOpts {
 
 /** Guidage lancé par le bouton « Y aller » (Bureau), « Où tu en es » laissé s'effacer. */
 async function guided(o: GuidedOpts = {}) {
-  const h = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { answers }, ...o.kit });
+  const h = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { answers }, ...o.kit });
   if (o.display) withDisplay(h, o.display);
   const imu: { on: boolean; pace?: number }[] = [];
   const port = depsOf(h).platform.glasses;
@@ -585,7 +585,11 @@ describe('PRD-1.3.0 § 6.2 : « vu » par le capteur de mouvement', () => {
 
   const closers: [string, (h: Kit) => Promise<void>][] = [
     ['vu', (h) => lift(h)],
-    ['effacé d’un toucher', (h) => h.gesture('tap')],
+    // 1.3.1 (A7) : masqué d'un toucher, affiché depuis au moins 1,5 s
+    ['masqué d’un toucher', async (h) => {
+      await h.settle(1_500);
+      await h.gesture('tap');
+    }],
     ['un nouveau moment', (h) => says(h, { moment: moment('turn', 'turn:j-bureau:0:1', NOW, NOW + 60 * MIN, { turn: 'left', distM: 40 }) })],
     ['la fin du moment', (h) => says(h, { moment: null })],
     ['premier plan quitté', (h) => h.emit({ kind: 'background' })],
@@ -609,7 +613,7 @@ describe('PRD-1.3.0 § 6.2 : « vu » par le capteur de mouvement', () => {
   }
 
   it('hors d’un guidage : aucun appel au capteur, quels que soient les écrans rendus', async () => {
-    const h = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { answers } });
+    const h = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { answers } });
     withDisplay(h, { headUp: HEAD });
     const imu: boolean[] = [];
     depsOf(h).platform.glasses.imu = async (on) => {
@@ -761,7 +765,8 @@ describe('PRD-1.3.0 § 6.3 : batterie des lunettes et vérification', () => {
     expect(h.last()).toMatchObject({ show: 'moment', moment: 'check:j-bureau' });
     // deux au plus
     await says(h, { issues: [{ kind: 'noPosition' }, { kind: 'battery', level: 12 }, { kind: 'positionLost', minutes: 3 }] });
-    expect(h.c.guideStatus()?.check).toEqual(['Pas de position : guidage à l’heure', 'Lunettes : 12 % de batterie']);
+    // 1.3.1 (L3) : « Quai suit l’horaire »
+    expect(h.c.guideStatus()?.check).toEqual(['Pas de position : Quai suit l’horaire', 'Lunettes : 12 % de batterie']);
     expect(seen.at(-1)?.check).toHaveLength(2);
     const before = seen.length;
     await says(h, {});
@@ -808,8 +813,9 @@ describe('PRD-1.3.0 § 6.4 : journal du trajet', () => {
     expect(jr.of('moment')).toEqual([{ t: expect.any(Number), k: 'moment', d: { m: 'board', id: 'board:j-bureau:1' } }]);
     expect(jr.of('remind').map((e) => e.d)).toEqual([{ m: 'board', n: 1 }]);
     expect(jr.of('seen').map((e) => e.d)).toEqual([{ m: 'board' }]);
-    // un autre, effacé d'un toucher
+    // un autre, masqué d'un toucher (1.3.1, A7 : affiché depuis au moins 1,5 s)
     await says(h, { moment: moment('platform', 'platform:j-bureau:1', NOW, NOW + 60 * MIN, { platform: '6' }), location: 'high' });
+    await h.settle(1_500);
     await h.gesture('tap');
     expect(jr.of('clear').map((e) => e.d)).toEqual([{ m: 'platform' }]);
     // montée et descente constatées par la position (mémoire du moteur), arrêt dépassé
@@ -849,6 +855,8 @@ describe('PRD-1.3.0 § 6.4 : journal du trajet', () => {
     const arrived = moment('arrived', 'arrived:j-bureau', NOW, NOW + 60 * MIN, { title: 'Bureau', at: NOW, diffMin: 0 });
     await says(h, { phase: { kind: 'arrived' }, moment: arrived });
     expect(jr.of('arrived')).toHaveLength(1);
+    // 1.3.1 (A7) : « Tu y es » affiché depuis au moins 1,5 s
+    await h.settle(1_500);
     await h.gesture('tap');
     expect(h.c.followed).toBeNull();
     expect(jr.trips[0]).toMatchObject({ end: 'done', endedAt: expect.any(Number) });
@@ -889,7 +897,7 @@ describe('PRD-1.3.0 § 6.4 : journal du trajet', () => {
     const kv = h.kv;
     const now = h.clock.now();
     h.c.stop();
-    const h2 = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0' }), stub: { answers }, kv, now: now + 10 * SEC });
+    const h2 = await guideSetup({ settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1' }), stub: { answers }, kv, now: now + 10 * SEC });
     depsOf(h2).journal = jr.journal;
     expect(h2.c.followed?.guide?.journal).toBe('t1');
     await says(h2, { moment: boardM() });
@@ -911,7 +919,7 @@ describe('PRD-1.3.0 § 6.4 : journal du trajet', () => {
 
   it('trajet vers une adresse : le journal ne garde pas l’adresse dans le titre', async () => {
     const jr = memoryJournal();
-    const h = await guideSetup({ settings: settingsWith([], { seenVersion: '1.3.0' }), stub: { plan: (now) => [door('j-adr', now + 2 * MIN, now + 40 * MIN)] } });
+    const h = await guideSetup({ settings: settingsWith([], { seenVersion: '1.3.1' }), stub: { plan: (now) => [door('j-adr', now + 2 * MIN, now + 40 * MIN)] } });
     depsOf(h).journal = jr.journal;
     await h.until((s) => s.screen === 'home');
     const to: Endpoint = { type: 'address', label: 'Place Flagey 18, 1050 Ixelles', lat: SPOTS.flagey.lat, lon: SPOTS.flagey.lon };

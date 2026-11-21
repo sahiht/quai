@@ -53,6 +53,8 @@ export function snapPoint(g: RoutingGraph, latU: number, lonU: number, maxM = SN
   let any: Snap | null = null;
   let giant: Snap | null = null;
   const dLat = maxM / M_PER_U;
+  // 1.3.1 (R4) : graphe sans marches (graph.ts, withoutSteps) : ses tronçons écartés ne sont pas des accroches
+  const skip = g.skip ?? 0;
   for (let ti = 0; ti < g.tiles.length; ti++) {
     const tg = g.tiles[ti];
     const t = tg.t;
@@ -61,6 +63,7 @@ export function snapPoint(g: RoutingGraph, latU: number, lonU: number, maxM = SN
     const bb = tg.bbox;
     const ne = t.edgeFrom.length;
     for (let k = 0; k < ne; k++) {
+      if (t.edgeFlags[k] & skip) continue;
       if (latU < bb[4 * k] - dLat || latU > bb[4 * k + 1] + dLat || lonU < bb[4 * k + 2] - dLon || lonU > bb[4 * k + 3] + dLon) continue;
       const e = g.edgeBase[ti] + k;
       const comp = t.edgeComp[k];
@@ -446,7 +449,9 @@ export function assemble(g: RoutingGraph, from: LatLon, to: LatLon, s: Snap, t: 
   for (let i = 0; i < n; i++) coords.push({ lat: round7(lat[i] * WALK_UNIT), lon: round7(lon[i] * WALK_UNIT) });
   coords[0] = { lat: from.lat, lon: from.lon };
   if (n > 1) coords[n - 1] = { lat: to.lat, lon: to.lon };
-  return { from, to, coords, lengthM: Math.round(lengthM * 10) / 10, maneuvers: cleanManeuvers(raw, lengthM), source: 'osm', builtAt };
+  // 1.3.1 (A6, correctif du 21/11) : le raccord de départ (du point demandé à la voie) est signalé au guidage
+  const joinAt = joinFrom && sIdx > 0 && sIdx < n ? { joinAt: sIdx } : {};
+  return { from, to, coords, lengthM: Math.round(lengthM * 10) / 10, maneuvers: cleanManeuvers(raw, lengthM), source: 'osm', ...joinAt, builtAt };
 }
 
 export type RouteFail = 'nosnap' | 'nopath';

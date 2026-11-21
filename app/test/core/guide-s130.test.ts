@@ -254,8 +254,12 @@ describe('1.3.0 moteur : marche hors de Belgique (PRD-1.3.0 § 4)', () => {
 
 const issues = (s: GuideState): CheckIssue[] => s.issues ?? [];
 
-/** Positions dans l'IC entre Ans et Louvain (à bord, 30 m/s). */
-const inIc = (f: number, t: number) => fix(lerp(S.ans, S.louvain, f), t, { speed: 30 });
+/**
+ * 1.3.1 (A8, I4) : la position perdue n'est plus dite à l'arrêt ni à bord : ses essais se font à pied, sur une longue
+ * marche (du parc d'Avroy à la gare d'Ans, 07:20 à 08:20 ; « Partir maintenant » fini à 07:23).
+ */
+const longWalk = () => journeyOf([walkLeg(S.avroy, S.ans, at('07:20'), 60)], 'jwalk', at('07:20'));
+const onFoot = (f: number, t: number) => fix(lerp(S.avroy, S.ans, f), t, { speed: 1.3 });
 
 describe('1.3.0 moteur : vérification au départ et en route (PRD-1.3.0 § 6.3)', () => {
   it('batterie des lunettes sous 20 % au lancement : « check » 30 s après, 20 s, une fois ; problème vrai tant qu’elle est basse', () => {
@@ -287,23 +291,25 @@ describe('1.3.0 moteur : vérification au départ et en route (PRD-1.3.0 § 6.3)
   });
 
   it('aucune position dans les 30 s alors que la phase en demande : « Pas de position » ; avec la batterie : deux lignes', () => {
-    // lancé dans le bus 6 (position moyenne demandée), aucune position
-    const r = guide(prdTrip(), { startedAt: at('07:13'), battery: 12 });
-    expect(step(r, at('07:13')).moment).toBeNull();
-    const s = step(r, at('07:13:30'));
+    // lancé 7 min avant de partir (position moyenne demandée), aucune position ; 1.3.1 (A8, I4) : plus dans le bus 6, où
+    // rien n'est dit sur la position
+    const r = guide(prdTrip(), { startedAt: at('06:58'), battery: 12 });
+    expect(step(r, at('06:58')).moment).toBeNull();
+    const s = step(r, at('06:58:30'));
     expect(m(s.moment, 'check')).toMatchObject({ id: 'check:battery+noPosition', issues: [{ kind: 'battery', level: 12 }, { kind: 'noPosition' }] });
     expect(issues(s)).toEqual([{ kind: 'battery', level: 12 }, { kind: 'noPosition' }]);
     // une position arrive : « Pas de position » réglé ; le moment reste pour la batterie
-    const s2 = step(r, at('07:13:40'), fix(lerp(P.gramme, P.leman, 0.5), at('07:13:40'), { speed: 8 }));
+    const s2 = step(r, at('06:58:40'), fix(P.avroy, at('06:58:40')));
     expect(m(s2.moment, 'check').issues).toEqual([{ kind: 'battery', level: 12 }]);
     expect(issues(s2)).toEqual([{ kind: 'battery', level: 12 }]);
   });
 
   it('une position arrive pendant « Pas de position » : le moment finit tout de suite, plus de problème', () => {
-    const r = guide(prdTrip(), { startedAt: at('07:13') });
-    step(r, at('07:13'));
-    expect(m(step(r, at('07:13:30')).moment, 'check').issues).toEqual([{ kind: 'noPosition' }]);
-    const s = step(r, at('07:13:35'), fix(lerp(P.gramme, P.leman, 0.5), at('07:13:35'), { speed: 8 }));
+    // 1.3.1 (A8, I4) : avant de partir, plus dans le bus 6
+    const r = guide(prdTrip(), { startedAt: at('06:58') });
+    step(r, at('06:58'));
+    expect(m(step(r, at('06:58:30')).moment, 'check').issues).toEqual([{ kind: 'noPosition' }]);
+    const s = step(r, at('06:58:35'), fix(P.avroy, at('06:58:35')));
     expect(s.moment).toBeNull();
     expect(s.issues).toBeUndefined();
   });
@@ -331,9 +337,10 @@ describe('1.3.0 moteur : vérification au départ et en route (PRD-1.3.0 § 6.3)
   });
 
   it('position perdue depuis 3 min en route : « check » une fois par guidage ; revenue : plus de problème', () => {
-    const r = guide(prdTrip(), { startedAt: at('07:40') });
-    step(r, at('07:40'), inIc(0.2, at('07:40')));
-    step(r, at('07:40:10'), inIc(0.21, at('07:40:10')));
+    // 1.3.1 (A8, I4) : à pied (dans l'IC, plus rien n'est dit sur la position)
+    const r = guide(longWalk(), { startedAt: at('07:15') });
+    step(r, at('07:40'), onFoot(0.2, at('07:40')));
+    step(r, at('07:40:10'), onFoot(0.21, at('07:40:10')));
     for (let t = at('07:40:30'); t < at('07:43:10'); t += 30 * SEC) {
       const s = step(r, t);
       expect(s.moment).toBeNull();
@@ -345,15 +352,16 @@ describe('1.3.0 moteur : vérification au départ et en route (PRD-1.3.0 § 6.3)
     expect(step(r, at('07:43:30')).moment).toBeNull();
     expect(issues(step(r, at('07:44:10')))).toEqual([{ kind: 'positionLost', minutes: 4 }]);
     // revenue : vide
-    expect(step(r, at('07:45'), inIc(0.3, at('07:45'))).issues).toBeUndefined();
+    expect(step(r, at('07:45'), onFoot(0.3, at('07:45'))).issues).toBeUndefined();
     // perdue de nouveau : le problème, sans nouveau moment
     for (let t = at('07:45:30'); t <= at('07:49'); t += 30 * SEC) expect(step(r, t).moment).toBeNull();
     expect(issues(r.last!)).toEqual([{ kind: 'positionLost', minutes: 4 }]);
   });
 
   it('téléphone en veille (aucun pas pendant plus de 2 min) : l’attente repart du réveil, pas de fausse perte', () => {
-    const r = guide(prdTrip(), { startedAt: at('07:40') });
-    step(r, at('07:40'), inIc(0.2, at('07:40')));
+    // 1.3.1 (A8, I4) : à pied
+    const r = guide(longWalk(), { startedAt: at('07:15') });
+    step(r, at('07:40'), onFoot(0.2, at('07:40')));
     const woke = step(r, at('07:50'));
     expect(woke.moment).toBeNull();
     expect(woke.issues).toBeUndefined();
@@ -381,8 +389,11 @@ describe('1.3.0 moteur : vérification au départ et en route (PRD-1.3.0 § 6.3)
   });
 
   it('sur tout le trajet du PRD : un moment « check » ne prend jamais la place d’une action ; le reste comme en 1.2.10', () => {
-    // lancé tôt (06:40) : la batterie 30 s après le lancement, « Pas de position » 30 s après que la phase en demande
-    const expected: Record<string, string[]> = { '06:40': ['check:battery', 'check:noPosition'] };
+    // lancé tôt (06:40) : la batterie 30 s après le lancement, « Pas de position » 30 s après que la phase en demande ;
+    // 1.3.1 (A8, I4) : lancé à l'arrêt ou à bord (07:10, 07:23, 07:31), la batterie seule tout de suite, « Pas de
+    // position » à la première marche libre (la dernière : les autres sont prises par « Descends », la marche, « Monter »)
+    const later = ['check:battery', 'check:noPosition'];
+    const expected: Record<string, string[]> = { '06:40': ['check:battery', 'check:noPosition'], '07:10': later, '07:23': later, '07:31': later };
     for (const start of ['06:40', '07:05', '07:10', '07:23', '07:31']) {
       // a : lancement vu, batterie basse, aucune position ; b : même trajet, rien à vérifier (guidage repris)
       const a = guide(prdTrip(), { startedAt: at(start), battery: 12 });
@@ -426,7 +437,7 @@ describe('1.3.0 moteur : vérification au départ et en route (PRD-1.3.0 § 6.3)
     expect(step(r, at('06:45')).moment).toBeNull();
   });
 
-  it('« J’y descends » lancé à l’arrêt sans position : « Pas de position » 30 s après, avant « Monter »', () => {
+  it('« J’y descends » lancé à l’arrêt sans position : rien sur la position à l’arrêt (1.3.1, A8), « Monter » à son heure', () => {
     const call = (areaId: string, name: string, hm: string) => ({ areaId, name: N(name), sched: at(hm), est: at(hm), rt: true, delayMin: 0 });
     const dep: Departure = { op: 'tec', mode: 'bus', line: '6', head: N('Gare des Guillemins'), sched: at('07:12'), est: at('07:12'), rt: true, delayMin: 0, cancelled: false, tripId: 'T6-07:12', stopId: 'LGgram1', stopSeq: 4 };
     const ds: DepartureStops = {
@@ -438,8 +449,10 @@ describe('1.3.0 moteur : vérification au départ et en route (PRD-1.3.0 § 6.3)
     const s0 = step(r, at('06:50'));
     expect(s0.phase).toEqual({ kind: 'wait', leg: 0 });
     expect(s0.moment).toBeNull();
-    expect(m(step(r, at('06:50:30')).moment, 'check').issues).toEqual([{ kind: 'noPosition' }]);
-    expect(step(r, at('06:50:50')).moment).toBeNull();
+    // 1.3.1 (A8, I4) : à l'arrêt et à bord, rien sur la position (dans le métro, le conseil de l'appli Even serait faux)
+    const s1 = step(r, at('06:50:30'));
+    expect(s1.moment).toBeNull();
+    expect(s1.issues).toBeUndefined();
     for (let t = at('06:51'); t < at('06:57'); t += MIN) expect(step(r, t).moment).toBeNull();
     expect(kindOf(step(r, at('06:57')))).toBe('board');
   });
@@ -474,8 +487,9 @@ describe('1.3.0 moteur : vérification au départ et en route (PRD-1.3.0 § 6.3)
   });
 
   it('mémoire gardée en JSON : même état, vérification comprise ; mémoire de vérification abîmée tolérée', () => {
-    const r = guide(prdTrip(), { startedAt: at('07:40') });
-    step(r, at('07:40'), inIc(0.2, at('07:40')));
+    // 1.3.1 (A8, I4) : à pied
+    const r = guide(longWalk(), { startedAt: at('07:15') });
+    step(r, at('07:40'), onFoot(0.2, at('07:40')));
     for (let t = at('07:40:30'); t <= at('07:42:30'); t += 30 * SEC) step(r, t);
     const input = { ...(r.input as GuideInput), journey: r.j, now: at('07:43'), fixes: [] };
     const a = guideStep(input, r.mem);

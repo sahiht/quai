@@ -15,7 +15,9 @@ export function alertsScreen(ctx: PhoneCtx): HTMLElement {
   const s = ctx.settings.get();
   const previewSlot = h('div');
   const refresh = (): void => {
-    previewSlot.replaceChildren(glassesPreview('Exemple dans les lunettes', alertsPreview(ctx.settings.get())));
+    // 1.3.1 (PRD-1.3.1 § 14, R5, contrôle) : l'exemple suit « Plein soleil », comme l'aperçu d'Affichage
+    const now = ctx.settings.get();
+    previewSlot.replaceChildren(glassesPreview('Exemple dans les lunettes', alertsPreview(now), { sun: now.display.sun === true }));
   };
   const set = (fn: (a: Settings['alerts']) => Settings['alerts']): void => {
     void ctx.settings.update((x) => ({ ...x, alerts: fn({ ...x.alerts }) })).then(refresh);

@@ -116,6 +116,12 @@ export interface Settings {
   onboarded: boolean;
   lang: NameLang;
   maxWalkMin: number;           // 5..20 : préférence (PRD-1.2 § 1.2), plus un mur
+  /**
+   * 1.3.1 (PRD-1.3.1 § 14, R4) : « Éviter les escaliers » : le chemin à pied du guidage évite les marches (escaliers et
+   * escaliers mécaniques) quand un chemin sans marches existe, sinon le chemin habituel. Seul `true` est enregistré ;
+   * absent : éteint.
+   */
+  avoidSteps?: boolean;
   favorites: Favorite[];        // 32 au plus, dans l'ordre choisi sur le téléphone ; 1.2.2 : lieux et trajets
   stations: StationPick[];      // 1.2.2 : 32 au plus, dans l'ordre choisi sur le téléphone
   lines: LinePick[];            // 1.2.2 : 32 au plus, dans l'ordre choisi sur le téléphone
@@ -152,6 +158,11 @@ export interface Settings {
      * utilisé : rappels à l'heure.
      */
     headUp?: { axis: 'x' | 'y' | 'z'; sign: 1 | -1; delta: number; rest?: number };
+    /**
+     * 1.3.1 (PRD-1.3.1 § 14, R5) : « Plein soleil » : les niveaux pâles des lunettes montent d'un cran (glasses/layout.ts,
+     * sunLevel), le curseur et la ligne d'action restent au plus clair. Seul `true` est enregistré ; absent : éteint.
+     */
+    sun?: boolean;
   };
   alerts: {
     platform: boolean;
@@ -193,7 +204,7 @@ export interface Departure {
   stopSeq?: number;
   stopId?: string;
   msg?: string;                 // message de l'opérateur (STIB)
-  last?: boolean;               // dernier passage annoncé de la ligne à cet arrêt (STIB « Dernier passage »)
+  last?: boolean;               // dernier passage de la ligne dans ce sens à cet arrêt (STIB « Dernier passage » ; 1.3.1 : aussi d'après l'horaire, core/boards.ts)
 }
 
 export interface Board {
@@ -302,6 +313,12 @@ export interface Leg {
   dep: number; arr: number;               // estimés (= prévus sans temps réel)
   schedDep: number; schedArr: number;
   walkMin?: number;                       // marche
+  /**
+   * 1.3.1 (vrai chemin partout, core/firstwalk.ts) : sur la première marche seulement, l'estimation d'origine (vol
+   * d'oiseau × 1,3) quand `walkMin` a été allongé d'après le vrai chemin à pied (au plus 5 min de plus). Absent : la
+   * marche est estimée, comme en 1.3.0.
+   */
+  walkEst?: number;
   op?: Op; mode?: Mode; line?: string;    // trajet en véhicule
   cat?: string; num?: string;             // trains : 'IC', '2112'
   head?: Names;
@@ -309,7 +326,7 @@ export interface Leg {
   fromStop?: string; toStop?: string;     // 1.1 : identifiants temps réel des arrêts physiques de montée et de descente
   platform?: string; newPlatform?: string;
   rt?: boolean; delayMin?: number; cancelled?: boolean;
-  last?: boolean;                         // dernier passage annoncé de la ligne (STIB « Dernier passage »)
+  last?: boolean;                         // dernier passage de la ligne dans ce sens (STIB « Dernier passage » ; 1.3.1 : aussi d'après l'horaire, core/journeys.ts markLast)
   stops?: Stopover[];                     // de la montée à la descente comprises (« Dans le train » ; 1.1 : aussi bus, tram, métro)
   rain?: boolean;                         // 1.2.5 : pluie prévue pendant cette marche (Open-Meteo, grille fixe du relais)
   rtKept?: boolean;                       // 1.2.5 : retard gardé de la mémoire du temps réel (relais muet, 15 min au plus)
@@ -463,14 +480,31 @@ export interface Core {
   /**
    * 1.2.10 : chemin à pied calculé sur le téléphone (graphe piéton OpenStreetMap, tuiles data/walk/). null : impossible
    * (données absentes) ; le chemin droit (`source: 'straight'`) quand les extrémités ne s'accrochent à aucune voie.
+   * 1.3.1 (R4) : `opts.avoidSteps` (réglage « Éviter les escaliers ») : un chemin sans marches s'il en existe un, sinon
+   * le chemin habituel (core/walk/router.ts).
    */
-  walkRoute?(from: LatLon, to: LatLon): Promise<WalkRoute | null>;
+  walkRoute?(from: LatLon, to: LatLon, opts?: { avoidSteps?: boolean }): Promise<WalkRoute | null>;
+  /**
+   * 1.3.1 (décision du 20/11 à 21:59, core/firstwalk.ts) : l'heure de partir d'après le vrai chemin de la première marche.
+   * route(), answer() et refresh() rendent déjà les trajets corrigés quand le chemin est connu ; ils n'attendent jamais
+   * le chemin (0,1 s au plus). `onFirstWalk` prévient quand un chemin tout juste connu allonge une première marche : les
+   * écrans rafraîchissent alors une fois leurs trajets (rend la fonction de désabonnement). `firstWalk` : le même
+   * trajet avec la correction connue à cet instant, sans réseau ni attente (le même objet si rien ne change), pour une
+   * liste de résultats qui n'est pas rafraîchie (recherche du téléphone).
+   */
+  onFirstWalk?(cb: () => void): () => void;
+  firstWalk?(j: Journey, settings: Settings): Journey;
   /**
    * 1.2.10 : chemins à pied publiés (data/walk/index.json), pour la carte « Chemins à pied » de l'écran Données :
    * `date` = date des données OpenStreetMap (AAAA-MM-JJ), `tiles` = nombre de tuiles. null : pas de chemins à pied
    * dans la publication (ou index illisible, serveur injoignable). Jamais d'exception.
    */
   walkIndex?(): Promise<{ date: string; tiles?: number } | null>;
+  /**
+   * 1.3.1 (PRD-1.3.1 § 14, R1) : sorties du métro et du prémétro publiées (data/exits.json, format de
+   * core/walk/exits-format.ts) ; null : aucune (fichier absent ou illisible, serveur injoignable). Jamais d'exception.
+   */
+  walkExits?(): Promise<import('./walk/exits-format').ExitsFile | null>;
   init(): Promise<Meta>;
   /** La publication en vigueur : elle peut changer après init() (copie remplacée par le réseau, relecture de 10 min). */
   readonly meta: Meta | null;
@@ -593,6 +627,11 @@ export interface GlassesApi {
   /** 1.3.0 (PRD-1.3.0 § 6.1) : test de l'écran des lunettes, mené par le téléphone (Réglages, « Pendant un trajet ») */
   displayTest?(cmd: DisplayTestCmd): Promise<DisplayTestState>;
   onDisplayTest?(cb: (s: DisplayTestState) => void): () => void;
+  /**
+   * 1.3.1 (PRD-1.3.1 § 12, B11) : « Effacer le journal » (Réglages, Données) oublie aussi les arrêts retenus de « j'y
+   * descends » (la liste des arrêts d'un départ s'ouvrait sur eux).
+   */
+  forgetAlights?(): void;
 }
 
 /* ------------------------------ 1.3.0 : test de l'écran des lunettes (PRD-1.3.0 § 6.1) ------------------------------ */

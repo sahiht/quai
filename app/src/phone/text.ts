@@ -10,6 +10,7 @@ import type { JournalTrip } from '../core/journal-types';
 import { favoriteTitle, placeOf } from '../core/favorites';
 import { displayLabel, HOLIDAY_TEXT, holidayName, longestWalk, meansText, rideName, walksMore } from '../core/means';
 import { NB, shortAddress } from '../core/text';
+import { apos } from '../core/typo';
 import { brusselsParts, displayName, hhmm, OP_NAME } from '../core/util';
 import { atTitle, durationText, journeyStart, spanText, stopAnswerLine, transfersText, tripAnswerLine, walkMinOf } from '../glasses/format';
 import { compareVersions } from '../version';
@@ -146,7 +147,7 @@ export const T = {
    * bouton « Réglages ».
    */
   settings: 'Réglages',
-  settingsLead: 'Favoris, gares, arrêts et lignes se règlent sur l’accueil, dans l’ordre des lunettes.',
+  settingsLead: 'Favoris, gares, lignes et arrêts se règlent sur l’accueil, dans l’ordre des lunettes.',
   inGlasses: 'Dans tes lunettes',
   mirrorLead: 'Mêmes rubriques, même ordre.',
   preview: 'Aperçu',
@@ -165,16 +166,21 @@ export const T = {
   alerts: 'Alertes',
   data: 'Données',
   sources: 'Données : SNCB, STIB, De Lijn, TEC via Belgian Mobility Company',
-  /** 1.2.10 (PRD-1.2.10 § 4.1) : le seul réglage du guidage, dans Réglages. */
+  /**
+   * 1.2.10 (PRD-1.2.10 § 4.1) : le seul réglage du guidage, dans Réglages. 1.3.1 (PRD-1.3.1 § 1 et § 12, L2) : pendant
+   * le guidage, les lunettes montrent trois petits points ; l'aide le dit.
+   */
   groupDuringTrip: 'Pendant un trajet',
   guide: 'Me guider pendant un trajet',
-  guideHelp: 'Les lunettes restent vides et t’écrivent seulement quand tu dois agir : partir, tourner, monter, descendre. Éteint : ton trajet est suivi sans rien afficher tout seul.',
+  guideHelp: 'Les lunettes ne montrent que trois petits points et t’écrivent seulement quand tu dois agir : partir, tourner, monter, descendre. Éteint : ton trajet est suivi sans rien afficher tout seul.',
   /** 1.2.10 (PRD-1.2.10 § 4.2) : bouton d'un favori, et son message quand les lunettes n'en rendent pas. */
   goThere: 'Y aller',
   guideStarted: 'Guidage lancé sur les lunettes.',
   followStarted: 'Trajet suivi dans les lunettes.',
   /** 1.2.10 (PRD-1.2.10 § 4.3) : carte « En cours » de l'accueil ; « suivi » quand le guidage est éteint. */
   nowTitle: 'En cours',
+  /** 1.3.1 (PRD-1.3.1 § 14, R6) : bouton de la carte « En cours ». */
+  copyArrival: 'Copier mon heure d’arrivée',
   stopGuide: 'Arrêter le guidage',
   stopFollow: 'Arrêter le suivi',
   guideStopped: 'Guidage arrêté.',
@@ -236,13 +242,24 @@ export const TEST_ANSWERS: readonly { answer: 'quai' | 'dashboard' | 'nothing'; 
 /**
  * 1.3.0 (PRD-1.3.0 § 6.1, étape done) : ce que le téléphone conseille selon le résultat (textes du PRD) ; `none` : la
  * réponse « Rien », aucun résultat, vérifier « Head-Up » dans l'appli Even.
+ * 1.3.1 (PRD-1.3.1 § 5) : résultat « Head-Up », le conseil précis du PRD, mot pour mot (aucun chemin de menu) ; « à 0 »
+ * insécable, pour qu'un « 0 » ne commence jamais une ligne. Les autres résultats ne changent pas.
  */
 export const TEST_ADVICE: Record<NonNullable<Settings['display']['alert']> | 'none', string> = {
   visible: 'Les messages de Quai se voient sans rien faire. S’il le faut, Quai les rappelle.',
-  headUp: `Lève un peu la tête pour voir les messages. Pour le moindre mouvement${NB}: dans l’appli Even, règle l’angle d’affichage au plus bas.`,
+  headUp: `Pour voir les messages sans bouger la tête${NB}: dans l’appli Even, règle l’angle de l’affichage Head-Up à${NB}0, en regardant un peu vers le bas pendant le réglage. L’écran restera allumé quand tu regardes devant toi${NB}; la batterie des lunettes s’use un peu plus vite.`,
   dashboard: 'En levant la tête, tu vois le Dashboard. Pendant un trajet, touche une fois les lunettes pour voir Quai.',
   none: `Les lunettes n’ont rien montré${NB}: dans l’appli Even, vérifie le réglage «${NB}Head-Up${NB}», puis recommence le test.`,
 };
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 14, R7) : sous le conseil des résultats « Head-Up » et « Rien » (TEST_CHECKED), ce qu'il faut
+ * vérifier quand l'affichage Head-Up ne réagit pas (support Even : « Wear Detection », mode silencieux coupé par un appui
+ * d'une seconde sur les deux branches). Aucun chemin de menu.
+ */
+export const TEST_CHECK = `Si l’affichage Head-Up ne réagit pas, vérifie «${NB}Wear Detection${NB}» dans l’appli Even, et que le mode silencieux est coupé (appui d’une seconde sur les deux branches).`;
+/** 1.3.1 (R7) : les résultats dont le conseil est suivi de TEST_CHECK. */
+export const TEST_CHECKED: ReadonlySet<NonNullable<Settings['display']['alert']> | 'none'> = new Set(['headUp', 'none']);
 
 /** 1.3.0 : ligne pâle sous « Tester l’écran des lunettes » dans Réglages : le dernier résultat (Settings.display.alert). */
 export const TEST_LAST: Record<NonNullable<Settings['display']['alert']>, string> = {
@@ -275,17 +292,32 @@ export function journalTripLine(t: Pick<JournalTrip, 'startedAt' | 'endedAt' | '
 
 /** 1.2.10 : choix de « À l’ouverture de Quai » (libellés de la revue d'usage n° 11, mêmes valeurs enregistrées). */
 export const OPENING_LABEL: Record<Settings['display']['opening'], string> = {
-  suggest: 'L’accueil, avec mes favoris en tête',
+  suggest: 'L’accueil, avec mes favoris',
   firstFavorite: 'Directement mon premier favori',
   home: 'L’accueil, sans favoris',
 };
 /** Ordre des choix de l'ouverture (celui de la 1.2.9). */
 export const OPENING_ORDER: readonly Settings['display']['opening'][] = ['suggest', 'firstFavorite', 'home'];
 
-/** 1.2.10 : carte « En cours » : « Bureau, arrivée 08:54 » (sans heure connue : le titre seul). */
-export const guideTitleLine = (s: Pick<GuideStatus, 'title' | 'arr'>): string => (Number.isFinite(s.arr) && s.arr > 0 ? `${s.title}, arrivée ${hhmm(s.arr)}` : s.title);
-/** 1.2.10 : « Maintenant : bus 6 vers Gare des Guillemins » (rien si le moteur ne dit rien). */
-export const guideNowLine = (s: Pick<GuideStatus, 'now'>): string => (s.now.trim() ? typo(`Maintenant : ${s.now.trim()}`) : '');
+/**
+ * 1.2.10 : carte « En cours » : « Bureau, arrivée 08:54 » (sans heure connue : le titre seul). 1.3.1 (§ 7) : les noms
+ * venus des données avec l'apostrophe typographique, à l'affichage seulement.
+ */
+export const guideTitleLine = (s: Pick<GuideStatus, 'title' | 'arr'>): string => apos(Number.isFinite(s.arr) && s.arr > 0 ? `${s.title}, arrivée ${hhmm(s.arr)}` : s.title);
+/**
+ * 1.2.10 : « Maintenant : bus 6 vers Gare des Guillemins » (rien si le moteur ne dit rien). 1.3.1 (L5, pôle Guidage) :
+ * avant le départ, ce qui vient : « Ensuite : partir à 07:05 » (GuideStatus.then). 1.3.1 (§ 7) : « ’ ».
+ */
+export const guideNowLine = (s: Pick<GuideStatus, 'now' | 'then'>): string => (s.now.trim() ? apos(typo(`${s.then ? 'Ensuite' : 'Maintenant'} : ${s.now.trim()}`)) : '');
+
+/**
+ * 1.3.1 (PRD-1.3.1 § 14, R6) : carte « En cours » : le texte que « Copier mon heure d’arrivée » met dans le
+ * presse-papiers, « J’arrive vers 08:54. » : l'heure d'arrivée du trajet en cours, jamais un nom de lieu ; sans heure
+ * connue : '' (pas de bouton). Quai n'envoie rien : la personne colle le texte où elle veut.
+ */
+export const arrivalCopyText = (s: Pick<GuideStatus, 'arr'>): string => (Number.isFinite(s.arr) && s.arr > 0 ? `J’arrive vers ${hhmm(s.arr)}.` : '');
+/** 1.3.1 (R6) : après la copie, « Copié : J’arrive vers 08:54. ». */
+export const copiedText = (text: string): string => `Copié${NB}: ${text}`;
 /**
  * 1.3.0 (PRD-1.3.0 § 6.3) : carte « En cours » : les problèmes de la vérification (GuideStatus.check, les lignes de
  * checkLines des lunettes : « Lunettes : 12 % de batterie »), deux au plus ; aucun : rien.
@@ -385,22 +417,29 @@ export const NEWS_129_WEB: readonly string[] = [
 
 /**
  * 1.2.10 (PRD-1.2.10 § 7) : nouveautés de la bannière, comme le message « Quai 1.2.10 » des lunettes (« Y aller »,
- * « j'y descends », favoris sur une ligne), puis ce qui change sur le téléphone.
+ * « j'y descends », favoris sur une ligne), puis ce qui change sur le téléphone. Montrées à qui vient d'avant la
+ * 1.2.10 : chacune reste vraie (PRD-1.3.1 § 9). 1.3.1 : l'écran du guidage n'est plus vide (§ 1, trois petits points) :
+ * la 1re ligne le dit avec les mots de l'aide de « Me guider pendant un trajet » (§ 12, L2) ; la liste des arrêts
+ * n'écrit plus « j’y descends » mais « ▶ Me guider jusqu’à … » (§ 6) : la 2e ligne cite ce qui est écrit.
  */
 export const NEWS_1210: readonly string[] = [
-  '« Y aller » : Quai te guide de porte à porte. L’écran des lunettes reste vide et t’écrit seulement quand tu dois agir : partir, tourner, monter, descendre.',
-  'Train ou bus déjà pris : dans la liste de ses arrêts, touche celui où tu descends, « j’y descends », et Quai te dit quand descendre.',
+  '« Y aller » : Quai te guide de porte à porte. Les lunettes ne montrent que trois petits points et t’écrivent seulement quand tu dois agir : partir, tourner, monter, descendre.',
+  'Train ou bus déjà pris : dans la liste de ses arrêts, touche celui où tu descends, « ▶ Me guider jusqu’à … », et Quai te dit quand descendre.',
   'Favoris des lunettes : une ligne chacun, le détail du favori choisi en bas de l’écran.',
   'Sur l’accueil du téléphone : « Y aller » sur chaque favori et, pendant le trajet, la carte « En cours ». Le réglage « Me guider pendant un trajet » est derrière le bouton « Réglages ».',
 ];
 
-/** 1.2.10 : les mêmes sur Quai Web, où la page du téléphone est l'onglet Réglages, et l'appui long de l'onglet Lunettes. */
+/**
+ * 1.2.10 : les mêmes sur Quai Web, où la page du téléphone est l'onglet Réglages, et l'appui long de l'onglet Lunettes.
+ * 1.3.1 (PRD-1.3.1 § 12, B10) : le menu dans son nouvel ordre, « Arrêter le guidage » en dernier ; « Voir les arrêts »
+ * n'existe pas pour un trajet tout à pied.
+ */
 export const NEWS_1210_WEB: readonly string[] = [
   NEWS_1210[0],
   NEWS_1210[1],
   NEWS_1210[2],
   'Dans l’onglet Réglages : « Y aller » sur chaque favori et, pendant le trajet, la carte « En cours ». Le réglage « Me guider pendant un trajet » est derrière le bouton « Réglages ».',
-  'Dans l’onglet Lunettes, le bouton « Appui long » ouvre le menu du guidage : « Arrêter le guidage », « Voir tout le trajet ».',
+  'Dans l’onglet Lunettes, le bouton « Appui long » ouvre le menu du guidage : « Voir tout le trajet », « Voir les arrêts » (sauf pour un trajet tout à pied), « Arrêter le guidage ».',
 ];
 
 /**
@@ -425,6 +464,32 @@ export const NEWS_130_WEB: readonly string[] = [
   'Dans l’onglet Réglages, bouton « Réglages », puis Données : le journal de tes 10 derniers trajets guidés, à lire et à copier.',
 ];
 
+/**
+ * 1.3.1 (PRD-1.3.1 § 9, décision du 21/11) : nouveautés de la bannière « Nouveau dans Quai 1.3.1 », les idées du message
+ * « Quai 1.3.1 » des lunettes (les trois points et « masquer » ; la sortie du métro et « dernier » ; l'heure de partir
+ * d'après le vrai chemin), puis ce qui change sur le téléphone (R4, R5, R6).
+ */
+export const NEWS_131: readonly string[] = [
+  'Pendant un guidage, trois petits points : Quai te suit, rien à faire. Un toucher masque un message, le guidage continue.',
+  'Après le métro, Quai écrit la sortie à prendre. Le soir, « dernier » marque le dernier départ que tu peux encore prendre.',
+  'L’heure de partir compte le vrai chemin à pied : la même sur le téléphone et dans les lunettes.',
+  'Dans Réglages : « Éviter les escaliers » et, dans Affichage, « Plein soleil ». Sur la carte « En cours » : « Copier mon heure d’arrivée ».',
+];
+
+/**
+ * 1.3.1 : les mêmes sur Quai Web, où la page du téléphone est l'onglet Réglages. La dernière ligne y cite l'essai du
+ * guidage (R2) : son nom, `trial`, est donné par Quai Web (web/essai.ts), jamais écrit ici, car ce fichier est aussi
+ * dans l'appli des lunettes, où l'essai n'existe pas. Sans lui : les deux réglages seulement.
+ */
+export function news131Web(trial = ''): string[] {
+  return [
+    NEWS_131[0],
+    NEWS_131[1],
+    'L’heure de partir compte le vrai chemin à pied : la même dans l’onglet Réglages et dans les lunettes.',
+    trial ? `Dans l’onglet Réglages : « Éviter les escaliers », « Plein soleil » et, sous « Y aller », « ${trial} ».` : 'Dans l’onglet Réglages : « Éviter les escaliers » et « Plein soleil ».',
+  ];
+}
+
 /** 1.2.8 : nouveautés de la bannière (comme le message « Quai 1.2.8 » des lunettes). */
 export const NEWS_128: readonly string[] = [
   'Dans les lunettes, touche un train au tableau d’une gare : tout son trajet, des gares d’avant jusqu’au terminus.',
@@ -439,12 +504,14 @@ const NO_LONGER_TRUE: ReadonlySet<string> = new Set([NEWS_1210[2]]);
 const stillTrue = (l: string): boolean => !/^Bus, tram, métro\b/.test(l) && !NO_LONGER_TRUE.has(l);
 
 /**
- * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.3.0 ; depuis une version
+ * Lignes de la bannière « Nouveau » (une seule bannière, montrée une fois) : celles de la 1.3.1 ; depuis une version
  * antérieure (`seen` : la version vue avant la mise à jour), celles des versions sautées ensuite, de la plus récente à
- * la plus ancienne, sans celles qui ne sont plus vraies. Quai Web (`web`) : ses propres lignes (onglet Réglages).
+ * la plus ancienne, sans celles qui ne sont plus vraies. Quai Web (`web`) : ses propres lignes (onglet Réglages) ;
+ * `trial` : le nom de l'essai du guidage, donné par Quai Web (news131Web).
  */
-export function newsLines(seen = '', web = false): string[] {
-  const out = [...(web ? NEWS_130_WEB : NEWS_130)];
+export function newsLines(seen = '', web = false, trial = ''): string[] {
+  const out = [...(web ? news131Web(trial) : NEWS_131)];
+  if (seen && compareVersions(seen, '1.3.0') < 0) out.push(...(web ? NEWS_130_WEB : NEWS_130));
   if (seen && compareVersions(seen, '1.2.10') < 0) out.push(...(web ? NEWS_1210_WEB : NEWS_1210).filter(stillTrue));
   if (seen && compareVersions(seen, '1.2.9') < 0) out.push(...(web ? NEWS_129_WEB : NEWS_129));
   if (seen && compareVersions(seen, '1.2.8') < 0) out.push(...NEWS_128);
@@ -526,10 +593,13 @@ export function looksLikeAddress(q: string): boolean {
 /** Nombre de lettres d'un texte (aide de saisie : 3 lettres ou plus). */
 export const letterCount = (q: string): number => (q.match(/\p{L}/gu) ?? []).length;
 
-/** Sous-titre d'un lieu (T3) : adresse normalisée, « Près de {arrêt} », « Adresse à vérifier » ; jamais de coordonnées. */
+/**
+ * Sous-titre d'un lieu (T3) : adresse normalisée, « Près de {arrêt} », « Adresse à vérifier » ; jamais de coordonnées.
+ * 1.3.1 (§ 7) : apostrophe typographique à l'affichage (l'adresse gardée ne change pas).
+ */
 export function placeSubtitle(p: Place): string {
-  if (p.src === 'address' && p.address) return p.approx ? `${p.address} (sans numéro)` : p.address;
-  if (p.src === 'stop') return p.address ?? 'Près d’un arrêt';
+  if (p.src === 'address' && p.address) return apos(p.approx ? `${p.address} (sans numéro)` : p.address);
+  if (p.src === 'stop') return apos(p.address ?? 'Près d’un arrêt');
   if (!p.src && p.address) return T.toVerify;
   return 'Position prise sur place';
 }
@@ -550,12 +620,17 @@ export function defaultSlot(name: string): Propose {
 
 /* ------------------------------ Extrémités et favoris ------------------------------ */
 
-/** Nom d'une extrémité pour le téléphone : « Ma position », « Bureau », « Gand-Saint-Pierre », adresse complète. */
+/**
+ * Nom d'une extrémité pour le téléphone : « Ma position », « Bureau », « Gand-Saint-Pierre », adresse complète. 1.3.1
+ * (§ 7) : un nom des données avec l'apostrophe typographique (affichage seulement).
+ */
 export function endpointText(e: Endpoint, settings: Settings): string {
   if (e.type === 'here') return 'Ma position';
-  if (e.type === 'area') return displayName(e.name, settings.lang);
-  if (e.type === 'address') return e.label;
-  return placeOf(settings, e.placeId)?.label ?? 'Lieu';
+  if (e.type === 'area') return apos(displayName(e.name, settings.lang));
+  // 1.3.1 (§ 7, décision du 20/11) : une adresse aussi, à l'affichage seulement (l'adresse gardée ne change pas)
+  if (e.type === 'address') return apos(e.label);
+  // 1.3.1 (§ 7) : le nom d'un lieu gardé (souvent celui d'une gare) s'affiche comme sur l'accueil et dans les lunettes
+  return apos(placeOf(settings, e.placeId)?.label ?? 'Lieu');
 }
 
 /**
@@ -583,13 +658,14 @@ export function lineName(l: { op: Op; line: string; mode?: Mode }): string {
  * sans filtre, migré) : « Gare du Nord · toutes les lignes ». `mode` : le mode s'il est connu autrement (linesAt).
  */
 export function linePickTitle(p: Pick<LinePick, 'op' | 'name' | 'line' | 'mode'>, lang: NameLang, mode: Mode | undefined = p.mode): string {
-  const stop = displayName(p.name, lang);
+  // 1.3.1 (§ 7) : apostrophe typographique, à l'affichage seulement
+  const stop = apos(displayName(p.name, lang));
   return p.line ? `${lineName({ op: p.op, line: p.line, mode })} · ${stop}` : `${stop} · toutes les lignes`;
 }
 
 /** Ligne trouvée par son numéro (PRD-1.2.2 § 4) : « Bus W TEC, Braine-l’Alleud ↔ Bruxelles Midi ». */
 export function lineMatchText(m: Pick<LineMatch, 'op' | 'mode' | 'line' | 'ends'>, lang: NameLang): string {
-  const ends = m.ends.map((e) => displayName(e, lang)).join(' ↔ ');
+  const ends = m.ends.map((e) => apos(displayName(e, lang))).join(' ↔ ');
   return `${lineName(m)} ${OP_NAME[m.op]}${ends ? `, ${ends}` : ''}`;
 }
 
@@ -665,27 +741,51 @@ const minuteOf = (t: number): number => Math.floor(t / 60_000);
  */
 export const cardTitle = (j: Journey, result: PlanResult): string => (j.label ? displayLabel(j, result.journeys) : '');
 
-/** Marches d'au moins 1 min, dans l'ordre du trajet. */
-const walksOf = (j: Journey): number[] =>
-  j.legs
-    .filter((l) => l.kind === 'walk')
-    .map((l) => Math.round(walkMinOf(l)))
-    .filter((m) => m >= 1);
+/**
+ * Marches d'au moins 1 min, dans l'ordre du trajet ; `to` : l'arrêt ou la gare où monter dans le véhicule qui suit la
+ * marche (nom affiché, apostrophe typographique), absent pour la dernière marche, vers la destination.
+ */
+function walksOf(j: Journey, lang: NameLang): { min: number; to?: string }[] {
+  const out: { min: number; to?: string }[] = [];
+  j.legs.forEach((l, i) => {
+    if (l.kind !== 'walk') return;
+    const min = Math.round(walkMinOf(l));
+    if (min < 1) return;
+    const next = j.legs.slice(i + 1).find((x) => x.kind === 'ride');
+    const to = next ? apos(displayName(next.from.name, lang)).trim() : '';
+    out.push(to ? { min, to } : { min });
+  });
+  return out;
+}
+
+/** 1.3.1 : flèche insécable des deux côtés (« 7 min → Flagey ») : jamais seule en bout ni en début de ligne. */
+const TO = `${NB}→${NB}`;
 
 /**
  * Ligne « moyens » d'une carte (PRD-1.2.1 § 2.3 et § 7.2) : comment on voyage (`meansText`), puis les marches dans
  * l'ordre : « bus W + S1, à pied 4 + 5 min » ; plus de 3 marches : « bus 36 + IC + métro 2, 12 min à pied » ; sans
  * marche : « IC + IC ». Trajet à pied : rien, la carte le dit déjà (« 22 min à pied », « À pied, sans transport »),
  * sauf la pluie prévue (1.2.5 : « pluie prévue »).
+ * 1.3.1 (PRD-1.3.1 § 4, téléphone) : la première marche, quand elle mène à un véhicule, nomme l'arrêt ou la gare où
+ * monter, comme les lunettes (« à pied 7 min → Flagey ») ; les autres marches suivent (« bus W + S1, à pied 6 min →
+ * Flagey, puis 1 + 9 min » ; plus de deux autres : leur total, « puis 10 min »). Seule la marche vers la destination
+ * (trajet qui part d'un arrêt) : inchangée (« tram 3, à pied 4 min »). `lang` : langue des noms (réglage).
  */
-export function meansLine(j: Journey): string {
+export function meansLine(j: Journey, lang: NameLang = 'fr'): string {
   // 1.2.5 : comme dans les lunettes, la pluie prévue sur une marche de 5 min ou plus
   const rainy = j.legs.some((l) => l.kind === 'walk' && !!l.rain && walkMinOf(l) >= 5);
   if (!j.legs.some((l) => l.kind === 'ride')) return rainy ? 'pluie prévue' : '';
-  const w = walksOf(j);
-  if (!w.length) return meansText(j);
+  const w = walksOf(j, lang);
+  const means = apos(meansText(j));
+  if (!w.length) return means;
   const rain = rainy ? ', pluie prévue' : '';
-  return `${meansText(j)}, ${w.length > 3 ? `${w.reduce((s, m) => s + m, 0)} min à pied` : `à pied ${w.join(' + ')} min`}${rain}`;
+  const total = (xs: readonly { min: number }[]): number => xs.reduce((s, x) => s + x.min, 0);
+  const [first, ...rest] = w;
+  if (first.to) {
+    const then = rest.length ? `, puis ${rest.length > 2 ? total(rest) : rest.map((x) => x.min).join(' + ')}${NB}min` : '';
+    return `${means}, à${NB}pied ${first.min}${NB}min${TO}${first.to}${then}${rain}`;
+  }
+  return `${means}, ${w.length > 3 ? `${total(w)}${NB}min à${NB}pied` : `à${NB}pied ${w.map((x) => x.min).join(' + ')}${NB}min`}${rain}`;
 }
 
 /** Largeur d'un palier de marche, en minutes (PRD-1.2.1 § 1.1). */
@@ -816,7 +916,7 @@ export type EmptyState =
 export function emptyState(r: PlanResult, to: Endpoint, settings: Settings, opts: { web?: boolean } = {}): EmptyState {
   switch (r.empty) {
     case 'here':
-      return { kind: 'text', text: `Tu es déjà ${atText(to, settings)}.` };
+      return { kind: 'text', text: apos(`Tu es déjà ${atText(to, settings)}.`) };
     case 'noPosition':
       return { kind: 'text', text: opts.web ? 'Position inconnue : autorise-la dans le navigateur, ou choisis une adresse ou un arrêt (onglet Lunettes, rubrique Position).' : 'Position inconnue : autorise la position pour Quai.' };
     case 'noStopFrom':
@@ -824,7 +924,8 @@ export function emptyState(r: PlanResult, to: Endpoint, settings: Settings, opts
       return { kind: 'text', text: noStopText(r.accessMin ?? settings.maxWalkMin * 2) };
     case 'noTrip':
       if (r.station) {
-        const name = displayName(r.station.name, settings.lang);
+        // 1.3.1 (§ 7) : le nom affiché ; la gare elle-même (r.station) ne change pas
+        const name = apos(displayName(r.station.name, settings.lang));
         return { kind: 'station', text: noFullTripText(name), button: searchTowards(name), station: r.station };
       }
       return { kind: 'text', text: T.noTripNow };

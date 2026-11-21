@@ -56,6 +56,13 @@ export interface WalkRoute {
    * Belgique) ; nosnap : aucune voie à 100 m ; nopath : pas de chemin dans les tuiles ; far : marche de plus de 5 km.
    */
   reason?: 'outside' | 'nosnap' | 'nopath' | 'far';
+  /**
+   * 1.3.1 (A6, correctif du 21/11) : rang, dans `coords`, du premier point du chemin sur une voie du graphe, quand le
+   * chemin commence par un raccord droit (du point demandé, ou de la position, à la voie la plus proche : 1 m ou plus).
+   * Absent : le chemin commence sur une voie (ou chemin d'avant ce champ). Le raccord n'est pas une rue : il n'a pas
+   * de sens de marche (« Fais demi-tour » ne se mesure pas contre lui).
+   */
+  joinAt?: number;
   builtAt: number;
 }
 
@@ -103,7 +110,20 @@ export type GuidePhase =
 /** Ce qui suit une descente (ligne « ensuite : … »). */
 export type Then =
   | { kind: 'walk'; min: number; toward: Names; last: boolean }
-  | { kind: 'ride'; vehicle: VehicleRef; depAt: number; rt: boolean; platform?: string; walkMin: number }
+  | {
+      kind: 'ride';
+      vehicle: VehicleRef;
+      depAt: number;
+      rt: boolean;
+      platform?: string;
+      walkMin: number;
+      /** 1.3.1 (PRD-1.3.1 § 4) : arrêt ou gare où monter, après la marche (« ensuite : 7 min à pied → Flagey ») */
+      from?: Names;
+      /** 1.3.1 (B16, U4) : correspondance très juste, marge de 1 min ou moins (« ensuite : tram 3 à ~08:44, très juste ») */
+      tight?: boolean;
+      /** 1.3.1 (B13, U6) : heure prévue d'un train en retard d'au moins 1 min (« IC 07:42 +2 ») ; absente sinon */
+      sched?: number;
+    }
   | { kind: 'none' };
 
 interface MomentBase {
@@ -117,7 +137,7 @@ interface MomentBase {
 
 /**
  * Un moment de l'écran calme (PRD § 3.2) : une seule chose à faire. Le moteur en donne au plus un à la fois, le plus
- * prioritaire : replan > passed > alight > platform > board > turn > leave > nextStop > arrived.
+ * prioritaire : replan > passed > alight > platform > board > turn > leave, walk > offMap > check > nextStop > arrived.
  */
 export type Moment =
   | (MomentBase & {
@@ -132,6 +152,8 @@ export type Moment =
       /** très juste (marge ≤ 1 min) : la ligne « Si tu le rates » s'ajoute */
       tight?: boolean;
       missed?: { arr: number; laterMin: number };
+      /** 1.3.1 (B13, U6) : heure prévue d'un train en retard d'au moins 1 min (« IC 07:42 +2 ») */
+      sched?: number;
     })
   | (MomentBase & {
       kind: 'turn';
@@ -141,6 +163,8 @@ export type Moment =
       /** vers où mène la marche */
       toward: Names;
       final: boolean;
+      /** 1.3.1 (B18, P6) : virage suivant tout proche, annoncé avec celui-ci (« À droite dans 40 m / puis à gauche ») */
+      then?: TurnKind;
     })
   | (MomentBase & {
       kind: 'board';
@@ -153,10 +177,24 @@ export type Moment =
       /** marche dans la gare jusqu'au quai (correspondance), et marge */
       walkMin?: number;
       marginMin?: number;
+      /**
+       * 1.3.1 (B16, U4, A4 ; contrôle du moteur) : correspondance très juste (marge de 1 min ou moins, comme `Then.tight`
+       * de « Descends ») : « 2 min à pied → Gare du Nord, très juste », jamais « marge 1 min » après « très juste »
+       */
+      tight?: boolean;
       alight: Names;
       stopsToAlight: number;
+      /** 1.3.1 (§ 4, § 12 « conflit réglé ») : l'arrêt ou la gare où monter (« 2 min à pied → Gare du Nord, très juste ») */
+      stop?: Names;
+      /** 1.3.1 (B13, U6) : heure prévue d'un train en retard d'au moins 1 min */
+      sched?: number;
+      /**
+       * 1.3.1 (B16, U4) : correspondance très juste, le suivant de la même ligne, même destination, même arrêt, s'il est
+       * connu (GuideInput.nextByLeg) : « Si tu le rates : tram 3 à 08:51 »
+       */
+      ifMissed?: { vehicle: VehicleRef; depAt: number; rt: boolean };
     })
-  | (MomentBase & { kind: 'platform'; vehicle: VehicleRef; depAt: number; platform: string; was?: string })
+  | (MomentBase & { kind: 'platform'; vehicle: VehicleRef; depAt: number; platform: string; was?: string; sched?: number })
   | (MomentBase & { kind: 'nextStop'; stop: Names; at: number; rt: boolean; stopsToAlight: number; alight: Names })
   | (MomentBase & { kind: 'alight'; stop: Names; at: number; rt: boolean; then: Then })
   | (MomentBase & {
@@ -164,15 +202,44 @@ export type Moment =
       reason: 'missed' | 'cancelled' | 'late';
       /** ce qui est perdu (« l'IC de 07:30 ») */
       lost: { vehicle: VehicleRef; depAt: number };
-      /** premier véhicule du nouveau trajet */
-      next?: { vehicle: VehicleRef; depAt: number; platform?: string };
+      /**
+       * premier véhicule du nouveau trajet (1.3.1, B13 : `sched`, heure prévue d'un train en retard ; correctif du
+       * 21/11 : `rt`, son heure vient du temps réel ; absent ou faux : heure prévue, écrite avec « ~ » comme partout)
+       */
+      next?: { vehicle: VehicleRef; depAt: number; platform?: string; sched?: number; rt?: boolean };
       arr?: number;
       laterMin?: number;
       /** aucun autre trajet trouvé */
       none?: boolean;
+      /**
+       * 1.3.1 (A3, I1) : véhicule raté sans temps réel, resté à l'arrêt : on ne sait pas s'il est passé, « Nouveau trajet :
+       * … » sans « est parti »
+       */
+      planned?: boolean;
     })
   | (MomentBase & { kind: 'passed'; passed: Names; getOff: Names; at: number; arr?: number })
   | (MomentBase & { kind: 'arrived'; title: string; at: number; diffMin: number })
+  /**
+   * 1.3.1 (B17, P7) : après une descente, la marche suivante (« 3 min à pied jusqu'à l'arrêt Gare Centrale » puis « bus 71
+   * à 08:34 » ; dernière marche « 13 min à pied jusqu'au bureau » puis « arrivée 09:01 ») ; finie après 40 m, au premier
+   * virage ou à « monter ».
+   */
+  | (MomentBase & {
+      kind: 'walk';
+      walkMin: number;
+      /** arrêt, gare ou destination rejointe à pied */
+      toward: Names;
+      /** dernière marche, vers la destination (`arr` : l'arrivée) */
+      final: boolean;
+      vehicle?: VehicleRef;
+      depAt?: number;
+      rt?: boolean;
+      sched?: number;
+      platform?: string;
+      arr?: number;
+      /** 1.3.1 (PRD-1.3.1 § 14, R1) : rue de la sortie du métro vers la suite du chemin (« Sortie : Boulevard Anspach ») */
+      exit?: string;
+    })
   /** 1.3.0 (PRD-1.3.0 § 4) : marche sans chemin à pied (hors de Belgique) : la direction et le temps, sans virage. */
   | (MomentBase & { kind: 'offMap'; walkMin: number; distM?: number; bearingDeg?: number; toward?: Names })
   /** 1.3.0 (PRD-1.3.0 § 6.3) : vérification au départ (position, batterie des lunettes). */
@@ -202,15 +269,38 @@ export interface WhereAmI {
     offMap?: boolean;
     /** 1.3.0 : distance à vol d'oiseau jusqu'à la cible (m), pour une marche sans chemin */
     crowM?: number;
+    /** 1.3.1 (B13, U6) : heure prévue du train visé, en retard d'au moins 1 min */
+    sched?: number;
+    /**
+     * 1.3.1 (vrai chemin partout) : avant de partir, l'heure de partir du trajet quand le cœur l'a avancée d'après le
+     * vrai chemin de la première marche (core/firstwalk.ts) : « Ensuite : partir à 07:12 » ; c'est Journey.leaveAt,
+     * répétée ici ; absente : pas d'avance
+     */
+    leaveAt?: number;
   };
-  wait?: { stop: Names; vehicle: VehicleRef; head: Names; depAt: number; rt: boolean; platform?: string; platformChanged?: boolean };
+  wait?: {
+    stop: Names;
+    vehicle: VehicleRef;
+    head: Names;
+    depAt: number;
+    rt: boolean;
+    platform?: string;
+    platformChanged?: boolean;
+    /** 1.3.1 (B13, U6) : heure prévue d'un train en retard d'au moins 1 min */
+    sched?: number;
+    /**
+     * 1.3.1 (A3, I1) : sans temps réel, l'heure prévue passée, véhicule gardé : « Si tu le rates : arrivée 09:57, 59 min
+     * plus tard » (GuideInput.missed, premier véhicule du trajet seulement)
+     */
+    missed?: { arr: number; laterMin: number };
+  };
   ride?: { vehicle: VehicleRef; head?: Names; total: number; next: number; nextStop: Names; nextAt: number; alight: Names; alightAt: number; stopsToAlight: number; rt: boolean };
 }
 
 /** Mémoire du guidage, persistante avec le trajet suivi (clé quai.trip). */
 export interface GuideMemory {
   v: 1;
-  /** moments effacés d'un toucher ou terminés : ils ne reviennent pas (sauf contenu changé : nouvel id) */
+  /** moments masqués d'un toucher ou terminés : ils ne reviennent pas (sauf contenu changé : nouvel id) */
   dismissed: string[];
   /** id → première apparition (epoch ms) */
   shown: Record<string, number>;
@@ -256,4 +346,9 @@ export interface GuideStatus {
   guided: boolean;
   /** 1.3.0 (PRD-1.3.0 § 6.3) : problèmes de la vérification en cours (« Lunettes : 12 % de batterie »), deux au plus */
   check?: string[];
+  /**
+   * 1.3.1 (L5) : la ligne dit ce qui vient, pas ce qui se passe : « Ensuite : partir à 07:05 » (avant le départ) au lieu
+   * de « Maintenant : … » ; absent : « Maintenant : … »
+   */
+  then?: boolean;
 }

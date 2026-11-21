@@ -12,6 +12,7 @@
  */
 import type { LinePick, Mode, NameLang, Settings, StationPick } from '../../core/api';
 import { lineKey } from '../../core/linepicks';
+import { apos } from '../../core/typo';
 import { displayName, kindLabel, OP_NAME } from '../../core/util';
 import { LIMITS, newId } from '../../settings';
 import { header, type PhoneCtx } from '../app';
@@ -124,8 +125,8 @@ export function resetKnownLines(): void {
   completing.clear();
 }
 
-/** Titre d'une gare : son nom dans la langue des noms. */
-export const stationTitle = (p: StationPick, lang: NameLang): string => displayName(p.name, lang);
+/** Titre d'une gare : son nom dans la langue des noms (1.3.1, § 7 : apostrophe typographique, à l'affichage seulement). */
+export const stationTitle = (p: StationPick, lang: NameLang): string => apos(displayName(p.name, lang));
 
 /**
  * Titre complété quand les lignes de l'arrêt sont connues : mode d'une ligne migrée sans mode (« Tram 3 · Gare du
@@ -144,7 +145,7 @@ function completeLine(ctx: Pick<PhoneCtx, 'core' | 'settings'>, p: LinePick, app
 }
 
 /** 1.2.4 : nom d'un élément de « Bus, tram, métro » : « Bus W · Merbraine » ; un arrêt (toutes les lignes) : son nom seul. */
-export const linePickName = (p: LinePick, lang: NameLang): string => (p.line ? linePickTitle(p, lang) : displayName(p.name, lang));
+export const linePickName = (p: LinePick, lang: NameLang): string => (p.line ? linePickTitle(p, lang) : apos(displayName(p.name, lang)));
 
 /** 1.2.6 : icône d'une gare, teintée en bleu (le train), distincte des bus, trams et métros. */
 export function trainIcon(): HTMLSpanElement {
@@ -162,7 +163,7 @@ function lineIcon(p: LinePick): HTMLSpanElement {
 
 /** 1.2.6 : sous une ligne suivie, son réseau et ses terminus (« STIB · Churchill ↔ Esplanade »), sinon « les deux sens ». */
 export function followSub(f: LineFollow, lang: NameLang): string {
-  const ends = f.ends?.length ? f.ends.map((e) => displayName(e, lang)).join(' ↔ ') : T.bothWays;
+  const ends = f.ends?.length ? f.ends.map((e) => apos(displayName(e, lang))).join(' ↔ ') : T.bothWays;
   return `${OP_NAME[f.op]} · ${ends}`;
 }
 
@@ -269,8 +270,8 @@ const FOLLOWS: SectionSpec<LineFollow> = {
   removeLabel: L.removeFollow,
   count: (s) => (s.follows ?? []).length,
   // une ligne ne s'ouvre d'office qu'avec son arrêt repère (les départs de cet arrêt)
-  nearSub: (f, lang) => (f.via ? nearViaSub(displayName(f.via.name, lang)) : null),
-  autoNear: (f, lang) => (f.via ? autoNearVia(displayName(f.via.name, lang)) : null),
+  nearSub: (f, lang) => (f.via ? nearViaSub(apos(displayName(f.via.name, lang))) : null),
+  autoNear: (f, lang) => (f.via ? autoNearVia(apos(displayName(f.via.name, lang))) : null),
 };
 
 /** Ce qui se voit d'une liste (ordre, noms, terminus) : un changement venu d'ailleurs (lunettes de Quai Web) la redessine. */

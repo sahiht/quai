@@ -10,6 +10,11 @@
  * 1.3.0 (PRD-1.3.0 § 4, § 11.3) : la raison d'un chemin droit est celle du routeur (outside, nosnap, nopath) ; tout
  * chemin droit en a une, et outside exactement quand la tuile d'un bout manque à la publication.
  *
+ * 1.3.1 (décision du 20/11 à 21:59, « l'heure de partir d'après le vrai chemin ») : une mesure de plus, qui ne bloque
+ * rien : pour chaque vrai chemin rejoué, ce que la règle ferait s'il était la première marche d'un trajet (estimation
+ * du calcul des trajets contre vrai chemin, avance plafonnée à 5 min). Trois lignes du journal commencent par
+ * « Première marche » : part des marches où l'heure de partir avancerait, répartition, pire cas (walk-helpers.ts).
+ *
  * Lancé seulement avec QUAI_SCAN_DATA (dossier des données de la nuit, ex. ../site/data), par le workflow « Données
  * de nuit » ; sans lui, ignoré. Ne bloque jamais la publication (étape continue-on-error). QUAI_SCAN_WALKS : nombre
  * de marches (1 000 par défaut).
@@ -23,7 +28,9 @@ import { isWalkIndex, leafKeyOf, leafKeysForBox, WALK_UNIT, type WalkIndex } fro
 import { mergeTiles, prepareTile, type TileGraph } from '../../src/core/walk/graph';
 import { snapPoint } from '../../src/core/walk/route';
 import { boxAround, MARGIN_M, WalkRouter } from '../../src/core/walk/router';
-import { diskSource, metres, prng } from './walk-helpers';
+import { FIRST_WALK, realWalkMin } from '../../src/core/firstwalk';
+import { walkMinutes } from '../../src/core/util';
+import { diskSource, firstWalkReport, metres, prng, type WalkSample } from './walk-helpers';
 
 const DIR = process.env.QUAI_SCAN_DATA;
 const WALKS = Number(process.env.QUAI_SCAN_WALKS ?? 1000);
@@ -116,6 +123,8 @@ describe.skipIf(!DIR)('1.2.10 : balayage des chemins à pied (QUAI_SCAN_DATA)', 
     /** 1.3.0 : chemins droits dont la raison ne correspond pas aux tuiles publiées (outside sans tuile absente, ou l'inverse) */
     const badReason: string[] = [];
     const ratios: number[] = [];
+    /** 1.3.1 : vrais chemins rejoués, pour la mesure de la première marche (jamais une exigence) */
+    const samples: WalkSample[] = [];
     for (const [a, b] of pairs) {
       const interior = !edge(a) && !edge(b);
       if (interior) inner++;
@@ -155,6 +164,7 @@ describe.skipIf(!DIR)('1.2.10 : balayage des chemins à pied (QUAI_SCAN_DATA)', 
       osm++;
       if (interior) innerOsm++;
       const crow = metres(a, b);
+      samples.push({ from: a.name, to: b.name, crowM: crow, lengthM: r.lengthM });
       ratios.push(r.lengthM / crow);
       if (r.lengthM > 2.5 * crow + 200) detours++;
       turns += r.maneuvers.length;
@@ -180,6 +190,12 @@ describe.skipIf(!DIR)('1.2.10 : balayage des chemins à pied (QUAI_SCAN_DATA)', 
     );
     for (const s of [...straight.filter((x) => !x.why.includes('bord')), ...straight.filter((x) => x.why.includes('bord'))].slice(0, 16)) log.push(`  chemin droit (${s.why}) : ${s.a.name} (${s.a.lat.toFixed(5)}, ${s.a.lon.toFixed(5)}) → ${s.b.name} (${s.b.lat.toFixed(5)}, ${s.b.lon.toFixed(5)})`);
     if (badReason.length) log.push(`  raison qui ne correspond pas aux tuiles publiées : ${badReason.slice(0, 8).join(' ; ')}`);
+    // 1.3.1 : la mesure de la première marche, dans un essai à part (elle ne peut ni bloquer ni fausser le bilan)
+    try {
+      log.push(...firstWalkReport(samples, { est: walkMinutes, real: realWalkMin, capMin: FIRST_WALK.capMin }));
+    } catch (e) {
+      log.push(`Première marche : mesure impossible (${e instanceof Error ? e.message : String(e)})`);
+    }
     console.log(log.join('\n'));
     expect(n).toBeGreaterThanOrEqual(Math.min(WALKS, 100));
     expect(inner).toBeGreaterThanOrEqual(Math.ceil(0.9 * n));

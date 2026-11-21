@@ -51,9 +51,10 @@ const partialW = (now: number): LineBoard =>
 
 describe('CA-126.2 : « Arrêts de bus, tram, métro »', () => {
   it('un arrêt « toutes les lignes » : son nom, ses 2 prochains départs, un par ligne ; toucher : le tableau', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', lines: [LINES.gdnAll] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1', lines: [LINES.gdnAll] }), core: (now) => stubCore(now) });
     const home = await h.until((x) => x.screen === 'home' && x.lines.some((l) => l.startsWith('Arrêts de bus, tram, métro   1')));
-    expect(home.lines.slice(-2)).toEqual(['Arrêts de bus, tram, métro   1 arrêt', 'Lignes de bus, tram, métro   à choisir']);
+    // 1.3.1 (PRD-1.3.1 § 8) : « Lignes… » avant « Arrêts… », la dernière rubrique
+    expect(home.lines.slice(-2)).toEqual(['Lignes de bus, tram, métro   à choisir', 'Arrêts de bus, tram, métro   1 arrêt']);
     await h.c.replaceRoute({ screen: 'lines' });
     const s = await h.until(linesReady);
     // 1.2.5 (PRD-1.2.5 § 4) : un départ par ligne, « Tram 3 vers Churchill », l'attente à droite ; 1.2.6 : l'écran
@@ -73,7 +74,7 @@ describe('CA-126.2 : « Arrêts de bus, tram, métro »', () => {
   it('revue : arrêt introuvable : « introuvable : modifie-le sur le téléphone » ; Quai Web : #/arrets', async () => {
     // identifiant inconnu, et aucune zone de ce nom autour de l'endroit du choix (faux cœur : missing, sans exception)
     const lostAll = { ...LINES.gdnAll, id: 'ln-lost-all', areaId: 'stib:0002', name: N('Arrêt supprimé') };
-    const settings = () => settingsWith([], { seenVersion: '1.3.0', lines: [lostAll] });
+    const settings = () => settingsWith([], { seenVersion: '1.3.1', lines: [lostAll] });
     const h = await setup({ now: NOW, settings: settings(), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'lines' });
@@ -89,7 +90,7 @@ describe('CA-126.2 : « Arrêts de bus, tram, métro »', () => {
     await w.until((x) => x.screen === 'home');
     await w.c.replaceRoute({ screen: 'lines' });
     const ws = await w.until(linesReady);
-    expect(ws.lines[1]).toBe('introuvable : modifie-le dans Réglages');
+    expect(ws.lines[1]).toBe('introuvable : modifie-le dans l’onglet Réglages');
     await w.gesture('tap');
     expect(opened).toEqual(['#/arrets']);
     w.c.stop();
@@ -97,7 +98,7 @@ describe('CA-126.2 : « Arrêts de bus, tram, métro »', () => {
 
   it('revue : zone retrouvée sous un autre identifiant (même nom à 150 m) : l’arrêt choisi suit', async () => {
     const renamed = { ...LINES.gdnAll, areaId: 'stib:0003' };
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', lines: [renamed] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1', lines: [renamed] }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'lines' });
     const s = await h.until(linesReady);
@@ -118,14 +119,15 @@ describe('CA-126.2 : « Arrêts de bus, tram, métro »', () => {
 
 describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un sens', () => {
   it('un sens par rangée, sans attente ; toucher : toute la ligne, le curseur sur l’arrêt le plus proche ; « ↔ Autre sens »', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', follows: [FW, F3] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1', follows: [FW, F3] }), core: (now) => stubCore(now) });
     const home = await h.until((x) => x.screen === 'home' && x.lines.some((l) => l.startsWith('Lignes de bus, tram, métro   2')));
-    expect(home.lines.at(-1)).toBe('Lignes de bus, tram, métro   2 lignes');
+    // 1.3.1 (PRD-1.3.1 § 8) : « Lignes… » avant « Arrêts… »
+    expect(home.lines.slice(-2)).toEqual(['Lignes de bus, tram, métro   2 lignes', 'Arrêts de bus, tram, métro   à choisir']);
     await h.c.replaceRoute({ screen: 'follows' });
     const f = await h.until(followsReady);
     expect(f.title).toBe('Lignes de bus, tram, métro');
     // les sens rangés par terminus ; la liste ne demande aucun passage
-    expect(f.lines).toEqual(['Bus W vers Braine-l’Alleud Gare', 'Bus W vers Bruxelles Midi', 'Tram 3 vers Churchill', 'Tram 3 vers Esplanade', '△▽ choisir   toucher : la ligne   double : retour']);
+    expect(f.lines).toEqual(['Bus W vers Braine-l’Alleud Gare', 'Bus W vers Bruxelles Midi', 'Tram 3 vers Churchill', 'Tram 3 vers Esplanade', '△▽ choisir   toucher : parcours   double : retour']);
     // variantes et terminus retrouvés à la première ouverture, puis gardés
     await h.until(() => (h.settings.get().follows ?? []).every((x) => x.routes.length > 0));
     expect(h.settings.get().follows?.map((x) => [x.id, x.routes.length, x.ends?.length])).toEqual([
@@ -153,7 +155,7 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
   });
 
   it('toucher un arrêt : les passages de la ligne à cet arrêt (deux sens), puis tous les départs de l’arrêt', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', follows: [F3] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1', follows: [F3] }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'follows' });
     await h.until(followsReady);
@@ -173,7 +175,7 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
 
   it('ligne introuvable dans les données du jour : « introuvable : modifie-la sur le téléphone » ; Quai Web : #/lignes', async () => {
     const lost: LineFollow = { id: 'f-lost', op: 'tec', mode: 'bus', line: 'ZZ9', routes: [] };
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', follows: [lost, F3] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1', follows: [lost, F3] }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.replaceRoute({ screen: 'follows' });
     const f = await h.until(followsReady);
@@ -185,11 +187,11 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
     expect(h.settings.get().follows?.map((x) => x.id)).toEqual(['f-lost', 'f-3']);
     h.c.stop();
     const opened: string[] = [];
-    const w = await setup({ now: NOW, web: true, opened, settings: settingsWith([], { seenVersion: '1.3.0', follows: [lost] }), core: (now) => stubCore(now) });
+    const w = await setup({ now: NOW, web: true, opened, settings: settingsWith([], { seenVersion: '1.3.1', follows: [lost] }), core: (now) => stubCore(now) });
     await w.until((x) => x.screen === 'home');
     await w.c.replaceRoute({ screen: 'follows' });
     const ws = await w.until(followsReady);
-    expect(ws.lines.slice(0, 2)).toEqual(['Bus ZZ9', 'introuvable : modifie-la dans Réglages']);
+    expect(ws.lines.slice(0, 2)).toEqual(['Bus ZZ9', 'introuvable : modifie-la dans l’onglet Réglages']);
     await w.gesture('tap');
     expect(opened).toEqual(['#/lignes']);
     w.c.stop();
@@ -355,7 +357,7 @@ describe('CA-126.3 : « Lignes de bus, tram, métro », toute la ligne dans un s
 
 describe('§ 3 : le détail d’une ligne à un arrêt (ouvert depuis toute la ligne), textes et largeurs', () => {
   it('passage partiel : « jusqu’à Waterloo Eglise » ; 4 passages par sens ; « Tous les départs de l’arrêt »', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', follows: [FW] }), core: (now) => stubCore(now, { lineBoard: (id, _l, n) => (id === LINES.w.areaId ? partialW(n) : undefined) }) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1', follows: [FW] }), core: (now) => stubCore(now, { lineBoard: (id, _l, n) => (id === LINES.w.areaId ? partialW(n) : undefined) }) });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'line', areaId: LINES.w.areaId, op: 'tec', line: 'W', name: LINES.w.name, mode: 'bus' });
     const d = await h.until((x) => x.screen === 'line' && x.lines.length > 3);
@@ -438,7 +440,7 @@ describe('§ 3 : le détail d’une ligne à un arrêt (ouvert depuis toute la l
 
 describe('REVUE-USAGE n° 3 et CA-126.4 : « garder une ligne » depuis les départs d’un arrêt : la ligne entière', () => {
   it('★ ouvre « Gare du Nord : garder une ligne » ; toucher garde la ligne (ses deux sens), la retire, annule dans les 5 s', async () => {
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', lines: [LINES.t3] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1', lines: [LINES.t3] }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     // la ligne gardée à cet arrêt (1.2.5) est suivie, l'arrêt en repère
     expect(h.settings.get().follows).toEqual([{ id: 'f-ln-t3', op: 'stib', mode: 'tram', line: '3', routes: [], via: via(LINES.t3) }]);
@@ -458,7 +460,7 @@ describe('REVUE-USAGE n° 3 et CA-126.4 : « garder une ligne » depuis les dép
     // garder le tram 4 : la ligne entière, dans « Lignes de bus, tram, métro », cet arrêt en repère
     await h.gesture('down', 'tap');
     expect(h.last().lines.slice(0, 2)).toEqual(['tram 3   ★', 'tram 4   ★']);
-    expect(h.last().lines.at(-1)).toBe('★ Ajoutée aux lignes');
+    expect(h.last().lines.at(-1)).toBe('★ Ajoutée à tes lignes');
     expect(h.settings.get().follows?.at(-1)).toMatchObject({ op: 'stib', line: '4', mode: 'tram', via: { areaId: 'stib:6357F' } });
     expect(h.settings.get().lines).toEqual([]);
     // retirer le tram 3, puis l'annuler dans les 5 s : à l'identique, à sa place
@@ -485,7 +487,7 @@ describe('REVUE-USAGE n° 3 et CA-126.4 : « garder une ligne » depuis les dép
 
   it('la limite des lignes (32) : « Déjà 32 lignes : retires-en une sur le téléphone »', async () => {
     const many: LineFollow[] = Array.from({ length: LIMITS.lines }, (_, i) => ({ id: `f-${i}`, op: 'tec', line: String(100 + i), routes: [] }));
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', follows: many }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1', follows: many }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.show({ screen: 'keepLine', areaId: 'stib:6357F', op: 'stib', name: N('Gare du Nord'), lat: 50.86, lon: 4.36 });
     await h.until((x) => x.screen === 'keepLine' && x.lines[0]?.startsWith('tram'));
@@ -503,18 +505,18 @@ describe('contrôle qualité 1.2.6 : deux lignes du même numéro dans deux rég
     const keep = { screen: 'keepLine' as const, areaId: 'stib:6357F', op: 'stib' as const, name: N('Gare du Nord'), ...GDN };
     // le tram 3 suivi est celui d'ailleurs (autres variantes) : pas d'★ ici ; le toucher ajoute celui de cet arrêt
     const elsewhere: LineFollow = { id: 'f-3b', op: 'stib', mode: 'tram', line: '3', routes: ['stib:ailleurs'] };
-    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', follows: [elsewhere] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1', follows: [elsewhere] }), core: (now) => stubCore(now) });
     await h.until((x) => x.screen === 'home');
     await h.c.show(keep);
     const k = await h.until((x) => x.screen === 'keepLine' && x.lines[0]?.startsWith('tram 3'));
     expect(k.lines[0]).toBe('tram 3');
     await h.gesture('tap');
-    expect(h.last().lines.at(-1)).toBe('★ Ajoutée aux lignes');
+    expect(h.last().lines.at(-1)).toBe('★ Ajoutée à tes lignes');
     expect(h.settings.get().follows?.map((f) => `${f.line} ${f.id === elsewhere.id ? 'ailleurs' : 'ici'}`)).toEqual(['3 ailleurs', '3 ici']);
     h.c.stop();
     // le tram 3 suivi est bien celui-ci (une variante en commun) : ★, et le toucher le retire
     const here: LineFollow = { ...elsewhere, routes: t3.routes };
-    const g = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.0', follows: [here] }), core: (now) => stubCore(now) });
+    const g = await setup({ now: NOW, settings: settingsWith([], { seenVersion: '1.3.1', follows: [here] }), core: (now) => stubCore(now) });
     await g.until((x) => x.screen === 'home');
     await g.c.show(keep);
     const k2 = await g.until((x) => x.screen === 'keepLine' && x.lines[0]?.startsWith('tram 3'));
@@ -529,7 +531,7 @@ describe('contrôle qualité 1.2.6 : deux lignes du même numéro dans deux rég
 describe('REVUE-USAGE n° 4 et CA-126.4 : ouverture d’office, alerte travaux', () => {
   it('à moins de 300 m de l’arrêt repère d’une ligne `near` : ses départs s’ouvrent d’office ; double toucher : l’accueil', async () => {
     const pos = { lat: LINES.w.lat, lon: LINES.w.lon + 0.001 };
-    const h = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0', lines: [LINES.t3, { ...LINES.w, near: true }] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1', lines: [LINES.t3, { ...LINES.w, near: true }] }), core: (now) => stubCore(now) });
     const b = await h.until((x) => x.screen === 'board' && x.lines.length > 2);
     expect(b.title).toBe('Braine-l’Alleud Merbraine, bus (TEC) ★');
     expect(b.lines[0]).toBe('★ garder une ligne');
@@ -537,14 +539,14 @@ describe('REVUE-USAGE n° 4 et CA-126.4 : ouverture d’office, alerte travaux',
     expect((await h.until((x) => x.screen === 'home')).screen).toBe('home');
     h.c.stop();
     // plus loin : l'accueil
-    const far = await setup({ now: NOW, pos: { lat: LINES.w.lat + 0.01, lon: LINES.w.lon }, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0', lines: [{ ...LINES.w, near: true }] }), core: (now) => stubCore(now) });
+    const far = await setup({ now: NOW, pos: { lat: LINES.w.lat + 0.01, lon: LINES.w.lon }, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1', lines: [{ ...LINES.w, near: true }] }), core: (now) => stubCore(now) });
     expect((await far.until((x) => x.screen === 'home')).screen).toBe('home');
     far.c.stop();
   });
 
   it('arrêt favori de la 1.2.1 migré (tram 3 et tram 4 à Gare du Nord, « près ») : les départs de Gare du Nord', async () => {
     const pos = { lat: LINES.t3.lat + 0.0005, lon: LINES.t3.lon };
-    const h = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.0', lines: [{ ...LINES.t3, near: true }, { ...LINES.t4, near: true }] }), core: (now) => stubCore(now) });
+    const h = await setup({ now: NOW, pos, settings: settingsWith([PLACES.bureau], { seenVersion: '1.3.1', lines: [{ ...LINES.t3, near: true }, { ...LINES.t4, near: true }] }), core: (now) => stubCore(now) });
     const b = await h.until((x) => x.screen === 'board' && x.lines.length > 2);
     expect(b.title).toBe('Gare du Nord, tram (STIB) ★');
     expect(b.lines.slice(1, 3)).toEqual(['T3   Churchill   1 min', 'T4   Stalle   4 min']);
@@ -553,7 +555,7 @@ describe('REVUE-USAGE n° 4 et CA-126.4 : ouverture d’office, alerte travaux',
 
   it('« Travaux et déviations » : sur le détail d’une ligne et sur les départs de son arrêt', async () => {
     const works = (core: Core): Core => Object.assign(Object.create(core) as Core, { works: async () => ['Déviation : arrêt Merbraine déplacé'] });
-    const settings = settingsWith([], { seenVersion: '1.3.0', follows: [FW] });
+    const settings = settingsWith([], { seenVersion: '1.3.1', follows: [FW] });
     settings.alerts.works = true;
     const h = await setup({ now: NOW, settings, core: (now) => works(stubCore(now)) });
     await h.until((x) => x.screen === 'home');

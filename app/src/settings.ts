@@ -13,6 +13,9 @@
  * 1.3.0 (docs/v1.3.0/PRD-1.3.0.md § 6.1 et § 6.2) : `display.alert` (résultat du test de l'écran des lunettes) et
  * `display.headUp` (mouvement « lever la tête » appris), absents par défaut ; une valeur invalide est retirée. Même
  * format v4 : les réglages de la 1.2.10 se lisent sans rien perdre.
+ * 1.3.1 (docs/v1.3.1/PRD-1.3.1.md § 14, R4 et R5) : `avoidSteps` (« Éviter les escaliers ») et `display.sun` (« Plein
+ * soleil »), éteints par défaut : seul `true` est enregistré, toute autre valeur est retirée. Même format v4 : les
+ * réglages de la 1.3.0 se lisent sans rien perdre.
  */
 import type { Endpoint, Favorite, FavoritePlace, FavoriteStop, FavoriteTrip, KV, LineFilter, LinePick, NameLang, Place, Propose, RecentAddress, Settings, StationPick } from './core/api';
 import { DEFAULT_SETTINGS } from './core/api';
@@ -499,6 +502,8 @@ export function validateSettings(input: unknown): Settings {
     onboarded: bool(x.onboarded, d.onboarded),
     lang,
     maxWalkMin: clampInt(x.maxWalkMin, LIMITS.maxWalkMin, d.maxWalkMin),
+    // 1.3.1 (R4) : « Éviter les escaliers », éteint par défaut : seul `true` est gardé (absent = éteint)
+    ...(x.avoidSteps === true ? { avoidSteps: true } : {}),
     favorites,
     stations,
     lines,
@@ -516,6 +521,8 @@ export function validateSettings(input: unknown): Settings {
       ...guide,
       // 1.3.0 : résultat du test de l'écran et mouvement appris, gardés seulement s'ils sont valides
       ...displayTestFields(disp),
+      // 1.3.1 (R5) : « Plein soleil », éteint par défaut : seul `true` est gardé (absent = éteint)
+      ...(disp.sun === true ? { sun: true } : {}),
     },
     alerts: {
       platform: bool(al.platform, d.alerts.platform),

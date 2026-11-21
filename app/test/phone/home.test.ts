@@ -12,11 +12,11 @@ import type { FavoriteAnswer, LinePick, Settings, StationPick } from '../../src/
 import { favoriteTitle } from '../../src/core/favorites';
 import type { LineFollow } from '../../src/core/linerun';
 import { catchable } from '../../src/glasses/format';
-import { HOME_FAVORITES, homeView } from '../../src/glasses/views';
+import { HOME_FAVORITES, homeFavoriteName, homeView } from '../../src/glasses/views';
 import { NEWS_SINCE, newsState } from '../../src/phone/app';
 import { forgetLineColors } from '../../src/phone/badges';
 import { ANSWER_MAX_AGE_MS, homeScreen, orderedFavorites, resetAnswers, reusable, rubrics } from '../../src/phone/screens/home';
-import { NEWS_122, NEWS_123, NEWS_124, NEWS_125, NEWS_126, NEWS_128, NEWS_129, NEWS_1210, NEWS_130, shortAnswer } from '../../src/phone/text';
+import { NEWS_122, NEWS_123, NEWS_124, NEWS_125, NEWS_126, NEWS_128, NEWS_129, NEWS_1210, NEWS_130, NEWS_131, shortAnswer } from '../../src/phone/text';
 import { at, button, defaults, harness, mount, plain, preset11, SCENARIO, textOf, until } from './helpers';
 
 beforeEach(() => {
@@ -83,7 +83,8 @@ describe('en-tête et « Où vas-tu ? » (M4.1, T1, PRD-1.2.9 § 2.1)', () => {
 });
 
 describe('« Dans tes lunettes » : les rubriques des lunettes, mêmes mots, même ordre (PRD-1.2.9 § 2.1)', () => {
-  it('titre, « Mêmes rubriques, même ordre. », lien « Aperçu » vers Affichage (retour à l’accueil) ; « Favoris », « Autour de moi » puis les trois rubriques', () => {
+  // 1.3.1 (PRD-1.3.1 § 8) : l'ordre des lunettes : « Autour de moi », « Favoris », « Gares », « Lignes », « Arrêts »
+  it('titre, « Mêmes rubriques, même ordre. », lien « Aperçu » vers Affichage (retour à l’accueil) ; « Autour de moi », « Favoris » puis les trois rubriques', () => {
     const hz = harness({ settings: defaults({ favorites: preset11().favorites, stations: [NAMUR, CENTRAL], lines: [GDN], follows: [T3, T4, W] }) });
     const el = mount(homeScreen(hz.ctx));
     const sec = el.querySelector<HTMLElement>('.mirror-sec')!;
@@ -93,11 +94,11 @@ describe('« Dans tes lunettes » : les rubriques des lunettes, mêmes mots, mê
     const preview = sec.querySelector<HTMLAnchorElement>('.sec-link')!;
     expect([textOf(preview), preview.getAttribute('href'), preview.getAttribute('aria-label')]).toEqual(['Aperçu', '#/affichage?retour=accueil', 'Aperçu de l’accueil des lunettes']);
     expect(navRows(el)).toEqual([
-      ['Favoris', '', '3', '#/favoris'],
       ['Autour de moi', 'à moins de 500 m', '', '#/affichage?retour=accueil'],
+      ['Favoris', '', '3', '#/favoris'],
       ['Gares de train', 'Namur, Bruxelles-Central', '2 gares', '#/gares'],
-      ['Arrêts de bus, tram, métro', 'Gare du Nord', '1 arrêt', '#/arrets'],
       ['Lignes de bus, tram, métro', '3 4 W', '3 lignes', '#/lignes'],
+      ['Arrêts de bus, tram, métro', 'Gare du Nord', '1 arrêt', '#/arrets'],
     ]);
     // le mot clé au plus clair, la précision pâle (comme « Gares de train » dans les lunettes)
     const gares = navRow(el, 'Gares de train');
@@ -110,31 +111,35 @@ describe('« Dans tes lunettes » : les rubriques des lunettes, mêmes mots, mê
     expect(() => button(el, 'Retirer')).toThrow();
   });
 
-  it('les mêmes mots et le même contenu à droite que l’accueil des lunettes (homeView)', () => {
+  it('les mêmes rubriques dans le même ordre, les mêmes mots et le même contenu à droite que l’accueil des lunettes (homeView)', () => {
+    // 1.3.1 (PRD-1.3.1 § 8) : test croisé, après la fusion de l'accueil des lunettes et du téléphone : l'ordre des
+    // rubriques est comparé tel quel (Gares de train ; Lignes ; Arrêts), avec les mêmes mots et le même contenu à droite
     for (const s of [defaults(), defaults({ stations: [NAMUR, CENTRAL], lines: [GDN], follows: [T3] }), defaults({ stations: [NAMUR], follows: [T3, T4, W] })]) {
       const glasses = homeView({ favorites: [], nearbyCount: 3 }, { now: SCENARIO.s3.now, settings: s })
         .items.filter((i) => i.segs)
         .map((i) => [i.segs!.map((g) => g.t).join(' '), plain(i.bRight)]);
       const el = mount(homeScreen(harness({ settings: s }).ctx));
-      expect(navRows(el).slice(2).map(([t, , right]) => [t, right])).toEqual(glasses);
+      expect(navRows(el).slice(2).map(([t, , right]) => [t!, right!])).toEqual(glasses);
+      expect(glasses.map(([t]) => t)).toEqual(['Gares de train', 'Lignes de bus, tram, métro', 'Arrêts de bus, tram, métro']);
       // et le même ordre que rubrics() (sans DOM)
-      expect(rubrics(s).map((r) => `${r.key} ${r.qual}`)).toEqual(glasses.map(([t]) => t));
+      expect(rubrics(s).map((r) => `${r.key} ${r.qual}`)).toEqual(navRows(el).slice(2).map(([t]) => t));
     }
   });
 
   it('rubriques vides : « à choisir » à droite, sans sous-titre, et le toucher ouvre l’ajout (#/…/ajouter)', () => {
     const el = mount(homeScreen(harness({ settings: defaults() }).ctx));
+    // 1.3.1 (PRD-1.3.1 § 8) : « Lignes » avant « Arrêts »
     expect(navRows(el).slice(2)).toEqual([
       ['Gares de train', '', 'à choisir', '#/gares/ajouter'],
-      ['Arrêts de bus, tram, métro', '', 'à choisir', '#/arrets/ajouter'],
       ['Lignes de bus, tram, métro', '', 'à choisir', '#/lignes/ajouter'],
+      ['Arrêts de bus, tram, métro', '', 'à choisir', '#/arrets/ajouter'],
     ]);
     // une seule rubrique vide : seulement elle ouvre l'ajout
     const some = mount(homeScreen(harness({ settings: defaults({ stations: [NAMUR], follows: [T3] }) }).ctx));
     expect(navRows(some).slice(2).map(([t, , right, href]) => [t, right, href])).toEqual([
       ['Gares de train', '1 gare', '#/gares'],
-      ['Arrêts de bus, tram, métro', 'à choisir', '#/arrets/ajouter'],
       ['Lignes de bus, tram, métro', '1 ligne', '#/lignes'],
+      ['Arrêts de bus, tram, métro', 'à choisir', '#/arrets/ajouter'],
     ]);
   });
 
@@ -169,7 +174,8 @@ describe('« Dans tes lunettes » : les rubriques des lunettes, mêmes mots, mê
 });
 
 describe('carte « Favoris » (S8, PRD-1.2.9 § 2.1)', () => {
-  it('S1 : « Favoris   3 » vers #/favoris, puis « Vers le bureau   partir à 07:33 » en tête (CA-S8.1)', async () => {
+  // 1.3.1 (PRD-1.3.1 § 12, L7) : le nom de l'accueil des lunettes, « Bureau » et pas « Vers le bureau »
+  it('S1 : « Favoris   3 » vers #/favoris, puis « Bureau   partir à 07:33 » en tête (CA-S8.1)', async () => {
     const hz = harness({ settings: preset11(), now: SCENARIO.s1.now, here: SCENARIO.s1, flags: { noRt: true } });
     const el = mount(homeScreen(hz.ctx));
     const favs = navRow(el, 'Favoris');
@@ -178,9 +184,9 @@ describe('carte « Favoris » (S8, PRD-1.2.9 § 2.1)', () => {
     // les favoris dans la même carte, en retrait sous « Favoris »
     expect(favRows(el).every((r) => r.closest('.fav-card') === favs.closest('.fav-card'))).toBe(true);
     await until(() => favRows(el).every((r) => textOf(r.querySelector('.answer')) !== '…'));
-    expect(rowText(favRows(el)[0])).toBe('Vers le bureau | partir à 07:33');
+    expect(rowText(favRows(el)[0])).toBe('Bureau | partir à 07:33');
     // 1.2.2 : les arrêts favoris du préréglage sont dans les rubriques, plus dans « Favoris »
-    expect(favRows(el).map((r) => textOf(r.querySelector('.t1')))).toEqual(['Vers le bureau', 'Vers Gand-Saint-Pierre', 'Vers la maison']);
+    expect(favRows(el).map((r) => textOf(r.querySelector('.t1')))).toEqual(['Bureau', 'Vers Gand-Saint-Pierre', 'Maison']);
   });
 
   it('écran attaché après coup par le routeur : les réponses arrivent quand même', async () => {
@@ -190,7 +196,7 @@ describe('carte « Favoris » (S8, PRD-1.2.9 § 2.1)', () => {
     await Promise.resolve();
     const el = mount(screen);
     await until(() => favRows(el).every((r) => textOf(r.querySelector('.answer')) !== '…'));
-    expect(rowText(favRows(el)[0])).toBe('Vers le bureau | partir à 07:33');
+    expect(rowText(favRows(el)[0])).toBe('Bureau | partir à 07:33');
   });
 
   it(`${HOME_FAVORITES} favoris au plus, dans l’ordre des lunettes (orderedFavorites) ; « Favoris » donne le total`, async () => {
@@ -200,7 +206,7 @@ describe('carte « Favoris » (S8, PRD-1.2.9 § 2.1)', () => {
     const hz = harness({ settings: s, now: SCENARIO.s1.now, here: SCENARIO.s1, flags: { noRt: true } });
     const el = mount(homeScreen(hz.ctx));
     expect(textOf(navRow(el, 'Favoris').querySelector('.count'))).toBe('5');
-    const expected = orderedFavorites(hz.core, s, SCENARIO.s1).slice(0, HOME_FAVORITES).map((f) => favoriteTitle(f, s));
+    const expected = orderedFavorites(hz.core, s, SCENARIO.s1).slice(0, HOME_FAVORITES).map((f) => homeFavoriteName({ fav: f }, { now: SCENARIO.s1.now, settings: s }));
     expect(expected).toHaveLength(HOME_FAVORITES);
     expect(favRows(el).map((r) => textOf(r.querySelector('.t1')))).toEqual(expected);
     // « Dans mon ordre » : l'ordre du téléphone (la maison, où l'on est à 07:31, passe en dernier comme dans les
@@ -210,7 +216,7 @@ describe('carte « Favoris » (S8, PRD-1.2.9 § 2.1)', () => {
     const answer = vi.spyOn(hz2.core, 'answer');
     const el2 = mount(homeScreen(hz2.ctx));
     const firstThree = orderedFavorites(hz2.core, mine, SCENARIO.s1).slice(0, HOME_FAVORITES);
-    expect(favRows(el2).map((r) => textOf(r.querySelector('.t1')))).toEqual(['Vers le bureau', 'Vers Gand-Saint-Pierre', 'Vers l’école']);
+    expect(favRows(el2).map((r) => textOf(r.querySelector('.t1')))).toEqual(['Bureau', 'Vers Gand-Saint-Pierre', 'École']);
     expect(firstThree.map((f) => favoriteTitle(f, mine))).toEqual(['Vers le bureau', 'Vers Gand-Saint-Pierre', 'Vers l’école']);
     await until(() => favRows(el2).every((r) => textOf(r.querySelector('.answer')) !== '…'));
     expect(new Set(answer.mock.calls.map(([f]) => f.id))).toEqual(new Set(firstThree.map((f) => f.id)));
@@ -222,7 +228,7 @@ describe('carte « Favoris » (S8, PRD-1.2.9 § 2.1)', () => {
     await until(() => favRows(el).every((r) => textOf(r.querySelector('.answer')) !== '…'));
     const row = favRows(el)[0];
     const btn = row.querySelector<HTMLButtonElement>('.btn-glasses')!;
-    expect(btn.getAttribute('aria-label')).toBe('Afficher Vers le bureau dans les lunettes');
+    expect(btn.getAttribute('aria-label')).toBe('Afficher Bureau dans les lunettes');
     btn.click();
     await until(() => textOf(row.querySelector('.msg')) !== '');
     expect(hz.glasses.trips).toHaveLength(1);
@@ -236,13 +242,13 @@ describe('carte « Favoris » (S8, PRD-1.2.9 § 2.1)', () => {
     const hz = harness({ settings: preset11(), now: SCENARIO.s1.now, here: SCENARIO.s1, flags: { noRt: true } });
     const first = mount(homeScreen(hz.ctx));
     await until(() => favRows(first).every((r) => textOf(r.querySelector('.answer')) !== '…'));
-    expect(rowText(favRows(first)[0])).toBe('Vers le bureau | partir à 07:33');
+    expect(rowText(favRows(first)[0])).toBe('Bureau | partir à 07:33');
     document.body.replaceChildren();
     hz.advance(39 * 60_000); // 08:10 : l'IC de 07:42 est parti
     const answer = vi.spyOn(hz.core, 'answer');
     const el = mount(homeScreen(hz.ctx));
     const row = favRows(el)[0];
-    expect(textOf(row.querySelector('.t1'))).toBe('Vers le bureau');
+    expect(textOf(row.querySelector('.t1'))).toBe('Bureau');
     // toucher tout de suite, avant le rafraîchissement de l'accueil
     row.querySelector<HTMLButtonElement>('.btn-glasses')!.click();
     await until(() => hz.glasses.trips.length === 1);
@@ -303,10 +309,10 @@ describe('réponses courtes (S8, mêmes règles que les lunettes)', () => {
   });
 });
 
-describe('bannière « Nouveau » après la mise à jour (T1, PRD-1.2.9 § 2.1, PRD-1.2.10 § 7, PRD-1.3.0 § 9)', () => {
+describe('bannière « Nouveau » après la mise à jour (T1, PRD-1.2.9 § 2.1, PRD-1.2.10 § 7, PRD-1.3.0 § 9, PRD-1.3.1 § 9)', () => {
   it(`« Nouveau dans Quai ${NEWS_SINCE} » sur une ligne ; « Voir ce qui change » déplie les nouveautés dans la bannière`, () => {
     const hz = harness({ settings: defaults() });
-    hz.ctx.news = newsState('1.2.10', NEWS_SINCE, '1.3.0');
+    hz.ctx.news = newsState('1.2.10', NEWS_SINCE, '1.3.1');
     const el = mount(homeScreen(hz.ctx));
     const news = el.querySelector<HTMLElement>('.news')!;
     // après « Où vas-tu ? », avant « Dans tes lunettes »
@@ -321,25 +327,28 @@ describe('bannière « Nouveau » après la mise à jour (T1, PRD-1.2.9 § 2.1, 
     expect([more.getAttribute('aria-expanded'), lines.hidden]).toEqual(['false', true]);
     more.click();
     expect([more.getAttribute('aria-expanded'), lines.hidden]).toEqual(['true', false]);
-    // 1.3.0 (PRD-1.3.0 § 9) : les nouveautés de la 1.3.0
-    expect([...lines.querySelectorAll('p')].map((p) => textOf(p))).toEqual(NEWS_130.map(plain));
+    // 1.3.1 (PRD-1.3.1 § 9, décision du 21/11) : les nouveautés de la 1.3.1, puis celles de la 1.3.0 (sautée)
+    expect([...lines.querySelectorAll('p')].map((p) => textOf(p))).toEqual([...NEWS_131, ...NEWS_130].map(plain));
     // typographie française : espace insécable devant « : », dans les guillemets
-    expect(lines.querySelectorAll('p')[0]!.textContent).toMatch(/^Écran d’un trajet dans les lunettes[\u00a0\u202f]: une ligne «[\u00a0\u202f]▶ Y aller[\u00a0\u202f]» dit/);
-    expect(lines.querySelectorAll('p')[0]!.textContent).toMatch(/«[\u00a0\u202f]Autres trajets[\u00a0\u202f]»/);
-    for (const l of [...NEWS_130, ...NEWS_1210, ...NEWS_129]) expect(l).not.toMatch(/[\u2013\u2014]|tes lieux|vous\b/);
+    expect(lines.querySelectorAll('p')[0]!.textContent).toMatch(/^Pendant un guidage, trois petits points[\u00a0\u202f]: Quai te suit, rien à faire\./);
+    expect(lines.querySelectorAll('p')[1]!.textContent).toMatch(/«[\u00a0\u202f]dernier[\u00a0\u202f]» marque/);
+    expect(lines.querySelectorAll('p')[4]!.textContent).toMatch(/^Écran d’un trajet dans les lunettes[\u00a0\u202f]: une ligne «[\u00a0\u202f]▶ Y aller[\u00a0\u202f]» dit/);
+    expect(lines.querySelectorAll('p')[4]!.textContent).toMatch(/«[\u00a0\u202f]Autres trajets[\u00a0\u202f]»/);
+    for (const l of [...NEWS_131, ...NEWS_130, ...NEWS_1210, ...NEWS_129]) expect(l).not.toMatch(/[\u2013\u2014]|tes lieux|vous\b/);
     more.click();
     expect([more.getAttribute('aria-expanded'), lines.hidden]).toEqual(['false', true]);
   });
 
   it('« OK » la ferme une fois pour toutes, le curseur passe à « Dans tes lunettes » ; le téléphone n’écrit pas la version vue', () => {
-    expect(NEWS_SINCE).toBe('1.3.0');
-    // l'appli en 1.3.0 : la bannière se montre une fois (1.2.10 et avant ; 1.2.10 vient après 1.2.9, pas avant 1.2.2)
-    for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3', '1.2.4', '1.2.5', '1.2.6', '1.2.7', '1.2.8', '1.2.9', '1.2.10']) expect(newsState(seen, NEWS_SINCE, '1.3.0').visible(), seen).toBe(true);
-    for (const seen of ['', '1.3.0', '1.3.1', '1.4.0']) expect(newsState(seen, NEWS_SINCE, '1.3.0').visible(), seen || 'installation neuve').toBe(false);
-    // une appli plus ancienne que ces nouveautés ne les annonce pas (numéro de version pas encore passé à 1.3.0)
+    expect(NEWS_SINCE).toBe('1.3.1');
+    // l'appli en 1.3.1 : la bannière se montre une fois (1.3.0 et avant ; 1.2.10 vient après 1.2.9, pas avant 1.2.2)
+    for (const seen of ['1.1.0', '1.2.0', '1.2.1', '1.2.2', '1.2.3', '1.2.4', '1.2.5', '1.2.6', '1.2.7', '1.2.8', '1.2.9', '1.2.10', '1.3.0']) expect(newsState(seen, NEWS_SINCE, '1.3.1').visible(), seen).toBe(true);
+    for (const seen of ['', '1.3.1', '1.4.0']) expect(newsState(seen, NEWS_SINCE, '1.3.1').visible(), seen || 'installation neuve').toBe(false);
+    // une appli plus ancienne que ces nouveautés ne les annonce pas (numéro de version pas encore passé à 1.3.1)
     expect(newsState('1.2.9', NEWS_SINCE, '1.2.10').visible()).toBe(false);
+    expect(newsState('1.2.10', NEWS_SINCE, '1.3.0').visible()).toBe(false);
     const hz = harness({ settings: defaults() });
-    hz.ctx.news = newsState('1.2.10', NEWS_SINCE, '1.3.0');
+    hz.ctx.news = newsState('1.2.10', NEWS_SINCE, '1.3.1');
     const el = mount(homeScreen(hz.ctx));
     button(el, 'OK').click();
     expect(el.querySelector('.news')).toBeNull();
@@ -347,15 +356,15 @@ describe('bannière « Nouveau » après la mise à jour (T1, PRD-1.2.9 § 2.1, 
     expect(document.activeElement).toBe(el.querySelector('#h-miroir'));
     expect(textOf(document.activeElement)).toBe('Dans tes lunettes');
     expect(mount(homeScreen(hz.ctx)).querySelector('.news')).toBeNull();
-    // le téléphone n'écrit pas la version vue (les lunettes s'en servent pour « Quai 1.3.0 »)
+    // le téléphone n'écrit pas la version vue (les lunettes s'en servent pour « Quai 1.3.1 »)
     expect(hz.settings.get().seenVersion).toBe('');
     // installation neuve : jamais
     const neuf = harness({ settings: defaults() });
-    neuf.ctx.news = newsState('', NEWS_SINCE, '1.3.0');
+    neuf.ctx.news = newsState('', NEWS_SINCE, '1.3.1');
     expect(mount(homeScreen(neuf.ctx)).querySelector('.news')).toBeNull();
   });
 
-  it('mise à jour directe vers la 1.3.0 : les nouveautés des versions sautées, sans celles qui ne sont plus vraies (« Bus, tram, métro », détail des favoris en bas) ; une seule bannière, une fois', () => {
+  it('mise à jour directe vers la 1.3.1 : les nouveautés des versions sautées, sans celles qui ne sont plus vraies (« Bus, tram, métro », détail des favoris en bas) ; une seule bannière, une fois', () => {
     const v126 = [
       'Gares de train, arrêts et lignes de bus, tram, métro : trois rubriques séparées.',
       'Une ligne se suit maintenant en entier, dans les deux sens, sans choisir d’arrêt : les lunettes montrent l’attente à chacun de ses arrêts.',
@@ -384,19 +393,21 @@ describe('bannière « Nouveau » après la mise à jour (T1, PRD-1.2.9 § 2.1, 
     // 1.3.0 (PRD-1.3.0 § 7) : le détail des favoris n'est plus en bas de l'écran (accordéon) : cette ligne de la 1.2.10 part
     const v1210 = NEWS_1210.filter((l) => !/en bas de l’écran/.test(l));
     expect(v1210).toHaveLength(NEWS_1210.length - 1);
-    const v130 = [...NEWS_130];
-    expect(newsState('1.2.10', NEWS_SINCE, '1.3.0').lines).toEqual(v130);
-    expect(newsState('1.2.9', NEWS_SINCE, '1.3.0').lines).toEqual([...v130, ...v1210]);
-    expect(newsState('1.2.8', NEWS_SINCE, '1.3.0').lines).toEqual([...v130, ...v1210, ...NEWS_129]);
-    expect(newsState('1.2.7', NEWS_SINCE, '1.3.0').lines).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128]);
-    expect(newsState('1.2.6', NEWS_SINCE, '1.3.0').lines).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128]);
-    expect(newsState('1.2.5', NEWS_SINCE, '1.3.0').lines).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128, ...v126]);
-    expect(newsState('1.2.4', NEWS_SINCE, '1.3.0').lines).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128, ...v126, ...v125]);
-    expect(newsState('1.2.3', NEWS_SINCE, '1.3.0').lines).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128, ...v126, ...v125, ...v124]);
-    expect(newsState('1.2.2', NEWS_SINCE, '1.3.0').lines).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128, ...v126, ...v125, ...v124, ...v123]);
-    for (const seen of ['1.2.1', '1.2.0', '1.1.0']) expect(newsState(seen, NEWS_SINCE, '1.3.0').lines, seen).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128, ...v126, ...v125, ...v124, ...v123, ...v122]);
+    // 1.3.1 (PRD-1.3.1 § 9) : ses quatre lignes d'abord ; depuis la 1.3.0, elles seules
+    expect(newsState('1.3.0', NEWS_SINCE, '1.3.1').lines).toEqual([...NEWS_131]);
+    const v130 = [...NEWS_131, ...NEWS_130];
+    expect(newsState('1.2.10', NEWS_SINCE, '1.3.1').lines).toEqual(v130);
+    expect(newsState('1.2.9', NEWS_SINCE, '1.3.1').lines).toEqual([...v130, ...v1210]);
+    expect(newsState('1.2.8', NEWS_SINCE, '1.3.1').lines).toEqual([...v130, ...v1210, ...NEWS_129]);
+    expect(newsState('1.2.7', NEWS_SINCE, '1.3.1').lines).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128]);
+    expect(newsState('1.2.6', NEWS_SINCE, '1.3.1').lines).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128]);
+    expect(newsState('1.2.5', NEWS_SINCE, '1.3.1').lines).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128, ...v126]);
+    expect(newsState('1.2.4', NEWS_SINCE, '1.3.1').lines).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128, ...v126, ...v125]);
+    expect(newsState('1.2.3', NEWS_SINCE, '1.3.1').lines).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128, ...v126, ...v125, ...v124]);
+    expect(newsState('1.2.2', NEWS_SINCE, '1.3.1').lines).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128, ...v126, ...v125, ...v124, ...v123]);
+    for (const seen of ['1.2.1', '1.2.0', '1.1.0']) expect(newsState(seen, NEWS_SINCE, '1.3.1').lines, seen).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128, ...v126, ...v125, ...v124, ...v123, ...v122]);
     const hz = harness({ settings: defaults() });
-    hz.ctx.news = newsState('1.2.5', NEWS_SINCE, '1.3.0');
+    hz.ctx.news = newsState('1.2.5', NEWS_SINCE, '1.3.1');
     const el = mount(homeScreen(hz.ctx));
     expect(el.querySelectorAll('.news')).toHaveLength(1);
     expect([...el.querySelectorAll('.news p')].map((p) => textOf(p))).toEqual([...v130, ...v1210, ...NEWS_129, ...NEWS_128, ...v126].map(plain));

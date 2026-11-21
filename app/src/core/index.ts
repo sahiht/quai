@@ -42,7 +42,9 @@ import { QuaiError } from './errors';
 import { answerFavorite, orderFavorites, relocateAmong, type PlanMemo } from './favorites';
 import { addDays, isCovered } from './freshness';
 import { GeocodeClient, relayGeoTransport } from './geocode';
-import { brokenConnection, refreshJourney, refreshJourneys, skeleton, type RefreshEnv } from './journeys';
+import { brokenConnection, refreshJourney, refreshJourneys, skeleton, withFirstWalk, type RefreshEnv } from './journeys';
+import { FirstWalks } from './firstwalk';
+import { itemOf } from './routing/rank';
 import { makeFetch, mapPool } from './net';
 import { PersistentCache } from './persist';
 import { inTime, markRain, WeatherClient } from './weather';
@@ -107,6 +109,10 @@ export function createCore(opts: CoreOptions): Core {
   const engine = new TrainEngine();
   // 1.2.10 : chemin à pied sur le téléphone (tuiles data/walk/, demandées par zone ; la position ne part jamais)
   const walk = new WalkRouter({ index: () => data.walkIndex(), tile: (k, v) => data.walkTile(k, v) }, { now });
+
+  // 1.3.1 (décision du 20/11 à 21:59) : vrais chemins des premières marches, pour l'heure de partir de tous les écrans
+  // (core/firstwalk.ts) ; mêmes tuiles et même calcul que le guidage (walk), un chemin à la fois
+  const firstWalks = new FirstWalks(async (from, to, o) => walk.route(from, to, o), { now });
 
   const ensure = (): Promise<Meta> => data.requireMeta();
 
@@ -268,7 +274,21 @@ export function createCore(opts: CoreOptions): Core {
     return scopeTexts(alerts, scope, BOARD_BUDGET);
   }
 
-  const refreshEnv: RefreshEnv = { rt, now, trainDays, area: preparedOrNull };
+  // 1.3.1 (R3) : « , dernier » d'une étape en bus, tram ou métro d'après une zone déjà connue, jamais demandée au réseau
+  const cachedArea = async (id: string): Promise<PreparedArea | null> => {
+    const f = await data.cachedArea(aliasOf.get(id) ?? id).catch(() => null);
+    const meta = data.meta;
+    return f && meta ? prepareArea(f, meta) : null;
+  };
+  const refreshEnv: RefreshEnv = { rt, now, trainDays, area: preparedOrNull, cachedArea };
+  // 1.3.1 : les trajets rendus aux écrans (refresh, plan mémorisé d'un favori) portent le vrai chemin connu de leur
+  // première marche ; le calcul des trajets garde `refreshEnv` (il classe sur les estimations)
+  const shownEnv: RefreshEnv = { ...refreshEnv, firstWalk: (legs, s) => firstWalks.apply(legs, s) };
+  /** Demande les chemins qui manquent pour ces trajets et les attend 0,1 s au plus (tuiles déjà en mémoire). */
+  const walksFor = async (js: readonly Journey[], s: Settings): Promise<void> => {
+    firstWalks.ask(js, s);
+    await firstWalks.settle();
+  };
 
   const core: Core = {
     get meta() {
@@ -288,9 +308,19 @@ export function createCore(opts: CoreOptions): Core {
      * voie à 100 m ou qu'aucun chemin ne les relie ; null si les données manquent ou que le réseau fait défaut (le
      * guidage réessaie au besoin). Jamais d'exception.
      */
-    async walkRoute(from: LatLon, to: LatLon): Promise<WalkRoute | null> {
+    async walkRoute(from: LatLon, to: LatLon, opts?: { avoidSteps?: boolean }): Promise<WalkRoute | null> {
       try {
-        return await walk.route(from, to);
+        // 1.3.1 (R4) : « Éviter les escaliers » (opts.avoidSteps), sans lui le chemin de toujours
+        return await walk.route(from, to, opts);
+      } catch {
+        return null;
+      }
+    },
+
+    /** 1.3.1 (PRD-1.3.1 § 14, R1) : sorties du métro (data/exits.json), par le même client. Jamais d'exception. */
+    async walkExits() {
+      try {
+        return await data.walkExits();
       } catch {
         return null;
       }
@@ -486,7 +516,9 @@ export function createCore(opts: CoreOptions): Core {
       };
       // trajet suivi : son réseau passe en tête de la mémoire des réseaux (routing/repair.ts)
       touchFollowed(j.id);
-      const out = await refreshJourney(j, settings, refreshEnv, false, followed);
+      // 1.3.1 : le vrai chemin de la première marche d'un trajet montré (demandé s'il manque, jamais attendu)
+      await walksFor([j], settings);
+      const out = await refreshJourney(j, settings, shownEnv, false, followed);
       // correspondance devenue impossible : reste du trajet recalculé sur le réseau de sa recherche, gardé par
       // identifiant de trajet et refait au besoin avec les mêmes fichiers de la même génération (routing/repair.ts)
       const meta = data.meta;
@@ -494,7 +526,7 @@ export function createCore(opts: CoreOptions): Core {
       const source = { meta, tile: (k: string) => data.tile(k), json: <T>(p: string, v: (x: unknown) => x is T) => data.json(p, v), trains: (d: string) => data.trains(d) };
       const legs = await repairFollowed(out, settings, source).catch(() => null);
       if (!legs || data.meta?.generatedAt !== meta.generatedAt) return marked(out);
-      const [fixed] = await refreshJourneys([{ ...out, legs }], settings, refreshEnv, false, followed);
+      const [fixed] = await refreshJourneys([{ ...out, legs }], settings, shownEnv, false, followed);
       return marked({ ...fixed, id: j.id, alerts: [recalcAlert(now()), ...fixed.alerts] });
     },
 
@@ -523,10 +555,22 @@ export function createCore(opts: CoreOptions): Core {
     async route(from: Endpoint, to: Endpoint, after: number, settings: Settings, here?: { lat: number; lon: number } | null): Promise<PlanResult> {
       // 1.2.5 : la grille météo est demandée pendant le calcul ; ensuite, 0,5 s d'attente au plus (WEATHER_GRACE_MS)
       const rain = rainOn(settings) ? weather.get() : Promise.resolve(null);
-      const result = await compute();
+      let result = await compute();
+      // 1.3.1 (vrai chemin partout) : le chemin de la première marche des propositions rendues (3 au plus), demandé
+      // sans être attendu. Connu pendant ce calcul et un premier véhicule devenu impossible à attraper : le calcul est
+      // refait une fois, il écarte alors ce départ comme un départ raté (le suivant vient à sa place).
+      await walksFor(result.journeys, settings);
+      if (result.journeys.some((j) => firstWalks.extra(j.legs, settings) > 0 && itemOf(j).dep - firstWalks.extra(j.legs, settings) < after / 60_000)) {
+        result = await compute();
+        await walksFor(result.journeys, settings);
+      }
       const w = await inTime(rain);
-      if (w !== undefined) markRain(result.journeys, w);
-      return result;
+      const t = now();
+      const journeys = result.journeys.map((j) => withFirstWalk(j, settings, t, (legs, s) => firstWalks.apply(legs, s)));
+      // la pluie après le vrai chemin (contrôle du 20/11) : une première marche de 3 min estimées qui en compte 6 est
+      // une marche de 5 min ou plus, marquée comme dans la réponse d'un favori (refresh) ; sans correction, rien ne change
+      if (w !== undefined) markRain(journeys, w);
+      return journeys.some((j, i) => j !== result.journeys[i]) ? { ...result, journeys } : result;
 
       async function compute(): Promise<PlanResult> {
         for (let attempt = 0; ; attempt++) {
@@ -536,6 +580,7 @@ export function createCore(opts: CoreOptions): Core {
             source: { meta, tile: (k) => data.tile(k), json: (p, v) => data.json(p, v), trains: (d) => data.trains(d) },
             now,
             refresh: (js, fresh) => refreshJourneys(js, settings, refreshEnv, fresh),
+            firstWalkExtra: (j) => firstWalks.extra(j.legs, settings),
             legacy: (O, D, t, maxWalk) =>
               planCandidates(O, D, t, maxWalk, { meta, areasAround, area: preparedOrNull, trainDays, engine, refresh: (j) => refreshJourney(j, settings, refreshEnv, true) }),
           });
@@ -573,14 +618,27 @@ export function createCore(opts: CoreOptions): Core {
         // retard : les marques d'avant restent ; réglage coupé : plus aucune
         refresh: async (js, s) => {
           const rain = rainOn(s) ? weather.get() : Promise.resolve(null);
-          const out = await refreshJourneys(js, s, refreshEnv, false);
+          // 1.3.1 : plan mémorisé ou marche jusqu'à la gare : le vrai chemin connu de la première marche
+          await walksFor(js, s);
+          const out = await refreshJourneys(js, s, shownEnv, false);
           const w = await inTime(rain);
           if (w !== undefined) markRain(out, w);
           return out;
         },
         generation: async () => (await ensure()).generatedAt,
         plans,
+        walkExtra: (from, to, est, s) => firstWalks.extraBetween(from, to, est, s),
       });
+    },
+
+    /** 1.3.1 (vrai chemin partout) : un chemin tout juste connu allonge une première marche (core/firstwalk.ts). */
+    onFirstWalk(cb: () => void): () => void {
+      return firstWalks.on(cb);
+    },
+
+    /** 1.3.1 : le trajet avec la correction connue à cet instant, sans réseau ni attente. */
+    firstWalk(j: Journey, settings: Settings): Journey {
+      return withFirstWalk(j, settings, now(), (legs, s) => firstWalks.apply(legs, s));
     },
 
     /** M4 : adresses par le relais (core/geocode.ts) : seuls le texte et la langue partent du téléphone. */

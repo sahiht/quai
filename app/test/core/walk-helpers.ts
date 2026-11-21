@@ -181,3 +181,51 @@ export function checkRoute(r: WalkRoute, from: LatLon, to: LatLon): void {
     prev = m.distM;
   }
 }
+
+/* ------------------------------ 1.3.1 : mesure de la première marche (vrai chemin partout) ------------------------------ */
+
+/** Une marche rejouée : ses deux bouts publics (noms d'arrêts), la distance à vol d'oiseau et la longueur du vrai chemin. */
+export interface WalkSample {
+  from: string;
+  to: string;
+  crowM: number;
+  lengthM: number;
+}
+
+/**
+ * 1.3.1 (décision du 20/11 à 21:59, contrôle) : ce que la règle « l'heure de partir d'après le vrai chemin » ferait de
+ * ces marches si chacune était la première marche d'un trajet. Estimation : celle du calcul des trajets (vol d'oiseau
+ * × 1,3 à 80 m par minute, `est`) ; vrai chemin : 80 m par minute (`real`) ; avance : real - est, au plus `capMin`.
+ * Lignes pour le journal de la nuit (elles commencent toutes par « Première marche ») : la part des marches où le vrai
+ * chemin dépasse l'estimation d'au moins 1 min, la répartition (+1, +2, +3 à +5, plus de 5 min plafonnées), l'avance
+ * moyenne, et le pire cas avec ses deux arrêts. Ne juge rien : une mesure.
+ */
+export function firstWalkReport(samples: readonly WalkSample[], o: { est: (crowM: number) => number; real: (lengthM: number) => number; capMin: number; nearM?: number }): string[] {
+  const pct = (n: number, d: number) => `${((100 * n) / Math.max(1, d)).toFixed(1).replace('.', ',')} %`;
+  const line = (title: string, xs: readonly WalkSample[]): string => {
+    const extra = xs.map((x) => o.real(x.lengthM) - o.est(x.crowM));
+    const n = xs.length;
+    const count = (ok: (e: number) => boolean) => extra.filter(ok).length;
+    const moved = count((e) => e >= 1);
+    const capped = extra.filter((e) => e >= 1).map((e) => Math.min(e, o.capMin));
+    const mean = capped.length ? capped.reduce((a, b) => a + b, 0) / capped.length : 0;
+    const part = (label: string, k: number) => `${label} ${k} (${pct(k, n)})`;
+    return (
+      `${title} : ${n} vrais chemins, ${moved} (${pct(moved, n)}) dépassent l'estimation d'au moins 1 min : ` +
+      [part('+1 min', count((e) => e === 1)), part('+2 min', count((e) => e === 2)), part(`+3 à +${o.capMin} min`, count((e) => e >= 3 && e <= o.capMin)), part(`plus de ${o.capMin} min, plafonnées`, count((e) => e > o.capMin))].join(', ') +
+      ` ; avance moyenne quand l'heure change : ${mean.toFixed(1).replace('.', ',')} min ; rien ne change pour ${n - moved} (${pct(n - moved, n)})`
+    );
+  };
+  const nearM = o.nearM ?? 600;
+  const out = [line('Première marche (1.3.1, heure de partir d\'après le vrai chemin), toutes les marches rejouées', samples), line(`Première marche, marches de ${nearM} m au plus à vol d'oiseau`, samples.filter((x) => x.crowM <= nearM))];
+  let worst: WalkSample | null = null;
+  for (const x of samples) if (!worst || o.real(x.lengthM) - o.est(x.crowM) > o.real(worst.lengthM) - o.est(worst.crowM)) worst = x;
+  if (worst) {
+    const e = o.real(worst.lengthM) - o.est(worst.crowM);
+    out.push(
+      `Première marche, pire cas : ${worst.from} → ${worst.to}, vrai chemin de ${Math.round(worst.lengthM)} m (${o.real(worst.lengthM)} min) pour ${o.est(worst.crowM)} min estimées (${Math.round(worst.crowM)} m à vol d'oiseau) : ` +
+        (e >= 1 ? `l'heure de partir avancerait de ${Math.min(e, o.capMin)} min${e > o.capMin ? ` (plafond, ${e} min sans lui)` : ''}` : 'rien ne changerait'),
+    );
+  }
+  return out;
+}

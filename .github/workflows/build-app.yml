@@ -3,7 +3,7 @@
 #   QUAI_RELAY_BASE  obligatoire, ex. https://quai-relais.vercel.app (https, sans / final)
 #   QUAI_DATA_BASE   facultative, par défaut https://<compte>.github.io/<dépôt>/data
 # Tant que QUAI_RELAY_BASE manque, un push ne lance rien (job ignoré) ; un lancement manuel échoue avec un message clair.
-# Nouvelle version : ajouter d'abord app/store/changelog/<version>.txt (1 à 3 lignes, exigé par les tests),
+# Nouvelle version : ajouter d'abord app/store/changelog/<version>.txt (quelques lignes courtes, forme exigée par les tests),
 # puis changer "version" dans app/app.json : ce second commit lance le paquet et crée la release v<version>.
 name: Paquet de l'appli
 

@@ -196,7 +196,8 @@ describe('trajets porte à porte : étape STIB', () => {
     const t3 = rides.find((l) => l.line === '3' && hhmm(l.schedDep) === '12:12');
     expect(t3).toMatchObject({ rt: true, last: true });
     const j = { id: 'x', legs: [t3!], dep: t3!.dep, arr: t3!.arr, leaveAt: t3!.dep, transfers: 0, rt: true, alerts: [] };
-    expect(rideDetail(j, 'fr')).toBe('T3 à Gare du Nord, à l’heure, dernier passage');
+    // 1.3.1 (R3, § 15) : « dernier », le mot des lunettes (plus « dernier passage »)
+    expect(rideDetail(j, 'fr')).toBe('T3 à Gare du Nord, à l’heure, dernier');
   });
 
   it('« Temps théorique » : l’étape reste en horaire prévu ; « Ne pas embarquer » : ignoré', async () => {

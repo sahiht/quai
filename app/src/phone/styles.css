@@ -284,6 +284,10 @@ button.add-link { border: 0; background: transparent; padding-left: 0; color: va
 .now-now { margin: 0; font-size: 15px; line-height: 21px; color: var(--body); overflow-wrap: anywhere; }
 .now-stop { align-self: flex-start; margin-top: 8px; }
 .now-card .msg { margin-top: 4px; }
+/* 1.3.1 (R6) : « Copier mon heure d’arrivée », après « Arrêter le guidage », et son message (« Copié : J’arrive vers 08:54. ») */
+.now-copy { align-self: flex-start; margin-top: 8px; }
+.now-copied { overflow-wrap: anywhere; }
+.now-copied-text { font-weight: 600; }
 .now-done { padding-left: 4px; }
 /* 1.3.0 : carte « En cours » : les problèmes de la vérification (batterie des lunettes, position perdue), deux au plus */
 .now-checks { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
@@ -294,6 +298,8 @@ button.add-link { border: 0; background: transparent; padding-left: 0; color: va
 .test-last { padding: 0 2px; }
 .test-box { padding: 18px 16px 16px; display: flex; flex-direction: column; gap: 14px; }
 .test-step { margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; }
+/* 1.3.1 (R7) : sous le conseil « Head-Up » ou « Rien », ce qu'il faut vérifier si l'affichage ne réagit pas */
+.test-note { margin: -4px 0 0; font-size: 15px; line-height: 21px; color: var(--body); }
 .test-left { margin: 0; font-size: 34px; line-height: 40px; font-weight: 600; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
 .test-actions, .test-answers { display: flex; flex-direction: column; gap: 10px; }
 
@@ -322,11 +328,15 @@ button.add-link { border: 0; background: transparent; padding-left: 0; color: va
 .preview-top { display: flex; flex-direction: column; gap: 8px; }
 /* 1.2.10 : Affichage tient sur un écran de 390 × 844 (maquette C) : espaces resserrés ; « À l’ouverture de Quai », une
    ligne qui ouvre son écran, titrée comme les réglages au-dessus */
-.screen.display { gap: 12px; }
-.display .group { gap: 6px; }
-.display .pad-row { padding: 10px 16px; }
+/* 1.3.1 (PRD-1.3.1 § 14, R5) : avec le quatrième interrupteur, « Plein soleil », Affichage tient toujours dans
+   390 × 844 sans rien retirer : espaces resserrés de 2 à 6 px (entre les blocs 12 → 8, titre de groupe 6 → 4, choix
+   segmentés 10 → 7, interrupteurs 56 → 50 px, ligne de l'ouverture 57 → 51 px) ; toute cible tactile garde 44 px ou plus */
+.screen.display { gap: 8px; }
+.display .group { gap: 4px; }
+.display .pad-row { padding: 7px 16px; }
 .display .seg { padding: 3px; }
-.opening-link .row { min-height: 56px; padding-left: 16px; }
+.display .switch-row { min-height: 50px; padding: 4px 16px; }
+.opening-link .row { min-height: 50px; padding: 5px 4px 5px 16px; }
 .opening-link .row .chev { height: 40px; }
 .opening-link .row .t1 { font-size: 15px; line-height: 20px; font-weight: 500; }
 .opening-link .row .t2 { font-size: 14px; line-height: 19px; }

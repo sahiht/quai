@@ -261,11 +261,11 @@ describe('liens directs et champs', () => {
 describe('jour férié (PRD-1.2.1 § 5, § 7.4, CA-121.7)', () => {
   const nov11 = onDay('2026-11-11');
   const nov12 = onDay('2026-11-12');
-  const madou = (t: (h: number, m: number) => number) => trip('short', t(13, 39), [8, [t(13, 47), t(14, 30), 'bus W'], 1, [t(14, 33), t(14, 45), 'métro 2'], 2]);
+  const louise = (t: (h: number, m: number) => number) => trip('short', t(13, 39), [8, [t(13, 47), t(14, 30), 'bus W'], 1, [t(14, 33), t(14, 45), 'métro 2'], 2]);
 
   it('holidayLine : « Jour férié : horaires du dimanche » si un trajet proposé part un jour férié ; rien sinon', () => {
-    expect(holidayLine({ journeys: [madou(nov11)] })).toBe(`Jour férié${NB}: horaires du dimanche`);
-    expect(holidayLine({ journeys: [madou(nov12)] })).toBe('');
+    expect(holidayLine({ journeys: [louise(nov11)] })).toBe(`Jour férié${NB}: horaires du dimanche`);
+    expect(holidayLine({ journeys: [louise(nov12)] })).toBe('');
     expect(holidayLine({ journeys: [] })).toBe('');
     expect(holidayLine(null)).toBe('');
     // le jour des trajets, pas celui de la recherche : le 11/11 à 23:30, des trajets le 12/11 au matin, rien
@@ -277,7 +277,7 @@ describe('jour férié (PRD-1.2.1 § 5, § 7.4, CA-121.7)', () => {
 
   /** Recherche au jour `t`, résultats construits sur ce jour. */
   async function searchOn(t: (h: number, m: number) => number) {
-    const r = { journeys: [madou(t)] };
+    const r = { journeys: [louise(t)] };
     const hz = open({ now: t(13, 30), params: 'de=sncb:8863008&vers=sncb:8813003', core: (c) => ({ ...c, route: async () => r }) });
     await results(hz.el);
     return hz.el;
