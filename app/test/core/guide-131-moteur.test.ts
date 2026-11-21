@@ -10,11 +10,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { LatLon } from '../../src/core/api';
-import type { GuideFix, GuideState, Moment, VehicleRef } from '../../src/core/guide-types';
+import type { GuideFix, GuideState, Moment, VehicleRef, WalkRoute } from '../../src/core/guide-types';
 import { dismissMoment, GUIDE, replanNone } from '../../src/core/guide';
 import { pointAlong, projectAlong } from '../../src/core/guide-walk';
 import { distanceM } from '../../src/core/util';
+import { WalkRouter } from '../../src/core/walk/router';
 import { at, fix, firstWalkRoute, guide, journeyOf, kindOf, lerp, MIN, N, offset, P, prdTrip, rideLeg, route, S, SEC, step, stop, toward, walkLeg, type Run } from './guide-fixtures';
+import { at as pt, memorySource, tileOf, type GraphDef } from './walk-helpers';
 
 const m = <K extends Moment['kind']>(x: Moment | null, kind: K): Extract<Moment, { kind: K }> => {
   expect(x?.kind).toBe(kind);
@@ -574,6 +576,180 @@ describe('A6 (P3) : « Fais demi-tour »', () => {
     // avant l'heure, à la porte puis 25 m du mauvais côté : phase « avant », rien
     const early = play(r, trace([D, Sn, offset(Sn, 200, 0)], { t0: at('06:50'), toM: 30, every: 3 }));
     expect(early.some((x) => isUturn(x.s))).toBe(false);
+  });
+});
+
+/* ------------------------------ A6 : le raccord du chemin (correctif du 21/11) ------------------------------ */
+
+describe('A6 : jamais « Fais demi-tour » sur le raccord d’un chemin, ni avant d’avoir rejoint ses rues (correctif du 21/11)', () => {
+  // Chemins du vrai routeur (core/walk) sur des graphes faits à la main, autour d'un point public (Ixelles, près de
+  // Flagey) : une place non dessinée au nord de la « Rue du Sud », l'arrêt au bout de la « Rue de l'Est ».
+  const PLACE: GraphDef = {
+    nodes: { A: [-200, 0], J: [200, 0], K: [200, 300] },
+    ways: [
+      { nodes: ['A', 'J'], name: 'Rue du Sud' },
+      { nodes: ['J', 'K'], name: 'Rue de l’Est' },
+    ],
+  };
+  // Une rue qui finit sur la place (son bout en B, la place au nord) ; l'arrêt se rejoint par le sud
+  const IMPASSE: GraphDef = {
+    nodes: { B: [0, 0], C: [0, -200], D: [250, -200], E: [250, 300], T: [60, 300] },
+    ways: [
+      { nodes: ['B', 'C'], name: 'Rue du Bout' },
+      { nodes: ['C', 'D'], name: 'Rue du Sud' },
+      { nodes: ['D', 'E'], name: 'Rue de l’Est' },
+      { nodes: ['E', 'T'], name: 'Rue du Nord' },
+    ],
+  };
+  const trip = (from: LatLon, to: LatLon, id: string) => {
+    const a = stop('Place', from);
+    const b = stop('Arrêt du Nord', to, 'tec:Xnord');
+    return journeyOf([walkLeg(a, b, at('07:05'), 9), rideLeg({ op: 'tec', mode: 'bus', line: '6', head: 'Gare des Guillemins', stops: [{ p: b, t: at('07:16') }, { p: S.leman, t: at('07:30') }] })], id, at('07:05'));
+  };
+  /**
+   * Comme le contrôleur : le chemin demandé par le moteur (`needRoute` : au lancement, puis chemin quitté de plus de
+   * 30 m pendant 10 s) est calculé par le vrai routeur depuis la position, une demande toutes les 10 s au plus.
+   */
+  async function walkIt(def: GraphDef, origin: LatLon, to: LatLon, fixes: (r: Run) => GuideFix[], id = 'jplace') {
+    let clock = at('07:04');
+    const router = new WalkRouter(memorySource([tileOf(def)]), { now: () => clock });
+    const r = guide(trip(origin, to, id), { origin });
+    const routes: WalkRoute[] = [];
+    let asked = -Infinity;
+    const ask = async (s: GuideState, now: number) => {
+      if (!s.needRoute || now - asked < 10 * SEC) return;
+      asked = now;
+      clock = now;
+      const rt = await router.route(s.needRoute.from, s.needRoute.to);
+      if (!rt) return;
+      routes.push(rt);
+      r.input.walk = { leg: s.needRoute.leg, route: rt };
+    };
+    await ask(step(r, at('07:04'), fix(origin, at('07:04'), { speed: 0 })), at('07:04'));
+    const out: { t: number; f: GuideFix; s: GuideState }[] = [];
+    for (const f of fixes(r)) {
+      const s = step(r, f.at, f);
+      out.push({ t: f.at, f, s });
+      await ask(s, f.at);
+    }
+    return { r, out, routes };
+  }
+  const uturns = (out: { t: number; s: GuideState }[]) => out.filter((x) => isUturn(x.s)).map((x) => hm(x.t));
+
+  it('place traversée en biais vers l’arrêt : à plus de 40 m de toute rue, le chemin est recalculé, son raccord repart vers la rue de derrière : rien', async () => {
+    const O = pt(-60, 0);
+    const T = pt(200, 300);
+    // 90 m sur la Rue du Sud, puis tout droit vers l'arrêt à travers la place (350 m)
+    const { out, routes } = await walkIt(PLACE, O, T, () => trace([O, pt(30, 0), T], { t0: at('07:05:10'), toM: 300, every: 2 }));
+    // le chemin a bien été recalculé depuis la place : raccord de plus de 40 m, vers le sud
+    const re = routes[1];
+    expect(routes.length).toBeGreaterThanOrEqual(2);
+    expect(re.source).toBe('osm');
+    expect(distanceM(re.coords[0], re.coords[1])).toBeGreaterThan(40);
+    expect(re.coords[1].lat).toBeLessThan(re.coords[0].lat);
+    expect(re.joinAt).toBe(1);
+    expect(uturns(out)).toEqual([]);
+    // rien d'autre de faux : aucune flèche tant qu'on traverse la place
+    expect(out.filter((x) => x.t > at('07:06:30') && x.s.moment?.kind === 'turn')).toEqual([]);
+  });
+
+  it('départ d’un point à 40 m de la rue (une place), marche tout droit vers l’arrêt : rien, que la rue soit derrière en travers ou qu’elle finisse sur la place', async () => {
+    // la rue passe en travers, 40 m derrière
+    const O = pt(0, 40);
+    const T = pt(200, 300);
+    const a = await walkIt(PLACE, O, T, () => trace([O, T], { t0: at('07:05:10'), toM: 200, every: 2 }));
+    expect(a.routes[0]).toMatchObject({ source: 'osm', joinAt: 1 });
+    expect(Math.round(distanceM(a.routes[0].coords[0], a.routes[0].coords[1]))).toBe(40);
+    expect(uturns(a.out)).toEqual([]);
+    // la rue finit sur la place, 40 m derrière, dans l'axe de la marche (le raccord la prolonge)
+    const T2 = pt(60, 300);
+    const b = await walkIt(IMPASSE, O, T2, () => trace([O, T2], { t0: at('07:05:10'), toM: 200, every: 2 }), 'jimpasse');
+    expect(b.routes[0]).toMatchObject({ source: 'osm', joinAt: 1 });
+    expect(Math.round(distanceM(b.routes[0].coords[0], b.routes[0].coords[1]))).toBe(40);
+    expect(uturns(b.out)).toEqual([]);
+  });
+
+  it('à 8 m de la rue seulement (à moins de 30 m : rejointe), s’en éloigner à travers la place : rien non plus (le raccord n’a pas de sens de marche)', async () => {
+    // une position par seconde : 15 m de marche tiennent avant d'être à 30 m de la rue (seule la règle du raccord joue)
+    const O = pt(0, 8);
+    const cases = [
+      ['rue en travers, tout droit', PLACE, pt(200, 300), pt(0, 200)],
+      ['rue qui finit sur la place, dans son axe', IMPASSE, pt(60, 300), pt(0, 200)],
+      ['rue qui finit sur la place, à 40° de son axe', IMPASSE, pt(60, 300), pt(100, 127)],
+    ] as const;
+    for (const [name, def, T, aim] of cases) {
+      const { out, routes } = await walkIt(def, O, T, () => trace([O, aim], { t0: at('07:05:10'), toM: 60, every: 1 }), 'j8');
+      expect(routes[0].joinAt, name).toBe(1);
+      expect(uturns(out), name).toEqual([]);
+    }
+  });
+
+  it('le vrai départ du mauvais côté reste dit sur un chemin du routeur (porte à 6 m de la rue) : sur la chaussée, ou sur le trottoir du côté de la porte', async () => {
+    const O = pt(0, 6);
+    const T = pt(200, 300);
+    // le chemin part vers l'est ; elle part vers l'ouest : sur l'axe de la rue, puis à 4 m de lui du côté de la porte
+    for (const [y, id] of [[0, 'jaxe'], [4, 'jtrottoir']] as const) {
+      const { out, routes } = await walkIt(PLACE, O, T, () => trace([O, pt(0, y), pt(-200, y)], { t0: at('07:05:10'), toM: 34, every: 2 }), id);
+      expect(routes).toHaveLength(1);
+      expect(routes[0].joinAt, id).toBe(1);
+      const k = out.findIndex((x) => isUturn(x.s));
+      expect(k, id).toBeGreaterThan(0);
+      // après 15 m au moins le long de la rue, avant d'en être à 30 m
+      expect(distanceM(out[k].f, pt(0, y)), id).toBeGreaterThanOrEqual(15);
+      expect(distanceM(out[k].f, pt(0, 0)), id).toBeLessThanOrEqual(30);
+      expect(m(out[k].s.moment, 'turn')).toMatchObject({ turn: 'uturn', toward: N('Arrêt du Nord') });
+    }
+  });
+
+  it('le vrai contresens reste dit une fois les rues rejointes : 60 m dans le bon sens, puis 30 m à rebours sur le chemin', async () => {
+    const O = pt(0, 40);
+    const T = pt(200, 300);
+    const way = [O, pt(0, 0), pt(200, 0)];
+    const { out, routes } = await walkIt(PLACE, O, T, () => {
+      const go = trace(way, { t0: at('07:05:10'), toM: 100, every: 2 });
+      const last = go[go.length - 1];
+      return [...go, ...trace(way, { t0: last.at + 2 * SEC, fromM: 98, toM: 66, every: 2 })];
+    });
+    expect(routes).toHaveLength(1);
+    const u = out.filter((x) => isUturn(x.s));
+    expect(u.length).toBeGreaterThan(0);
+    // jamais pendant l'aller (raccord compris), seulement au retour
+    expect(u[0].t).toBeGreaterThan(at('07:05:10') + Math.round((100 / 1.3) * SEC));
+  });
+
+  it('contresens sur la rue dans la direction même du raccord (rue qui finit sur la place, 60 m vers le sud puis retour vers le nord) : dit sur la rue', async () => {
+    const O = pt(0, 40);
+    const T = pt(60, 300);
+    const way = [O, pt(0, 0), pt(0, -200)];
+    const { out, routes } = await walkIt(IMPASSE, O, T, () => {
+      const go = trace(way, { t0: at('07:05:10'), toM: 100, every: 2 });
+      const last = go[go.length - 1];
+      return [...go, ...trace(way, { t0: last.at + 2 * SEC, fromM: 98, toM: 66, every: 2 })];
+    }, 'jretour');
+    expect(routes).toHaveLength(1);
+    const u = out.filter((x) => isUturn(x.s));
+    expect(u.length).toBeGreaterThan(0);
+    expect(u[0].t).toBeGreaterThan(at('07:05:10') + Math.round((100 / 1.3) * SEC));
+    // dit alors qu'elle est encore sur la rue (au sud de son bout)
+    expect(u[0].f.lat).toBeLessThan(pt(0, 0).lat);
+  });
+
+  it('le virage raté reste dit avec un chemin du routeur : position à 5 m de l’axe de la rue (petit raccord en travers), elle continue tout droit', async () => {
+    // la Rue du Sud continue après le carrefour J ; le chemin tourne à gauche en J ; elle continue vers l'est, sur le
+    // trottoir (5 m au nord de l'axe)
+    const CROSS: GraphDef = { nodes: { ...PLACE.nodes, Z: [500, 0] }, ways: [...PLACE.ways, { nodes: ['J', 'Z'], name: 'Rue du Sud' }] };
+    const O = pt(100, 5);
+    const T = pt(200, 300);
+    const { out, routes } = await walkIt(CROSS, O, T, () => trace([O, pt(500, 5)], { t0: at('07:05:10'), toM: 220, every: 2 }), 'jrate');
+    // recalculé après le carrefour, depuis le trottoir : raccord de 5 m en travers, puis retour vers J
+    expect(routes.length).toBeGreaterThanOrEqual(2);
+    expect(routes[1]).toMatchObject({ source: 'osm', joinAt: 1 });
+    expect(Math.round(distanceM(routes[1].coords[0], routes[1].coords[1]))).toBe(5);
+    const u = out.find((x) => isUturn(x.s));
+    expect(u, 'demi-tour').toBeDefined();
+    expect(u!.s.moment?.id).toBe(`turn:jrate:0:u:${routes[1].builtAt}`);
+    // dit dans les 10 s qui suivent le nouveau chemin
+    expect(u!.t - routes[1].builtAt).toBeLessThanOrEqual(10 * SEC);
   });
 });
 

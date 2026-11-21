@@ -249,6 +249,24 @@ describe('départ et arrivée hors des voies', () => {
     expect(r.lengthM).toBeGreaterThan(207);
     expect(r.lengthM).toBeLessThan(213);
     expect(r.maneuvers).toEqual([]);
+    // 1.3.1 (A6, correctif du 21/11) : le raccord de départ est signalé (rang du premier point sur la voie)
+    expect(r.joinAt).toBe(1);
+  });
+
+  it('1.3.1 (A6) : `joinAt` seulement quand le départ est hors de la voie (1 m ou plus) ; jamais sur un chemin droit', async () => {
+    const on = await route(road, [0, -100], [0, 100]);
+    expect('joinAt' in on).toBe(false);
+    const near = await route(road, [0.4, -100], [0, 100]);
+    expect('joinAt' in near).toBe(false);
+    const door = await route(road, [6, -100], [0, 100]);
+    expect(door.joinAt).toBe(1);
+    expect(metres(door.coords[1], at(0, -100))).toBeLessThan(1.5);
+    // départ hors de la voie, arrivée au pied du raccord : le raccord, puis l'arrivée
+    const short = await route(road, [40, 0], [0, 0]);
+    expect(short.joinAt).toBe(1);
+    expect(short.coords).toHaveLength(2);
+    const far = await route(road, [150, 0], [0, 150]);
+    expect('joinAt' in far).toBe(false);
   });
 
   it('à 150 m de toute voie : chemin droit (aucun virage)', async () => {

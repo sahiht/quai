@@ -56,6 +56,13 @@ export interface WalkRoute {
    * Belgique) ; nosnap : aucune voie à 100 m ; nopath : pas de chemin dans les tuiles ; far : marche de plus de 5 km.
    */
   reason?: 'outside' | 'nosnap' | 'nopath' | 'far';
+  /**
+   * 1.3.1 (A6, correctif du 21/11) : rang, dans `coords`, du premier point du chemin sur une voie du graphe, quand le
+   * chemin commence par un raccord droit (du point demandé, ou de la position, à la voie la plus proche : 1 m ou plus).
+   * Absent : le chemin commence sur une voie (ou chemin d'avant ce champ). Le raccord n'est pas une rue : il n'a pas
+   * de sens de marche (« Fais demi-tour » ne se mesure pas contre lui).
+   */
+  joinAt?: number;
   builtAt: number;
 }
 

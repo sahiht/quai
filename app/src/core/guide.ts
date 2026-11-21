@@ -1095,9 +1095,11 @@ function walkedAlong(c: Ctx, w: number, d: number): boolean {
  * avant son début : départ du mauvais côté) n'avance pas. Rien à mesurer (undefined) : pas assez de marche, une des deux
  * positions à plus de 30 m du chemin, ou, pour lancer le demi-tour (`start`), moins de 20 m de chemin devant, une
  * allure qui n'est pas celle d'une marche (0,5 à 2,5 m/s sur ce déplacement : le bruit d'une position immobile saute
- * plus vite) ou un éloignement qui revient en arrière en route.
+ * plus vite), un éloignement qui revient en arrière en route, ou, sur un chemin qui commence par un raccord (`join` :
+ * rang de son premier point sur une rue), une position à plus de 30 m des rues du chemin ou une marche qui s'éloigne
+ * de la rue le long du raccord.
  */
-function motionOn(pts: LatLon[], cum: number[], fx: TimedPoint[], i: number, minM: number, start: boolean): { angle: number; back: boolean } | undefined {
+function motionOn(pts: LatLon[], cum: number[], fx: TimedPoint[], i: number, minM: number, start: boolean, join = 0): { angle: number; back: boolean } | undefined {
   const f = fx[i];
   let ka = -1;
   for (let k = i - 1; k >= 0 && ka < 0; k--) if (distanceM(fx[k], f) >= minM) ka = k;
@@ -1112,6 +1114,18 @@ function motionOn(pts: LatLon[], cum: number[], fx: TimedPoint[], i: number, min
   const pf = projectAlong(pts, f, cum);
   const pa = projectAlong(pts, a, cum);
   if (pf.offM > GUIDE.offRouteM || pa.offM > GUIDE.offRouteM) return undefined;
+  // correctif du 21/11 : le raccord de départ (pts[0] → pts[join] : du point de départ, ou de la position au recalcul,
+  // à la rue la plus proche) n'est pas une rue, il n'a pas de sens de marche. Sur une place ou un parking non dessinés,
+  // à 45 m de toute rue, le chemin recalculé repartait vers la rue de derrière, et avancer vers l'arrêt passait pour
+  // 15 m à contresens. Pour lancer le demi-tour : les deux positions à 30 m au plus des rues du chemin (pas encore
+  // rejoint : rien) ; et tant que la position se projette sur le raccord, s'éloigner de la rue le long de lui (à 60°
+  // près) n'est pas marcher à contresens. Le vrai départ du mauvais côté longe la rue : il reste dit
+  if (start && join > 0) {
+    const streets = pts.slice(join);
+    if (projectOn(streets, f).offM > GUIDE.offRouteM || projectOn(streets, a).offM > GUIDE.offRouteM) return undefined;
+    const awayDeg = bearingDeg(pts[join], pts[0]);
+    if (projectOn(pts, f, cum).seg < join && Math.abs(relativeDeg(bearingDeg(a, f), awayDeg)) <= GUIDE.uturnWithDeg) return undefined;
+  }
   // chemin en épingle (rampe, aller et retour jusqu'au passage piéton quand les trottoirs sont séparés) : la position,
   // bruitée, se projette sur l'autre branche, qui va dans l'autre sens. Si une partie du chemin à 30 m au plus va dans
   // le sens de la marche, on ne sait pas sur quelle branche on est : jamais « Fais demi-tour » dans le doute
@@ -1145,6 +1159,15 @@ function routeGoesWith(pts: LatLon[], cum: number[], p: LatLon, moveDeg: number)
   return false;
 }
 
+/**
+ * 1.3.1 (A6, correctif du 21/11) : rang du premier point du chemin sur une voie du graphe (`WalkRoute.joinAt`, posé par
+ * le routeur quand le chemin commence par un raccord droit) ; 0 : pas de raccord connu.
+ */
+function joinOf(route: WalkRoute, pts: LatLon[]): number {
+  const k = route.joinAt;
+  return pts === route.coords && typeof k === 'number' && Number.isInteger(k) && k > 0 && k < pts.length ? k : 0;
+}
+
 /** Une position (ou une moyenne de positions) datée. */
 type TimedPoint = LatLon & { at: number };
 
@@ -1160,8 +1183,10 @@ function smoothed(fx: readonly GuideFix[]): TimedPoint[] {
  * 1.3.1 (A6, P3) : « Fais demi-tour » sur le chemin de la marche `w` (vrai chemin ; le chemin ne crée de virage qu'aux
  * carrefours) : 15 m à contresens du chemin (plus de 135°, sans avancer le long de lui ; deux fois la précision annoncée
  * si elle est moins bonne que 7,5 m), positions lissées sur trois, pour les trois dernières, à 0,5 m/s au moins (jamais
- * à l'arrêt). Couvre le départ du mauvais côté (le raccord de la porte à la rue compris) et le virage raté (le nouveau
- * chemin, calculé depuis la position, repart en arrière). Une fois par chemin (id avec builtAt) ; fini après 10 m dans
+ * à l'arrêt). Couvre le départ du mauvais côté (le long de la rue) et le virage raté (le nouveau chemin, calculé depuis
+ * la position, repart en arrière). Correctif du 21/11 : jamais contre le raccord de départ d'un chemin (du point de
+ * départ ou de la position à la première rue : `joinAt`), ni à plus de 30 m des rues du chemin (pas encore rejoint) :
+ * voir motionOn. Une fois par chemin (id avec builtAt) ; fini après 10 m dans
  * le bon sens (moins de 90°, deux positions) ou d'un toucher ; un nouveau chemin le remplace. Moment `turn` (flèche
  * demi-tour), sans rue : « vers l'arrêt X » sous « Fais demi-tour ».
  */
@@ -1181,7 +1206,8 @@ function uturnCand(c: Ctx, w: number, route: WalkRoute, pts: LatLon[], cum: numb
   const n = raw.length;
   const wl = c.legs[w];
   const make = (since: number): Moment => ({ kind: 'turn', id, since, until: f0.at + GUIDE.freshMs, leg: w, turn: 'uturn', distM: 0, toward: wl.to.name, final: w === c.legs.length - 1 });
-  const lastK = (k: number, fx: TimedPoint[], minM: number, start: boolean) => (n >= k && raw[n - 1] === f0 ? Array.from({ length: k }, (_, j) => motionOn(pts, cum, fx, n - k + j, minM, start)) : []);
+  const join = joinOf(route, pts);
+  const lastK = (k: number, fx: TimedPoint[], minM: number, start: boolean) => (n >= k && raw[n - 1] === f0 ? Array.from({ length: k }, (_, j) => motionOn(pts, cum, fx, n - k + j, minM, start, join)) : []);
   if (m.shown[id] === undefined) {
     if ((c.speed ?? 0) < GUIDE.uturnSpeedMs) return null;
     // au moins 15 m, et deux fois la précision annoncée (une position qui saute de 10 m n'est pas une marche) ; trois
