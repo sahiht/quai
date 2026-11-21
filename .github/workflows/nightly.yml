@@ -195,6 +195,10 @@ jobs:
 
       # 1.2.6 (PRD-1.2.6 § 9) : toutes les lignes de bus, tram et métro passent par le calcul des lunettes (sens,
       # terminus, toute la ligne, rangées) ; le bilan est dans le journal. Ne bloque jamais la publication.
+      # 1.3.1 (PRD-1.3.1 § 14, R3) : « , dernier » d'après l'horaire. La nuit ordinaire joue le contrôle léger (toutes
+      # les marques, tous les tableaux, les étapes d'un échantillon stable de zones) pour ne pas retarder la
+      # publication ; le balayage complet de toutes les étapes tourne en vérification (QUAI_SCAN_DERNIER=complet).
+      # La première ligne de son bilan dit lequel a tourné.
       - name: Balayer les lignes de bus, tram et métro
         if: ${{ steps.webapp.outcome == 'success' }}
         continue-on-error: true
@@ -203,6 +207,7 @@ jobs:
         env:
           QUAI_SCAN_DATA: ../site/data
           QUAI_SCAN_DETAIL: ${{ inputs.lignes }}
+          QUAI_SCAN_DERNIER: ${{ inputs.verification && 'complet' || '' }}
         run: npx vitest run test/scan
 
       # 1.2.10 (PRD-1.2.10 § 9.3) : 1 000 marches de 200 m à 1,5 km entre vrais arrêts publiés, sur les tuiles

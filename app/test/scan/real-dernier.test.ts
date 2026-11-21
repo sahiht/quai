@@ -30,6 +30,15 @@
  * marquées, celles que le tableau ne marque pas (un express suit, il ne s'arrête pas à la descente) et les étapes non
  * marquées alors que le tableau marque leur départ (une autre ligne va encore à la descente).
  *
+ * Finitions du 21/11 : relire les 32 millions d'étapes prend 15 min, la nuit ne les attend plus. Deux façons de tourner :
+ * - contrôle léger (nuit ordinaire, par défaut) : toutes les marques de toutes les zones, tous leurs tableaux (22:30,
+ *   00:30, 03:30), tous les trains à leurs gares de montée ; et pour un échantillon stable seulement (les mêmes chaque
+ *   nuit, test/scan/sample.ts) : les tableaux marqués dessinés dans les lunettes (une zone sur LIGHT_VIEWS) et les
+ *   étapes (une zone sur LIGHT_ZONES pour le bus, le tram et le métro, un couple de gares sur LIGHT_PAIRS en train) ;
+ * - balayage complet : QUAI_SCAN_DERNIER=complet (le workflow « Données de nuit » le met quand il est lancé en
+ *   vérification ; à la main : QUAI_SCAN_DERNIER=complet QUAI_SCAN_DATA=../site/data npx vitest run test/scan/real-dernier).
+ * La première ligne du bilan dit lequel a tourné, et sa dernière partie les temps de chaque morceau.
+ *
  * Lancé seulement avec QUAI_SCAN_DATA (dossier des données de la nuit, ex. ../site/data) ; sans lui, ignoré.
  */
 import { readdir, readFile } from 'node:fs/promises';
@@ -48,10 +57,21 @@ import type { GlassesView, PageSpec } from '../../src/glasses/types';
 import { boardView, type ViewCtx } from '../../src/glasses/views';
 import { overflowing, settingsWith } from '../glasses/helpers';
 import { pageCuts } from './cuts';
+import { inSample, scanComplet } from './sample';
 
 const DIR = process.env.QUAI_SCAN_DATA;
 const OPS: Op[] = ['sncb', 'stib', 'delijn', 'tec'];
 const MIN = 60_000;
+/** Balayage complet (vérification, ou à la main) ; sinon contrôle léger de la nuit ordinaire. */
+const FULL = scanComplet(process.env.QUAI_SCAN_DERNIER);
+/**
+ * Contrôle léger : étapes d'une zone sur LIGHT_ZONES (bus, tram, métro) et d'un couple de gares sur LIGHT_PAIRS (train),
+ * tableaux marqués dessinés dans les lunettes pour une zone sur LIGHT_VIEWS. Réglé pour que l'étape de nuit entière
+ * reste sous 2 min (mesures dans le rapport des finitions) : un échantillon plus large rallonge la nuit.
+ */
+const LIGHT_ZONES = 10;
+const LIGHT_PAIRS = 4;
+const LIGHT_VIEWS = 4;
 
 /**
  * Ligne du contrôle : tous les trains SNCB ensemble, ses bus à part ; ailleurs la famille du numéro : les chiffres, sans
@@ -68,10 +88,19 @@ const lineOf = (op: Op, mode: string, line: string): string => {
 };
 const HOUR = 60 * MIN;
 
-/** 04:00 (heure belge) qui suit `t` : début de « demain ». */
+/**
+ * 04:00 (heure belge) qui suit `t` : début de « demain ». Gardé par instant : les départs de deux jours tombent sur
+ * quelques milliers de minutes, relues des millions de fois (même réponse, sans refaire le calcul du fuseau).
+ */
+const demainMemo = new Map<number, number>();
 function demain(t: number): number {
-  const p = brusselsParts(t);
-  return gtfsTime(p.h < 4 ? p.date : addDays(p.date, 1), 240);
+  let end = demainMemo.get(t);
+  if (end === undefined) {
+    const p = brusselsParts(t);
+    end = gtfsTime(p.h < 4 ? p.date : addDays(p.date, 1), 240);
+    demainMemo.set(t, end);
+  }
+  return end;
 }
 
 /** Relais muet : l'horaire seul. */
@@ -111,9 +140,18 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
     const stats = new Map<Op, { areas: number; deps: number; window: number; marked: number; evening: number; boards: number; boardsMarked: number; rows: number; views: number; cutWord: number; ms: number; worst: number; worstName: string; biggest: number; biggestMs: number; boardMs: number; boardName: string }>();
     const examples = new Map<Op, string[]>();
     const preps = new Map<string, PreparedArea>();
+    // début de chaque jour publié : l'instant d'un départ est sa base plus ses minutes (comme gtfsTime)
+    const dayBase = dates.map((d) => gtfsTime(d, 0));
     const at = [gtfsTime(dates[0], 22 * 60 + 30), gtfsTime(dates[0], 24 * 60 + 30), gtfsTime(dates[0], 27 * 60 + 30)];
     let followed = 0;
-    const trip = new Map<Op, { legs: number; marked: number; notBoard: number; boardOnly: number; ms: number }>();
+    const trip = new Map<Op, { legs: number; marked: number; notBoard: number; boardOnly: number; ms: number; zones: number }>();
+    // temps de chaque morceau (ms) : lecture des fichiers, marques, étapes, tableaux, trains
+    const spent = { read: 0, marks: 0, legs: 0, boards: 0, trains: 0, trainLegs: 0 };
+    const lap = (key: keyof typeof spent, since: number): number => {
+      const now = performance.now();
+      spent[key] += now - since;
+      return now;
+    };
 
     for (const op of OPS) {
       const s = { areas: 0, deps: 0, window: 0, marked: 0, evening: 0, boards: 0, boardsMarked: 0, rows: 0, views: 0, cutWord: 0, ms: 0, worst: 0, worstName: '', biggest: 0, biggestMs: 0, boardMs: 0, boardName: '' };
@@ -123,6 +161,7 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
       const files = (await readdir(join(dir, 'areas', op))).filter((f) => f.endsWith('.json')).sort();
       for (const name of files) {
         let f: AreaFile;
+        let clock = performance.now();
         try {
           f = JSON.parse(await readFile(join(dir, 'areas', op, name), 'utf8')) as AreaFile;
         } catch (e) {
@@ -133,6 +172,7 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
         try {
           const prep = prepareArea(f, meta);
           if (op === 'sncb') preps.set(f.id, prep);
+          clock = lap('read', clock);
           // coût du calcul des marques d'une zone (une fois par zone et par publication, puis gardé)
           const c0 = performance.now();
           const flags = scheduleLastFlags(prep);
@@ -141,9 +181,11 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
           if (cost > s.worst) [s.worst, s.worstName] = [cost, `${f.n.fr}, ${f.deps.length} départs`];
           if (f.deps.length > s.biggest) [s.biggest, s.biggestMs] = [f.deps.length, cost];
           // départs bruts, relus sans les tableaux préparés : instant, ligne, destination, zones suivantes
+          // (ligne, destination et zones suivantes : une fois par motif, les départs d'un motif les partagent)
+          const ofPattern = f.patterns.map((p) => ({ line: lineOf(op, p.mode, p.line), head: headKey(p.head?.fr ?? ''), next: new Set(p.next.map(([z]) => z)), pl: p.line }));
           const raw = f.deps.map((d) => {
-            const p = f.patterns[d[2]];
-            return { t: gtfsTime(dates[d[0]], d[1]), line: lineOf(op, p.mode, p.line), head: headKey(p.head?.fr ?? ''), next: new Set(p.next.map(([z]) => z)), pl: p.line, day: d[0], min: d[1] };
+            const p = ofPattern[d[2]];
+            return { t: dayBase[d[0]] + d[1] * MIN, line: p.line, head: p.head, next: p.next, pl: p.pl, day: d[0], min: d[1] };
           });
           const byLine = new Map<string, number[]>();
           raw.forEach((r, i) => {
@@ -189,10 +231,14 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
             }
             if (ex.length < 6 && f.deps[i][0] === 0 && (ex.length < 3 || r.t >= gtfsTime(dates[0], 22 * 60))) ex.push(`${f.n.fr} : ${r.pl} vers ${f.patterns[f.deps[i][2]].head.fr} ${hhmm(r.t)}`);
           });
+          clock = lap('marks', clock);
           // écran du trajet (bus, tram, métro) : chaque départ vers chaque zone où son véhicule s'arrête ensuite
-          if (op !== 'sncb') {
-            const tr = trip.get(op) ?? { legs: 0, marked: 0, notBoard: 0, boardOnly: 0, ms: 0 };
+          // (contrôle léger : les zones de l'échantillon stable seulement)
+          const sampled = FULL || inSample(`${op}/${f.id}`, LIGHT_ZONES);
+          if (op !== 'sncb' && sampled) {
+            const tr = trip.get(op) ?? { legs: 0, marked: 0, notBoard: 0, boardOnly: 0, ms: 0, zones: 0 };
             trip.set(op, tr);
+            tr.zones++;
             const ways = lastWays(prep);
             const byZone = new Map<string, number[]>();
             raw.forEach((r, i) => {
@@ -238,8 +284,10 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
               }
             }
           }
-          // tableaux, horaire seul : 22:30 le premier jour et 00:30 dans la nuit
+          clock = lap('legs', clock);
+          // tableaux, horaire seul : 22:30 le premier jour, 00:30 et 03:30 dans la nuit
           if (flags.some((x) => x === 1)) {
+            const drawn = FULL || inSample(`${op}/${f.id}`, LIGHT_VIEWS);
             for (const now of at) {
               const b0 = performance.now();
               const [b] = await buildBoards([{ prep, limit: 40 }], NO_RT, now);
@@ -263,11 +311,14 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
                 });
                 if (after) err(`${f.n.fr} (${f.id}) à ${hhmm(now)} : ${d.line} vers ${d.head.fr} ${hhmm(d.est)} marqué, puis ${after.line} vers ${after.head.fr} ${hhmm(after.est)} dans le tableau`);
               }
-              // dans les lunettes, tous les tableaux marqués : la marque se lit en entier, tout tient au pixel, et la
-              // destination devant « , dernier » n'est jamais coupée au milieu d'un mot
+              // dans les lunettes, tous les tableaux marqués (contrôle léger : ceux des zones de l'échantillon stable) :
+              // la marque se lit en entier, tout tient au pixel, et la destination devant « , dernier » n'est jamais
+              // coupée au milieu d'un mot
+              if (!drawn) continue;
               const v = boardView(b, { now, settings } as ViewCtx, { kept: false });
               s.views++;
-              for (const p of pagesOf(v)) {
+              const pages = pagesOf(v);
+              for (const p of pages) {
                 const bad = overflowing(p);
                 if (bad.length) err(`${f.n.fr} (${f.id}) à ${hhmm(now)} : ${bad[0]}`);
                 const shown = p.lines.filter((l) => l.includes(', dernier'));
@@ -279,10 +330,11 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
                 }
               }
               const total = v.items.filter((it) => it.bTail === ', dernier').length;
-              const seen = pagesOf(v).reduce((n, p) => n + p.lines.filter((l) => l.includes(', dernier')).length, 0);
+              const seen = pages.reduce((n, p) => n + p.lines.filter((l) => l.includes(', dernier')).length, 0);
               if (seen !== total) err(`${f.n.fr} (${f.id}) à ${hhmm(now)} : ${total} marque(s), ${seen} lue(s) en entier dans les lunettes`);
             }
           }
+          lap('boards', clock);
         } catch (e) {
           err(`${op}/${name} : ${(e as Error).stack?.split('\n').slice(0, 3).join(' ')}`);
         }
@@ -290,6 +342,7 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
     }
 
     // trains, comme l'écran du trajet : chaque voyage du premier jour à chacune de ses gares de montée
+    let clock = performance.now();
     const days = (
       await Promise.all(
         dates.slice(0, 2).map(async (d) => {
@@ -395,8 +448,11 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
       });
     }
 
+    clock = lap('trains', clock);
     // écran du trajet en train : chaque train du premier jour, de chaque gare de montée vers chaque gare de descente,
-    // par couple de gares (le calcul d'un couple est gardé)
+    // par couple de gares (le calcul d'un couple est gardé) ; contrôle léger : les couples de l'échantillon stable
+    let pairsAll = 0;
+    const pairSeen = new Map<string, boolean>();
     const pairs = new Map<string, { station: string; dest: string; legs: { id: string; cat: string; head: string; t: number; m: number; plain: boolean }[] }>();
     for (const tr of d0?.file.trips ?? []) {
       tr.s.forEach((x, p) => {
@@ -410,6 +466,13 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
           if (y[1] < 0 || !dest || dest === station || seen.has(dest)) continue;
           seen.add(dest);
           const key = `${station}>${dest}`;
+          let kept = pairSeen.get(key);
+          if (kept === undefined) {
+            kept = FULL || inSample(key, LIGHT_PAIRS);
+            pairSeen.set(key, kept);
+            pairsAll++;
+          }
+          if (!kept) continue;
           let g = pairs.get(key);
           if (!g) pairs.set(key, (g = { station, dest, legs: [] }));
           g.legs.push({ id: tr.id, cat: tr.cat, head: headKey(tr.head.fr), t: schedDep, m: x[2], plain });
@@ -449,22 +512,30 @@ describe.skipIf(!DIR)('1.3.1 R3 : balayage de « , dernier » d’après l’hor
       }
     }
 
+    lap('trainLegs', clock);
+    const sec = (ms: number): string => `${Math.round(ms / 1000)} s`;
     const lines: string[] = [];
-    lines.push(`Balayage de « , dernier » (${dates.join(', ')}, horaire seul) en ${Math.round((Date.now() - t0) / 1000)} s.`);
+    lines.push(
+      FULL
+        ? `Balayage complet de « , dernier » (${dates.join(', ')}, horaire seul) en ${Math.round((Date.now() - t0) / 1000)} s : toutes les marques, tous les tableaux, toutes les étapes (QUAI_SCAN_DERNIER=complet : vérification, ou lancé à la main).`
+        : `Contrôle léger de « , dernier » (${dates.join(', ')}, horaire seul) en ${Math.round((Date.now() - t0) / 1000)} s : toutes les marques, tous les tableaux, tous les trains à leurs gares de montée ; échantillon stable (les mêmes chaque nuit) pour les tableaux marqués dessinés dans les lunettes (1 zone sur ${LIGHT_VIEWS}) et pour les étapes (1 zone sur ${LIGHT_ZONES}, 1 couple de gares sur ${LIGHT_PAIRS}). Le balayage complet tourne en vérification, ou à la main avec QUAI_SCAN_DERNIER=complet.`,
+    );
     for (const op of OPS) {
       const s = stats.get(op)!;
       lines.push(
-        `${op} : ${s.areas} zones, ${s.deps} départs, ${s.window} dans la fenêtre des jours publiés, ${s.marked} marqués « dernier » (${pct(s.marked, s.window)}), dont ${s.evening} le soir et la nuit (20:00 à 04:00) ; tableaux à 22:30, 00:30 et 03:30 : ${s.boards} calculés, ${s.boardsMarked} avec une marque, ${s.views} vus dans les lunettes (${s.rows} rangées marquées, ${s.cutWord} avec la destination coupée au mot, 0 au milieu d'un mot) ; calcul des marques : ${Math.round(s.ms)} ms pour toutes les zones, au pire ${s.worst.toFixed(1)} ms (${s.worstName}), la zone la plus chargée (${s.biggest} départs) ${s.biggestMs.toFixed(1)} ms ; tableau de 40 départs le plus lent : ${s.boardMs.toFixed(1)} ms (${s.boardName}). Ex. : ${(examples.get(op) ?? []).join(' | ')}`,
+        `${op} : ${s.areas} zones, ${s.deps} départs, ${s.window} dans la fenêtre des jours publiés, ${s.marked} marqués « dernier » (${pct(s.marked, s.window)}), dont ${s.evening} le soir et la nuit (20:00 à 04:00) ; tableaux à 22:30, 00:30 et 03:30 : ${s.boards} calculés, ${s.boardsMarked} avec une marque, ${s.views} vus dans les lunettes${FULL ? '' : ` (1 zone sur ${LIGHT_VIEWS})`} (${s.rows} rangées marquées, ${s.cutWord} avec la destination coupée au mot, 0 au milieu d'un mot) ; calcul des marques : ${Math.round(s.ms)} ms pour toutes les zones, au pire ${s.worst.toFixed(1)} ms (${s.worstName}), la zone la plus chargée (${s.biggest} départs) ${s.biggestMs.toFixed(1)} ms ; tableau de 40 départs le plus lent : ${s.boardMs.toFixed(1)} ms (${s.boardName}). Ex. : ${(examples.get(op) ?? []).join(' | ')}`,
       );
     }
     lines.push(
       `Trains (écran du trajet), ${dates[0]} : ${legs} montées, ${legMarked} marquées « dernier » (${pct(legMarked, legs)}), ${trainsChecked} contrôlées sur les trains eux-mêmes, ${followed} sur la zone de la gare ; accord avec la zone : ${agree} sur ${legs - noArea} (${pct(agree, legs - noArea)}), dernier selon les trains seulement : ${onlyTrains}, selon la zone seulement : ${onlyArea}, gare sans zone ou sans ce départ : ${noArea}.${diffEx.length ? ` Ex. : ${diffEx.join(' | ')}` : ''}`,
     );
-    lines.push('Écran du trajet, d’après l’arrêt de descente (décision du 20/11 à 21:58) : étapes possibles (un départ, une descente), marquées « dernier », dont non marquées au tableau (un départ du même sens suit, mais ne s’arrête pas à la descente), et étapes non marquées alors que le tableau marque leur départ (une autre ligne va encore à la descente) :');
+    lines.push(`Écran du trajet, d’après l’arrêt de descente (décision du 20/11 à 21:58)${FULL ? '' : ', échantillon stable'} : étapes possibles (un départ, une descente), marquées « dernier », dont non marquées au tableau (un départ du même sens suit, mais ne s’arrête pas à la descente), et étapes non marquées alors que le tableau marque leur départ (une autre ligne va encore à la descente) :`);
     for (const op of OPS) {
       const x = op === 'sncb' ? tt : trip.get(op);
-      if (x) lines.push(`${op} : ${x.legs} étapes, ${x.marked} marquées (${pct(x.marked, x.legs)}), dont ${x.notBoard} non marquées au tableau ; ${x.boardOnly} non marquées alors que le tableau marque ; calcul ${Math.round(x.ms)} ms.`);
+      const part = op === 'sncb' ? `${pairs.size} couples de gares sur ${pairsAll}` : `${trip.get(op)?.zones ?? 0} zones sur ${stats.get(op)!.areas}`;
+      if (x) lines.push(`${op} (${part}) : ${x.legs} étapes, ${x.marked} marquées (${pct(x.marked, x.legs)}), dont ${x.notBoard} non marquées au tableau ; ${x.boardOnly} non marquées alors que le tableau marque ; calcul ${Math.round(x.ms)} ms.`);
     }
+    lines.push(`Temps : lecture des zones ${sec(spent.read)}, marques ${sec(spent.marks)}, étapes ${sec(spent.legs)}, tableaux ${sec(spent.boards)}, trains à leurs gares ${sec(spent.trains)}, étapes en train ${sec(spent.trainLegs)}.`);
     lines.push(errors.length ? `Erreurs : ${errors.length}. ${errors.slice(0, 20).join(' | ')}` : 'Aucune erreur.');
     process.stdout.write(`${lines.join('\n')}\n`);
     expect(errors).toEqual([]);
