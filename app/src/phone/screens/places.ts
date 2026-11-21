@@ -20,7 +20,7 @@ const MODE_ORDER: Mode[] = ['train', 'metro', 'tram', 'bus'];
 /** « Gare de Namur », « gare d’Ottignies » (élision devant une voyelle). */
 const stationName = (name: string, capital: boolean): string => `${capital ? 'Gare' : 'gare'} ${/^[aeiouyàâäéèêëîïôöûüœ]/i.test(name) ? `d’${name}` : `de ${name}`}`;
 
-/** « Métro Madou », « Bus TEC Namur Omalius », « Tram De Lijn Korenmarkt », « Gare de Namur » (mots de l'appli). */
+/** « Métro Louise », « Bus TEC Namur Omalius », « Tram De Lijn Korenmarkt », « Gare de Namur » (mots de l'appli). */
 function stopName(a: AreaSummary, lang: NameLang, capital: boolean): string {
   // 1.3.1 (§ 7) : apostrophe typographique, à l'affichage seulement
   const name = apos(displayName(a.n, lang));
@@ -31,7 +31,7 @@ function stopName(a: AreaSummary, lang: NameLang, capital: boolean): string {
 }
 
 /**
- * Accès d'un lieu (PRD-1.2 § 2.5) : l'arrêt le plus proche d'abord, nommé (« Métro Madou à 2 min à pied »,
+ * Accès d'un lieu (PRD-1.2 § 2.5) : l'arrêt le plus proche d'abord, nommé (« Métro Louise à 2 min à pied »,
  * « Gare de Namur à 7 min à pied ») ; le plus proche : le moins de minutes, puis train, métro, tram, bus, puis la
  * distance. Ensuite la gare, seulement si elle est utile : desservie par des IC, à la marche maximale ou moins et
  * pas déjà citée (« ; gare de Namur à 8 min »). Rien à 800 m : « Aucun arrêt à moins de 800 m ».

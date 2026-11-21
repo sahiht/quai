@@ -218,7 +218,8 @@ export const PLACES = {
   maison: { kind: 'place', id: 'fav-maison', label: 'Maison', lat: MAISON.lat, lon: MAISON.lon, propose: 'never' } as Favorite,
   /** 1.2.2 : un 4e lieu, à un arrêt public (Waterloo Eglise). */
   ecole: { kind: 'place', id: 'fav-ecole', label: 'École', lat: 50.7174, lon: 4.3979, propose: 'never' } as Favorite,
-  bureau: { kind: 'place', id: 'fav-bureau', label: 'Bureau', lat: 50.8504, lon: 4.3707, propose: 'never' } as Favorite,
+  /** 1.3.1 : sur la place Flagey (lieu public d'Ixelles) ; le nom « Bureau » est celui que l'appli propose à tout le monde. */
+  bureau: { kind: 'place', id: 'fav-bureau', label: 'Bureau', lat: 50.8275, lon: 4.3721, propose: 'never' } as Favorite,
   parc: { kind: 'place', id: 'fav-parc', label: 'Parc', lat: 50.87755, lon: 4.37966, propose: 'never' } as Favorite,
   /** Arrêt favori de la 1.2.1 : les réglages v4 le rangent dans « Gares » (migration, settings.ts). */
   gare: { kind: 'stop', id: 'fav-gare', areaId: 'sncb:8814266', op: 'sncb', name: N('Braine-l’Alleud'), lat: 50.6833, lon: 4.3747, propose: 'never' } as Favorite,
